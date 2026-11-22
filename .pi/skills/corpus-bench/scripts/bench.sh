@@ -17,10 +17,16 @@ quick=0
 corpus=$FULL
 if (( quick )); then
   corpus=$QUICK
-  if [[ ! -d $corpus ]]; then
-    echo "быстрый корпус отсутствует: $corpus"
-    echo "создать: 120 жёстких ссылок из основного корпуса в $corpus"
-    exit 2
+  if [[ ! -d $corpus || -z $(ls -A "$corpus" 2>/dev/null) ]]; then
+    # быстрый корпус: 120 жёстких ссылок (места не занимают), только из основного корпуса
+    [[ -d $FULL ]] || { echo "нет основного корпуса: $FULL"; exit 2; }
+    mkdir -p -- "$corpus"
+    n=0
+    while IFS= read -r -d '' f; do
+      ln -- "$f" "$corpus/$(basename -- "$f")" 2>/dev/null && n=$((n + 1))
+      (( n >= 120 )) && break
+    done < <(find "$FULL" -maxdepth 1 -type f -name '*.jpg' -print0)
+    echo "создан быстрый корпус: $corpus ($n файлов жёсткими ссылками)"
   fi
 fi
 [[ -d $corpus ]] || { echo "корпус не найден: $corpus"; exit 2; }
@@ -42,7 +48,7 @@ echo
 t0=$(date +%s.%N)
 "$BIN" index "$corpus" --jobs 16 --db "$DB" 2>/dev/null | tail -1
 t1=$(date +%s.%N)
-printf 'время индексации: %.1f с\n' "$(echo "$t1 - $t0" | bc)"
+printf 'время индексации: %.1f с\n' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print b-a}')"
 
 echo
 "$BIN" stats --db "$DB"
@@ -51,7 +57,7 @@ echo
 t0=$(date +%s.%N)
 "$BIN" dupes --db "$DB" --max-dist 6 --quiet 2>/dev/null | head -1
 t1=$(date +%s.%N)
-printf 'время кластеризации: %.2f с\n' "$(echo "$t1 - $t0" | bc)"
+printf 'время кластеризации: %.2f с\n' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print b-a}')"
 
 echo
 echo "план раскладки по датам:"
