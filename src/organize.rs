@@ -45,7 +45,7 @@ pub fn build_plan(rows: &[FileRow], out: &Path, rename: bool) -> Vec<PlanItem> {
                 .filter(|c| c.is_alphanumeric() || "-_.".contains(*c))
                 .take(40)
                 .collect();
-            let t = time.replace(':', "").replace('.', "");
+            let t: String = time.chars().filter(|c| c.is_ascii_digit()).collect();
             let t = &t[..t.len().min(6)];
             if safe.is_empty() {
                 format!("{y}{m}{d}_{t}.{ext}")

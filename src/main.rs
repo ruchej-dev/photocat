@@ -54,9 +54,9 @@ fn main() -> Result<()> {
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 loop {
-                    let (d, t) = (show.done(), show.total());
+                    let (d, t, e) = (show.done(), show.total(), show.errors());
                     if t > 0 {
-                        eprint!("\rиндексация: {d}/{t}");
+                        eprint!("\rиндексация: {d}/{t}, ошибок {e}");
                     }
                     if show.finished() {
                         eprintln!();

@@ -206,14 +206,14 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
     if resp.clicked() {
         cs.clicked = Some(f.id);
     }
-    if resp.hovered() {
-        if let Some(t) = cs.textures.get(&f.id).cloned() {
-            resp.on_hover_ui_at_pointer(|ui| {
-                let big = egui::load::SizedTexture::new(t.id(), egui::vec2(400.0, 400.0));
-                ui.add(egui::Image::new(big).maintain_aspect_ratio(true));
-                ui.label(&f.path);
-            });
-        }
+    if resp.hovered()
+        && let Some(t) = cs.textures.get(&f.id).cloned()
+    {
+        resp.on_hover_ui_at_pointer(|ui| {
+            let big = egui::load::SizedTexture::new(t.id(), egui::vec2(400.0, 400.0));
+            ui.add(egui::Image::new(big).maintain_aspect_ratio(true));
+            ui.label(&f.path);
+        });
     }
 }
 
@@ -261,10 +261,15 @@ impl eframe::App for App {
                 if let Some(p) = &self.progress {
                     let (d, t) = (p.done(), p.total());
                     let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+                    let text = if t > 0 {
+                        format!("{d}/{t}")
+                    } else {
+                        p.msg()
+                    };
                     ui.add(
                         egui::ProgressBar::new(frac)
                             .desired_width(220.0)
-                            .text(format!("{d}/{t}")),
+                            .text(text),
                     );
                 }
             });
@@ -274,8 +279,10 @@ impl eframe::App for App {
         egui::Panel::bottom("bottom").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(if self.status.is_empty() { "—" } else { &self.status });
-                if let Some(id) = self.selected {
-                    if let Some(f) = self.items.iter().find(|r| r.id == id) {
+                if let Some(id) = self.selected
+                    && let Some(f) = self.items.iter().find(|r| r.id == id)
+                {
+                    {
                         ui.separator();
                         ui.label(format!(
                             "{} · {} · {}×{} · {}",
@@ -330,8 +337,10 @@ impl eframe::App for App {
             ui.label(format!("без превью (видео/битые): {no_thumb}"));
             ui.label(format!("БД: {}", self.db_path.display()));
 
-            if let Some(id) = self.selected {
-                if let Some(f) = self.items.iter().find(|r| r.id == id) {
+            if let Some(id) = self.selected
+                && let Some(f) = self.items.iter().find(|r| r.id == id)
+            {
+                {
                     ui.separator();
                     ui.heading("Файл");
                     ui.label(format!("путь: {}", f.path));

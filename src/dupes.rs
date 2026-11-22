@@ -119,17 +119,20 @@ pub fn cli(args: &[String]) -> Result<()> {
                 g.members.len(),
                 db::human(g.waste)
             );
+            let base = rows[g.members[0]].dhash.map(|v| v as u64);
             for &i in &g.members {
                 let r = &rows[i];
-                let dist = if n == 0 { 0 } else { 0 };
-                let _ = dist;
+                let dist = match (base, r.dhash) {
+                    (Some(a), Some(b)) => crate::derive::hamming(a, b as u64),
+                    _ => 0,
+                };
                 println!(
-                    "   {:>10}  {}{}",
+                    "   {:>10}  {}  Δ{:<2}  {}",
                     db::human(r.size),
                     r.taken_at.clone().unwrap_or_else(|| "-".into()),
-                    "",
+                    dist,
+                    r.path
                 );
-                println!("               {}", r.path);
             }
         }
         if groups.len() > 200 {

@@ -84,7 +84,7 @@ pub struct Meta {
 pub fn exif_meta(p: &Path) -> Meta {
     let mut out = Meta::default();
     let Ok(f) = File::open(p) else { return out };
-    let mut r = exif::Reader::new();
+    let r = exif::Reader::new();
     let Ok(exif) = r.read_from_container(&mut BufReader::new(f)) else {
         return out;
     };
