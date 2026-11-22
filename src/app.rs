@@ -89,6 +89,8 @@ struct App {
     search_ocr: bool,
     ocr_files: i64,
     ocr_chars: i64,
+    /// Сколько снимков пойдёт в пакетный проход по эвристике (план, не запуск).
+    ocr_candidates: usize,
     ocr_progress: Option<Arc<Progress>>,
     ocr_rx: Option<mpsc::Receiver<OcrReply>>,
     /// Версия tesseract из PATH: `None` — OCR недоступен, кнопка погашена.
@@ -136,6 +138,7 @@ impl App {
             search_ocr: false,
             ocr_files: 0,
             ocr_chars: 0,
+            ocr_candidates: 0,
             ocr_progress: None,
             ocr_rx: None,
             tesseract: derive::tesseract_version(),
@@ -174,6 +177,8 @@ impl App {
                 self.hidden_tags = hidden;
                 self.ocr_files = ocr_files;
                 self.ocr_chars = ocr_chars;
+                self.ocr_candidates =
+                    ocr::plan(&self.db_path, false).map(|p| p.candidates).unwrap_or(0);
                 self.groups.clear();
                 self.init_calendar();
             }
@@ -490,7 +495,8 @@ impl App {
         });
     }
 
-    fn start_ocr(&mut self) {
+    /// `Some(id)` — только этот снимок (главное действие), `None` — пакетный проход по кандидатам.
+    fn start_ocr(&mut self, file: Option<i64>) {
         if self.ocr_rx.is_some() || self.tesseract.is_none() {
             return;
         }
@@ -499,9 +505,37 @@ impl App {
         self.ocr_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.ocr_rx = Some(rx);
-        self.status = "OCR: распознаю текст на документах и скриншотах…".into();
+        self.status = match file {
+            Some(id) => {
+                let name = self
+                    .items
+                    .iter()
+                    .find(|r| r.id == id)
+                    .and_then(|r| {
+                        Path::new(&r.path)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_else(|| "выбранного снимка".into());
+                format!("OCR: распознаю текст с {name}…")
+            }
+            None => format!(
+                "OCR: пакетный проход по {} кандидатам…",
+                self.ocr_candidates
+            ),
+        };
         std::thread::spawn(move || {
-            let r = ocr::run(&db_path, 4, false, Some(progress));
+            let r = match file {
+                Some(id) => ocr::run_files(&db_path, &[id], Some(progress)),
+                None => {
+                    let jobs = std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(4)
+                        .clamp(2, 8);
+                    ocr::run(&db_path, jobs, false, Some(progress))
+                }
+            };
             let _ = tx.send(r);
         });
     }
@@ -990,7 +1024,15 @@ impl eframe::App for App {
                     match res {
                         Ok(stats) => {
                             self.reload();
-                            self.status = stats.to_string();
+                            self.status = if stats.candidates == 1 {
+                                if stats.chars > 0 {
+                                    format!("текст распознан: знаков {}", stats.chars)
+                                } else {
+                                    "на этом снимке текста не найдено".into()
+                                }
+                            } else {
+                                stats.to_string()
+                            };
                         }
                         Err(e) => self.status = format!("текст не распознан: {e:#}"),
                     }
@@ -1140,6 +1182,7 @@ impl eframe::App for App {
         }
 
         let mut unhide_file: Option<i64> = None;
+        let mut ocr_file: Option<i64> = None;
         egui::Panel::left("left").default_size(260.0).show(ui, |ui| {
             ui.add_space(6.0);
             ui.heading("photocat");
@@ -1297,17 +1340,24 @@ impl eframe::App for App {
             if self.ocr_chars > 0 {
                 ui.label(format!("знаков: {}", self.ocr_chars));
             }
+            ui.label(format!("кандидатов на проход: {}", self.ocr_candidates));
             if ui
                 .add_enabled(
-                    self.tesseract.is_some() && self.ocr_rx.is_none(),
-                    egui::Button::new("Распознать текст"),
+                    self.tesseract.is_some()
+                        && self.ocr_rx.is_none()
+                        && self.ocr_candidates > 0,
+                    egui::Button::new(format!(
+                        "Распознать документы ({})",
+                        self.ocr_candidates
+                    )),
                 )
                 .on_hover_text(
-                    "tesseract по документам и скриншотам; текст хранится в БД, оригинал не меняется",
+                    "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
+                     один снимок — кнопкой в карточке файла",
                 )
                 .clicked()
             {
-                self.start_ocr();
+                self.start_ocr(None);
             }
 
             ui.separator();
@@ -1394,6 +1444,27 @@ impl eframe::App for App {
                     {
                         unhide_file = Some(id);
                     }
+                    if f.kind == "image" {
+                        let label = if self
+                            .ocr_text
+                            .get(&id)
+                            .is_some_and(|t| !t.trim().is_empty())
+                        {
+                            "Распознать заново"
+                        } else {
+                            "Распознать текст"
+                        };
+                        if ui
+                            .add_enabled(
+                                self.tesseract.is_some() && self.ocr_rx.is_none(),
+                                egui::Button::new(label),
+                            )
+                            .on_hover_text("только для этого снимка; оригинал не меняется")
+                            .clicked()
+                        {
+                            ocr_file = Some(id);
+                        }
+                    }
                     let shown = self
                         .ocr_snippets
                         .get(&id)
@@ -1413,6 +1484,10 @@ impl eframe::App for App {
                 }
             }
         });
+
+        if let Some(id) = ocr_file {
+            self.start_ocr(Some(id));
+        }
 
         if let Some(id) = unhide_file {
             match db::unhide_tags(&self.db_path, id) {

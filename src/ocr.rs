@@ -107,23 +107,51 @@ fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>
     Ok((images, selected))
 }
 
-/// Проход по кандидатам: `all` — распознавать все изображения, а не только документы и скриншоты.
+/// Пакетный проход по кандидатам: `all` — все изображения, а не только документы и скриншоты.
 pub fn run(
     db_path: &Path,
     jobs: usize,
     all: bool,
     progress: Option<Arc<Progress>>,
 ) -> Result<Stats> {
+    run_selected(db_path, jobs, all, None, progress)
+}
+
+/// Распознать конкретные файлы (кнопка у выбранного снимка). Явный запрос — всегда заново:
+/// владелец мог попросить пересчитать текст, даже если sha256 не менялся.
+pub fn run_files(
+    db_path: &Path,
+    ids: &[i64],
+    progress: Option<Arc<Progress>>,
+) -> Result<Stats> {
+    run_selected(db_path, 1, false, Some(ids), progress)
+}
+
+fn run_selected(
+    db_path: &Path,
+    jobs: usize,
+    all: bool,
+    only: Option<&[i64]>,
+    progress: Option<Arc<Progress>>,
+) -> Result<Stats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
     let lang = db::load_settings(&conn).ocr_lang;
-    let (_, selected) = select(&conn, all)?;
+    // Явно выбранный файл распознаём независимо от эвристики.
+    let (_, selected) = select(&conn, all || only.is_some())?;
+    let selected: Vec<FileRow> = match only {
+        Some(ids) => selected.into_iter().filter(|r| ids.contains(&r.id)).collect(),
+        None => selected,
+    };
     let done_shas = db::ocr_shas(&conn)?;
     let candidates = selected.len();
-    let todo: Vec<FileRow> = selected
-        .into_iter()
-        .filter(|r| done_shas.get(&r.id) != Some(&r.sha256))
-        .collect();
+    let todo: Vec<FileRow> = match only {
+        Some(_) => selected,
+        None => selected
+            .into_iter()
+            .filter(|r| done_shas.get(&r.id) != Some(&r.sha256))
+            .collect(),
+    };
     let skipped = candidates - todo.len();
 
     if !todo.is_empty() && derive::tesseract_version().is_none() {

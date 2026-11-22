@@ -36,7 +36,8 @@ fn usage() {
                                             найти дубли и похожие снимки, выгрузить решения
   organize --out DIR [--apply] [--copy]    план (и применение) раскладки по датам
   embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
-  ocr [--jobs N] [--all] [--dry-run]       текст с документов и скриншотов (tesseract)
+  ocr [--jobs N] [--all] [--dry-run] [--file PATH]
+                                            текст с документов и скриншотов (tesseract)
   search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
   clusters [--k N] [--out FILE]             кластеры CLIP → отчёт с примерами
   models [list|check|download --id ID --yes]
@@ -152,6 +153,18 @@ fn main() -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
+            if let Some(file) = flag_str(&args, "--file") {
+                let conn = db::open(&db_path)?;
+                let path = std::fs::canonicalize(&file)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or(file);
+                let id: i64 = conn
+                    .query_row("SELECT id FROM files WHERE path=?1", [&path], |r| r.get(0))
+                    .map_err(|_| anyhow::anyhow!("файл не в индексе: {path}"))?;
+                let stats = ocr::run_files(&db_path, &[id], Some(progress))?;
+                println!("{stats}");
+                return Ok(());
+            }
             let stats = ocr::run(&db_path, jobs, all, Some(progress))?;
             println!("{stats}");
             Ok(())
