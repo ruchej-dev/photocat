@@ -14,13 +14,16 @@ pub struct Stats {
     pub errors: usize,
     pub bytes: i64,
     pub seconds: f64,
+    /// Прогон прерван владельцем: остальные файлы не обработаны.
+    pub cancelled: bool,
 }
 
 impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "проиндексировано {}/{} файлов ({}), ошибок {}, за {:.1} с",
+            "{}проиндексировано {}/{} файлов ({}), ошибок {}, за {:.1} с",
+            if self.cancelled { "остановлено: " } else { "" },
             self.indexed,
             self.total,
             db::human(self.bytes),
@@ -84,6 +87,10 @@ pub fn run(
     let errors = std::sync::atomic::AtomicUsize::new(0);
     pool.install(|| {
         files.par_iter().for_each_with(tx, |tx, path| {
+            // «Стоп»: уже начатые файлы доводим, остальные не трогаем.
+            if progress.as_ref().is_some_and(|p| p.cancelled()) {
+                return;
+            }
             let res = process(path, &root, &thumbs_dir);
             match res {
                 Ok((rec, size, soft_error)) => {
@@ -122,6 +129,7 @@ pub fn run(
         errors: errors.load(std::sync::atomic::Ordering::Relaxed),
         bytes: bytes.load(std::sync::atomic::Ordering::Relaxed),
         seconds: t0.elapsed().as_secs_f64(),
+        cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
     })
 }
 

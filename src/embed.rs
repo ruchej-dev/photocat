@@ -542,14 +542,17 @@ pub struct EmbedStats {
     pub errors: usize,
     pub seconds: f64,
     pub model_bytes: i64,
+    /// Прогон прерван владельцем: остальные файлы остались на следующий раз.
+    pub cancelled: bool,
 }
 
 impl std::fmt::Display for EmbedStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "CLIP ({}): посчитано {}/{}, пропущено {}, ошибок {}, за {:.1} с, модель {}",
+            "CLIP ({}): {}посчитано {}/{}, пропущено {}, ошибок {}, за {:.1} с, модель {}",
             self.model,
+            if self.cancelled { "остановлено: " } else { "" },
             self.computed,
             self.total,
             self.skipped,
@@ -597,6 +600,7 @@ pub fn embed_missing(
             errors: 0,
             seconds: t0.elapsed().as_secs_f64(),
             model_bytes: model_bytes_in(&settings.models_dir, entry),
+            cancelled: false,
         });
     }
     let mut model = Model::load(&settings, threads)?;
@@ -608,6 +612,10 @@ pub fn embed_missing(
     let mut errors = 0usize;
     let batch = batch.clamp(1, 64);
     for part in todo.chunks(batch) {
+        // «Стоп»: посчитанные пакеты уже в БД, остальные остаются на следующий запуск.
+        if progress.as_ref().is_some_and(|p| p.cancelled()) {
+            break;
+        }
         let mut paths = Vec::with_capacity(part.len());
         let mut valid = Vec::with_capacity(part.len());
         for r in part {
@@ -670,6 +678,7 @@ pub fn embed_missing(
         errors,
         seconds: t0.elapsed().as_secs_f64(),
         model_bytes: model_bytes_in(&settings.models_dir, entry),
+        cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
     })
 }
 

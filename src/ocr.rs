@@ -22,6 +22,8 @@ pub struct Stats {
     pub errors: usize,
     pub chars: i64,
     pub seconds: f64,
+    /// Проход прерван владельцем: остальные файлы остались на следующий раз.
+    pub cancelled: bool,
 }
 
 impl std::fmt::Display for Stats {
@@ -31,8 +33,13 @@ impl std::fmt::Display for Stats {
         }
         write!(
             f,
-            "распознано {} из {} файлов, знаков {}, ошибок {}, за {:.1} с",
-            self.done, self.candidates, self.chars, self.errors, self.seconds
+            "{}распознано {} из {} файлов, знаков {}, ошибок {}, за {:.1} с",
+            if self.cancelled { "остановлено: " } else { "" },
+            self.done,
+            self.candidates,
+            self.chars,
+            self.errors,
+            self.seconds
         )?;
         if self.skipped > 0 {
             write!(f, " (пропущено {}, текст уже есть)", self.skipped)?;
@@ -83,15 +90,23 @@ pub fn wants_text(
 pub struct Plan {
     pub images: usize,
     pub candidates: usize,
+    /// Из кандидатов: у кого текста ещё нет (или файл изменился).
+    pub todo: usize,
 }
 
 /// Только план, без OCR: каталог и БД читаются, текст не распознаётся.
 pub fn plan(db_path: &Path, all: bool) -> Result<Plan> {
     let conn = db::open(db_path)?;
     let (images, selected) = select(&conn, all)?;
+    let done = db::ocr_shas(&conn)?;
+    let todo = selected
+        .iter()
+        .filter(|r| done.get(&r.id) != Some(&r.sha256))
+        .count();
     Ok(Plan {
         images,
         candidates: selected.len(),
+        todo,
     })
 }
 
@@ -154,6 +169,22 @@ fn run_selected(
     };
     let skipped = candidates - todo.len();
 
+    // «Стоп» нажат до старта: ничего не запускаем и не ищем tesseract зря.
+    if progress.as_ref().is_some_and(|p| p.cancelled()) {
+        if let Some(p) = &progress {
+            p.finish();
+        }
+        return Ok(Stats {
+            candidates,
+            done: 0,
+            skipped,
+            errors: 0,
+            chars: 0,
+            seconds: t0.elapsed().as_secs_f64(),
+            cancelled: true,
+        });
+    }
+
     if !todo.is_empty() && derive::tesseract_version().is_none() {
         anyhow::bail!(
             "tesseract не найден в PATH — установите tesseract и языковые пакеты ({lang}); \
@@ -191,6 +222,10 @@ fn run_selected(
     let errors = AtomicUsize::new(0);
     pool.install(|| {
         todo.par_iter().for_each_with(tx, |tx, f| {
+            // «Стоп»: уже начатый файл доводим, остальные оставляем следующему запуску.
+            if progress.as_ref().is_some_and(|p| p.cancelled()) {
+                return;
+            }
             match derive::ocr_image(Path::new(&f.path), &lang, MAX_SIDE) {
                 Ok(text) => {
                     let _ = tx.send((f.id, f.sha256.clone(), text));
@@ -221,6 +256,7 @@ fn run_selected(
         errors: errors.load(Ordering::Relaxed),
         chars,
         seconds: t0.elapsed().as_secs_f64(),
+        cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
     })
 }
 
@@ -277,6 +313,34 @@ mod tests {
             ("дети".to_string(), 0.295),
         ])]);
         assert!(!wants_text(&row("image", Some("Pixel")), &flat, SHOW, MARGIN));
+    }
+
+    #[test]
+    fn cancelled_before_start_does_nothing() {
+        // Уникальное имя на прогон: файл теста не мешает и не удаляется (границы запрещают).
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "pc-ocr-cancel-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let conn = db::open(&path).unwrap();
+        let mut r = row("image", None);
+        r.path = "/nonexistent/нет-такого.jpg".into();
+        db::insert(&conn, &r).unwrap();
+        let id: i64 = conn
+            .query_row("SELECT id FROM files", [], |r| r.get(0))
+            .unwrap();
+        drop(conn);
+
+        let progress = Arc::new(Progress::default());
+        progress.cancel();
+        let stats = run_files(&path, &[id], Some(progress)).unwrap();
+        assert!(stats.cancelled);
+        assert_eq!(stats.done, 0);
+        assert_eq!(stats.errors, 0);
     }
 
     #[test]

@@ -478,6 +478,8 @@ fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
 fn tesseract_text(png: &[u8], lang: &str) -> Result<String> {
     let mut child = quiet_command("tesseract")
         .args(["stdin", "stdout", "-l", lang, "--psm", "3"])
+        // Один процесс tesseract не должен занимать все ядра: потоков задаёт наше планирование.
+        .env("OMP_THREAD_LIMIT", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -14,6 +14,7 @@ pub struct Progress {
     total: AtomicUsize,
     errors: AtomicUsize,
     finished: AtomicBool,
+    cancel: AtomicBool,
     msg: Mutex<String>,
 }
 
@@ -24,6 +25,7 @@ impl Progress {
     /// Начать заново (например, при переходе к следующей модели-кандидату).
     pub fn reset(&self) {
         self.done.store(0, Ordering::Relaxed);
+        self.cancel.store(false, Ordering::Relaxed);
         self.total.store(0, Ordering::Relaxed);
         self.errors.store(0, Ordering::Relaxed);
         self.finished.store(false, Ordering::Relaxed);
@@ -36,6 +38,13 @@ impl Progress {
     }
     pub fn finish(&self) {
         self.finished.store(true, Ordering::Relaxed);
+    }
+    /// Попросить прогон остановиться: воркеры проверяют флаг между файлами.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
     }
     pub fn set_msg(&self, s: impl Into<String>) {
         *self.msg.lock().unwrap() = s.into();
@@ -84,11 +93,23 @@ pub fn open(db: &Path) -> Result<Connection> {
     Ok(c)
 }
 
+/// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
+/// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
+/// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
+const SCHEMA_VERSION: i64 = 1;
+
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
-         CREATE TABLE IF NOT EXISTS files(
+         PRAGMA busy_timeout=2000;",
+    )?;
+    let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version >= SCHEMA_VERSION {
+        return Ok(());
+    }
+    c.execute_batch(
+        "CREATE TABLE IF NOT EXISTS files(
             id         INTEGER PRIMARY KEY,
             path       TEXT NOT NULL UNIQUE,
             size       INTEGER NOT NULL,
@@ -190,6 +211,7 @@ fn init(c: &Connection) -> Result<()> {
         "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
         [],
     )?;
+    c.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
 

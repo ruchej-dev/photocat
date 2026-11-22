@@ -91,6 +91,8 @@ struct App {
     ocr_chars: i64,
     /// Сколько снимков пойдёт в пакетный проход по эвристике (план, не запуск).
     ocr_candidates: usize,
+    /// Из них — ещё без текста; «Продолжить» показывает именно остаток.
+    ocr_remaining: usize,
     ocr_progress: Option<Arc<Progress>>,
     ocr_rx: Option<mpsc::Receiver<OcrReply>>,
     /// Версия tesseract из PATH: `None` — OCR недоступен, кнопка погашена.
@@ -139,6 +141,7 @@ impl App {
             ocr_files: 0,
             ocr_chars: 0,
             ocr_candidates: 0,
+            ocr_remaining: 0,
             ocr_progress: None,
             ocr_rx: None,
             tesseract: derive::tesseract_version(),
@@ -177,8 +180,10 @@ impl App {
                 self.hidden_tags = hidden;
                 self.ocr_files = ocr_files;
                 self.ocr_chars = ocr_chars;
-                self.ocr_candidates =
-                    ocr::plan(&self.db_path, false).map(|p| p.candidates).unwrap_or(0);
+                if let Ok(plan) = ocr::plan(&self.db_path, false) {
+                    self.ocr_candidates = plan.candidates;
+                    self.ocr_remaining = plan.todo;
+                }
                 self.groups.clear();
                 self.init_calendar();
             }
@@ -1024,7 +1029,9 @@ impl eframe::App for App {
                     match res {
                         Ok(stats) => {
                             self.reload();
-                            self.status = if stats.candidates == 1 {
+                            self.status = if stats.cancelled {
+                                stats.to_string()
+                            } else if stats.candidates == 1 {
                                 if stats.chars > 0 {
                                     format!("текст распознан: знаков {}", stats.chars)
                                 } else {
@@ -1075,6 +1082,9 @@ impl eframe::App for App {
                             .desired_width(220.0)
                             .text(text),
                     );
+                    if self.rx.is_some() && ui.button("Стоп").clicked() {
+                        p.cancel();
+                    }
                 }
             });
             let semantic_ready = embed::model_present(&self.settings);
@@ -1124,28 +1134,38 @@ impl eframe::App for App {
             if let Some(p) = &self.embed_progress {
                 let (d, t) = (p.done(), p.total());
                 let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                ui.add(
-                    egui::ProgressBar::new(frac)
-                        .desired_width(320.0)
-                        .text(if t > 0 {
-                            format!("CLIP: {d}/{t}")
-                        } else {
-                            p.msg()
-                        }),
-                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .desired_width(320.0)
+                            .text(if t > 0 {
+                                format!("CLIP: {d}/{t}")
+                            } else {
+                                p.msg()
+                            }),
+                    );
+                    if self.embed_rx.is_some() && ui.button("Стоп").clicked() {
+                        p.cancel();
+                    }
+                });
             }
             if let Some(p) = &self.ocr_progress {
                 let (d, t) = (p.done(), p.total());
                 let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                ui.add(
-                    egui::ProgressBar::new(frac)
-                        .desired_width(320.0)
-                        .text(if t > 0 {
-                            format!("OCR: {d}/{t}")
-                        } else {
-                            p.msg()
-                        }),
-                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .desired_width(320.0)
+                            .text(if t > 0 {
+                                format!("OCR: {d}/{t}")
+                            } else {
+                                p.msg()
+                            }),
+                    );
+                    if self.ocr_rx.is_some() && ui.button("Стоп").clicked() {
+                        p.cancel();
+                    }
+                });
             }
             ui.add_space(4.0);
         });
@@ -1340,16 +1360,25 @@ impl eframe::App for App {
             if self.ocr_chars > 0 {
                 ui.label(format!("знаков: {}", self.ocr_chars));
             }
-            ui.label(format!("кандидатов на проход: {}", self.ocr_candidates));
-            if ui
+            ui.label(format!(
+                "кандидатов на проход: {}, осталось {}",
+                self.ocr_candidates, self.ocr_remaining
+            ));
+            if self.ocr_rx.is_some() {
+                if ui.button("Стоп").clicked()
+                    && let Some(p) = &self.ocr_progress
+                {
+                    p.cancel();
+                    self.status = "OCR: останавливаю после текущих файлов…".into();
+                }
+            } else if ui
                 .add_enabled(
-                    self.tesseract.is_some()
-                        && self.ocr_rx.is_none()
-                        && self.ocr_candidates > 0,
-                    egui::Button::new(format!(
-                        "Распознать документы ({})",
-                        self.ocr_candidates
-                    )),
+                    self.tesseract.is_some() && self.ocr_remaining > 0,
+                    egui::Button::new(if self.ocr_remaining < self.ocr_candidates {
+                        format!("Продолжить ({})", self.ocr_remaining)
+                    } else {
+                        format!("Распознать документы ({})", self.ocr_candidates)
+                    }),
                 )
                 .on_hover_text(
                     "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
