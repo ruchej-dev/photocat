@@ -72,6 +72,44 @@ pub fn hamming(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }
 
+/// Резкость: дисперсия лапласиана по серому. Чем выше, тем больше в кадре чётких границ.
+/// Считается на копии не больше 512 px по длинной стороне, чтобы значения снимков разного
+/// разрешения были сравнимы между собой.
+pub fn sharpness(gray: &image::GrayImage) -> f32 {
+    const MAX_SIDE: u32 = 512;
+    let (w, h) = gray.dimensions();
+    let scale = (MAX_SIDE as f32 / w.max(h) as f32).min(1.0);
+    let small = if scale < 1.0 {
+        let nw = ((w as f32 * scale).round() as u32).max(1);
+        let nh = ((h as f32 * scale).round() as u32).max(1);
+        image::imageops::resize(gray, nw, nh, image::imageops::FilterType::Triangle)
+    } else {
+        gray.clone()
+    };
+    let (w, h) = small.dimensions();
+    if w < 3 || h < 3 {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    let mut sum2 = 0.0f64;
+    let mut n = 0u64;
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            let c = small.get_pixel(x, y)[0] as f64;
+            let l = small.get_pixel(x - 1, y)[0] as f64;
+            let r = small.get_pixel(x + 1, y)[0] as f64;
+            let u = small.get_pixel(x, y - 1)[0] as f64;
+            let d = small.get_pixel(x, y + 1)[0] as f64;
+            let lap = 4.0 * c - l - r - u - d;
+            sum += lap;
+            sum2 += lap * lap;
+            n += 1;
+        }
+    }
+    let mean = sum / n as f64;
+    (sum2 / n as f64 - mean * mean).max(0.0) as f32
+}
+
 /// Метаданные из EXIF.
 #[derive(Default, Debug, Clone)]
 pub struct Meta {
@@ -238,6 +276,7 @@ pub struct ImageInfo {
     pub width: u32,
     pub height: u32,
     pub dhash: u64,
+    pub sharpness: f32,
     pub thumb: String,
 }
 
@@ -260,6 +299,8 @@ pub fn analyze_image(
         (h as f32 * scale).round().max(1.0) as u32,
     );
     let small = img.resize_exact(nw, nh, image::imageops::FilterType::Triangle);
+    // Резкость — по тому же уменьшенному кадру, что уходит в превью: дёшево и сравнимо.
+    let sharpness = sharpness(&small.to_luma8());
     let sub = &key[..2.min(key.len())];
     let dir = thumbs_dir.join(sub);
     std::fs::create_dir_all(&dir)?;
@@ -271,5 +312,5 @@ pub fn analyze_image(
             .save_with_format(&path, image::ImageFormat::Jpeg)
             .with_context(|| format!("запись превью {}", path.display()))?;
     }
-    Ok(ImageInfo { width: w, height: h, dhash, thumb: rel })
+    Ok(ImageInfo { width: w, height: h, dhash, sharpness, thumb: rel })
 }

@@ -71,6 +71,11 @@ pub fn resolve_db(explicit: Option<&Path>) -> Result<PathBuf> {
 
 pub fn open(db: &Path) -> Result<Connection> {
     let c = Connection::open(db).with_context(|| format!("не открыть БД {}", db.display()))?;
+    init(&c)?;
+    Ok(c)
+}
+
+fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
@@ -89,7 +94,9 @@ pub fn open(db: &Path) -> Result<Connection> {
             lon        REAL,
             camera     TEXT,
             dhash      INTEGER,
+            sharpness  REAL,
             thumb      TEXT,
+            decision   TEXT,
             indexed_at INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_sha   ON files(sha256);
@@ -104,7 +111,29 @@ pub fn open(db: &Path) -> Result<Connection> {
          );
          CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);",
     )?;
-    Ok(c)
+    // Схема старых БД дополняется на месте: данные не теряются при обновлении.
+    ensure_column(c, "files", "sharpness", "REAL")?;
+    ensure_column(c, "files", "decision", "TEXT")?;
+    Ok(())
+}
+
+fn ensure_column(c: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
+    let exists = {
+        let mut st = c.prepare(&format!("PRAGMA table_info({table})"))?;
+        let mut names = st.query_map([], |r| r.get::<_, String>(1))?;
+        let mut found = false;
+        for n in names.by_ref() {
+            if n? == column {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+    if !exists {
+        c.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+    }
+    Ok(())
 }
 
 /// Одна запись каталога.
@@ -124,19 +153,23 @@ pub struct FileRow {
     pub lon: Option<f64>,
     pub camera: Option<String>,
     pub dhash: Option<i64>,
+    pub sharpness: Option<f64>,
     pub thumb: Option<String>,
+    /// Решение владельца по дублю: `keep` | `drop` | `NULL` (не решено).
+    pub decision: Option<String>,
 }
 
 pub fn insert(conn: &Connection, r: &FileRow) -> Result<()> {
     conn.execute(
-        "INSERT INTO files(path,size,mtime,sha256,kind,width,height,taken_at,taken_src,lat,lon,camera,dhash,thumb,indexed_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+        "INSERT INTO files(path,size,mtime,sha256,kind,width,height,taken_at,taken_src,lat,lon,camera,dhash,sharpness,thumb,decision,indexed_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
          ON CONFLICT(path) DO UPDATE SET
             size=excluded.size, sha256=excluded.sha256, kind=excluded.kind,
             width=excluded.width, height=excluded.height, taken_at=excluded.taken_at,
             taken_src=excluded.taken_src, lat=excluded.lat, lon=excluded.lon,
-            camera=excluded.camera, dhash=excluded.dhash, thumb=excluded.thumb,
-            indexed_at=excluded.indexed_at",
+            camera=excluded.camera, dhash=excluded.dhash, sharpness=excluded.sharpness,
+            thumb=excluded.thumb, indexed_at=excluded.indexed_at,
+            decision=CASE WHEN files.sha256 IS excluded.sha256 THEN files.decision ELSE NULL END",
         params![
             r.path,
             r.size,
@@ -151,10 +184,28 @@ pub fn insert(conn: &Connection, r: &FileRow) -> Result<()> {
             r.lon,
             r.camera,
             r.dhash,
+            r.sharpness,
             r.thumb,
+            r.decision,
             now(),
         ],
     )?;
+    Ok(())
+}
+
+/// Пометить файл группы «оставить», остальные — «лишний». Оригиналы не трогаем: только БД.
+pub fn mark_keep(db: &Path, keep: i64, drops: &[i64]) -> Result<()> {
+    let mut conn = open(db)?;
+    mark_keep_conn(&mut conn, keep, drops)
+}
+
+fn mark_keep_conn(conn: &mut Connection, keep: i64, drops: &[i64]) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE files SET decision='keep' WHERE id=?1", params![keep])?;
+    for &id in drops {
+        tx.execute("UPDATE files SET decision='drop' WHERE id=?1", params![id])?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -168,7 +219,7 @@ pub fn now() -> i64 {
 pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
     let mut st = conn.prepare(
         "SELECT id,path,size,sha256,kind,COALESCE(width,0),COALESCE(height,0),
-                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,thumb
+                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,thumb,decision
          FROM files ORDER BY COALESCE(taken_at,'9999') , path",
     )?;
     let rows = st.query_map([], |r| {
@@ -187,7 +238,9 @@ pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
             lon: r.get(10)?,
             camera: r.get(11)?,
             dhash: r.get(12)?,
-            thumb: r.get(13)?,
+            sharpness: r.get(13)?,
+            thumb: r.get(14)?,
+            decision: r.get(15)?,
         })
     })?;
     let mut out = Vec::new();
@@ -261,4 +314,84 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
     println!("уникальных sha256: {uniq_sha}  (точных копий: {})", total_n - uniq_sha);
     println!("уникальных dhash: {uniq_dhash}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(path: &str, sha: &str, sharpness: f64) -> FileRow {
+        FileRow {
+            id: 0,
+            path: path.into(),
+            size: 1000,
+            mtime: 0,
+            sha256: sha.into(),
+            kind: "image".into(),
+            width: 100,
+            height: 100,
+            taken_at: None,
+            taken_src: "mtime".into(),
+            lat: None,
+            lon: None,
+            camera: None,
+            dhash: Some(1),
+            sharpness: Some(sharpness),
+            thumb: None,
+            decision: None,
+        }
+    }
+
+    fn id_of(c: &Connection, path: &str) -> i64 {
+        c.query_row("SELECT id FROM files WHERE path=?1", [path], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn schema_upgrade_keeps_old_db() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE files(
+                id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
+                mtime INTEGER, sha256 TEXT, kind TEXT NOT NULL, width INTEGER, height INTEGER,
+                taken_at TEXT, taken_src TEXT, lat REAL, lon REAL, camera TEXT, dhash INTEGER,
+                thumb TEXT, indexed_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        init(&c).unwrap();
+        init(&c).unwrap(); // повторный вызов не падает
+        let r = row("/old.jpg", "aa", 7.5);
+        insert(&c, &r).unwrap();
+        let loaded = load_all(&c).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].sharpness, Some(7.5));
+        assert_eq!(loaded[0].decision, None);
+    }
+
+    #[test]
+    fn decision_survives_same_content_and_resets_on_change() {
+        let mut c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let r = row("/a.jpg", "aa", 10.0);
+        insert(&c, &r).unwrap();
+        let id = id_of(&c, "/a.jpg");
+        let other = row("/b.jpg", "bb", 20.0);
+        insert(&c, &other).unwrap();
+        let other_id = id_of(&c, "/b.jpg");
+        mark_keep_conn(&mut c, id, &[other_id]).unwrap();
+
+        let loaded = load_all(&c).unwrap();
+        let a = loaded.iter().find(|r| r.path == "/a.jpg").unwrap();
+        let b = loaded.iter().find(|r| r.path == "/b.jpg").unwrap();
+        assert_eq!(a.decision.as_deref(), Some("keep"));
+        assert_eq!(b.decision.as_deref(), Some("drop"));
+
+        insert(&c, &r).unwrap(); // переиндексация того же файла
+        assert_eq!(load_all(&c).unwrap()[0].decision.as_deref(), Some("keep"));
+
+        let mut changed = r.clone();
+        changed.sha256 = "cc".into();
+        insert(&c, &changed).unwrap(); // файл подменили — решение устарело
+        assert_eq!(load_all(&c).unwrap()[0].decision, None);
+    }
 }

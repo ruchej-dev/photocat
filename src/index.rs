@@ -134,6 +134,7 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> 
     let mut width = 0u32;
     let mut height = 0u32;
     let mut dhash: Option<u64> = None;
+    let mut sharpness: Option<f64> = None;
     let mut thumb: Option<String> = None;
 
     if kind == "image" {
@@ -142,6 +143,7 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> 
                 width = info.width;
                 height = info.height;
                 dhash = Some(info.dhash);
+                sharpness = Some(info.sharpness as f64);
                 thumb = Some(info.thumb);
             }
             Err(e) => {
@@ -175,7 +177,9 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> 
         lon: meta.lon,
         camera: meta.camera,
         dhash: dhash.map(|v| v as i64),
+        sharpness,
         thumb,
+        decision: None,
     };
     Ok((row, size))
 }

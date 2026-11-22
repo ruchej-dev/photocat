@@ -3,7 +3,7 @@
 //! Подкоманды:
 //!   photocat index <каталог> [--jobs N] [--db PATH]
 //!   photocat stats
-//!   photocat dupes [--max-dist 6] [--csv FILE]
+//!   photocat dupes [--max-dist 6] [--csv FILE] [--plan FILE]
 //!   photocat organize --out <каталог> [--apply] [--copy|--symlink] [--rename]
 //!   photocat            (без аргументов — GUI)
 
@@ -26,7 +26,8 @@ fn usage() {
 подкоманды:
   index <каталог> [--jobs N] [--db PATH]   проиндексировать каталог
   stats [--db PATH]                        статистика по индексу
-  dupes [--max-dist N] [--csv FILE]        найти дубли и похожие снимки
+  dupes [--max-dist N] [--csv FILE] [--plan FILE]
+                                            найти дубли и похожие снимки, выгрузить решения
   organize --out DIR [--apply] [--copy]    план (и применение) раскладки по датам
   gui                                       графический интерфейс (по умолчанию)
 

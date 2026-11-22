@@ -131,6 +131,10 @@ struct Cells<'a> {
     thumbs_dir: &'a Path,
     selected: Option<i64>,
     clicked: Option<i64>,
+    /// Показать на плитке кнопку «оставить» (вид «Дубли»).
+    show_keep: bool,
+    /// Нажата «оставить» у файла — применить решение к его группе.
+    keep_clicked: Option<i64>,
 }
 
 fn load_texture(ctx: &egui::Context, path: &Path, name: &str) -> Option<egui::TextureHandle> {
@@ -194,6 +198,51 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             egui::FontId::proportional(11.0),
             egui::Color32::from_gray(190),
         );
+        // Решение по дублю видно на плитке в любом виде, а не только по наведению.
+        match f.decision.as_deref() {
+            Some("drop") => {
+                ui.painter().rect_filled(
+                    img_rect,
+                    3.0,
+                    egui::Color32::from_black_alpha(150),
+                );
+                ui.painter().text(
+                    img_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "лишний",
+                    egui::FontId::proportional(16.0),
+                    egui::Color32::from_gray(210),
+                );
+            }
+            Some("keep") => {
+                ui.painter().rect_stroke(
+                    img_rect,
+                    3.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
+                    egui::StrokeKind::Inside,
+                );
+                ui.painter().text(
+                    egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
+                    egui::Align2::LEFT_TOP,
+                    "оставить",
+                    egui::FontId::proportional(12.0),
+                    egui::Color32::from_rgb(90, 170, 255),
+                );
+            }
+            _ => {}
+        }
+        if cs.show_keep {
+            let btn = egui::Rect::from_min_size(
+                egui::pos2(img_rect.right() - 78.0, img_rect.top() + 4.0),
+                egui::vec2(74.0, 20.0),
+            );
+            if ui
+                .place(btn, egui::Button::new("оставить").small())
+                .clicked()
+            {
+                cs.keep_clicked = Some(f.id);
+            }
+        }
     }
     if cs.selected == Some(f.id) {
         ui.painter().rect_stroke(
@@ -323,7 +372,49 @@ impl eframe::App for App {
                         t.elapsed().as_secs_f32()
                     );
                 }
+                let sum = dupes::summary(&self.items, &self.groups);
+                ui.label(format!(
+                    "в группах {}, помечено лишними {}, освободится {}",
+                    sum.groups,
+                    sum.marked_drop,
+                    db::human(sum.freed)
+                ));
+                let has_groups = !self.groups.is_empty();
+                if ui
+                    .add_enabled(has_groups, egui::Button::new("Экспорт плана"))
+                    .clicked()
+                {
+                    let path = db::cache_dir().join("plan.csv");
+                    let csv = dupes::plan_csv(&self.items, &self.groups);
+                    match std::fs::write(&path, &csv) {
+                        Ok(()) => {
+                            self.status = format!(
+                                "план записан: {} (строк {})",
+                                path.display(),
+                                csv.lines().count().saturating_sub(1)
+                            )
+                        }
+                        Err(e) => self.status = format!("план не записан: {e}"),
+                    }
+                }
+                if ui
+                    .add_enabled(has_groups, egui::Button::new("Скопировать список в буфер"))
+                    .clicked()
+                {
+                    ctx.copy_text(dupes::plan_csv(&self.items, &self.groups));
+                    self.status = "план скопирован в буфер обмена".into();
+                }
                 ui.label(format!("найдено групп: {}", self.groups.len()));
+                let no_sharp = self
+                    .items
+                    .iter()
+                    .filter(|r| r.kind == "image" && r.sharpness.is_none())
+                    .count();
+                if no_sharp > 0 {
+                    ui.label(format!(
+                        "резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог"
+                    ));
+                }
             }
 
             ui.separator();
@@ -364,6 +455,8 @@ impl eframe::App for App {
             thumbs_dir: &self.thumbs_dir,
             selected: self.selected,
             clicked: None,
+            show_keep: self.view == View::Dupes,
+            keep_clicked: None,
         };
         let groups = std::mem::take(&mut self.groups);
         let view = self.view;
@@ -395,6 +488,21 @@ impl eframe::App for App {
                                     g.reason,
                                     g.members.len(),
                                     db::human(g.waste)
+                                ));
+                                let keep = dupes::keep_of(&items, g);
+                                let name = Path::new(&items[keep].path)
+                                    .file_name()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or(&items[keep].path);
+                                let decided = g
+                                    .members
+                                    .iter()
+                                    .any(|&i| items[i].decision.as_deref() == Some("keep"));
+                                ui.label(format!(
+                                    "{}: оставить {} — {}",
+                                    if decided { "решение" } else { "совет" },
+                                    name,
+                                    g.advice
                                 ));
                                 ui.horizontal_wrapped(|ui| {
                                     for &i in &g.members {
@@ -443,6 +551,41 @@ impl eframe::App for App {
         self.groups = groups;
         if let Some(id) = cells.clicked {
             self.selected = Some(id);
+        }
+        if let Some(keep_id) = cells.keep_clicked {
+            self.selected = Some(keep_id);
+            if let Some(gi) = self
+                .groups
+                .iter()
+                .position(|g| g.members.iter().any(|&i| self.items[i].id == keep_id))
+            {
+                let members = self.groups[gi].members.clone();
+                let mut drops = Vec::new();
+                for &i in &members {
+                    if self.items[i].id == keep_id {
+                        self.items[i].decision = Some("keep".into());
+                    } else {
+                        self.items[i].decision = Some("drop".into());
+                        drops.push(self.items[i].id);
+                    }
+                }
+                let name = self
+                    .items
+                    .iter()
+                    .find(|r| r.id == keep_id)
+                    .and_then(|r| Path::new(&r.path).file_name().and_then(|s| s.to_str()))
+                    .unwrap_or("файл")
+                    .to_string();
+                match db::mark_keep(&self.db_path, keep_id, &drops) {
+                    Ok(()) => {
+                        self.status = format!(
+                            "оставлен {name}, помечено лишними {}",
+                            drops.len()
+                        )
+                    }
+                    Err(e) => self.status = format!("решение не сохранено: {e}"),
+                }
+            }
         }
     }
 }
