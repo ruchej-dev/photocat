@@ -201,6 +201,21 @@ ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='fi
 
 Правило: числа без корпуса и даты в таблицу не попадают.
 
+## Внешние программы
+
+Приложение — один Rust-бинарник; всё, что требует C-стека, работает процессами (ADR 0019).
+Проверка — `photocat doctor`: версии, языки OCR, модель, БД.
+
+| Программа | Модуль | Без неё |
+|---|---|---|
+| `ffmpeg` | `derive::analyze_video` | видео в индексе без превью и dHash, ошибка в счётчике |
+| `ffprobe` | `derive::video_probe` | видео без длительности и разрешения |
+| `tesseract` | `derive::ocr_image` | OCR выключен (кнопка погашена, `ocr` подсказывает команду) |
+| `curl` | `embed::download_model` | веса модели кладутся вручную |
+
+Все ищутся в `PATH`, вызываются без `sh`, на Windows без консольного окна; отсутствие — состояние,
+а не падение. Языки tesseract сверяются с `settings.ocr_lang` (`rus+eng` по умолчанию).
+
 ## Кросс-платформенность
 
 Цель — Linux (ADR 0014), но код не содержит тупиков: кэш ищется через `XDG_CACHE_HOME` /
@@ -208,4 +223,6 @@ ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='fi
 `ffmpeg`/`ffprobe`/`curl`/`tesseract` запускаются из `PATH` и без консольного окна на Windows.
 Известное ограничение: не-UTF-8 имена (в Linux допустимы) теряются при записи пути в SQLite через
 `to_string_lossy`; для видео, загрузки модели и OCR нужны соответствующие программы в `PATH`
-(без tesseract пропадает только OCR — остальное работает).
+(без tesseract пропадает только OCR — остальное работает). Что именно есть на машине, печатает
+`photocat doctor`; пакеты ставятся штатным пакетным менеджером ОС (Arch: `tesseract` +
+`tesseract-data-rus` + `tesseract-data-eng`, Windows/macOS — свои сборки ffmpeg и tesseract).

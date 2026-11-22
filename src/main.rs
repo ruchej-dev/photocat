@@ -43,6 +43,7 @@ fn usage() {
                                             каталог моделей, проверка и загрузка весов
   settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L]
                                             показать или изменить настройки
+  doctor                                   что есть на машине: программы, языки OCR, модель
   gui                                       графический интерфейс (по умолчанию)
 
 по умолчанию: GUI"
@@ -322,6 +323,77 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        "doctor" => {
+            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+            let conn = db::open(&db_path)?;
+            let settings = db::load_settings(&conn);
+
+            println!("внешние программы (ищутся в PATH, без них отключается только своя работа):");
+            let tools: [(&str, &[&str], &str); 4] = [
+                ("ffmpeg", &["-version"], "видео: кадр-обложка, dHash, превью"),
+                ("ffprobe", &["-version"], "видео: длительность и разрешение"),
+                ("tesseract", &["--version"], "OCR: текст с документов и скриншотов"),
+                ("curl", &["--version"], "скачивание весов модели по согласию"),
+            ];
+            for (prog, vargs, purpose) in tools {
+                let state = match derive::tool_version(prog, vargs) {
+                    Some(v) => short_version(&v),
+                    None => "не найден".to_string(),
+                };
+                println!("  {prog:<10} {state:<30} {purpose}");
+            }
+
+            match derive::tesseract_langs() {
+                Some(langs) => {
+                    let want: Vec<&str> = settings
+                        .ocr_lang
+                        .split('+')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let missing: Vec<&str> = want
+                        .iter()
+                        .copied()
+                        .filter(|l| !langs.iter().any(|x| x.eq_ignore_ascii_case(l)))
+                        .collect();
+                    if missing.is_empty() {
+                        println!("языки OCR: {} — на месте", settings.ocr_lang);
+                    } else {
+                        println!(
+                            "языки OCR: {} — нет {}; установите языковые пакеты tesseract для них",
+                            settings.ocr_lang,
+                            missing.join(", ")
+                        );
+                    }
+                    println!("  доступны: {}", langs.join(", "));
+                }
+                None => println!("языки OCR: не проверить — tesseract не найден"),
+            }
+
+            let entry = embed::active_entry(&settings);
+            println!(
+                "модель CLIP: {} · {} · {}",
+                entry.title,
+                db::human(entry.bytes() as i64),
+                if embed::model_present(&settings) {
+                    "на месте".to_string()
+                } else {
+                    "не скачана — смысловой поиск и теги недоступны".to_string()
+                }
+            );
+            let (ocr_files, ocr_chars) = db::ocr_summary(&conn)?;
+            let total: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+            let size = std::fs::metadata(&db_path).map(|m| m.len() as i64).unwrap_or(0);
+            println!(
+                "БД: {} · {} · файлов {}, с текстом {} (знаков {})",
+                db_path.display(),
+                db::human(size),
+                total,
+                ocr_files,
+                ocr_chars
+            );
+            Ok(())
+        }
         "gui" | "" => app::run(flag_str(&args, "--db").map(PathBuf::from)),
         "-h" | "--help" | "help" => {
             usage();
@@ -333,6 +405,11 @@ fn main() -> Result<()> {
             std::process::exit(2);
         }
     }
+}
+
+/// Короткая подпись версии: «ffmpeg version 6.1.1» вместо строки с копирайтом.
+fn short_version(line: &str) -> String {
+    line.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
 }
 
 pub fn flag_str(args: &[String], name: &str) -> Option<String> {

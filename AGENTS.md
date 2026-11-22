@@ -89,6 +89,7 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat ocr                            # текст с документов и скриншотов (tesseract)
 ./target/release/photocat ocr --dry-run                  # сколько файлов пойдёт в OCR
 ./target/release/photocat search "справка" --text        # поиск по распознанному тексту
+./target/release/photocat doctor                         # что есть: ffmpeg, tesseract, языки, модель
 ./target/release/photocat clusters --k 30                # кластеры → plan/M3-clusters.md
 ./target/release/photocat models list                    # каталог моделей и что уже скачано
 ./target/release/photocat models download --id ID --yes  # веса (сеть, только по согласию)

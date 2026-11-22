@@ -418,14 +418,42 @@ pub fn analyze_video(
     })
 }
 
-/// Есть ли OCR: `tesseract` в PATH и его версия. Спрашивается один раз, не на каждый кадр.
-pub fn tesseract_version() -> Option<String> {
-    let out = quiet_command("tesseract").arg("--version").output().ok()?;
+/// Версия внешней программы. Нет программы в `PATH` — `None`, а не ошибка:
+/// каждая такая программа нужна только своему виду работы (ADR 0019).
+pub fn tool_version(program: &str, args: &[&str]) -> Option<String> {
+    let out = quiet_command(program).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     Some(stdout.lines().next()?.trim().to_string())
+}
+
+/// Есть ли OCR: `tesseract` в PATH и его версия. Спрашивается один раз, не на каждый кадр.
+pub fn tesseract_version() -> Option<String> {
+    tool_version("tesseract", &["--version"])
+}
+
+/// Установленные языковые пакеты tesseract. `None` — программы нет.
+pub fn tesseract_langs() -> Option<Vec<String>> {
+    let out = quiet_command("tesseract").arg("--list-langs").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    Some(parse_langs(&text))
+}
+
+/// Разбор `tesseract --list-langs`: первая строка — заголовок, дальше коды по одному.
+fn parse_langs(out: &str) -> Vec<String> {
+    out.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .filter(|l| *l != "osd")
+        .map(str::to_string)
+        .collect()
 }
 
 /// Вход для OCR: повёрнутый по EXIF кадр не больше `max_side`, PNG в памяти.
@@ -555,6 +583,13 @@ pub fn clip_input(thumb: &Path, size: u32) -> Result<Vec<f32>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tesseract_langs_parses_header_and_codes() {
+        let out = "List of available languages in /usr/share/tessdata/ (3):\neng\nrus\nosd\n";
+        assert_eq!(super::parse_langs(out), vec!["eng".to_string(), "rus".to_string()]);
+        assert!(super::parse_langs("").is_empty());
+    }
+
     use super::*;
 
     fn probe(json: &str) -> Result<VideoMeta> {
