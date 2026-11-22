@@ -314,3 +314,36 @@ pub fn analyze_image(
     }
     Ok(ImageInfo { width: w, height: h, dhash, sharpness, thumb: rel })
 }
+
+/// Вход CLIP: квадрат по центру превью, 224×224, нормализация каналов, раскладка CHW.
+pub fn clip_input(thumb: &Path, size: u32) -> Result<Vec<f32>> {
+    const MEAN: [f32; 3] = [0.481_454_7, 0.457_827_5, 0.408_210_7];
+    const STD: [f32; 3] = [0.268_629_5, 0.261_302_6, 0.275_777_1];
+    let img = image::ImageReader::open(thumb)?
+        .with_guessed_format()?
+        .decode()
+        .with_context(|| format!("декодирование превью {}", thumb.display()))?
+        .to_rgb8();
+    let (w, h) = img.dimensions();
+    let side = w.min(h).max(1);
+    let (x0, y0) = ((w - side) / 2, (h - side) / 2);
+    let crop = image::imageops::crop_imm(&img, x0, y0, side, side).to_image();
+    let small = image::imageops::resize(
+        &crop,
+        size,
+        size,
+        image::imageops::FilterType::Triangle,
+    );
+    let plane = (size * size) as usize;
+    let mut out = vec![0f32; plane * 3];
+    for y in 0..size {
+        for x in 0..size {
+            let px = small.get_pixel(x, y);
+            let i = (y * size + x) as usize;
+            for c in 0..3 {
+                out[c * plane + i] = (px[c] as f32 / 255.0 - MEAN[c]) / STD[c];
+            }
+        }
+    }
+    Ok(out)
+}

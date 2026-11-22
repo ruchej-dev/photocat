@@ -45,6 +45,7 @@
 | `src/db.rs` | L1 | схема SQLite, вставка/выборка, `Progress`, `human()` | egui, декодирование картинок |
 | `src/index.rs` | L2 | обход `walkdir`, rayon-параллелизм, поток-писатель | egui |
 | `src/dupes.rs` | L2 | union-find, точные и похожие дубли, CSV | egui |
+| `src/embed.rs` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means | egui, БД-строки |
 | `src/organize.rs` | L2 | план по датам, hardlink/copy/symlink | egui |
 | `src/app.rs` | L3 | весь GUI на egui | прямые вызовы SQL |
 | `src/main.rs` | L3 | разбор CLI, подкоманды | — |
@@ -57,7 +58,10 @@
 - БД: `~/.cache/photocat/photocat.db` (SQLite, WAL). Пересоздаётся индексацией; в каталог архива
   не пишем никогда.
 - Превью: `~/.cache/photocat/thumbs/<2 симв.>/<sha256[..24]>.jpg`, 320 px по длинной стороне.
-- Кэш на 2230 файлов: БД 1.2 МБ, превью 29 МБ. Если стало в 10 раз больше — это регресс.
+- Модель CLIP: `~/.cache/photocat/models/clip-vit-b32/`, 218 МиБ, скачивается вручную
+  `bash scripts/fetch-model.sh`; приложение в сеть не ходит.
+- Кэш на 2230 файлов: БД 1.3 МБ, превью 29 МБ; после CLIP БД ~11 МБ (векторы 3.9 МиБ).
+  Если стало в 10 раз больше — это регресс.
 - Схема меняется только через `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE` в `db::open`, с
   сохранением данных: индекс на 2230 файлов стоит 65 с, но его нельзя терять из-за правки схемы.
 
@@ -71,7 +75,11 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat stats
 ./target/release/photocat dupes --max-dist 6
 ./target/release/photocat organize --out DIR            # dry-run
+./target/release/photocat embed                          # CLIP-эмбеддинги и теги (локально)
+./target/release/photocat search "торт" --top 20         # смысловой поиск
+./target/release/photocat clusters --k 30                # кластеры → plan/M3-clusters.md
 ./target/release/photocat gui                            # GUI
+bash scripts/fetch-model.sh                              # веса CLIP (один раз, сеть)
 bash .pi/skills/corpus-bench/scripts/bench.sh            # замер на реальном корпусе
 ```
 
@@ -107,7 +115,10 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # замер на ре�
 - HEIC/AVIF-видео кодеков нет: `image` не читает HEIC.
 - `hardlink` не работает между разными ФС (`/tmp` — tmpfs): витрину делать на том же диске или
   `--copy`/`--symlink`.
-- ML (CLIP/лица/OCR) отсутствует — это этапы M3–M6.
+- CLIP-теги приблизительны: уверенный тег — только если первый отрывается от второго на 0.01;
+  «не уверен» — нормальное состояние, а не баг. Модель требует AVX2 (int8-квантование), 218 МиБ.
+- Лица (M6) и OCR (M5) отсутствуют.
+- `plan/M3-clusters.md` — локальный отчёт с путями архива, в git не попадает.
 
 ## 9. Скиллы репозитория
 

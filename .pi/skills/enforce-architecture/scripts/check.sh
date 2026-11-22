@@ -23,8 +23,9 @@ declare -A ALLOWED=(
   [index]="derive db"
   [dupes]="db derive"
   [organize]="db"
-  [app]="derive db index dupes organize"
-  [main]="derive db index dupes organize app"
+  [embed]="derive db"
+  [app]="derive db index dupes organize embed"
+  [main]="derive db index dupes organize embed app"
 )
 
 echo "1. зависимости между модулями"

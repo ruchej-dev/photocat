@@ -43,7 +43,10 @@ D=/tmp/pc-bench.db
 ./target/release/photocat stats --db "$D"
 ./target/release/photocat dupes --db "$D" --max-dist 6 --quiet
 ./target/release/photocat organize --db "$D" --out /tmp/pc-plan | head -12
-du -sh "$D" ~/.cache/photocat/thumbs
+./target/release/photocat embed --db "$D" --jobs 8 --batch 8
+./target/release/photocat search "торт" --db "$D" --top 5
+./target/release/photocat clusters --db "$D" --k 30 --out /tmp/M3-clusters.md
+du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 ```
 
 ## Ожидаемые значения (базовая линия, не догма)
@@ -59,6 +62,11 @@ du -sh "$D" ~/.cache/photocat/thumbs
 | Кластеризация | 0.03 с | > 1 с |
 | Файлов без dHash | 259 (видео) | больше (значит сломали декод) |
 | Файлов без даты | 0 | > 5% |
+| `embed` 1971 фото, `--jobs 8 --batch 8` | 66.9 с (34 мс/фото) | > 180 с |
+| Модель CLIP (4 файла) | 218 МиБ | файлы не совпали по sha256 |
+| Векторы эмбеддингов | 3.85 МиБ (2 КиБ/фото) | > 40 МиБ на 20 тыс. фото |
+| Повторный `embed` | 0.025 с, всё пропущено по sha256 | > 5 с |
+| Поиск по 20 тыс. векторов | 48–51 мс | > 200 мс |
 
 ## Правила
 

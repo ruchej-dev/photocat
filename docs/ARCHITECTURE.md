@@ -4,7 +4,7 @@
 
 ```
 L3  main.rs ── app.rs            CLI и GUI
-L2  index.rs   dupes.rs   organize.rs
+L2  index.rs   dupes.rs   organize.rs   embed.rs
 L1  db.rs
 L0  derive.rs
 ```
@@ -14,6 +14,7 @@ L0  derive.rs
 | L0 `derive` | файлы, `image`, `image_hasher`, `kamadak-exif`, `sha2` | БД, UI, параллелизм |
 | L1 `db` | `rusqlite`, `anyhow` | декодирование, egui |
 | L2 `index` / `dupes` / `organize` | L0/L1 + `rayon`, `walkdir` | egui |
+| L2 `embed` | L0/L1 + `ort`, `tokenizers`, `serde_json` | egui, SQL-строки |
 | L3 `app` | всё ниже + `eframe`/`egui` | прямые SQL-строки, декодирование в UI-потоке |
 
 Граница проверяется скриптом `.pi/skills/enforce-architecture/scripts/check.sh` (grep по `use
@@ -36,7 +37,8 @@ walkdir → Vec<PathBuf> → rayon(par_iter, jobs потоков)
 ```sql
 files(id, path UNIQUE, size, mtime, sha256, kind, width, height,
       taken_at, taken_src, lat, lon, camera, dhash, sharpness, thumb, decision, indexed_at)
-tags(file_id, tag, score, source)      -- задел под M3
+tags(file_id, tag, score, source)      -- source='clip': 7 весов на фото
+embeddings(file_id, model, sha256, dim, vec, PRIMARY KEY(file_id, model))
 ```
 
 - `kind`: `image` | `video` | `other`.
@@ -49,6 +51,11 @@ tags(file_id, tag, score, source)      -- задел под M3
   перезапуск и переиндексацию; сбрасывается, только если у файла изменился `sha256`.
 - `thumb`: путь относительно `~/.cache/photocat/thumbs/`, ключ — `sha256[..24]` (одинаковые файлы
   делят одно превью).
+- `embeddings.vec`: f32 little-endian, 512 чисел (2 КиБ на фото); `sha256` — содержимое файла на
+  момент расчёта. Если `files.sha256` меняется, триггер `invalidate_clip_after_sha_change` удаляет
+  векторы и CLIP-теги этого файла; остальные теги не трогаются.
+- `tags.score`: косинус «фото ↔ промпт». Хранятся все 7 весов; уверенным считается только первый,
+  если он ≥ 0.22 и опережает второй на 0.01 (`embed::confident_tag`).
 
 Изменение схемы — только через `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE` в `db::open`, данные
 сохраняются.
@@ -67,6 +74,34 @@ tags(file_id, tag, score, source)      -- задел под M3
 
 Сложность O(n²) по числу изображений с dHash: 1972 файла → 1.9 млн сравнений → 0.03 с. До 20 тыс.
 фото это ~200 млн (≈3 с) — приемлемо; выше — BK-tree по 64-битным хешам (задача на будущее).
+
+## CLIP: эмбеддинги, теги, поиск
+
+```
+превью 320 → центр-кроп → 224×224 → CLIP ViT-B/32 (int8 ONNX) → 512 f32 → normalize → embeddings
+текст «торт» → DistilBERT-multilingual (int8 ONNX) → mean pool → Dense 768→512 → normalize
+                                        → cosine по 20 тыс. векторов → топ-N в сетке
+```
+
+- Модель: **зрительная часть** `Xenova/clip-vit-base-patch32` (`vision_model_quantized.onnx`),
+  **текстовая** — `sentence-transformers/clip-ViT-B-32-multilingual-v1` (`model_quint8_avx2.onnx`,
+  mean pooling + `2_Dense` 768→512 из safetensors). Русский запрос кодируется мультиязычным
+  текстовым энкодером и сравнивается с образом в общем 512-мерном пространстве.
+- Файлы лежат в `~/.cache/photocat/models/clip-vit-b32/` (218 МиБ), sha256 закреплён в
+  `src/embed.rs` и `scripts/fetch-model.sh`; проверяется при каждой загрузке модели.
+  **Приложение не делает сетевых запросов**: веса скачивает только явно запущенный скрипт.
+  ONNX Runtime для сборки тянет `ort-sys` (кеш `~/.cache/ort.pyke.io`), в рантайме — с диска.
+- Один декод на фото: `derive::clip_input` читает превью из кэша, нормализует каналы CLIP.
+  Инференс батчами по 8; ошибка батча откатывается на поштучную обработку.
+- Повторный `embed` не пересчитывает неизменённые файлы: ключ — `sha256` в `embeddings`.
+- Теги: 7 промптов на русском (пляж, документ, скриншот, еда, животные, дети, праздник),
+  текстовые векторы считаются один раз при загрузке модели.
+- Поиск: текст → вектор → косинус по всем векторам из БД → топ-200. 20 тыс. векторов: 48–51 мс
+  вместе с чтением 40 МиБ BLOB из SQLite. BLOB читаются каждым запросом; в GUI модель и БД
+  держатся, поэтому повторный запрос дешевле.
+- Кластеры: k-means++ (детерминированный seed) по нормализованным векторам, k=30, 30 итераций;
+  отчёт `plan/M3-clusters.md` — 12 примеров на кластер. Отчёт локальный (пути архива), в git не
+  попадает.
 
 ## Дата
 
@@ -88,6 +123,10 @@ tags(file_id, tag, score, source)      -- задел под M3
 | 2026-11-22 | 1972 фото | `dupes --max-dist 6 --csv --plan` | 103 группы, 238 файлов, 214.1 МиБ; `sharpness` заполнен у всех 238 строк |
 | 2026-11-22 | 122 файла (жёсткие ссылки на корпус) | `index --jobs 16`, release | 1.5 с (~80 фото/с) |
 | 2026-11-22 | 1972 фото | `dupes --max-dist 6` | 0.03 с, 103 группы, 238 файлов, 214.1 МиБ |
+| 2026-11-22 | 1971 фото с превью (корпус 2230) | `embed --jobs 8 --batch 8`, release | 66.9 с (34 мс/фото), 0 ошибок, векторы 3.85 МиБ, тегов 13 797, модель 217.5 МиБ |
+| 2026-11-22 | тот же корпус | повторный `embed` | 0.025 с: 1971 пропущен по sha256 |
+| 2026-11-22 | 20 120 векторов (1971 реальных + синтетика) | `search «кошка» --repeat 4` | 48–51 мс на запрос, включая чтение 40 МиБ из SQLite |
+| 2026-11-22 | 1971 фото, 30 кластеров | `clusters --k 30` | 1.6 с, отчёт 30 кластеров × 12 примеров |
 | 2026-11-22 | 122 файла | `index --jobs 8`, **debug** | 48 с — debug-сборка для картинок непригодна |
 
 Правило: числа без корпуса и даты в таблицу не попадают.

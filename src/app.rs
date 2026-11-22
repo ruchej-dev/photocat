@@ -2,12 +2,16 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::dupes::{self, Group};
+use crate::embed;
 use crate::index;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
+
+type SearchReply = Result<(embed::Model, Vec<(i64, f32)>, f32)>;
+type EmbedReply = Result<embed::EmbedStats>;
 
 #[derive(Clone, Copy, PartialEq)]
 enum View {
@@ -47,6 +51,17 @@ struct App {
     only_images: bool,
     progress: Option<Arc<Progress>>,
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
+    /// Теги CLIP: file_id → [(тег, вес)] по убыванию.
+    tags: HashMap<i64, Vec<(String, f32)>>,
+    tag_filter: Option<String>,
+    semantic_query: String,
+    /// Результаты смыслового поиска в порядке убывания похожести.
+    semantic_hits: Option<Vec<i64>>,
+    /// Модель загружена после первого поиска; дальше запросы идут без паузы.
+    ml_model: Option<embed::Model>,
+    search_rx: Option<mpsc::Receiver<SearchReply>>,
+    embed_progress: Option<Arc<Progress>>,
+    embed_rx: Option<mpsc::Receiver<EmbedReply>>,
     status: String,
 }
 
@@ -68,6 +83,14 @@ impl App {
             only_images: true,
             progress: None,
             rx: None,
+            tags: HashMap::new(),
+            tag_filter: None,
+            semantic_query: String::new(),
+            semantic_hits: None,
+            ml_model: None,
+            search_rx: None,
+            embed_progress: None,
+            embed_rx: None,
             status: String::new(),
         };
         me.reload();
@@ -77,14 +100,20 @@ impl App {
     fn reload(&mut self) {
         self.textures.clear();
         self.missing.clear();
-        match db::open(&self.db_path).and_then(|c| db::load_all(&c)) {
-            Ok(rows) => {
+        self.semantic_hits = None;
+        match db::open(&self.db_path).and_then(|c| {
+            let rows = db::load_all(&c)?;
+            let tags = db::load_tags(&c)?;
+            Ok((rows, tags))
+        }) {
+            Ok((rows, tags)) => {
                 self.status = format!(
                     "в индексе {} файлов, {}",
                     rows.len(),
                     db::human(rows.iter().map(|r| r.size).sum())
                 );
                 self.items = rows;
+                self.tags = tags;
                 self.groups.clear();
             }
             Err(e) => self.status = format!("ошибка чтения индекса: {e}"),
@@ -93,7 +122,8 @@ impl App {
 
     fn filtered(&self) -> Vec<usize> {
         let q = self.query.to_lowercase();
-        self.items
+        let mut out: Vec<usize> = self
+            .items
             .iter()
             .enumerate()
             .filter(|(_, r)| !self.only_images || r.kind == "image")
@@ -102,8 +132,82 @@ impl App {
                     || r.path.to_lowercase().contains(&q)
                     || r.taken_at.clone().unwrap_or_default().contains(&q)
             })
+            .filter(|(_, r)| match &self.tag_filter {
+                None => true,
+                Some(want) => self
+                    .tags
+                    .get(&r.id)
+                    .and_then(|t| embed::confident_tag(t))
+                    .map(|(tag, _)| tag == want)
+                    .unwrap_or(false),
+            })
             .map(|(i, _)| i)
-            .collect()
+            .collect();
+        if let Some(hits) = &self.semantic_hits {
+            let rank: HashMap<i64, usize> = hits
+                .iter()
+                .enumerate()
+                .map(|(n, id)| (*id, n))
+                .collect();
+            out.retain(|&i| rank.contains_key(&self.items[i].id));
+            out.sort_by_key(|&i| rank.get(&self.items[i].id).copied().unwrap_or(usize::MAX));
+        }
+        out
+    }
+
+    fn start_embed(&mut self) {
+        if self.embed_rx.is_some() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let progress = Arc::new(Progress::default());
+        self.embed_progress = Some(progress.clone());
+        let (tx, rx) = mpsc::channel();
+        self.embed_rx = Some(rx);
+        self.status = "CLIP: считаю эмбеддинги и теги…".into();
+        std::thread::spawn(move || {
+            let r = embed::embed_missing(&db_path, 8, 8, Some(progress));
+            let _ = tx.send(r);
+        });
+    }
+
+    fn start_search(&mut self) {
+        let q = self.semantic_query.trim().to_string();
+        if q.is_empty() {
+            self.semantic_hits = None;
+            return;
+        }
+        if let Some(model) = self.ml_model.as_mut() {
+            let t = std::time::Instant::now();
+            match embed::search(&self.db_path, model, &q, 200) {
+                Ok(hits) => {
+                    self.status = format!(
+                        "смысловой поиск «{q}»: {} файлов за {} мс",
+                        hits.len(),
+                        t.elapsed().as_millis()
+                    );
+                    self.semantic_hits = Some(hits.into_iter().map(|(id, _)| id).collect());
+                }
+                Err(e) => self.status = format!("поиск не удался: {e}"),
+            }
+            return;
+        }
+        if self.search_rx.is_some() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let (tx, rx) = mpsc::channel();
+        self.search_rx = Some(rx);
+        self.status = format!("CLIP: загружаю модель для запроса «{q}»…");
+        std::thread::spawn(move || {
+            let t = std::time::Instant::now();
+            let res = embed::Model::load(8).and_then(|mut model| {
+                let hits = embed::search(&db_path, &mut model, &q, 200)?;
+                let ms = t.elapsed().as_secs_f32() * 1000.0;
+                Ok((model, hits, ms))
+            });
+            let _ = tx.send(res);
+        });
     }
 
     fn start_index(&mut self) {
@@ -292,6 +396,54 @@ impl eframe::App for App {
             }
         }
 
+        if let Some(rx) = &self.embed_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.embed_rx = None;
+                    self.embed_progress = None;
+                    match res {
+                        Ok(stats) => {
+                            self.reload();
+                            self.status = stats.to_string();
+                        }
+                        Err(e) => self.status = format!("CLIP не посчитан: {e}"),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.embed_rx = None;
+                    self.embed_progress = None;
+                }
+            }
+        }
+        if let Some(rx) = &self.search_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.search_rx = None;
+                    match res {
+                        Ok((model, hits, ms)) => {
+                            self.ml_model = Some(model);
+                            self.status = format!(
+                                "смысловой поиск: {} файлов за {ms:.0} мс",
+                                hits.len()
+                            );
+                            self.semantic_hits =
+                                Some(hits.into_iter().map(|(id, _)| id).collect());
+                        }
+                        Err(e) => self.status = format!("поиск не удался: {e}"),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.search_rx = None;
+                }
+            }
+        }
+
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -322,6 +474,41 @@ impl eframe::App for App {
                     );
                 }
             });
+            if embed::model_present() {
+                ui.horizontal(|ui| {
+                    ui.label("Смысловой поиск:");
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.semantic_query)
+                            .hint_text("торт, море, документ")
+                            .desired_width(300.0),
+                    );
+                    let enter =
+                        resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui.button("Найти").clicked() || enter {
+                        self.start_search();
+                    }
+                    if self.semantic_hits.is_some() && ui.button("Сбросить").clicked() {
+                        self.semantic_hits = None;
+                        self.status = "смысловой поиск сброшен".into();
+                    }
+                    if self.search_rx.is_some() {
+                        ui.label("загрузка модели CLIP…");
+                    }
+                });
+            }
+            if let Some(p) = &self.embed_progress {
+                let (d, t) = (p.done(), p.total());
+                let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+                ui.add(
+                    egui::ProgressBar::new(frac)
+                        .desired_width(320.0)
+                        .text(if t > 0 {
+                            format!("CLIP: {d}/{t}")
+                        } else {
+                            p.msg()
+                        }),
+                );
+            }
             ui.add_space(4.0);
         });
 
@@ -418,6 +605,54 @@ impl eframe::App for App {
             }
 
             ui.separator();
+            ui.heading("Смысловые теги");
+            if embed::model_present() {
+                ui.label(format!(
+                    "CLIP: {} · {} признаков",
+                    db::human(embed::model_bytes()),
+                    embed::DIM
+                ));
+                if ui
+                    .add_enabled(
+                        self.embed_rx.is_none(),
+                        egui::Button::new("Посчитать теги"),
+                    )
+                    .clicked()
+                {
+                    self.start_embed();
+                }
+                egui::ComboBox::from_label("Тег")
+                    .selected_text(self.tag_filter.clone().unwrap_or_else(|| "все".into()))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.tag_filter, None, "все");
+                        for (label, _) in embed::TAGS {
+                            ui.selectable_value(
+                                &mut self.tag_filter,
+                                Some(label.to_string()),
+                                label,
+                            );
+                        }
+                    });
+                let tagged = self
+                    .items
+                    .iter()
+                    .filter(|r| {
+                        self.tags
+                            .get(&r.id)
+                            .and_then(|t| embed::confident_tag(t))
+                            .is_some()
+                    })
+                    .count();
+                ui.label(format!("с уверенным тегом: {tagged}"));
+                if let Some(hits) = &self.semantic_hits {
+                    ui.label(format!("смысловой поиск: {} файлов", hits.len()));
+                }
+            } else {
+                ui.label("CLIP: модель не найдена");
+                ui.label("bash scripts/fetch-model.sh");
+            }
+
+            ui.separator();
             let n = self.items.len();
             let bytes: i64 = self.items.iter().map(|r| r.size).sum();
             let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
@@ -441,6 +676,19 @@ impl eframe::App for App {
                     }
                     if let (Some(a), Some(b)) = (f.lat, f.lon) {
                         ui.label(format!("GPS: {a:.5}, {b:.5}"));
+                    }
+                    match self.tags.get(&id) {
+                        Some(tags) => match embed::confident_tag(tags) {
+                            Some((tag, score)) => {
+                                ui.label(format!("тег: {tag} ({score:.2})"));
+                            }
+                            None => {
+                                ui.label("тег: не уверен");
+                            }
+                        },
+                        None => {
+                            ui.label("тег: не посчитан");
+                        }
                     }
                     ui.label(format!("sha256: {}…", &f.sha256[..16.min(f.sha256.len())]));
                 }

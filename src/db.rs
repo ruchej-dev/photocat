@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -109,7 +110,23 @@ fn init(c: &Connection) -> Result<()> {
             source  TEXT,
             PRIMARY KEY(file_id, tag)
          );
-         CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);",
+         CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);
+         CREATE TABLE IF NOT EXISTS embeddings(
+            file_id INTEGER NOT NULL,
+            model   TEXT NOT NULL,
+            sha256  TEXT NOT NULL,
+            dim     INTEGER NOT NULL,
+            vec     BLOB NOT NULL,
+            PRIMARY KEY(file_id, model)
+         );
+         CREATE INDEX IF NOT EXISTS idx_emb_model ON embeddings(model);
+         CREATE TRIGGER IF NOT EXISTS invalidate_clip_after_sha_change
+         AFTER UPDATE OF sha256 ON files
+         WHEN old.sha256 IS NOT new.sha256
+         BEGIN
+            DELETE FROM embeddings WHERE file_id = new.id;
+            DELETE FROM tags WHERE file_id = new.id AND source = 'clip';
+         END;",
     )?;
     // Схема старых БД дополняется на месте: данные не теряются при обновлении.
     ensure_column(c, "files", "sharpness", "REAL")?;
@@ -250,6 +267,92 @@ pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
     Ok(out)
 }
 
+/// sha256 уже посчитанных векторов: file_id → sha256 файла на момент расчёта.
+pub fn embedding_shas(conn: &Connection, model: &str) -> Result<HashMap<i64, String>> {
+    let mut st = conn.prepare("SELECT file_id, sha256 FROM embeddings WHERE model=?1")?;
+    let rows = st.query_map([model], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let (id, sha) = r?;
+        out.insert(id, sha);
+    }
+    Ok(out)
+}
+
+/// Все векторы модели: `(file_id, f32)` для косинусного поиска и кластеризации.
+pub fn load_embeddings(conn: &Connection, model: &str) -> Result<Vec<(i64, Vec<f32>)>> {
+    let mut st = conn.prepare("SELECT file_id, vec FROM embeddings WHERE model=?1")?;
+    let rows = st.query_map([model], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        let (id, blob) = r?;
+        let vec: Vec<f32> = blob
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
+            .collect();
+        out.push((id, vec));
+    }
+    Ok(out)
+}
+
+pub fn save_embedding(
+    conn: &Connection,
+    file_id: i64,
+    model: &str,
+    sha256: &str,
+    vec: &[f32],
+) -> Result<()> {
+    let mut blob = Vec::with_capacity(vec.len() * 4);
+    for v in vec {
+        blob.extend_from_slice(&v.to_le_bytes());
+    }
+    conn.execute(
+        "INSERT INTO embeddings(file_id,model,sha256,dim,vec) VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(file_id,model) DO UPDATE SET
+            sha256=excluded.sha256, dim=excluded.dim, vec=excluded.vec",
+        params![file_id, model, sha256, vec.len() as i64, blob],
+    )?;
+    Ok(())
+}
+
+/// Заменить теги одного источника у файла (CLIP пересчитывается целиком).
+pub fn replace_tags(
+    conn: &Connection,
+    file_id: i64,
+    source: &str,
+    tags: &[(String, f32)],
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM tags WHERE file_id=?1 AND source=?2",
+        params![file_id, source],
+    )?;
+    let mut st = conn.prepare(
+        "INSERT INTO tags(file_id,tag,score,source) VALUES(?1,?2,?3,?4)",
+    )?;
+    for (tag, score) in tags {
+        st.execute(params![file_id, tag, score, source])?;
+    }
+    Ok(())
+}
+
+/// Все теги: file_id → [(тег, вес)] по убыванию веса.
+pub fn load_tags(conn: &Connection) -> Result<HashMap<i64, Vec<(String, f32)>>> {
+    let mut st = conn.prepare(
+        "SELECT file_id, tag, COALESCE(score,0) FROM tags ORDER BY file_id, score DESC",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?)))?;
+    let mut out: HashMap<i64, Vec<(String, f32)>> = HashMap::new();
+    for r in rows {
+        let (id, tag, score) = r?;
+        out.entry(id).or_default().push((tag, score));
+    }
+    Ok(out)
+}
+
 pub fn human(bytes: i64) -> String {
     let b = bytes as f64;
     let units = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
@@ -366,6 +469,25 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].sharpness, Some(7.5));
         assert_eq!(loaded[0].decision, None);
+    }
+
+    #[test]
+    fn clip_data_is_invalidated_when_content_changes() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let r = row("/a.jpg", "aa", 10.0);
+        insert(&c, &r).unwrap();
+        let id = id_of(&c, "/a.jpg");
+        save_embedding(&c, id, "m", "aa", &[1.0, 0.0]).unwrap();
+        replace_tags(&c, id, "clip", &[("пляж".into(), 0.3)]).unwrap();
+        assert_eq!(embedding_shas(&c, "m").unwrap().len(), 1);
+        assert_eq!(load_tags(&c).unwrap().len(), 1);
+
+        let mut changed = r.clone();
+        changed.sha256 = "bb".into();
+        insert(&c, &changed).unwrap();
+        assert!(embedding_shas(&c, "m").unwrap().is_empty());
+        assert!(load_tags(&c).unwrap().is_empty());
     }
 
     #[test]
