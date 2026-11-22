@@ -4,7 +4,8 @@
 //!   photocat index <каталог> [--jobs N] [--db PATH]
 //!   photocat stats
 //!   photocat dupes [--max-dist 6] [--csv FILE] [--plan FILE]
-//!   photocat organize --out <каталог> [--apply] [--copy|--symlink] [--rename]
+//!   photocat organize --out <каталог> [--by day|month|event] [--name ШАБЛОН]
+//!                     [--exclude-dup] [--apply] [--copy|--symlink] [--rename]
 //!   photocat embed [--jobs N] [--batch N]
 //!   photocat ocr [--jobs N] [--all]
 //!   photocat search <запрос> [--top N] [--text]
@@ -36,7 +37,9 @@ fn usage() {
   stats [--db PATH]                        статистика по индексу
   dupes [--max-dist N] [--csv FILE] [--plan FILE]
                                             найти дубли и похожие снимки, выгрузить решения
-  organize --out DIR [--apply] [--copy]    план (и применение) раскладки по датам
+  organize --out DIR [--by day|month|event] [--name ШАБЛОН] [--exclude-dup] [--apply]
+                                            план (и применение) витрины: по дням, месяцам или
+                                            событиям; имена из {{date}} {{time}} {{camera}} {{tag}}
   embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
   faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
                                             лица: детекция, эмбеддинги, группы

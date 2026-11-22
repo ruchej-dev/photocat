@@ -23,11 +23,15 @@ cargo build --release      # первый раз ~3 минуты
 ./target/release/photocat dupes --max-dist 4 --csv /tmp/dupes.csv
 ./target/release/photocat dupes --max-dist 6 --plan /tmp/dupes-plan.csv   # план: что оставить
 
-# 4. План раскладки по датам (по умолчанию ничего не меняет)
+# 4. Витрина (по умолчанию только план, ничего не меняет и не переименовывает)
 ./target/release/photocat organize --out ~/Фото-витрина
+./target/release/photocat organize --out ~/Фото-витрина --by month     # ГГГГ/ГГГГ-ММ
+./target/release/photocat organize --out ~/Фото-витрина --by event     # день + место по GPS
 ./target/release/photocat organize --out ~/Фото-витрина --apply          # hardlink
 ./target/release/photocat organize --out /mnt/disk --apply --copy        # копии
 ./target/release/photocat organize --out ~/Фото-витрина --apply --rename # имена из даты
+./target/release/photocat organize --out ~/Фото-витрина --exclude-dup    # без помеченных лишними
+./target/release/photocat organize --out ~/Фото-витрина --name '{date}_{camera}_{orig}'
 
 # 5. CLIP: смысловые теги и поиск (модель скачивается один раз, дальше всё локально)
 bash scripts/fetch-model.sh
