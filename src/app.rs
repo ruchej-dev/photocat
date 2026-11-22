@@ -3,7 +3,9 @@
 use crate::db::{self, FileRow, Progress};
 use crate::dupes::{self, Group};
 use crate::embed;
+use crate::derive;
 use crate::index;
+use crate::ocr;
 use anyhow::Result;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,6 +15,7 @@ use std::sync::mpsc;
 
 type SearchReply = Result<(embed::Model, Vec<(i64, f32)>, f32)>;
 type EmbedReply = Result<embed::EmbedStats>;
+type OcrReply = Result<ocr::Stats>;
 
 #[derive(Clone, Copy, PartialEq)]
 enum View {
@@ -78,6 +81,18 @@ struct App {
     cal_day: Option<String>,
     /// Сколько тегов скрыто владельцем у файла (для «вернуть»).
     hidden_tags: HashMap<i64, usize>,
+    /// Текст с фото: загружается по выбранному файлу и кэшируется.
+    ocr_text: HashMap<i64, String>,
+    /// Фрагменты найденного текста с маркерами «» (для подсветки в карточке).
+    ocr_snippets: HashMap<i64, String>,
+    /// Искать по тексту на фото (FTS5), а не по смыслу (CLIP).
+    search_ocr: bool,
+    ocr_files: i64,
+    ocr_chars: i64,
+    ocr_progress: Option<Arc<Progress>>,
+    ocr_rx: Option<mpsc::Receiver<OcrReply>>,
+    /// Версия tesseract из PATH: `None` — OCR недоступен, кнопка погашена.
+    tesseract: Option<String>,
     status: String,
 }
 
@@ -116,6 +131,14 @@ impl App {
             cal_month: 1,
             cal_day: None,
             hidden_tags: HashMap::new(),
+            ocr_text: HashMap::new(),
+            ocr_snippets: HashMap::new(),
+            search_ocr: false,
+            ocr_files: 0,
+            ocr_chars: 0,
+            ocr_progress: None,
+            ocr_rx: None,
+            tesseract: derive::tesseract_version(),
             status: String::new(),
         };
         me.reload();
@@ -126,15 +149,18 @@ impl App {
         self.textures.clear();
         self.missing.clear();
         self.semantic_hits = None;
+        self.ocr_text.clear();
+        self.ocr_snippets.clear();
         match db::open(&self.db_path).and_then(|c| {
             let settings = db::load_settings(&c);
             let source = embed::tag_source(embed::active_entry(&settings));
             let rows = db::load_all(&c)?;
             let tags = db::load_tags(&c, &source)?;
             let hidden = db::load_hidden_counts(&c)?;
-            Ok((settings, rows, tags, hidden))
+            let (ocr_files, ocr_chars) = db::ocr_summary(&c)?;
+            Ok((settings, rows, tags, hidden, ocr_files, ocr_chars))
         }) {
-            Ok((settings, rows, tags, hidden)) => {
+            Ok((settings, rows, tags, hidden, ocr_files, ocr_chars)) => {
                 self.status = format!(
                     "в индексе {} файлов, {}",
                     rows.len(),
@@ -146,6 +172,8 @@ impl App {
                 self.items = rows;
                 self.tags = tags;
                 self.hidden_tags = hidden;
+                self.ocr_files = ocr_files;
+                self.ocr_chars = ocr_chars;
                 self.groups.clear();
                 self.init_calendar();
             }
@@ -462,10 +490,49 @@ impl App {
         });
     }
 
+    fn start_ocr(&mut self) {
+        if self.ocr_rx.is_some() || self.tesseract.is_none() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let progress = Arc::new(Progress::default());
+        self.ocr_progress = Some(progress.clone());
+        let (tx, rx) = mpsc::channel();
+        self.ocr_rx = Some(rx);
+        self.status = "OCR: распознаю текст на документах и скриншотах…".into();
+        std::thread::spawn(move || {
+            let r = ocr::run(&db_path, 4, false, Some(progress));
+            let _ = tx.send(r);
+        });
+    }
+
     fn start_search(&mut self) {
         let q = self.semantic_query.trim().to_string();
         if q.is_empty() {
             self.semantic_hits = None;
+            self.ocr_snippets.clear();
+            return;
+        }
+        self.ocr_snippets.clear();
+        if self.search_ocr {
+            let t = std::time::Instant::now();
+            let res = db::open(&self.db_path).and_then(|c| db::search_ocr(&c, &q, 200));
+            match res {
+                Ok(hits) => {
+                    self.status = format!(
+                        "поиск по тексту «{q}»: файлов {} за {} мс",
+                        hits.len(),
+                        t.elapsed().as_millis()
+                    );
+                    self.ocr_snippets = hits.iter().cloned().collect();
+                    self.semantic_hits = Some(hits.into_iter().map(|(id, _)| id).collect());
+                }
+                Err(e) => self.status = format!("поиск по тексту не удался: {e}"),
+            }
+            return;
+        }
+        if !embed::model_present(&self.settings) {
+            self.status = "смысловой поиск недоступен: модель не скачана (см. «Настройки»)".into();
             return;
         }
         if let Some(model) = self.ml_model.as_mut() {
@@ -651,6 +718,42 @@ fn nearest_file_month(
         }
     }
     None
+}
+
+/// Фрагмент текста с совпадениями: FTS5 отмечает их « », UI красит их акцентом.
+fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
+    let normal = ui.visuals().text_color();
+    let accent = egui::Color32::from_rgb(90, 170, 255);
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width().max(120.0);
+    let mut matched = false;
+    let mut segment = String::new();
+    fn flush(segment: &mut String, matched: bool, normal: egui::Color32, accent: egui::Color32, job: &mut egui::text::LayoutJob) {
+        if segment.is_empty() {
+            return;
+        }
+        job.append(
+            segment,
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(12.0),
+                color: if matched { accent } else { normal },
+                ..Default::default()
+            },
+        );
+        segment.clear();
+    }
+    for ch in text.chars() {
+        match ch {
+            '«' | '»' => {
+                flush(&mut segment, matched, normal, accent, &mut job);
+                matched = ch == '«';
+            }
+            _ => segment.push(ch),
+        }
+    }
+    flush(&mut segment, matched, normal, accent, &mut job);
+    job
 }
 
 fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow) {
@@ -879,6 +982,29 @@ impl eframe::App for App {
             }
         }
 
+        if let Some(rx) = &self.ocr_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.ocr_rx = None;
+                    self.ocr_progress = None;
+                    match res {
+                        Ok(stats) => {
+                            self.reload();
+                            self.status = stats.to_string();
+                        }
+                        Err(e) => self.status = format!("текст не распознан: {e:#}"),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.ocr_rx = None;
+                    self.ocr_progress = None;
+                }
+            }
+        }
+
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -909,25 +1035,47 @@ impl eframe::App for App {
                     );
                 }
             });
-            if embed::model_present(&self.settings) {
+            let semantic_ready = embed::model_present(&self.settings);
+            if semantic_ready || self.ocr_files > 0 {
                 ui.horizontal(|ui| {
-                    ui.label("Смысловой поиск:");
+                    ui.label(if self.search_ocr {
+                        "Текст на фото:"
+                    } else {
+                        "Смысловой поиск:"
+                    });
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut self.semantic_query)
-                            .hint_text("торт, море, документ")
+                            .hint_text(if self.search_ocr {
+                                "справка, квитанция, 2024"
+                            } else {
+                                "торт, море, документ"
+                            })
                             .desired_width(300.0),
                     );
                     let enter =
                         resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.button("Найти").clicked() || enter {
+                    let ready = self.search_ocr || semantic_ready;
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Найти"))
+                        .clicked()
+                        || (enter && ready)
+                    {
                         self.start_search();
                     }
+                    ui.checkbox(&mut self.search_ocr, "по тексту на фото")
+                        .on_hover_text(
+                            "искать по тексту, распознанному на документе или скриншоте",
+                        );
                     if self.semantic_hits.is_some() && ui.button("Сбросить").clicked() {
                         self.semantic_hits = None;
-                        self.status = "смысловой поиск сброшен".into();
+                        self.ocr_snippets.clear();
+                        self.status = "поиск сброшен".into();
                     }
                     if self.search_rx.is_some() {
                         ui.label("загрузка модели CLIP…");
+                    }
+                    if !semantic_ready && !self.search_ocr {
+                        ui.label("модель не скачана");
                     }
                 });
             }
@@ -939,6 +1087,19 @@ impl eframe::App for App {
                         .desired_width(320.0)
                         .text(if t > 0 {
                             format!("CLIP: {d}/{t}")
+                        } else {
+                            p.msg()
+                        }),
+                );
+            }
+            if let Some(p) = &self.ocr_progress {
+                let (d, t) = (p.done(), p.total());
+                let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+                ui.add(
+                    egui::ProgressBar::new(frac)
+                        .desired_width(320.0)
+                        .text(if t > 0 {
+                            format!("OCR: {d}/{t}")
                         } else {
                             p.msg()
                         }),
@@ -967,6 +1128,16 @@ impl eframe::App for App {
                 }
             });
         });
+
+        // Текст с фото читается из БД один раз на файл, а не каждый кадр.
+        if let Some(id) = self.selected
+            && !self.ocr_text.contains_key(&id)
+            && !self.ocr_snippets.contains_key(&id)
+            && let Ok(conn) = db::open(&self.db_path)
+            && let Ok(text) = db::load_ocr(&conn, id)
+        {
+            self.ocr_text.insert(id, text.unwrap_or_default());
+        }
 
         let mut unhide_file: Option<i64> = None;
         egui::Panel::left("left").default_size(260.0).show(ui, |ui| {
@@ -1110,6 +1281,36 @@ impl eframe::App for App {
             }
 
             ui.separator();
+            ui.label(egui::RichText::new("ТЕКСТ НА ФОТО").small().weak());
+            match &self.tesseract {
+                Some(v) => {
+                    ui.label(egui::RichText::new(v).small().color(egui::Color32::from_gray(150)));
+                }
+                None => {
+                    ui.label(
+                        "tesseract не найден — установите tesseract и языки rus, eng",
+                    );
+                }
+            }
+            let images = self.items.iter().filter(|r| r.kind == "image").count();
+            ui.label(format!("с текстом: {} из {} снимков", self.ocr_files, images));
+            if self.ocr_chars > 0 {
+                ui.label(format!("знаков: {}", self.ocr_chars));
+            }
+            if ui
+                .add_enabled(
+                    self.tesseract.is_some() && self.ocr_rx.is_none(),
+                    egui::Button::new("Распознать текст"),
+                )
+                .on_hover_text(
+                    "tesseract по документам и скриншотам; текст хранится в БД, оригинал не меняется",
+                )
+                .clicked()
+            {
+                self.start_ocr();
+            }
+
+            ui.separator();
             let n = self.items.len();
             let bytes: i64 = self.items.iter().map(|r| r.size).sum();
             let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
@@ -1192,6 +1393,21 @@ impl eframe::App for App {
                         && ui.button(format!("вернуть скрытые теги ({hidden})")).clicked()
                     {
                         unhide_file = Some(id);
+                    }
+                    let shown = self
+                        .ocr_snippets
+                        .get(&id)
+                        .cloned()
+                        .or_else(|| {
+                            self.ocr_text.get(&id).map(|t| {
+                                t.chars().take(400).collect::<String>()
+                            })
+                        })
+                        .filter(|t| !t.trim().is_empty());
+                    if let Some(text) = shown {
+                        ui.separator();
+                        ui.label("текст с фото:");
+                        ui.label(highlight_job(ui, &text));
                     }
                     ui.label(format!("sha256: {}…", &f.sha256[..16.min(f.sha256.len())]));
                 }

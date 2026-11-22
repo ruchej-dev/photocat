@@ -6,7 +6,8 @@
 //!   photocat dupes [--max-dist 6] [--csv FILE] [--plan FILE]
 //!   photocat organize --out <каталог> [--apply] [--copy|--symlink] [--rename]
 //!   photocat embed [--jobs N] [--batch N]
-//!   photocat search <запрос> [--top N]
+//!   photocat ocr [--jobs N] [--all]
+//!   photocat search <запрос> [--top N] [--text]
 //!   photocat clusters [--k N] [--out FILE]
 //!   photocat            (без аргументов — GUI)
 
@@ -16,6 +17,7 @@ mod derive;
 mod dupes;
 mod embed;
 mod index;
+mod ocr;
 mod organize;
 
 use anyhow::Result;
@@ -34,11 +36,12 @@ fn usage() {
                                             найти дубли и похожие снимки, выгрузить решения
   organize --out DIR [--apply] [--copy]    план (и применение) раскладки по датам
   embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
-  search <запрос> [--top N]                 смысловой поиск по эмбеддингам
+  ocr [--jobs N] [--all] [--dry-run]       текст с документов и скриншотов (tesseract)
+  search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
   clusters [--k N] [--out FILE]             кластеры CLIP → отчёт с примерами
   models [list|check|download --id ID --yes]
                                             каталог моделей, проверка и загрузка весов
-  settings [--models-dir DIR] [--model ID] [--max-model-mb N]
+  settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L]
                                             показать или изменить настройки
   gui                                       графический интерфейс (по умолчанию)
 
@@ -116,6 +119,42 @@ fn main() -> Result<()> {
             println!("{stats}");
             Ok(())
         }
+        "ocr" => {
+            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+            let jobs = flag_num(&args, "--jobs", 4);
+            let all = has_flag(&args, "--all");
+            if has_flag(&args, "--dry-run") {
+                let plan = ocr::plan(&db_path, all)?;
+                println!(
+                    "кандидатов: {} из {} снимков; tesseract: {}",
+                    plan.candidates,
+                    plan.images,
+                    derive::tesseract_version().unwrap_or_else(|| "не найден".into())
+                );
+                return Ok(());
+            }
+            let progress = Arc::new(Progress::default());
+            let show = progress.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                loop {
+                    let (d, t, e) = (show.done(), show.total(), show.errors());
+                    if t > 0 {
+                        eprint!("\rOCR: {d}/{t}, ошибок {e} — {}", show.msg());
+                    } else {
+                        eprint!("\r{}", show.msg());
+                    }
+                    if show.finished() {
+                        eprintln!();
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            });
+            let stats = ocr::run(&db_path, jobs, all, Some(progress))?;
+            println!("{stats}");
+            Ok(())
+        }
         "search" => {
             let query = match args.get(1) {
                 Some(q) if !q.starts_with('-') => q.clone(),
@@ -126,6 +165,23 @@ fn main() -> Result<()> {
             };
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let top = flag_num(&args, "--top", 30);
+            if has_flag(&args, "--text") {
+                // Поиск по распознанному тексту — без модели и без сети.
+                let conn = db::open(&db_path)?;
+                let t0 = std::time::Instant::now();
+                let hits = db::search_ocr(&conn, &query, top)?;
+                let ms = t0.elapsed().as_secs_f32() * 1000.0;
+                println!("текст на фото, запрос «{query}»: файлов {} за {ms:.0} мс", hits.len());
+                let rows = db::load_all(&conn)?;
+                let by_id: std::collections::HashMap<i64, &str> =
+                    rows.iter().map(|r| (r.id, r.path.as_str())).collect();
+                for (id, snip) in hits {
+                    if let Some(path) = by_id.get(&id) {
+                        println!("  {path}\n    {snip}");
+                    }
+                }
+                return Ok(());
+            }
             let repeat = flag_num(&args, "--repeat", 1).max(1);
             eprintln!("загрузка модели CLIP…");
             let settings = {
@@ -226,6 +282,10 @@ fn main() -> Result<()> {
                 settings.model_id = id;
                 changed = true;
             }
+            if let Some(lang) = flag_str(&args, "--ocr-lang") {
+                settings.ocr_lang = lang;
+                changed = true;
+            }
             if let Some(n) = flag_str(&args, "--max-model-mb") {
                 settings.max_model_mb = n.parse().unwrap_or(settings.max_model_mb);
                 changed = true;
@@ -240,10 +300,14 @@ fn main() -> Result<()> {
             println!("потоков: {}", settings.index_jobs);
             println!("порог дублей: {}", settings.max_dist);
             println!("тег: ≥ {:.2}, отрыв {:.2}", settings.tag_show, settings.tag_margin);
+            println!("языки OCR: {}", settings.ocr_lang);
+            println!(
+                "tesseract: {}",
+                derive::tesseract_version().unwrap_or_else(|| "не найден в PATH".into())
+            );
             Ok(())
         }
-        "clusters" => {
-            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+        "clusters" => {            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let k = flag_num(&args, "--k", 30);
             let out = flag_str(&args, "--out")
                 .map(PathBuf::from)

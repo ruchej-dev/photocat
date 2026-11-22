@@ -138,6 +138,35 @@ fn init(c: &Connection) -> Result<()> {
             PRIMARY KEY(file_id, model)
          );
          CREATE INDEX IF NOT EXISTS idx_emb_model ON embeddings(model);
+         CREATE TABLE IF NOT EXISTS ocr(
+            file_id    INTEGER PRIMARY KEY,
+            sha256     TEXT NOT NULL,
+            lang       TEXT NOT NULL,
+            text       TEXT NOT NULL,
+            chars      INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+         );
+         CREATE VIRTUAL TABLE IF NOT EXISTS ocr_fts USING fts5(
+            text, content='ocr', content_rowid='file_id', tokenize='unicode61'
+         );
+         CREATE TRIGGER IF NOT EXISTS ocr_ai AFTER INSERT ON ocr BEGIN
+            INSERT INTO ocr_fts(rowid, text) VALUES (new.file_id, new.text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS ocr_ad AFTER DELETE ON ocr BEGIN
+            INSERT INTO ocr_fts(ocr_fts, rowid, text)
+            VALUES('delete', old.file_id, old.text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS ocr_au AFTER UPDATE ON ocr BEGIN
+            INSERT INTO ocr_fts(ocr_fts, rowid, text)
+            VALUES('delete', old.file_id, old.text);
+            INSERT INTO ocr_fts(rowid, text) VALUES (new.file_id, new.text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS invalidate_ocr_after_sha_change
+         AFTER UPDATE OF sha256 ON files
+         WHEN old.sha256 IS NOT new.sha256
+         BEGIN
+            DELETE FROM ocr WHERE file_id = new.id;
+         END;
          CREATE TRIGGER IF NOT EXISTS clear_hidden_tags_after_sha_change
          AFTER UPDATE OF sha256 ON files
          WHEN old.sha256 IS NOT new.sha256
@@ -180,6 +209,8 @@ pub struct Settings {
     /// Порог уверенного тега и отрыв от второго.
     pub tag_show: f32,
     pub tag_margin: f32,
+    /// Языки tesseract для распознавания текста, например `rus+eng`.
+    pub ocr_lang: String,
 }
 
 impl Default for Settings {
@@ -192,6 +223,7 @@ impl Default for Settings {
             max_dist: 6,
             tag_show: 0.22,
             tag_margin: 0.01,
+            ocr_lang: "rus+eng".into(),
         }
     }
 }
@@ -214,6 +246,7 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "max_dist" => s.max_dist = v.parse().unwrap_or(s.max_dist),
             "tag_show" => s.tag_show = v.parse().unwrap_or(s.tag_show),
             "tag_margin" => s.tag_margin = v.parse().unwrap_or(s.tag_margin),
+            "ocr_lang" if !v.trim().is_empty() => s.ocr_lang = v,
             _ => {}
         }
     }
@@ -229,6 +262,7 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("max_dist", s.max_dist.to_string()),
         ("tag_show", s.tag_show.to_string()),
         ("tag_margin", s.tag_margin.to_string()),
+        ("ocr_lang", s.ocr_lang.clone()),
     ];
     for (k, v) in pairs {
         conn.execute(
@@ -499,6 +533,122 @@ pub fn load_tags(conn: &Connection, source: &str) -> Result<HashMap<i64, Vec<(St
     Ok(out)
 }
 
+/// sha256 текста, уже распознанного у файла: file_id → sha256 файла на момент OCR.
+pub fn ocr_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
+    let mut st = conn.prepare("SELECT file_id, sha256 FROM ocr")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let (id, sha) = r?;
+        out.insert(id, sha);
+    }
+    Ok(out)
+}
+
+/// Записать распознанный текст. Текст живёт в БД: рядом с оригиналом ничего не пишется.
+pub fn save_ocr(
+    conn: &Connection,
+    file_id: i64,
+    sha256: &str,
+    lang: &str,
+    text: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO ocr(file_id,sha256,lang,text,chars,created_at)
+         VALUES(?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(file_id) DO UPDATE SET
+            sha256=excluded.sha256, lang=excluded.lang, text=excluded.text,
+            chars=excluded.chars, created_at=excluded.created_at",
+        params![file_id, sha256, lang, text, text.chars().count() as i64, now()],
+    )?;
+    Ok(())
+}
+
+pub fn load_ocr(conn: &Connection, file_id: i64) -> Result<Option<String>> {
+    let mut st = conn.prepare("SELECT text FROM ocr WHERE file_id=?1")?;
+    let mut rows = st.query([file_id])?;
+    match rows.next()? {
+        Some(r) => Ok(Some(r.get(0)?)),
+        None => Ok(None),
+    }
+}
+
+/// Сколько файлов с текстом и сколько всего знаков распознано.
+pub fn ocr_summary(conn: &Connection) -> Result<(i64, i64)> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(chars),0) FROM ocr",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?)
+}
+
+/// Все видимые теги с весами: file_id → [(тег, вес)] по убыванию.
+/// Один тег из нескольких моделей берётся по лучшему весу, чтобы догадки не дублировались.
+/// Нужен проходу OCR: там тег «документ»/«скриншот» — повод искать текст.
+pub fn load_visible_tags(conn: &Connection) -> Result<HashMap<i64, Vec<(String, f32)>>> {
+    let mut st = conn.prepare(
+        "WITH visible AS (
+            SELECT t.file_id, t.tag, MAX(COALESCE(t.score,0)) AS score
+            FROM tags t
+            LEFT JOIN tag_hidden h ON h.file_id=t.file_id AND h.tag=t.tag
+            WHERE h.tag IS NULL
+            GROUP BY t.file_id, t.tag
+         )
+         SELECT file_id, tag, score FROM visible ORDER BY file_id, score DESC",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, f32>(2)?))
+    })?;
+    let mut out: HashMap<i64, Vec<(String, f32)>> = HashMap::new();
+    for r in rows {
+        let (id, tag, score) = r?;
+        out.entry(id).or_default().push((tag, score));
+    }
+    Ok(out)
+}
+
+/// Запрос для FTS5: каждое слово — префикс, кавычки снимают спецсимволы.
+/// Пустая строка — `None`, а не ошибка синтаксиса FTS.
+pub fn fts_query(q: &str) -> Option<String> {
+    let terms: Vec<String> = q
+        .split_whitespace()
+        .map(|t| t.replace(['"', '*'], ""))
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\"*"))
+        .collect();
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" AND "))
+    }
+}
+
+/// Полнотекстовый поиск по распознанному тексту: `(file_id, фрагмент с «…»)`.
+/// Фрагмент уже подсвечен маркерами: UI красит совпадения, CLI печатает как есть.
+pub fn search_ocr(
+    conn: &Connection,
+    q: &str,
+    limit: usize,
+) -> Result<Vec<(i64, String)>> {
+    let Some(match_q) = fts_query(q) else {
+        return Ok(Vec::new());
+    };
+    let mut st = conn.prepare(
+        "SELECT o.file_id, snippet(ocr_fts, 0, '«', '»', '…', 12)
+         FROM ocr_fts JOIN ocr o ON o.file_id = ocr_fts.rowid
+         WHERE ocr_fts MATCH ?1
+         ORDER BY rank LIMIT ?2",
+    )?;
+    let rows = st.query_map(params![match_q, limit as i64], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
 pub fn human(bytes: i64) -> String {
     let b = bytes as f64;
     let units = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
@@ -580,6 +730,10 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     println!("видео с длительностью: {vid_n}, суммарно {}", duration(vid_dur));
+    let (ocr_n, ocr_chars) = ocr_summary(&conn)?;
+    if ocr_n > 0 {
+        println!("файлов с распознанным текстом: {ocr_n}, знаков: {ocr_chars}");
+    }
     Ok(())
 }
 
@@ -676,6 +830,75 @@ mod tests {
     }
 
     #[test]
+    fn fts_query_is_prefix_only_and_safe() {
+        assert_eq!(
+            fts_query("  справка 2024 ").as_deref(),
+            Some("\"справка\"* AND \"2024\"*")
+        );
+        assert_eq!(fts_query(""), None);
+        assert_eq!(fts_query("  \"*  "), None); // одни спецсимволы — не ошибка FTS, пустой запрос
+        assert_eq!(fts_query("a\"b*").as_deref(), Some("\"ab\"*"));
+    }
+
+    #[test]
+    fn ocr_text_is_searchable_and_highlighted() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/doc.jpg", "aa", 1.0)).unwrap();
+        let id = id_of(&c, "/doc.jpg");
+        save_ocr(&c, id, "aa", "rus+eng", "Справка о доходах\nза 2024 год").unwrap();
+        assert_eq!(ocr_summary(&c).unwrap(), (1, 29));
+        assert_eq!(
+            load_ocr(&c, id).unwrap().as_deref(),
+            Some("Справка о доходах\nза 2024 год")
+        );
+        let hits = search_ocr(&c, "справ", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, id);
+        assert!(hits[0].1.contains('«') && hits[0].1.contains('»'), "{}", hits[0].1);
+        assert!(search_ocr(&c, "договор", 10).unwrap().is_empty());
+        // синтаксис FTS не должен превращать пользовательский ввод в ошибку
+        assert!(search_ocr(&c, "\"),", 10).is_ok());
+    }
+
+    #[test]
+    fn ocr_text_is_invalidated_when_content_changes() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let r = row("/doc.jpg", "aa", 1.0);
+        insert(&c, &r).unwrap();
+        let id = id_of(&c, "/doc.jpg");
+        save_ocr(&c, id, "aa", "rus+eng", "квитанция").unwrap();
+        let mut changed = r.clone();
+        changed.sha256 = "bb".into();
+        insert(&c, &changed).unwrap();
+        assert_eq!(load_ocr(&c, id).unwrap(), None);
+        assert!(search_ocr(&c, "квитанция", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn top_tag_ignores_hidden_and_low_scores() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
+        let id = id_of(&c, "/a.jpg");
+        replace_tags(
+            &c,
+            id,
+            "clip:m",
+            &[("документ".into(), 0.30), ("дети".into(), 0.10)],
+        )
+        .unwrap();
+        assert_eq!(load_visible_tags(&c).unwrap()[&id][0].0, "документ");
+        c.execute(
+            "INSERT INTO tag_hidden(file_id,tag,hidden_at) VALUES(?1,'документ',0)",
+            params![id],
+        )
+        .unwrap();
+        assert_eq!(load_visible_tags(&c).unwrap()[&id][0].0, "дети");
+    }
+
+    #[test]
     fn settings_survive_roundtrip() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
@@ -685,6 +908,7 @@ mod tests {
             max_model_mb: 160,
             tag_show: 0.27,
             tag_margin: 0.02,
+            ocr_lang: "rus".into(),
             ..Default::default()
         };
         save_settings(&c, &s).unwrap();
@@ -694,6 +918,7 @@ mod tests {
         assert_eq!(back.max_model_mb, 160);
         assert!((back.tag_show - 0.27).abs() < 1e-6);
         assert!((back.tag_margin - 0.02).abs() < 1e-6);
+        assert_eq!(back.ocr_lang, "rus");
     }
 
     #[test]

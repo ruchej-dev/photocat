@@ -21,8 +21,8 @@
   запросы, статистику, телеметрию. Никакой автоматической загрузки без нажатия. Всё скачанное
   проверяется по sha256 и лежит на диске; офлайн-режим остаётся рабочим.
 - **Кросс-платформенность.** Целевая среда — Linux (Arch + Wayland), но код не упирается в ОС:
-  кэш (`db::cache_dir`), симлинки, внешние процессы (`ffmpeg`, `ffprobe`, `curl`) и пути имеют
-  запасной вариант; домашние пути в коде и UI не хардкодятся. Платформенные ветки — только парой
+  кэш (`db::cache_dir`), симлинки, внешние процессы (`ffmpeg`, `ffprobe`, `curl`, `tesseract`) и
+  пути имеют запасной вариант; домашние пути в коде и UI не хардкодятся. Платформенные ветки — только парой
   `#[cfg(unix)]` / `#[cfg(windows)]`, без «пока сойдёт».
 - **Дорогое — в фон.** Декодирование, хеширование, инференс, кластеризация: никогда в UI-потоке;
   прогресс виден, окно не замирает.
@@ -53,6 +53,7 @@
 | `src/index.rs` | L2 | обход `walkdir`, rayon-параллелизм, поток-писатель | egui |
 | `src/dupes.rs` | L2 | union-find, точные и похожие дубли, CSV | egui |
 | `src/embed.rs` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means | egui, БД-строки |
+| `src/ocr.rs` | L2 | кандидаты на текст, проход `tesseract`, запись текста в БД | egui, декодирование картинок |
 | `src/organize.rs` | L2 | план по датам, hardlink/copy/symlink | egui |
 | `src/app.rs` | L3 | весь GUI на egui | прямые вызовы SQL |
 | `src/main.rs` | L3 | разбор CLI, подкоманды | — |
@@ -85,6 +86,9 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat organize --out DIR            # dry-run
 ./target/release/photocat embed                          # CLIP-эмбеддинги и теги (локально)
 ./target/release/photocat search "торт" --top 20         # смысловой поиск
+./target/release/photocat ocr                            # текст с документов и скриншотов (tesseract)
+./target/release/photocat ocr --dry-run                  # сколько файлов пойдёт в OCR
+./target/release/photocat search "справка" --text        # поиск по распознанному тексту
 ./target/release/photocat clusters --k 30                # кластеры → plan/M3-clusters.md
 ./target/release/photocat models list                    # каталог моделей и что уже скачано
 ./target/release/photocat models download --id ID --yes  # веса (сеть, только по согласию)
@@ -131,7 +135,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # замер на ре�
   `--copy`/`--symlink`.
 - CLIP-теги приблизительны: уверенный тег — только если первый отрывается от второго на 0.01;
   «не уверен» — нормальное состояние, а не баг. Модель требует AVX2 (int8-квантование), 218 МиБ.
-- Лица (M6) и OCR (M5) отсутствуют.
+- Лица (M6) отсутствуют. OCR (M5) требует `tesseract` в `PATH` и языковые пакеты `rus`/`eng`;
+  без него всё остальное работает, а кнопка «Распознать текст» погашена.
 - `plan/M3-clusters.md` — локальный отчёт с путями архива, в git не попадает.
 
 ## 9. Скиллы репозитория

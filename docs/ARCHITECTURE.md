@@ -4,7 +4,7 @@
 
 ```
 L3  main.rs ── app.rs            CLI и GUI
-L2  index.rs   dupes.rs   organize.rs   embed.rs
+L2  index.rs   dupes.rs   organize.rs   embed.rs   ocr.rs
 L1  db.rs
 L0  derive.rs
 ```
@@ -15,6 +15,7 @@ L0  derive.rs
 | L1 `db` | `rusqlite`, `anyhow` | декодирование, egui |
 | L2 `index` / `dupes` / `organize` | L0/L1 + `rayon`, `walkdir` | egui |
 | L2 `embed` | L0/L1 + `ort`, `tokenizers`, `serde_json` | egui, SQL-строки |
+| L2 `ocr` | L0/L1 + `rayon`; процесс `tesseract` | egui, SQL-строки |
 | L3 `app` | всё ниже + `eframe`/`egui` | прямые SQL-строки, декодирование в UI-потоке |
 
 Граница проверяется скриптом `.pi/skills/enforce-architecture/scripts/check.sh` (grep по `use
@@ -43,7 +44,9 @@ files(id, path UNIQUE, size, mtime, sha256, kind, width, height,
 tags(file_id, tag, score, source)      -- source='clip:<model_id>': 7 весов
 tag_hidden(file_id, tag, hidden_at)    -- владелец убрал тег у фото
 embeddings(file_id, model, sha256, dim, vec, PRIMARY KEY(file_id, model))
-settings(key, value)                   -- модель, путь, лимит, пороги, потоки
+settings(key, value)                   -- модель, путь, лимит, пороги, потоки, языки OCR
+ocr(file_id, sha256, lang, text, chars, created_at)   -- текст с фото; PRIMARY KEY(file_id)
+ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='file_id'
 ```
 
 - `kind`: `image` | `video` | `other`.
@@ -60,6 +63,9 @@ settings(key, value)                   -- модель, путь, лимит, п
   перезапуск и переиндексацию; сбрасывается, только если у файла изменился `sha256`.
 - `thumb`: путь относительно `~/.cache/photocat/thumbs/`, ключ — `sha256[..24]` (одинаковые файлы
   делят одно превью).
+- `ocr.text`: текст с фото из `tesseract`. Одна строка на файл, `sha256` — содержимое на момент
+  распознавания; триггер `invalidate_ocr_after_sha_change` стирает текст, если файл подменили.
+  `ocr_fts` — FTS5 (`tokenize='unicode61'`), синхронизируется триггерами на `ocr`.
 - `embeddings.vec`: f32 little-endian, 512 чисел (2 КиБ на фото); `sha256` — содержимое файла на
   момент расчёта. Если `files.sha256` меняется, триггер `invalidate_clip_after_sha_change` удаляет
   векторы и CLIP-теги этого файла; остальные теги не трогаются.
@@ -138,6 +144,25 @@ settings(key, value)                   -- модель, путь, лимит, п
 - Кластеры: k-means++ (детерминированный seed) по нормализованным векторам, k=30, 30 итераций;
   отчёт `plan/M3-clusters.md` — 12 примеров на кластер. Отчёт локальный, в git не попадает.
 
+## Текст на фото (OCR)
+
+`photocat ocr` — отдельный проход, а не часть `index`: распознавание дорого и нужно не каждому файлу.
+
+1. **Кандидаты.** Снимок без EXIF-камеры (скан, скриншот) и снимок, которому CLIP уверенно дал
+   верхний тег «документ» или «скриншот» (пороги из настроек, скрытые теги не считаются). `--all`
+   берёт все изображения, `--dry-run` печатает план без единого запуска tesseract.
+2. **Вход.** Кадр декодируется нами: EXIF-поворот применяется
+   (`image::DynamicImage::apply_orientation`), длинная сторона ≤ 2000 px. PNG уходит в
+   `tesseract stdin stdout -l rus+eng` через трубу — временных файлов нет, оригинал только
+   читается (ADR 0018).
+3. **Хранение.** Текст живёт в `ocr`; FTS5 держат триггеры. Повторный проход пропускает файлы с
+   тем же `sha256`; подмена содержимого стирает и текст, и его индекс.
+4. **Поиск.** `db::fts_query` делает из ввода префиксные фразы (`"справ"* AND "2024"*`), кавычки
+   снимают спецсимволы FTS. `snippet(...)` отдаёт фрагмент с маркерами « », по ним UI красит
+   совпадение в карточке. Языки задаются настройкой `ocr_lang` (`rus+eng` по умолчанию).
+5. **GUI.** Галочка «по тексту на фото» в строке поиска, кнопка «Распознать текст» в левой панели;
+   без `tesseract` в `PATH` кнопка погашена с подсказкой.
+
 ## Дата
 
 Порядок: EXIF `DateTimeOriginal` → регулярка по имени (`IMG_20240517_144243`, `P_20190410_102958`,
@@ -172,6 +197,7 @@ settings(key, value)                   -- модель, путь, лимит, п
 | 2026-11-22 | сеть, 155 МБ | `models download --id clip-vit-b32-en --yes` | 18.8 с, 148.6 МиБ, sha256 всех 3 файлов совпал |
 | 2026-11-22 | лимит 100 МиБ | `models download` | обе модели отклонены по размеру, ошибка с числами |
 | 2026-11-22 | лимит 160 МиБ, запрошена несуществующая | `models download --id nonexistent --yes` | выбран и проверен `clip-vit-b32-en` (148.6 МиБ) |
+| 2026-11-22 | 1972 снимка корпуса | `ocr --dry-run` | кандидатов 435: без EXIF-камеры или уверенный тег «документ»/«скриншот»; tesseract в системе не установлен |
 
 Правило: числа без корпуса и даты в таблицу не попадают.
 
@@ -179,6 +205,7 @@ settings(key, value)                   -- модель, путь, лимит, п
 
 Цель — Linux (ADR 0014), но код не содержит тупиков: кэш ищется через `XDG_CACHE_HOME` /
 `LOCALAPPDATA` / `HOME`, симлинки — с `#[cfg(unix)]` и `#[cfg(windows)]`, внешние
-`ffmpeg`/`ffprobe`/`curl` запускаются из `PATH` и без консольного окна на Windows. Известное
-ограничение: не-UTF-8 имена (в Linux допустимы) теряются при записи пути в SQLite через
-`to_string_lossy`; для загрузки модели и видео нужны соответствующие программы в `PATH`.
+`ffmpeg`/`ffprobe`/`curl`/`tesseract` запускаются из `PATH` и без консольного окна на Windows.
+Известное ограничение: не-UTF-8 имена (в Linux допустимы) теряются при записи пути в SQLite через
+`to_string_lossy`; для видео, загрузки модели и OCR нужны соответствующие программы в `PATH`
+(без tesseract пропадает только OCR — остальное работает).

@@ -6,9 +6,9 @@ use image::GenericImageView;
 use image_hasher::{HashAlg, HasherConfig};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub const IMG_EXT: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif",
@@ -416,6 +416,64 @@ pub fn analyze_video(
         sharpness: sharpness(&gray),
         thumb: rel,
     })
+}
+
+/// Есть ли OCR: `tesseract` в PATH и его версия. Спрашивается один раз, не на каждый кадр.
+pub fn tesseract_version() -> Option<String> {
+    let out = quiet_command("tesseract").arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    Some(stdout.lines().next()?.trim().to_string())
+}
+
+/// Вход для OCR: повёрнутый по EXIF кадр не больше `max_side`, PNG в памяти.
+/// Декодируем сами: `tesseract` не читает EXIF-поворот, а снимок с телефона иначе ляжет боком.
+fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::open(src)?
+        .with_guessed_format()?
+        .into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut img = image::DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    if img.width() > max_side || img.height() > max_side {
+        img = img.resize(max_side, max_side, image::imageops::FilterType::Triangle);
+    }
+    let mut png = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .with_context(|| format!("подготовка PNG для OCR {}", src.display()))?;
+    Ok(png)
+}
+
+fn tesseract_text(png: &[u8], lang: &str) -> Result<String> {
+    let mut child = quiet_command("tesseract")
+        .args(["stdin", "stdout", "-l", lang, "--psm", "3"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("запуск tesseract (нужны tesseract и языки {lang})"))?;
+    let mut stdin = child.stdin.take().context("tesseract: stdin недоступен")?;
+    let data = png.to_vec();
+    // Пишем в stdin параллельно чтению stdout: иначе большой текст упрётся в буфер трубы.
+    let writer = std::thread::spawn(move || stdin.write_all(&data));
+    let out = child.wait_with_output()?;
+    writer
+        .join()
+        .map_err(|_| anyhow::anyhow!("tesseract: поток записи упал"))??;
+    if !out.status.success() {
+        anyhow::bail!("tesseract: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Текст с картинки через внешний `tesseract` (ADR 0018).
+/// Оригинал только читается: PNG уходит процессу в stdin, временных файлов не появляется.
+pub fn ocr_image(src: &Path, lang: &str, max_side: u32) -> Result<String> {
+    let png = ocr_input_png(src, max_side)?;
+    tesseract_text(&png, lang)
 }
 
 /// Один декод на файл: размеры, dHash, превью.
