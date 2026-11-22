@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Проверка архитектурных границ photocat.
+#   bash check.sh           — только grep, секунды
+#   bash check.sh --build   — плюс cargo check
+set -uo pipefail
+
+# scripts/ → enforce-architecture/ → skills/ → .pi/ → корень проекта
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)
+cd -- "$ROOT" || exit 2
+
+fail=0
+ok=0
+note() { printf '  %-6s %s\n' "$1" "$2"; }
+err()  { printf '  ОШИБКА %s\n' "$1"; fail=$((fail + 1)); }
+pass() { ok=$((ok + 1)); }
+
+echo "photocat: проверка границ ($ROOT)"
+
+# ---------------------------------------------------------------- 1. слои
+declare -A ALLOWED=(
+  [derive]=""
+  [db]=""
+  [index]="derive db"
+  [dupes]="db derive"
+  [organize]="db"
+  [app]="derive db index dupes organize"
+  [main]="derive db index dupes organize app"
+)
+
+echo "1. зависимости между модулями"
+for f in src/*.rs; do
+  mod=$(basename "$f" .rs)
+  [[ -v ALLOWED[$mod] ]] || { err "модуль src/$mod.rs не зарегистрирован в карте слоёв check.sh"; continue; }
+  refs=$(grep -oE 'crate::[a-z_][a-z0-9_]*' "$f" 2>/dev/null | cut -d: -f3 | sort -u | grep -vx "$mod" || true)
+  for r in $refs; do
+    if [[ " ${ALLOWED[$mod]} " == *" $r "* ]]; then
+      pass
+    else
+      err "src/$mod.rs использует crate::$r, а слои это запрещают"
+    fi
+  done
+done
+(( fail == 0 )) && note "ок" "все ссылки внутри слоёв"
+
+# ---------------------------------------------------------------- 2. egui
+echo "2. egui только в app.rs"
+bad=$(grep -lE '\b(egui|eframe)::|use eframe|use egui' src/*.rs 2>/dev/null | grep -v '^src/app.rs$' || true)
+if [[ -n $bad ]]; then
+  err "egui найден вне src/app.rs: $(echo "$bad" | tr '\n' ' ')"
+else
+  pass
+  note "ок" "ядро не знает про интерфейс"
+fi
+
+# ---------------------------------------------------------------- 3. файлы архива
+echo "3. запрет удаления и переименования файлов"
+bad=$(grep -nE '\b(fs::remove_file|fs::remove_dir|fs::remove_dir_all|fs::rename|remove_file|remove_dir_all)' src/*.rs 2>/dev/null || true)
+if [[ -n $bad ]]; then
+  err "в src/ есть удаление/переименование (ADR 0005):"
+  echo "$bad" | sed 's/^/      /'
+else
+  pass
+  note "ок" "ни один код не удаляет и не переименовывает"
+fi
+
+# ---------------------------------------------------------------- 4. сеть
+echo "4. никаких HTTP-клиентов"
+bad=$(grep -nE '^(reqwest|hyper|ureq|curl|isahc|attohttpc)\s*=' Cargo.toml 2>/dev/null || true)
+if [[ -n $bad ]]; then
+  err "сетевой клиент в Cargo.toml (ADR 0011): $bad"
+else
+  pass
+  note "ок" "сеть запрещена"
+fi
+
+# ---------------------------------------------------------------- 5. зависимости
+echo "5. каждая зависимость описана в docs/DECISIONS.md"
+missing=""
+while read -r dep; do
+  [[ -z $dep || $dep == "photocat" ]] && continue
+  grep -qi "\b${dep}\b" docs/DECISIONS.md docs/ARCHITECTURE.md 2>/dev/null || missing+=" $dep"
+done < <(sed -n '/^\[dependencies\]/,/^\[/p' Cargo.toml | grep -oE '^[a-z0-9_-]+' | sort -u)
+if [[ -n $missing ]]; then
+  printf '  ВНИМАНИЕ не описаны: %s\n' "$missing"
+else
+  pass
+  note "ок" "все зависимости объяснены"
+fi
+
+# ---------------------------------------------------------------- 6. сборка
+if [[ ${1:-} == --build ]]; then
+  echo "6. cargo check"
+  if cargo check --all-targets --quiet 2>&1 | tail -5; then
+    pass
+    note "ок" "сборка проходит"
+  else
+    err "cargo check не проходит"
+  fi
+fi
+
+echo
+if (( fail == 0 )); then
+  echo "ИТОГ: границы в порядке ($ok проверок)"
+  exit 0
+fi
+echo "ИТОГ: нарушений $fail — задача не закрыта"
+exit 1

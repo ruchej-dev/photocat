@@ -50,6 +50,33 @@ cargo build --release      # первый раз ~3 минуты
 | Превью видео через ffmpeg | ⏳ |
 | «Лучший кадр из серии» (резкость/экспозиция) | ⏳ |
 
+## Продолжить в новой сессии
+
+Проект самодостаточен для передачи другому агенту (или себе через месяц):
+
+| Файл | Зачем |
+|---|---|
+| `AGENTS.md` | конституция: ограничения, слои, команды, правила изменений |
+| `plan/STATUS.md` | `STATE:` — где мы сейчас, что проверено, что дальше, открытые вопросы |
+| `plan/BACKLOG.md` | задачи M2–M8 с критериями приёмки |
+| `docs/ARCHITECTURE.md` | слои, поток индексации, схема БД, замеры |
+| `docs/UI.md` | экраны, метрики, состояния, тексты, клавиатура |
+| `docs/DECISIONS.md` | 11 коротких ADR: почему egui, SQLite, dHash, неприкосновенность файлов |
+| `.pi/skills/ui-design` | процедура и рубрика для любого экрана |
+| `.pi/skills/add-view` | добавить вид/вкладку/фильтр целиком, с ловушками borrow checker |
+| `.pi/skills/enforce-architecture` | машинная проверка слоёв и запретов (`scripts/check.sh`) |
+| `.pi/skills/corpus-bench` | замер на реальном архиве + базовая линия (`scripts/bench.sh`) |
+| `.pi/prompts/next-task.md` | `/next-task` — взять задачу из плана и довести до цифр |
+
+Порядок входа: `plan/STATUS.md` → `plan/BACKLOG.md` → `docs/ARCHITECTURE.md` → файлы задачи.
+Проверки перед коммитом:
+
+```bash
+cargo clippy --all-targets
+bash .pi/skills/enforce-architecture/scripts/check.sh
+bash .pi/skills/corpus-bench/scripts/bench.sh --quick
+```
+
 ## Хранение
 
 * БД: `~/.cache/photocat/photocat.db` (SQLite, WAL). Пересоздаётся индексацией, оригиналы не изменяются.
