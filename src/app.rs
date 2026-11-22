@@ -29,7 +29,206 @@ enum View {
     Dupes,
     Calendar,
     Faces,
-    Settings,
+}
+
+/// Раздел диалога «Настройки»: редкие настройки не отнимают экран у сетки.
+#[derive(Clone, Copy, PartialEq)]
+enum SettingsTab {
+    Model,
+    Index,
+    Tags,
+    Faces,
+    Storage,
+    Tools,
+}
+
+impl SettingsTab {
+    const ALL: [SettingsTab; 6] = [
+        SettingsTab::Model,
+        SettingsTab::Index,
+        SettingsTab::Tags,
+        SettingsTab::Faces,
+        SettingsTab::Storage,
+        SettingsTab::Tools,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            SettingsTab::Model => "Модель ИИ",
+            SettingsTab::Index => "Индексация и дубли",
+            SettingsTab::Tags => "Теги",
+            SettingsTab::Faces => "Лица",
+            SettingsTab::Storage => "Хранилище",
+            SettingsTab::Tools => "Внешние программы",
+        }
+    }
+}
+
+/// Акцент проекта: значит ровно «выбрано», «уверенный тег», «оставить» (docs/UI.md).
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(90, 170, 255);
+/// Второстепенный текст и служебные подписи; темнее 150 не опускаемся.
+const DIM: egui::Color32 = egui::Color32::from_gray(150);
+/// Метрики раскладки: менять только вместе с docs/UI.md.
+const LEFT_W: f32 = 260.0;
+const RIGHT_W: f32 = 280.0;
+/// Ниже этой ширины окна сведения уходят в левую панель: сетке нужны 4 колонки.
+const DETAILS_MIN_W: f32 = 1200.0;
+
+/// Фон выбранного пункта: акцент с прозрачностью, а не сплошная заливка.
+fn selected_fill() -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(90, 170, 255, 40)
+}
+
+/// Источник даты съёмки: в БД латиницей, на экране по-русски.
+fn date_source(src: &str) -> &'static str {
+    match src {
+        "exif" => "EXIF",
+        "filename" => "имя файла",
+        "mtime" => "время файла",
+        _ => "источник не указан",
+    }
+}
+
+/// Основная кнопка экрана: единственное место, где фон красится акцентом.
+fn primary_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text).color(ACCENT))
+        .fill(egui::Color32::from_rgba_unmultiplied(90, 170, 255, 32))
+}
+
+/// Заголовок секции в панели: 11 px, второстепенный цвет, без капса.
+fn section_label(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(text).size(11.0).color(DIM));
+    ui.add_space(2.0);
+}
+
+/// Строка «подпись слева — число справа»: числа всегда у правого края колонки.
+fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(label).size(12.0).color(DIM));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new(value).size(12.0));
+        });
+    });
+}
+
+/// Строка карточки: подпись 11 px сверху, значение 12 px снизу.
+fn meta_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.label(egui::RichText::new(label).size(11.0).color(DIM));
+    ui.label(egui::RichText::new(value).size(12.0));
+    ui.add_space(4.0);
+}
+
+/// Пункт навигации: вся ширина панели, подсветка выбора, слово вместо иконки.
+fn nav_item(ui: &mut egui::Ui, current: &mut View, view: View, text: &str) {
+    let selected = *current == view;
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let fill = if selected {
+            selected_fill()
+        } else if resp.hovered() {
+            ui.visuals().widgets.hovered.weak_bg_fill
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(rect, 3.0, fill);
+        let color = if selected {
+            ACCENT
+        } else if resp.hovered() {
+            ui.visuals().text_color()
+        } else {
+            egui::Color32::from_gray(190)
+        };
+        ui.painter().text(
+            rect.left_center() + egui::vec2(8.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::FontId::proportional(14.0),
+            color,
+        );
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if resp.clicked() {
+        *current = view;
+    }
+}
+
+/// Пункт левого списка в диалоге «Настройки»: та же геометрия, что у навигации.
+fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let fill = if selected {
+            selected_fill()
+        } else if resp.hovered() {
+            ui.visuals().widgets.hovered.weak_bg_fill
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(rect, 3.0, fill);
+        ui.painter().text(
+            rect.left_center() + egui::vec2(8.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::FontId::proportional(14.0),
+            if selected {
+                ACCENT
+            } else {
+                egui::Color32::from_gray(190)
+            },
+        );
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
+/// Имя файла одной строкой: полный путь живёт в карточке, а не в статусе.
+fn file_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// Блок с рамкой: секция контекста в левой панели, тег или текст в карточке.
+fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    let w = ui.available_width();
+    egui::Frame::group(ui.style())
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            ui.set_width((w - 16.0).max(80.0));
+            add(ui);
+        });
+}
+
+/// Строка прогресса фонового прохода: `done/total`, «Стоп» рядом.
+/// Возвращает `true`, если нажали «Стоп».
+fn progress_row(ui: &mut egui::Ui, name: &str, p: &Arc<Progress>, running: bool) -> bool {
+    let (d, t) = (p.done(), p.total());
+    let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+    let mut stop = false;
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.add(
+            egui::ProgressBar::new(frac)
+                .desired_width(320.0)
+                .text(if t > 0 {
+                    format!("{name}: {d}/{t}")
+                } else {
+                    p.msg()
+                }),
+        );
+        if running && ui.button("Стоп").clicked() {
+            stop = true;
+        }
+    });
+    stop
 }
 
 pub fn run(explicit: Option<PathBuf>) -> Result<()> {
@@ -124,6 +323,9 @@ struct App {
     tools_input: tools::Tools,
     /// Проверенное состояние программ (версия или ошибка) — не запускаем их на каждом кадре.
     tool_states: [String; 4],
+    /// Диалог «Настройки»: открыт ли и какой раздел показан.
+    settings_open: bool,
+    settings_tab: SettingsTab,
     status: String,
 }
 
@@ -142,7 +344,7 @@ impl App {
             max_dist: 6,
             path_input: String::new(),
             query: String::new(),
-            only_images: true,
+            only_images: false,
             progress: None,
             rx: None,
             tags: HashMap::new(),
@@ -189,6 +391,8 @@ impl App {
             tesseract: None,
             tools_input: tools::Tools::default(),
             tool_states: std::array::from_fn(|_| String::new()),
+            settings_open: false,
+            settings_tab: SettingsTab::Model,
             status: String::new(),
         };
         me.reload();
@@ -295,287 +499,1293 @@ impl App {
         }
     }
 
-    /// Экран настроек: модель, путь, лимит, пороги, индексация.
-    fn settings_view(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.heading("Настройки");
-                ui.label(
-                    "Всё хранится в БД рядом с индексом; оригиналы фото и видео не меняются.",
-                );
-                ui.add_space(8.0);
-
-                ui.heading("Модель ИИ");
-                let current = embed::active_entry(&self.settings);
-                let current_id = current.id;
-                let mut chosen = current_id;
-                egui::ComboBox::from_label("Модель")
-                    .selected_text(format!(
-                        "{} — {}",
-                        current.title,
-                        db::human(current.bytes() as i64)
-                    ))
-                    .show_ui(ui, |ui| {
-                        for e in embed::catalog() {
-                            ui.selectable_value(
-                                &mut chosen,
-                                e.id,
-                                format!(
-                                    "{} — {} · {}",
-                                    e.title,
-                                    db::human(e.bytes() as i64),
-                                    e.note
-                                ),
-                            );
-                        }
+    /// Диалог «Настройки»: редко нужное, но всегда в один клик с верхней панели.
+    fn settings_modal(&mut self, ctx: &egui::Context) {
+        if !self.settings_open {
+            return;
+        }
+        let mut close = false;
+        let mut tab = self.settings_tab;
+        let resp = egui::Modal::new(egui::Id::unique("photocat-settings")).show(ctx, |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(760.0, 620.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_min_size(egui::vec2(760.0, 620.0));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        ui.label(egui::RichText::new("Настройки").size(16.0));
                     });
-                if chosen != current_id {
-                    self.settings.model_id = chosen.to_string();
-                    self.ml_model = None;
-                    self.semantic_hits = None;
+                    ui.add_space(8.0);
+                    egui::Panel::bottom("settings-footer").show(ui, |ui| {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ui.label(
+                                egui::RichText::new(
+                                    "Изменения сохраняются сразу; оригиналы не меняются.",
+                                )
+                                .size(11.0)
+                                .color(DIM),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.add_space(12.0);
+                                    if ui.button("Закрыть").clicked() {
+                                        close = true;
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(4.0);
+                    });
+                    egui::Panel::left("settings-nav")
+                        .exact_size(200.0)
+                        .resizable(false)
+                        .show(ui, |ui| {
+                            ui.add_space(8.0);
+                            for t in SettingsTab::ALL {
+                                if settings_nav_item(ui, tab == t, t.label()) {
+                                    tab = t;
+                                }
+                            }
+                        });
+                    egui::ScrollArea::vertical()
+                        .id_salt("settings-scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add_space(12.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space(16.0);
+                                ui.vertical(|ui| {
+                                    ui.set_max_width(520.0);
+                                    self.settings_section(ui, tab);
+                                });
+                            });
+                        });
+                },
+            );
+        });
+        self.settings_tab = tab;
+        if close
+            || resp.backdrop_response.clicked()
+            || ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
+            self.settings_open = false;
+        }
+    }
+
+    fn settings_section(&mut self, ui: &mut egui::Ui, tab: SettingsTab) {
+        ui.label(egui::RichText::new(tab.label()).size(16.0));
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(8.0);
+        match tab {
+            SettingsTab::Model => self.settings_model(ui),
+            SettingsTab::Index => self.settings_index(ui),
+            SettingsTab::Tags => self.settings_tags(ui),
+            SettingsTab::Faces => self.settings_faces(ui),
+            SettingsTab::Storage => self.settings_storage(ui),
+            SettingsTab::Tools => self.settings_tools(ui),
+        }
+    }
+
+    fn settings_model(&mut self, ui: &mut egui::Ui) {
+        let current = embed::active_entry(&self.settings);
+        let current_id = current.id;
+        let mut chosen = current_id;
+        ui.label(egui::RichText::new("Модель").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        egui::ComboBox::from_id_salt("model_pick")
+            .width(380.0)
+            .selected_text(format!(
+                "{} — {}",
+                current.title,
+                db::human(current.bytes() as i64)
+            ))
+            .show_ui(ui, |ui| {
+                for e in embed::catalog() {
+                    ui.selectable_value(
+                        &mut chosen,
+                        e.id,
+                        format!(
+                            "{} — {} · {}",
+                            e.title,
+                            db::human(e.bytes() as i64),
+                            e.note
+                        ),
+                    );
+                }
+            });
+        if chosen != current_id {
+            self.settings.model_id = chosen.to_string();
+            self.ml_model = None;
+            self.semantic_hits = None;
+            self.save_settings();
+            self.reload();
+        }
+        ui.add_space(8.0);
+
+        ui.label(egui::RichText::new("Состояние модели").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        let state = if embed::model_present(&self.settings) {
+            format!("Скачана · проверена · {}", db::human(embed::model_bytes_in(&self.settings.models_dir, current)))
+        } else {
+            "Не скачана".to_string()
+        };
+        ui.label(
+            egui::RichText::new(state)
+                .size(12.0)
+                .color(if embed::model_present(&self.settings) { ACCENT } else { DIM }),
+        );
+        if ui.button("Проверить модель").clicked() {
+            match embed::check_model(&self.settings) {
+                Ok(()) => {
+                    self.status = format!(
+                        "модель {} проверена: sha256 совпал",
+                        embed::active_entry(&self.settings).title
+                    )
+                }
+                Err(e) => self.status = format!("модель не готова: {e:#}"),
+            }
+        }
+        ui.add_space(12.0);
+
+        ui.label(egui::RichText::new("Папка моделей").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.models_dir_input)
+                    .hint_text("путь, куда скачивать веса")
+                    .desired_width(380.0),
+            );
+            if ui.button("Применить путь").clicked() {
+                let p = self.models_dir_input.trim();
+                if p.is_empty() {
+                    self.status = "путь к моделям пуст".into();
+                } else {
+                    self.settings.models_dir = PathBuf::from(p);
                     self.save_settings();
                     self.reload();
                 }
+            }
+        });
+        ui.label(egui::RichText::new(self.settings.models_dir.display().to_string()).size(11.0).color(DIM));
+        ui.add_space(12.0);
 
-                ui.horizontal(|ui| {
-                    ui.label("Папка моделей:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.models_dir_input)
-                            .hint_text("путь, куда скачивать веса")
-                            .desired_width(420.0),
-                    );
-                    if ui.button("Применить путь").clicked() {
-                        let p = self.models_dir_input.trim();
-                        if p.is_empty() {
-                            self.status = "путь к моделям пуст".into();
-                        } else {
-                            self.settings.models_dir = PathBuf::from(p);
-                            self.save_settings();
-                            self.reload();
-                        }
-                    }
-                });
-                ui.label(format!(
-                    "сейчас: {}",
-                    self.settings.models_dir.display()
-                ));
+        ui.label(egui::RichText::new("Лимит на скачивание").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            let r = ui.add(
+                egui::Slider::new(&mut self.settings.max_model_mb, 50..=2000)
+                    .suffix(" МиБ")
+                    .step_by(10.0),
+            );
+            if r.drag_stopped() || r.lost_focus() {
+                self.save_settings();
+            }
+        });
+        ui.label(
+            egui::RichText::new(
+                "Модель сверх лимита не скачивается. Если выбранная недоступна, \
+                 загрузчик ищет совместимую в пределах лимита.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+        ui.add_space(8.0);
+        for e in embed::catalog() {
+            let present = embed::model_present_in(&self.settings.models_dir, e);
+            let fits = e.fits(self.settings.max_model_mb);
+            let state = if present {
+                "на месте"
+            } else if fits {
+                "не скачана"
+            } else {
+                "сверх лимита"
+            };
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} — {} · {}",
+                    e.title,
+                    db::human(e.bytes() as i64),
+                    state
+                ))
+                .size(12.0),
+            );
+        }
+        ui.add_space(12.0);
 
-                let r = ui.add(
-                    egui::DragValue::new(&mut self.settings.max_model_mb)
-                        .range(50..=2000)
-                        .suffix(" МиБ")
-                        .speed(10),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.save_settings();
-                }
-                ui.label(
-                    "Лимит на скачивание: модель сверх него не скачивается. Если выбранная                      недоступна, загрузчик ищет совместимую в пределах лимита.",
-                );
-
-                ui.add_space(4.0);
-                for e in embed::catalog() {
-                    let present = embed::model_present_in(&self.settings.models_dir, e);
-                    let fits = e.fits(self.settings.max_model_mb);
-                    let state = if present {
-                        "на месте"
-                    } else if fits {
-                        "не скачана"
+        ui.label(egui::RichText::new("Согласие на сеть").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        ui.checkbox(
+            &mut self.download_consent,
+            "разрешаю скачать веса модели (фото, пути и запросы не отправляются)",
+        );
+        ui.label(
+            egui::RichText::new(
+                "Сеть используется только при нажатии «Скачать модель». \
+                 Пользовательские данные не отправляются.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+        ui.add_space(8.0);
+        let busy = self.download_rx.is_some();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    self.download_consent && !busy,
+                    primary_button("Скачать модель"),
+                )
+                .clicked()
+            {
+                self.start_download();
+            }
+            if ui
+                .add_enabled(
+                    self.embed_rx.is_none() && embed::model_present(&self.settings),
+                    egui::Button::new("Посчитать теги"),
+                )
+                .clicked()
+            {
+                self.start_embed();
+            }
+        });
+        if !self.download_consent {
+            ui.label(
+                egui::RichText::new("кнопка погашена: нужно согласие на сеть")
+                    .size(11.0)
+                    .color(DIM),
+            );
+        }
+        if let Some(p) = &self.download_progress {
+            let (d, t) = (p.done(), p.total());
+            let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+            ui.add(
+                egui::ProgressBar::new(frac)
+                    .desired_width(380.0)
+                    .text(if t > 0 {
+                        format!("файлов: {d}/{t}")
                     } else {
-                        "сверх лимита"
-                    };
-                    ui.label(format!(
-                        "{} — {} · {}",
-                        e.title,
-                        db::human(e.bytes() as i64),
-                        state
-                    ));
-                }
+                        p.msg()
+                    }),
+            );
+            ui.label(egui::RichText::new(p.msg()).size(11.0).color(DIM));
+        }
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(
+                "Теги и векторы привязаны к модели: после смены модели их нужно посчитать.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+    }
 
-                ui.checkbox(
-                    &mut self.download_consent,
-                    "разрешаю скачать веса модели (фото, пути и запросы не отправляются)",
+    fn settings_index(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Потоков на индексацию").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        let r = ui.add(
+            egui::DragValue::new(&mut self.settings.index_jobs)
+                .range(1..=64)
+                .suffix(" потоков"),
+        );
+        if r.drag_stopped() || r.lost_focus() {
+            self.save_settings();
+        }
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new("Порог дублей").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        let r = ui.add(
+            egui::Slider::new(&mut self.settings.max_dist, 0..=16).text("бит из 64"),
+        );
+        if r.drag_stopped() || r.lost_focus() {
+            self.max_dist = self.settings.max_dist;
+            self.save_settings();
+        }
+        ui.label(
+            egui::RichText::new(
+                "Больше бит — больше похожих снимков в группе. Точные копии \
+                 находятся при любом пороге.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+    }
+
+    fn settings_tags(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Порог уверенного тега").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        let r = ui.add(egui::Slider::new(&mut self.settings.tag_show, 0.10..=0.50));
+        if r.drag_stopped() || r.lost_focus() {
+            self.save_settings();
+        }
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new("Отрыв от второго тега").size(12.0).color(DIM));
+        ui.add_space(2.0);
+        let r = ui.add(egui::Slider::new(&mut self.settings.tag_margin, 0.0..=0.10));
+        if r.drag_stopped() || r.lost_focus() {
+            self.save_settings();
+        }
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(
+                "Ниже порог — больше тегов и больше ошибок. «Убрать» у тега в карточке \
+                 скрывает его у одного фото и переживает пересчёт.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+    }
+
+    fn settings_faces(&mut self, ui: &mut egui::Ui) {
+        let present = faces::model_present(&self.settings);
+        ui.label(
+            egui::RichText::new(format!(
+                "{} · {} · {}",
+                faces::MODEL_ID,
+                db::human(faces::model_bytes(&self.settings)),
+                if present { "на месте" } else { "не скачана" }
+            ))
+            .size(12.0)
+            .color(if present { ACCENT } else { DIM }),
+        );
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new("Порог склейки лиц (косинус)")
+                .size(12.0)
+                .color(DIM),
+        );
+        ui.add_space(2.0);
+        let r = ui.add(
+            egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70).step_by(0.01),
+        );
+        if r.drag_stopped() || r.lost_focus() {
+            self.save_settings();
+        }
+        ui.label(
+            egui::RichText::new(
+                "Выше порог — меньше ложных склеек, но один человек может разбиться \
+                 на группы. Модели SCRFD и ArcFace — ONNX, локально.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+        ui.add_space(12.0);
+        ui.checkbox(
+            &mut self.face_download_consent,
+            "разрешаю скачать веса лиц (фото не отправляются)",
+        );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    self.face_download_consent && self.face_download_rx.is_none(),
+                    primary_button("Скачать модель лиц"),
+                )
+                .clicked()
+            {
+                self.start_face_download();
+            }
+            if ui.button("Проверить модель лиц").clicked() {
+                match faces::check_model(&self.settings) {
+                    Ok(()) => self.status = "модель лиц проверена: sha256 совпал".into(),
+                    Err(e) => self.status = format!("модель лиц не готова: {e:#}"),
+                }
+            }
+        });
+        if !self.face_download_consent {
+            ui.label(
+                egui::RichText::new("кнопка погашена: нужно согласие на сеть")
+                    .size(11.0)
+                    .color(DIM),
+            );
+        }
+        if let Some(p) = &self.face_download_progress {
+            let (d, t) = (p.done(), p.total());
+            let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+            ui.add(
+                egui::ProgressBar::new(frac)
+                    .desired_width(380.0)
+                    .text(if t > 0 {
+                        format!("файлов лиц: {d}/{t}")
+                    } else {
+                        p.msg()
+                    }),
+            );
+            ui.label(egui::RichText::new(p.msg()).size(11.0).color(DIM));
+        }
+    }
+
+    fn settings_storage(&mut self, ui: &mut egui::Ui) {
+        let n = self.items.len();
+        let bytes: i64 = self.items.iter().map(|r| r.size).sum();
+        meta_row(ui, "Индекс", &format!("файлов {n}, {}", db::human(bytes)));
+        meta_row(ui, "БД", &self.db_path.display().to_string());
+        meta_row(ui, "Кэш", &db::cache_dir().display().to_string());
+        meta_row(ui, "Превью", &self.thumbs_dir.display().to_string());
+        meta_row(
+            ui,
+            "Модели",
+            &format!(
+                "{} · {}",
+                self.settings.models_dir.display(),
+                db::human(embed::model_bytes_in(
+                    &self.settings.models_dir,
+                    embed::active_entry(&self.settings)
+                ))
+            ),
+        );
+        meta_row(
+            ui,
+            "Лица",
+            &format!(
+                "{} · {}",
+                faces::MODEL_ID,
+                db::human(faces::model_bytes(&self.settings))
+            ),
+        );
+        ui.label(
+            egui::RichText::new(
+                "В каталог архива photocat не пишет: только строки в БД и превью в кэше. \
+                 Витрина по датам — отдельная команда с явным подтверждением.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+    }
+
+    fn settings_tools(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            egui::RichText::new(
+                "Пусто — программа ищется в PATH. Путь проверяется запуском при сохранении; \
+                 без программы отключается только её работа.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+        ui.add_space(8.0);
+        for (i, tool) in tools::ALL.into_iter().enumerate() {
+            ui.label(egui::RichText::new(tool.name()).size(12.0).color(DIM));
+            ui.add_space(2.0);
+            let input = self.tools_input.get_mut(tool);
+            ui.add(
+                egui::TextEdit::singleline(input)
+                    .hint_text("пусто — из PATH")
+                    .desired_width(380.0),
+            );
+            ui.label(
+                egui::RichText::new(&self.tool_states[i])
+                    .size(11.0)
+                    .color(DIM),
+            );
+            ui.label(
+                egui::RichText::new(format!("без неё: {}", tool.without()))
+                    .size(11.0)
+                    .color(DIM),
+            );
+            ui.add_space(8.0);
+        }
+        if ui
+            .add(egui::Button::new("Проверить и сохранить программы"))
+            .clicked()
+        {
+            self.apply_tools();
+        }
+    }
+
+    fn reset_filters(&mut self) {
+        self.query.clear();
+        self.only_images = false;
+        self.tag_filter = None;
+        self.semantic_hits = None;
+        self.ocr_snippets.clear();
+        self.status = "фильтры сброшены".into();
+    }
+
+    /// Верхняя панель: две строки управления, дальше — только прогресс прохода.
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Каталог:").size(12.0).color(DIM));
+            let w = (ui.available_width() - 300.0).clamp(240.0, 520.0);
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.path_input)
+                    .hint_text("путь к каталогу с фото")
+                    .desired_width(w),
+            );
+            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.add(primary_button("Индексировать")).clicked() || enter {
+                self.start_index();
+            }
+            if ui.button("Обновить").clicked() {
+                self.reload();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Настройки").clicked() {
+                    self.settings_open = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let mut text_mode = self.search_ocr;
+            if ui
+                .selectable_label(!text_mode, egui::RichText::new("Смысловой").size(12.0))
+                .clicked()
+            {
+                text_mode = false;
+            }
+            if ui
+                .selectable_label(text_mode, egui::RichText::new("По тексту").size(12.0))
+                .clicked()
+            {
+                text_mode = true;
+            }
+            if text_mode != self.search_ocr {
+                self.search_ocr = text_mode;
+                self.semantic_hits = None;
+                self.ocr_snippets.clear();
+                self.status = if text_mode {
+                    "поиск по тексту, распознанному на снимках".into()
+                } else {
+                    "смысловой поиск по содержимому снимков".into()
+                };
+            }
+            let ready = if self.search_ocr {
+                self.ocr_files > 0
+            } else {
+                embed::model_present(&self.settings)
+            };
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.semantic_query)
+                    .hint_text(if self.search_ocr {
+                        "справка, квитанция, 2024"
+                    } else {
+                        "торт, море, документ"
+                    })
+                    .desired_width(340.0),
+            );
+            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.add_enabled(ready, egui::Button::new("Найти")).clicked() || (enter && ready) {
+                self.start_search();
+            }
+            if ui
+                .add_enabled(self.semantic_hits.is_some(), egui::Button::new("Сбросить"))
+                .clicked()
+            {
+                self.semantic_hits = None;
+                self.ocr_snippets.clear();
+                self.status = "поиск сброшен".into();
+            }
+            if self.search_rx.is_some() {
+                ui.label(egui::RichText::new("загрузка модели…").size(11.0).color(DIM));
+            } else if !ready {
+                ui.label(
+                    egui::RichText::new(if self.search_ocr {
+                        "нет распознанного текста"
+                    } else {
+                        "модель не скачана"
+                    })
+                    .size(11.0)
+                    .color(DIM),
                 );
-                let busy = self.download_rx.is_some();
+            }
+        });
+
+        if let Some(p) = &self.progress {
+            let running = self.rx.is_some();
+            if progress_row(ui, "Индексация", p, running) {
+                p.cancel();
+            }
+        }
+        if let Some(p) = &self.embed_progress {
+            let running = self.embed_rx.is_some();
+            if progress_row(ui, "CLIP", p, running) {
+                p.cancel();
+            }
+        }
+        if let Some(p) = &self.ocr_progress {
+            let running = self.ocr_rx.is_some();
+            if progress_row(ui, "OCR", p, running) {
+                p.cancel();
+            }
+        }
+        if let Some(p) = &self.face_progress {
+            let running = self.face_rx.is_some();
+            if progress_row(ui, "Лица", p, running) {
+                p.cancel();
+            }
+        }
+        ui.add_space(4.0);
+    }
+
+    /// Строка статуса: факт слева, выбранный файл справа.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(if self.status.is_empty() {
+                    "—"
+                } else {
+                    &self.status
+                })
+                .size(11.0),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(f) = self
+                    .selected
+                    .and_then(|id| self.items.iter().find(|r| r.id == id))
+                {
+                    let date = f
+                        .taken_at
+                        .as_deref()
+                        .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
+                        .unwrap_or_else(|| "без даты".into());
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Выбрано: {} · {date}",
+                            file_name(&f.path)
+                        ))
+                        .size(11.0)
+                        .color(DIM),
+                    );
+                }
+            });
+        });
+    }
+
+    /// Левая панель: карта приложения. Навигация и фильтр закреплены, контекст вида — в прокрутке.
+    fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool) {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("photocat").size(16.0));
+        ui.label(egui::RichText::new("семейный архив").size(11.0).color(DIM));
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("БИБЛИОТЕКА").size(11.0).color(DIM));
+        nav_item(ui, &mut self.view, View::Grid, "Все файлы");
+        nav_item(ui, &mut self.view, View::Dupes, "Дубли и серии");
+        nav_item(ui, &mut self.view, View::Calendar, "Календарь");
+        nav_item(ui, &mut self.view, View::Faces, "Лица");
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("Поиск по пути или дате").size(11.0).color(DIM));
+        ui.add(
+            egui::TextEdit::singleline(&mut self.query)
+                .hint_text("2024-05, отпуск")
+                .desired_width(f32::INFINITY),
+        );
+        ui.add_space(2.0);
+        ui.checkbox(&mut self.only_images, "только изображения");
+        ui.add_space(2.0);
+
+        // На широком окне сводка прижата к низу панели. На узком — карточка и сводка
+        // идут в общей прокрутке: иначе карточке остаётся полоска в 40 px.
+        if !show_card {
+            egui::Panel::bottom("left-stats")
+                .resizable(false)
+                .show(ui, |ui| {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    self.stats_block(ui);
+                });
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("left-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                match self.view {
+                    View::Dupes => self.dupes_controls(ui),
+                    View::Faces => self.faces_controls(ui),
+                    _ => {}
+                }
+                self.model_block(ui);
+                self.ocr_block(ui);
+                if show_card {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    self.file_card(ui);
+                    ui.add_space(8.0);
+                    ui.separator();
+                    self.stats_block(ui);
+                }
+            });
+    }
+
+    /// Контекст вида «Дубли и серии»: порог, «Найти группы», сводка и выгрузка плана.
+    fn dupes_controls(&mut self, ui: &mut egui::Ui) {
+        block(ui, |ui| {
+            ui.label(egui::RichText::new("Дубли и серии").size(11.0).color(DIM));
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(format!(
+                "Порог похожести: {} бит из 64",
+                self.max_dist
+            )));
+            let resp = ui.add(egui::Slider::new(&mut self.max_dist, 0..=16));
+            if resp.changed() {
+                self.settings.max_dist = self.max_dist;
+                self.save_settings();
+            }
+            if ui.add(primary_button("Найти группы")).clicked() {
+                let t = std::time::Instant::now();
+                self.groups = dupes::find_groups(&self.items, self.max_dist);
+                let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
+                self.status = format!(
+                    "групп: {}, дублей на {}, за {:.1} с",
+                    self.groups.len(),
+                    db::human(waste),
+                    t.elapsed().as_secs_f32()
+                );
+            }
+            let sum = dupes::summary(&self.items, &self.groups);
+            ui.label(
+                egui::RichText::new(format!(
+                    "в группах {}, помечено лишними {}, освободится {}",
+                    sum.groups,
+                    sum.marked_drop,
+                    db::human(sum.freed)
+                ))
+                .size(11.0)
+                .color(DIM),
+            );
+            let has_groups = !self.groups.is_empty();
+            ui.add_space(4.0);
+            if ui
+                .add_enabled(has_groups, egui::Button::new("Экспорт плана"))
+                .clicked()
+            {
+                let path = db::cache_dir().join("plan.csv");
+                let csv = dupes::plan_csv(&self.items, &self.groups);
+                match std::fs::write(&path, &csv) {
+                    Ok(()) => {
+                        self.status = format!(
+                            "план записан: {} (строк {})",
+                            path.display(),
+                            csv.lines().count().saturating_sub(1)
+                        )
+                    }
+                    Err(e) => self.status = format!("план не записан: {e}"),
+                }
+            }
+            if ui
+                .add_enabled(has_groups, egui::Button::new("Скопировать список"))
+                .on_hover_text("весь план CSV в буфер обмена")
+                .clicked()
+            {
+                ui.ctx().copy_text(dupes::plan_csv(&self.items, &self.groups));
+                self.status = "план скопирован в буфер обмена".into();
+            }
+            let no_sharp = self
+                .items
+                .iter()
+                .filter(|r| r.kind == "image" && r.sharpness.is_none())
+                .count();
+            if no_sharp > 0 {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог"
+                    ))
+                    .size(11.0)
+                    .color(DIM),
+                );
+            }
+        });
+    }
+
+    /// Контекст вида «Лица»: порог, проход по снимкам, пересборка групп и их список.
+    fn faces_controls(&mut self, ui: &mut egui::Ui) {
+        block(ui, |ui| {
+            ui.label(egui::RichText::new("Лица").size(11.0).color(DIM));
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(format!(
+                "Порог склейки: {:.2}",
+                self.settings.face_threshold
+            )));
+            let r = ui.add(
+                egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70)
+                    .step_by(0.01),
+            );
+            if r.drag_stopped() || r.lost_focus() {
+                self.save_settings();
+            }
+            let model = faces::model_present(&self.settings);
+            if !model {
+                ui.label(
+                    egui::RichText::new("модель лиц не скачана")
+                        .size(11.0)
+                        .color(DIM),
+                );
+                if ui.button("Настройки лиц").clicked() {
+                    self.settings_open = true;
+                    self.settings_tab = SettingsTab::Faces;
+                }
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "лиц: {} на {} снимках, групп: {}",
+                    self.face_faces,
+                    self.face_photos,
+                    self.face_clusters.len()
+                ))
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "ещё без лиц: {} из {} снимков",
+                    self.face_todo, self.face_images
+                ))
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.add_space(4.0);
+            if self.face_rx.is_some() {
+                ui.label("пересобираю группы…");
+                if let Some(p) = &self.face_progress
+                    && ui.button("Стоп").clicked()
+                {
+                    p.cancel();
+                    self.status = "лица: останавливаю после текущих снимков…".into();
+                }
+            } else {
+                let scan_label = if self.face_todo < self.face_images {
+                    format!("Продолжить ({})", self.face_todo)
+                } else {
+                    format!("Найти лица ({})", self.face_todo)
+                };
                 if ui
                     .add_enabled(
-                        self.download_consent && !busy,
-                        egui::Button::new("Скачать модель"),
+                        model && self.face_todo > 0,
+                        egui::Button::new(scan_label),
+                    )
+                    .on_hover_text(
+                        "долгий проход: детекция и эмбеддинги локально, без сети; \
+                         уже просканированные снимки пропускаются по sha256",
                     )
                     .clicked()
                 {
-                    self.start_download();
-                }
-                if let Some(p) = &self.download_progress {
-                    let (d, t) = (p.done(), p.total());
-                    let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(360.0)
-                            .text(if t > 0 {
-                                format!("файлов: {d}/{t}")
-                            } else {
-                                p.msg()
-                            }),
-                    );
-                    ui.label(p.msg());
-                }
-                if ui.button("Проверить модель").clicked() {
-                    match embed::check_model(&self.settings) {
-                        Ok(()) => {
-                            self.status = format!(
-                                "модель {} проверена: sha256 совпал",
-                                embed::active_entry(&self.settings).title
-                            )
-                        }
-                        Err(e) => self.status = format!("модель не готова: {e:#}"),
-                    }
+                    self.start_faces();
                 }
                 if ui
                     .add_enabled(
-                        self.embed_rx.is_none() && embed::model_present(&self.settings),
+                        self.face_faces > 0,
+                        egui::Button::new("Пересобрать группы"),
+                    )
+                    .on_hover_text(
+                        "порог применяется к лицам; ручные подписи и разъединения сохраняются",
+                    )
+                    .clicked()
+                {
+                    self.start_face_clusters();
+                }
+            }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Группы").size(11.0).color(DIM));
+            let clusters = self.face_clusters.clone();
+            egui::ScrollArea::vertical()
+                .id_salt("face-clusters")
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            self.face_selected_cluster.is_none(),
+                            format!("Все лица · {}", self.face_faces),
+                        )
+                        .clicked()
+                    {
+                        self.face_selected_cluster = None;
+                        self.face_label_input.clear();
+                    }
+                    for c in clusters {
+                        let label = if c.label.is_empty() {
+                            "без имени".to_string()
+                        } else {
+                            c.label.clone()
+                        };
+                        if ui
+                            .selectable_label(
+                                self.face_selected_cluster == Some(c.id),
+                                format!("{label} · {} фото", c.photos),
+                            )
+                            .clicked()
+                        {
+                            self.face_selected_cluster = Some(c.id);
+                            self.face_label_input = c.label;
+                        }
+                    }
+                });
+        });
+    }
+
+    /// Блок модели: состояние, «Посчитать теги», фильтр по тегу.
+    fn model_block(&mut self, ui: &mut egui::Ui) {
+        block(ui, |ui| {
+            ui.label(egui::RichText::new("Модель ИИ").size(11.0).color(DIM));
+            ui.add_space(2.0);
+            if embed::model_present(&self.settings) {
+                let entry = embed::active_entry(&self.settings);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} · {}",
+                        entry.title,
+                        db::human(embed::model_bytes_in(&self.settings.models_dir, entry))
+                    ))
+                    .size(11.0)
+                    .color(DIM),
+                );
+                if ui
+                    .add_enabled(
+                        self.embed_rx.is_none(),
                         egui::Button::new("Посчитать теги"),
                     )
                     .clicked()
                 {
                     self.start_embed();
                 }
+                let tagged = self
+                    .items
+                    .iter()
+                    .filter(|r| {
+                        self.tags.get(&r.id).is_some_and(|t| {
+                            embed::confident_tag_with(
+                                t,
+                                self.settings.tag_show,
+                                self.settings.tag_margin,
+                            )
+                            .is_some()
+                        })
+                    })
+                    .count();
                 ui.label(
-                    "Теги и векторы привязаны к модели: после смены модели их нужно посчитать.",
+                    egui::RichText::new(format!("с уверенным тегом: {tagged}"))
+                        .size(11.0)
+                        .color(DIM),
                 );
-
-                ui.add_space(8.0);
-                ui.heading("Индексация и дубли");
-                let r = ui.add(
-                    egui::DragValue::new(&mut self.settings.index_jobs)
-                        .range(1..=64)
-                        .suffix(" потоков"),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.save_settings();
+                egui::ComboBox::from_id_salt("tag_filter")
+                    .width(ui.available_width())
+                    .selected_text(
+                        self.tag_filter
+                            .clone()
+                            .map(|t| format!("тег: {t}"))
+                            .unwrap_or_else(|| "все теги".into()),
+                    )
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_value(&mut self.tag_filter, None, "все теги")
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                        for label in embed::TAG_LABELS {
+                            if ui
+                                .selectable_value(
+                                    &mut self.tag_filter,
+                                    Some(label.to_string()),
+                                    label,
+                                )
+                                .clicked()
+                            {
+                                ui.close();
+                            }
+                        }
+                    });
+                if let Some(hits) = &self.semantic_hits {
+                    ui.label(
+                        egui::RichText::new(format!("поиск: {} файлов", hits.len()))
+                            .size(11.0)
+                            .color(DIM),
+                    );
                 }
-                let r = ui.add(
-                    egui::Slider::new(&mut self.settings.max_dist, 0..=16)
-                        .text("порог дублей, бит из 64"),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.max_dist = self.settings.max_dist;
-                    self.save_settings();
-                }
-
-                ui.add_space(8.0);
-                ui.heading("Теги");
-                let r = ui.add(
-                    egui::Slider::new(&mut self.settings.tag_show, 0.10..=0.50)
-                        .text("порог уверенного тега"),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.save_settings();
-                }
-                let r = ui.add(
-                    egui::Slider::new(&mut self.settings.tag_margin, 0.0..=0.10)
-                        .text("отрыв от второго тега"),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.save_settings();
-                }
+            } else {
                 ui.label(
-                    "Ниже порог — больше тегов и больше ошибок. «Убрать» у тега в карточке                      скрывает его у одного фото и переживает пересчёт.",
+                    egui::RichText::new("модель не скачана")
+                        .size(11.0)
+                        .color(DIM),
                 );
+            }
+            if ui.button("Настройки модели").clicked() {
+                self.settings_open = true;
+                self.settings_tab = SettingsTab::Model;
+            }
+        });
+    }
 
-                ui.add_space(8.0);
-                ui.heading("Лица");
-                let present = faces::model_present(&self.settings);
-                ui.label(format!(
-                    "{} · {} · {}",
-                    faces::MODEL_ID,
-                    db::human(faces::model_bytes(&self.settings)),
-                    if present { "на месте" } else { "не скачана" }
-                ));
-                let r = ui.add(
-                    egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70)
-                        .step_by(0.01)
-                        .text("порог склейки лиц (косинус)"),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.save_settings();
-                }
+    /// Блок текста на фото: сколько уже распознано и сколько осталось.
+    fn ocr_block(&mut self, ui: &mut egui::Ui) {
+        block(ui, |ui| {
+            ui.label(egui::RichText::new("Текст на фото").size(11.0).color(DIM));
+            ui.add_space(2.0);
+            if self.tesseract.is_none() {
                 ui.label(
-                    "Модели SCRFD и ArcFace — ONNX, локально; лица, пути и эмбеддинги никуда не \
-                     отправляются.",
+                    egui::RichText::new("tesseract не запускается — путь в «Настройках»")
+                        .size(11.0)
+                        .color(DIM),
                 );
-                ui.checkbox(
-                    &mut self.face_download_consent,
-                    "разрешаю скачать веса лиц (фото не отправляются)",
-                );
+            }
+            let images = self.items.iter().filter(|r| r.kind == "image").count();
+            ui.label(
+                egui::RichText::new(format!("с текстом: {} из {images} снимков", self.ocr_files))
+                    .size(11.0)
+                    .color(DIM),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "кандидатов: {}, осталось {}",
+                    self.ocr_candidates, self.ocr_remaining
+                ))
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.add_space(4.0);
+            if self.ocr_rx.is_some() {
+                if ui.button("Стоп").clicked()
+                    && let Some(p) = &self.ocr_progress
+                {
+                    p.cancel();
+                    self.status = "OCR: останавливаю после текущих файлов…".into();
+                }
+            } else {
+                let label = if self.ocr_remaining < self.ocr_candidates {
+                    format!("Продолжить ({})", self.ocr_remaining)
+                } else {
+                    format!("Распознать документы ({})", self.ocr_candidates)
+                };
                 if ui
                     .add_enabled(
-                        self.face_download_consent && self.face_download_rx.is_none(),
-                        egui::Button::new("Скачать модель лиц"),
+                        self.tesseract.is_some() && self.ocr_remaining > 0,
+                        egui::Button::new(label),
+                    )
+                    .on_hover_text(
+                        "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
+                         один снимок — кнопкой в карточке файла",
                     )
                     .clicked()
                 {
-                    self.start_face_download();
+                    self.start_ocr(None);
                 }
-                if let Some(p) = &self.face_download_progress {
-                    let (d, t) = (p.done(), p.total());
-                    let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(360.0)
-                            .text(if t > 0 {
-                                format!("файлов лиц: {d}/{t}")
-                            } else {
-                                p.msg()
-                            }),
+            }
+        });
+    }
+
+    /// Сводка внизу левой панели: только числа с подписями, без действий.
+    fn stats_block(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Сводка").size(11.0).color(DIM));
+        ui.add_space(2.0);
+        let n = self.items.len();
+        let bytes: i64 = self.items.iter().map(|r| r.size).sum();
+        let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
+        let no_thumb = self.items.iter().filter(|r| r.thumb.is_none()).count();
+        stat_row(ui, "Файлов:", &n.to_string());
+        stat_row(ui, "Объём:", &db::human(bytes));
+        stat_row(ui, "Без даты:", &no_date.to_string());
+        stat_row(ui, "Без превью:", &no_thumb.to_string());
+        ui.add_space(4.0);
+    }
+
+    /// Правая панель: сведения и действия по выбранному файлу.
+    fn details_panel(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Сведения о файле").size(12.0).color(DIM));
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .id_salt("details-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.file_card(ui));
+    }
+
+    /// Карточка файла: превью, метаданные, теги и текст. Одна на весь интерфейс.
+    fn file_card(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.selected else {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(
+                    "Выберите снимок в сетке — здесь появятся дата, камера, теги и текст.",
+                )
+                .size(12.0)
+                .color(DIM),
+            );
+            return;
+        };
+        let Some(f) = self.items.iter().find(|r| r.id == id).cloned() else {
+            return;
+        };
+
+        // Текст с фото читается из БД один раз на файл, а не каждый кадр.
+        if !self.ocr_text.contains_key(&id) && !self.ocr_snippets.contains_key(&id)
+            && let Ok(conn) = db::open(&self.db_path)
+            && let Ok(text) = db::load_ocr(&conn, id)
+        {
+            self.ocr_text.insert(id, text.unwrap_or_default());
+        }
+
+        let w = ui.available_width();
+        let h = (w * 0.75).min(210.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+        let ctx = ui.ctx().clone();
+        let mut cells = Cells {
+            textures: &mut self.textures,
+            missing: &mut self.missing,
+            thumbs_dir: &self.thumbs_dir,
+            selected: self.selected,
+            clicked: None,
+            show_keep: false,
+            keep_clicked: None,
+        };
+        if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
+            let txt = match f.kind.as_str() {
+                "video" => "▶ видео".to_string(),
+                _ => "нет превью".to_string(),
+            };
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                txt,
+                egui::FontId::proportional(12.0),
+                DIM,
+            );
+        }
+        ui.add_space(8.0);
+
+        meta_row(ui, "Путь", &f.path);
+        let date = format!(
+            "{} ({})",
+            f.taken_at
+                .as_deref()
+                .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
+                .unwrap_or_else(|| "—".into()),
+            date_source(&f.taken_src)
+        );
+        meta_row(ui, "Дата", &date);
+        if let Some(c) = &f.camera {
+            meta_row(ui, "Камера", c);
+        }
+        if let (Some(a), Some(b)) = (f.lat, f.lon) {
+            meta_row(ui, "GPS", &format!("{a:.5}, {b:.5}"));
+        }
+        let mut size = format!("{}×{} · {}", f.width, f.height, db::human(f.size));
+        if f.kind == "video"
+            && let Some(d) = f.duration_s
+        {
+            size.push_str(&format!(" · ▶ {}", db::duration(d)));
+        }
+        meta_row(ui, "Размер", &size);
+        meta_row(
+            ui,
+            "SHA256",
+            &format!("{}…", &f.sha256[..16.min(f.sha256.len())]),
+        );
+
+        section_label(ui, "Теги ИИ");
+        let confident = self.tags.get(&id).and_then(|tags| {
+            embed::confident_tag_with(tags, self.settings.tag_show, self.settings.tag_margin)
+                .map(|(tag, _)| tag.to_string())
+        });
+        let mut hide: Option<String> = None;
+        if let Some(tags) = self.tags.get(&id).cloned() {
+            let spacing = ui.spacing_mut().item_spacing.y;
+            ui.spacing_mut().item_spacing.y = 2.0;
+            for (tag, score) in &tags {
+                ui.horizontal(|ui| {
+                    let color = if confident.as_deref() == Some(tag.as_str()) {
+                        ACCENT
+                    } else {
+                        ui.visuals().text_color()
+                    };
+                    ui.label(egui::RichText::new(tag).size(12.0).color(color));
+                    ui.label(
+                        egui::RichText::new(format!("{score:.2}"))
+                            .size(11.0)
+                            .color(DIM),
                     );
-                    ui.label(p.msg());
-                }
-                if ui.button("Проверить модель лиц").clicked() {
-                    match faces::check_model(&self.settings) {
-                        Ok(()) => self.status = "модель лиц проверена: sha256 совпал".into(),
-                        Err(e) => self.status = format!("модель лиц не готова: {e:#}"),
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui
+                                .small_button("убрать")
+                                .on_hover_text("убрать тег у этого фото; оригинал не меняется")
+                                .clicked()
+                            {
+                                hide = Some(tag.clone());
+                            }
+                        },
+                    );
+                });
+            }
+            ui.spacing_mut().item_spacing.y = spacing;
+        } else {
+            ui.label(
+                egui::RichText::new("тег: не посчитан")
+                    .size(12.0)
+                    .color(DIM),
+            );
+        }
+        if let Some(tag) = hide {
+            match db::hide_tag(&self.db_path, id, &tag) {
+                Ok(()) => {
+                    if let Some(tags) = self.tags.get_mut(&id) {
+                        tags.retain(|(t, _)| t != &tag);
                     }
+                    *self.hidden_tags.entry(id).or_insert(0) += 1;
+                    self.status = format!("тег «{tag}» убран у этого фото");
                 }
+                Err(e) => self.status = format!("тег не убран: {e}"),
+            }
+        }
+        let hidden = self.hidden_tags.get(&id).copied().unwrap_or(0);
+        if hidden > 0 && ui.button(format!("вернуть скрытые теги ({hidden})")).clicked() {
+            match db::unhide_tags(&self.db_path, id) {
+                Ok(_) => {
+                    self.reload();
+                    self.status = "скрытые теги возвращены".into();
+                }
+                Err(e) => self.status = format!("теги не вернуть: {e}"),
+            }
+        }
 
-                ui.add_space(8.0);
-                ui.heading("Хранилище");
-                ui.label(format!("БД: {}", self.db_path.display()));
-                ui.label(format!("кэш: {}", db::cache_dir().display()));
-                ui.label(format!("превью: {}", self.thumbs_dir.display()));
-                ui.label(format!(
-                    "модели: {} · {}",
-                    self.settings.models_dir.display(),
-                    db::human(embed::model_bytes_in(
-                        &self.settings.models_dir,
-                        embed::active_entry(&self.settings)
-                    ))
-                ));
-
-                ui.add_space(8.0);
-                ui.heading("Внешние программы");
+        if f.kind == "image" {
+            section_label(ui, "Текст на фото");
+            let label = if self.ocr_text.get(&id).is_some_and(|t| !t.trim().is_empty()) {
+                "Распознать заново"
+            } else {
+                "Распознать текст"
+            };
+            if ui
+                .add_enabled(
+                    self.tesseract.is_some() && self.ocr_rx.is_none(),
+                    egui::Button::new(label),
+                )
+                .on_hover_text("только для этого снимка; оригинал не меняется")
+                .clicked()
+            {
+                self.start_ocr(Some(id));
+            }
+            if self.tesseract.is_none() {
                 ui.label(
-                    "Пусто — программа ищется в PATH. Путь проверяется запуском при сохранении; \
-                     без программы отключается только её работа.",
+                    egui::RichText::new("кнопка погашена: tesseract не запускается")
+                        .size(11.0)
+                        .color(DIM),
                 );
-                for (i, tool) in tools::ALL.into_iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{:<10}", tool.name()));
-                        let input = self.tools_input.get_mut(tool);
-                        ui.add(
-                            egui::TextEdit::singleline(input)
-                                .hint_text("пусто — из PATH")
-                                .desired_width(380.0),
-                        );
-                    });
-                    ui.label(format!("      {}", self.tool_states[i]));
-                    ui.label(format!("      без неё: {}", tool.without()));
-                }
-                if ui.button("Проверить и сохранить программы").clicked() {
-                    self.apply_tools();
-                }
-            });
+            }
+            let shown = self
+                .ocr_snippets
+                .get(&id)
+                .cloned()
+                .or_else(|| self.ocr_text.get(&id).map(|t| t.chars().take(400).collect()))
+                .filter(|t| !t.trim().is_empty());
+            if let Some(text) = shown {
+                ui.add_space(4.0);
+                block(ui, |ui| {
+                    ui.label(highlight_job(ui, &text));
+                });
+            }
+        }
     }
 
     /// Один проход по программам: версия, найденный файл, источник. Запускать в reload/сохранении.
@@ -928,7 +2138,7 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
                 egui::Align2::CENTER_CENTER,
                 "нет кадра",
                 egui::FontId::proportional(12.0),
-                egui::Color32::GRAY,
+                DIM,
             );
         }
         let date = f
@@ -1179,7 +2389,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 egui::Align2::CENTER_CENTER,
                 txt,
                 egui::FontId::proportional(12.0),
-                egui::Color32::GRAY,
+                DIM,
             );
         }
         // Видео видно по кадру-обложке, но подпись с длительностью не даёт спутать его с фото.
@@ -1470,613 +2680,28 @@ impl eframe::App for App {
             }
         }
 
-        egui::Panel::top("top").show(ui, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Каталог:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.path_input)
-                        .hint_text("путь к каталогу с фото")
-                        .desired_width(520.0),
-                );
-                if ui.button("Индексировать").clicked() {
-                    self.start_index();
-                }
-                if ui.button("Обновить").clicked() {
-                    self.reload();
-                }
-                if let Some(p) = &self.progress {
-                    let (d, t) = (p.done(), p.total());
-                    let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                    let text = if t > 0 {
-                        format!("{d}/{t}")
-                    } else {
-                        p.msg()
-                    };
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(220.0)
-                            .text(text),
-                    );
-                    if self.rx.is_some() && ui.button("Стоп").clicked() {
-                        p.cancel();
-                    }
-                }
-            });
-            let semantic_ready = embed::model_present(&self.settings);
-            if semantic_ready || self.ocr_files > 0 {
-                ui.horizontal(|ui| {
-                    ui.label(if self.search_ocr {
-                        "Текст на фото:"
-                    } else {
-                        "Смысловой поиск:"
-                    });
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut self.semantic_query)
-                            .hint_text(if self.search_ocr {
-                                "справка, квитанция, 2024"
-                            } else {
-                                "торт, море, документ"
-                            })
-                            .desired_width(300.0),
-                    );
-                    let enter =
-                        resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let ready = self.search_ocr || semantic_ready;
-                    if ui
-                        .add_enabled(ready, egui::Button::new("Найти"))
-                        .clicked()
-                        || (enter && ready)
-                    {
-                        self.start_search();
-                    }
-                    ui.checkbox(&mut self.search_ocr, "по тексту на фото")
-                        .on_hover_text(
-                            "искать по тексту, распознанному на документе или скриншоте",
-                        );
-                    if self.semantic_hits.is_some() && ui.button("Сбросить").clicked() {
-                        self.semantic_hits = None;
-                        self.ocr_snippets.clear();
-                        self.status = "поиск сброшен".into();
-                    }
-                    if self.search_rx.is_some() {
-                        ui.label("загрузка модели CLIP…");
-                    }
-                    if !semantic_ready && !self.search_ocr {
-                        ui.label("модель не скачана");
-                    }
-                });
-            }
-            if let Some(p) = &self.embed_progress {
-                let (d, t) = (p.done(), p.total());
-                let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(320.0)
-                            .text(if t > 0 {
-                                format!("CLIP: {d}/{t}")
-                            } else {
-                                p.msg()
-                            }),
-                    );
-                    if self.embed_rx.is_some() && ui.button("Стоп").clicked() {
-                        p.cancel();
-                    }
-                });
-            }
-            if let Some(p) = &self.ocr_progress {
-                let (d, t) = (p.done(), p.total());
-                let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(320.0)
-                            .text(if t > 0 {
-                                format!("OCR: {d}/{t}")
-                            } else {
-                                p.msg()
-                            }),
-                    );
-                    if self.ocr_rx.is_some() && ui.button("Стоп").clicked() {
-                        p.cancel();
-                    }
-                });
-            }
-            if let Some(p) = &self.face_progress {
-                let (d, t) = (p.done(), p.total());
-                let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(320.0)
-                            .text(if t > 0 {
-                                format!("Лица: {d}/{t}")
-                            } else {
-                                p.msg()
-                            }),
-                    );
-                    if self.face_rx.is_some() && ui.button("Стоп").clicked() {
-                        p.cancel();
-                    }
-                });
-            }
-            ui.add_space(4.0);
-        });
+        egui::Panel::top("top")
+            .resizable(false)
+            .show(ui, |ui| self.top_bar(ui));
+        egui::Panel::bottom("status")
+            .resizable(false)
+            .show(ui, |ui| self.status_bar(ui));
 
-        egui::Panel::bottom("bottom").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(if self.status.is_empty() { "—" } else { &self.status });
-                if let Some(id) = self.selected
-                    && let Some(f) = self.items.iter().find(|r| r.id == id)
-                {
-                    {
-                        ui.separator();
-                        ui.label(format!(
-                            "{} · {} · {}×{} · {}",
-                            f.kind,
-                            db::human(f.size),
-                            f.width,
-                            f.height,
-                            f.taken_src
-                        ));
-                    }
-                }
-            });
-        });
-
-        // Текст с фото читается из БД один раз на файл, а не каждый кадр.
-        if let Some(id) = self.selected
-            && !self.ocr_text.contains_key(&id)
-            && !self.ocr_snippets.contains_key(&id)
-            && let Ok(conn) = db::open(&self.db_path)
-            && let Ok(text) = db::load_ocr(&conn, id)
-        {
-            self.ocr_text.insert(id, text.unwrap_or_default());
+        // Сведения живут в правой панели, пока в сетке остаются 4 колонки;
+        // на узком окне карточка уходит в левую, а сетка не «съёживется».
+        let details = ui.available_width() >= DETAILS_MIN_W;
+        egui::Panel::left("left")
+            .exact_size(LEFT_W)
+            .resizable(false)
+            .show(ui, |ui| self.left_panel(ui, !details));
+        if details {
+            egui::Panel::right("details")
+                .exact_size(RIGHT_W)
+                .resizable(false)
+                .show(ui, |ui| self.details_panel(ui));
         }
 
-        let mut unhide_file: Option<i64> = None;
-        let mut ocr_file: Option<i64> = None;
-        egui::Panel::left("left").default_size(260.0).show(ui, |ui| {
-            ui.add_space(6.0);
-            ui.heading("photocat");
-            ui.label(
-                egui::RichText::new("семейный архив")
-                    .small()
-                    .color(egui::Color32::from_gray(150)),
-            );
-            ui.separator();
-            ui.label(egui::RichText::new("БИБЛИОТЕКА").small().weak());
-            ui.selectable_value(&mut self.view, View::Grid, "Все файлы");
-            ui.selectable_value(&mut self.view, View::Dupes, "Дубли и серии");
-            ui.selectable_value(&mut self.view, View::Calendar, "Календарь");
-            ui.selectable_value(&mut self.view, View::Faces, "Лица");
-            ui.selectable_value(&mut self.view, View::Settings, "Настройки");
-            ui.separator();
-            ui.label("Поиск по пути/дате:");
-            ui.add(egui::TextEdit::singleline(&mut self.query).desired_width(f32::INFINITY));
-            ui.checkbox(&mut self.only_images, "только изображения");
-            ui.separator();
-
-            if self.view == View::Dupes {
-                ui.label("Порог похожести (бит из 64):");
-                let resp = ui.add(egui::Slider::new(&mut self.max_dist, 0..=16));
-                if resp.changed() {
-                    self.settings.max_dist = self.max_dist;
-                    self.save_settings();
-                }
-                if ui.button("Найти группы").clicked() {
-                    let t = std::time::Instant::now();
-                    self.groups = dupes::find_groups(&self.items, self.max_dist);
-                    let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
-                    self.status = format!(
-                        "групп: {}, дублей на {}, за {:.1} с",
-                        self.groups.len(),
-                        db::human(waste),
-                        t.elapsed().as_secs_f32()
-                    );
-                }
-                let sum = dupes::summary(&self.items, &self.groups);
-                ui.label(format!(
-                    "в группах {}, помечено лишними {}, освободится {}",
-                    sum.groups,
-                    sum.marked_drop,
-                    db::human(sum.freed)
-                ));
-                let has_groups = !self.groups.is_empty();
-                if ui
-                    .add_enabled(has_groups, egui::Button::new("Экспорт плана"))
-                    .clicked()
-                {
-                    let path = db::cache_dir().join("plan.csv");
-                    let csv = dupes::plan_csv(&self.items, &self.groups);
-                    match std::fs::write(&path, &csv) {
-                        Ok(()) => {
-                            self.status = format!(
-                                "план записан: {} (строк {})",
-                                path.display(),
-                                csv.lines().count().saturating_sub(1)
-                            )
-                        }
-                        Err(e) => self.status = format!("план не записан: {e}"),
-                    }
-                }
-                if ui
-                    .add_enabled(has_groups, egui::Button::new("Скопировать список в буфер"))
-                    .clicked()
-                {
-                    ctx.copy_text(dupes::plan_csv(&self.items, &self.groups));
-                    self.status = "план скопирован в буфер обмена".into();
-                }
-                ui.label(format!("найдено групп: {}", self.groups.len()));
-                let no_sharp = self
-                    .items
-                    .iter()
-                    .filter(|r| r.kind == "image" && r.sharpness.is_none())
-                    .count();
-                if no_sharp > 0 {
-                    ui.label(format!(
-                        "резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог"
-                    ));
-                }
-            }
-
-            if self.view == View::Faces {
-                ui.separator();
-                ui.label(format!(
-                    "Порог склейки лиц: {:.2}",
-                    self.settings.face_threshold
-                ));
-                let r = ui.add(
-                    egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70)
-                        .step_by(0.01),
-                );
-                if r.drag_stopped() || r.lost_focus() {
-                    self.save_settings();
-                }
-                ui.label(
-                    "Выше порог — меньше ложных склеек, но один человек может разбиться на группы.",
-                );
-                let model = faces::model_present(&self.settings);
-                if model {
-                    ui.label(format!(
-                        "модель лиц {} · {}",
-                        faces::MODEL_ID,
-                        db::human(faces::model_bytes(&self.settings))
-                    ));
-                } else {
-                    ui.label("модель лиц не скачана");
-                    if ui.button("Настройки лиц").clicked() {
-                        self.view = View::Settings;
-                    }
-                }
-                ui.label(format!(
-                    "лиц: {} на {} снимках, групп: {}",
-                    self.face_faces,
-                    self.face_photos,
-                    self.face_clusters.len()
-                ));
-                ui.label(format!(
-                    "ещё без лиц: {} из {} снимков",
-                    self.face_todo, self.face_images
-                ));
-                if self.face_rx.is_some() {
-                    if let Some(p) = &self.face_progress {
-                        if ui.button("Стоп").clicked() {
-                            p.cancel();
-                            self.status = "лица: останавливаю после текущих снимков…".into();
-                        }
-                    } else {
-                        ui.label("пересобираю группы…");
-                    }
-                } else {
-                    let scan_label = if self.face_todo < self.face_images {
-                        format!("Продолжить ({})", self.face_todo)
-                    } else {
-                        format!("Найти лица ({})", self.face_todo)
-                    };
-                    if ui
-                        .add_enabled(model && self.face_todo > 0, egui::Button::new(scan_label))
-                        .on_hover_text(
-                            "долгий проход: детекция и эмбеддинги локально, без сети; \
-                             уже просканированные снимки пропускаются по sha256",
-                        )
-                        .clicked()
-                    {
-                        self.start_faces();
-                    }
-                    if ui
-                        .add_enabled(self.face_faces > 0, egui::Button::new("Пересобрать группы"))
-                        .on_hover_text("порог применяется к лицам; ручные подписи и разъединения сохраняются")
-                        .clicked()
-                    {
-                        self.start_face_clusters();
-                    }
-                }
-                ui.separator();
-                ui.label(egui::RichText::new("ГРУППЫ").small().weak());
-                let clusters = self.face_clusters.clone();
-                egui::ScrollArea::vertical()
-                    .id_salt("face-clusters")
-                    .max_height(250.0)
-                    .show(ui, |ui| {
-                        if ui
-                            .selectable_label(
-                                self.face_selected_cluster.is_none(),
-                                format!("Все лица · {}", self.face_faces),
-                            )
-                            .clicked()
-                        {
-                            self.face_selected_cluster = None;
-                            self.face_label_input.clear();
-                        }
-                        for c in clusters {
-                            let label = if c.label.is_empty() {
-                                "без имени".to_string()
-                            } else {
-                                c.label.clone()
-                            };
-                            if ui
-                                .selectable_label(
-                                    self.face_selected_cluster == Some(c.id),
-                                    format!("{label} · {} фото", c.photos),
-                                )
-                                .clicked()
-                            {
-                                self.face_selected_cluster = Some(c.id);
-                                self.face_label_input = c.label;
-                            }
-                        }
-                    });
-            }
-
-            ui.separator();
-            ui.heading("Модель ИИ");
-            if embed::model_present(&self.settings) {
-                let entry = embed::active_entry(&self.settings);
-                ui.label(format!(
-                    "{}: {} · {} признаков",
-                    entry.title,
-                    db::human(embed::model_bytes_in(&self.settings.models_dir, entry)),
-                    embed::DIM
-                ));
-                if ui
-                    .add_enabled(
-                        self.embed_rx.is_none(),
-                        egui::Button::new("Посчитать теги"),
-                    )
-                    .clicked()
-                {
-                    self.start_embed();
-                }
-                ui.label("Фильтр по уверенному тегу:");
-                egui::ComboBox::from_id_salt("tag_filter")
-                    .selected_text(self.tag_filter.clone().unwrap_or_else(|| "все".into()))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.tag_filter, None, "все");
-                        for label in embed::TAG_LABELS {
-                            ui.selectable_value(
-                                &mut self.tag_filter,
-                                Some(label.to_string()),
-                                label,
-                            );
-                        }
-                    });
-                let tagged = self
-                    .items
-                    .iter()
-                    .filter(|r| {
-                        self.tags.get(&r.id).is_some_and(|t| {
-                            embed::confident_tag_with(
-                                t,
-                                self.settings.tag_show,
-                                self.settings.tag_margin,
-                            )
-                            .is_some()
-                        })
-                    })
-                    .count();
-                ui.label(format!("с уверенным тегом: {tagged}"));
-                if let Some(hits) = &self.semantic_hits {
-                    ui.label(format!("смысловой поиск: {} файлов", hits.len()));
-                }
-            } else {
-                ui.label("модель не скачана");
-            }
-            if ui.button("Настройки модели").clicked() {
-                self.view = View::Settings;
-            }
-
-            ui.separator();
-            ui.label(egui::RichText::new("ТЕКСТ НА ФОТО").small().weak());
-            match &self.tesseract {
-                Some(v) => {
-                    ui.label(egui::RichText::new(v).small().color(egui::Color32::from_gray(150)));
-                }
-                None => {
-                    ui.label(
-                        "tesseract не запускается — укажите путь в «Настройках» \
-                         или установите tesseract и языки rus, eng",
-                    );
-                }
-            }
-            let images = self.items.iter().filter(|r| r.kind == "image").count();
-            ui.label(format!("с текстом: {} из {} снимков", self.ocr_files, images));
-            if self.ocr_chars > 0 {
-                ui.label(format!("знаков: {}", self.ocr_chars));
-            }
-            ui.label(format!(
-                "кандидатов на проход: {}, осталось {}",
-                self.ocr_candidates, self.ocr_remaining
-            ));
-            if self.ocr_rx.is_some() {
-                if ui.button("Стоп").clicked()
-                    && let Some(p) = &self.ocr_progress
-                {
-                    p.cancel();
-                    self.status = "OCR: останавливаю после текущих файлов…".into();
-                }
-            } else if ui
-                .add_enabled(
-                    self.tesseract.is_some() && self.ocr_remaining > 0,
-                    egui::Button::new(if self.ocr_remaining < self.ocr_candidates {
-                        format!("Продолжить ({})", self.ocr_remaining)
-                    } else {
-                        format!("Распознать документы ({})", self.ocr_candidates)
-                    }),
-                )
-                .on_hover_text(
-                    "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
-                     один снимок — кнопкой в карточке файла",
-                )
-                .clicked()
-            {
-                self.start_ocr(None);
-            }
-
-            ui.separator();
-            let n = self.items.len();
-            let bytes: i64 = self.items.iter().map(|r| r.size).sum();
-            let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
-            let no_thumb = self.items.iter().filter(|r| r.thumb.is_none()).count();
-            ui.label(format!("файлов: {n}"));
-            ui.label(format!("объём: {}", db::human(bytes)));
-            ui.label(format!("без даты: {no_date}"));
-            ui.label(format!("без превью: {no_thumb}"));
-
-            if let Some(id) = self.selected
-                && let Some(f) = self.items.iter().find(|r| r.id == id)
-            {
-                {
-                    ui.separator();
-                    ui.heading("Файл");
-                    ui.label(format!("путь: {}", f.path));
-                    ui.label(format!("дата: {}", f.taken_at.clone().unwrap_or_else(|| "—".into())));
-                    if let Some(c) = &f.camera {
-                        ui.label(format!("камера: {c}"));
-                    }
-                    if let (Some(a), Some(b)) = (f.lat, f.lon) {
-                        ui.label(format!("GPS: {a:.5}, {b:.5}"));
-                    }
-                    if f.kind == "video" {
-                        ui.label(match f.duration_s {
-                            Some(d) => format!("длительность: {}", db::duration(d)),
-                            None => "длительность: —".into(),
-                        });
-                    }
-                    let confident = self.tags.get(&id).and_then(|tags| {
-                        embed::confident_tag_with(
-                            tags,
-                            self.settings.tag_show,
-                            self.settings.tag_margin,
-                        )
-                        .map(|(tag, _)| tag.to_string())
-                    });
-                    let mut hide: Option<String> = None;
-                    if let Some(tags) = self.tags.get(&id) {
-                        ui.label("теги:");
-                        for (tag, score) in tags {
-                            ui.horizontal(|ui| {
-                                let color = if confident.as_deref() == Some(tag.as_str()) {
-                                    egui::Color32::from_rgb(90, 170, 255)
-                                } else {
-                                    egui::Color32::from_gray(190)
-                                };
-                                ui.label(
-                                    egui::RichText::new(format!("{tag} ({score:.2})"))
-                                        .color(color),
-                                );
-                                if ui
-                                    .small_button("убрать")
-                                    .on_hover_text(
-                                        "убрать тег у этого фото; оригинал не меняется",
-                                    )
-                                    .clicked()
-                                {
-                                    hide = Some(tag.clone());
-                                }
-                            });
-                        }
-                    } else {
-                        ui.label("тег: не посчитан");
-                    }
-                    if let Some(tag) = hide {
-                        match db::hide_tag(&self.db_path, id, &tag) {
-                            Ok(()) => {
-                                if let Some(tags) = self.tags.get_mut(&id) {
-                                    tags.retain(|(t, _)| t != &tag);
-                                }
-                                *self.hidden_tags.entry(id).or_insert(0) += 1;
-                                self.status = format!("тег «{tag}» убран у этого фото");
-                            }
-                            Err(e) => self.status = format!("тег не убран: {e}"),
-                        }
-                    }
-                    let hidden = self.hidden_tags.get(&id).copied().unwrap_or(0);
-                    if hidden > 0
-                        && ui.button(format!("вернуть скрытые теги ({hidden})")).clicked()
-                    {
-                        unhide_file = Some(id);
-                    }
-                    if f.kind == "image" {
-                        let label = if self
-                            .ocr_text
-                            .get(&id)
-                            .is_some_and(|t| !t.trim().is_empty())
-                        {
-                            "Распознать заново"
-                        } else {
-                            "Распознать текст"
-                        };
-                        if ui
-                            .add_enabled(
-                                self.tesseract.is_some() && self.ocr_rx.is_none(),
-                                egui::Button::new(label),
-                            )
-                            .on_hover_text("только для этого снимка; оригинал не меняется")
-                            .clicked()
-                        {
-                            ocr_file = Some(id);
-                        }
-                    }
-                    let shown = self
-                        .ocr_snippets
-                        .get(&id)
-                        .cloned()
-                        .or_else(|| {
-                            self.ocr_text.get(&id).map(|t| {
-                                t.chars().take(400).collect::<String>()
-                            })
-                        })
-                        .filter(|t| !t.trim().is_empty());
-                    if let Some(text) = shown {
-                        ui.separator();
-                        ui.label("текст с фото:");
-                        ui.label(highlight_job(ui, &text));
-                    }
-                    ui.label(format!("sha256: {}…", &f.sha256[..16.min(f.sha256.len())]));
-                }
-            }
-        });
-
-        if let Some(id) = ocr_file {
-            self.start_ocr(Some(id));
-        }
-
-        if let Some(id) = unhide_file {
-            match db::unhide_tags(&self.db_path, id) {
-                Ok(_) => {
-                    self.reload();
-                    self.status = "скрытые теги возвращены".into();
-                }
-                Err(e) => self.status = format!("теги не вернуть: {e}"),
-            }
-        }
-
-        if self.view == View::Settings {
-            egui::CentralPanel::default().show(ui, |ui| self.settings_view(ui));
-            return;
-        }
+        self.settings_modal(ctx);
 
         let visible = self.filtered();
         let items = std::mem::take(&mut self.items);
@@ -2103,15 +2728,69 @@ impl eframe::App for App {
         let face_selected = self.face_selected_cluster;
         let mut face_label_input = self.face_label_input.clone();
         let face_total = self.face_faces;
+        let face_photos = self.face_photos;
         let mut face_save_label: Option<String> = None;
+        let mut reset = false;
         let view = self.view;
         let mut cal_year = self.cal_year;
         let mut cal_month = self.cal_month;
         let mut cal_day = self.cal_day.clone();
 
-        egui::CentralPanel::default().show(ui, |ui| match view {
+        let (title, count) = match view {
+            View::Grid => (
+                "Все файлы".to_string(),
+                if visible.len() == items.len() {
+                    format!("· файлов {}", items.len())
+                } else {
+                    format!("· файлов {} из {}", visible.len(), items.len())
+                },
+            ),
+            View::Dupes => {
+                let waste: i64 = groups.iter().map(|g| g.waste).sum();
+                (
+                    "Дубли и серии".to_string(),
+                    format!("· групп {}, зря {}", groups.len(), db::human(waste)),
+                )
+            }
+            View::Calendar => (
+                "Календарь".to_string(),
+                format!(
+                    "· {} {}",
+                    MONTHS[(cal_month.clamp(1, 12) - 1) as usize],
+                    cal_year
+                ),
+            ),
+            View::Faces => (
+                "Лица".to_string(),
+                format!("· лиц {} на {} снимках", face_total, face_photos),
+            ),
+        };
+
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(title).size(14.0));
+                ui.label(egui::RichText::new(count).size(12.0).color(DIM));
+            });
+            ui.add_space(4.0);
+            ui.separator();
+            match view {
             View::Grid => {
+                if items.is_empty() {
+                    ui.add_space(12.0);
+                    ui.label("Введите каталог и нажмите «Индексировать».");
+                    return;
+                }
+                if visible.is_empty() {
+                    ui.add_space(12.0);
+                    ui.label("ничего не найдено");
+                    if ui.button("Сбросить фильтр").clicked() {
+                        reset = true;
+                    }
+                    return;
+                }
                 egui::ScrollArea::vertical()
+                    .id_salt("grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -2443,8 +3122,13 @@ impl eframe::App for App {
                          Ложную склейку разъединяет кнопка «не он» на плитке.",
                     );
                 } else {
-                    ui.heading(format!("Все лица · {face_total}"));
-                    ui.label("Выберите группу слева, чтобы дать ей имя, или разъединяйте плитки.");
+                    ui.label(
+                        egui::RichText::new(
+                            "Выберите группу слева, чтобы дать ей имя, или разъединяйте плитки.",
+                        )
+                        .size(12.0)
+                        .color(DIM),
+                    );
                 }
                 let shown: Vec<&db::FaceView> = face_views
                     .iter()
@@ -2466,7 +3150,7 @@ impl eframe::App for App {
                         });
                     });
             }
-            View::Settings => unreachable!("настройки рисуются до сетки"),
+            }
         });
 
         self.items = items;
@@ -2549,6 +3233,9 @@ impl eframe::App for App {
         {
             self.selected = Some(file_id);
             self.view = View::Grid;
+        }
+        if reset {
+            self.reset_filters();
         }
     }
 }
