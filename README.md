@@ -51,7 +51,12 @@ bash scripts/fetch-model.sh
 ./target/release/photocat faces label --id 5 --name Лиза
 ./target/release/photocat faces split --id 123
 
-# 8. GUI
+# 8. Целостность и бэкап (только чтение, код 0 — совпало, 1 — есть расхождения)
+./target/release/photocat verify ~/Фото ~/backup/Фото
+./target/release/photocat manifest ~/Фото --out ~/Фото.sha256
+./target/release/photocat verify --manifest ~/Фото.sha256 ~/backup/Фото
+
+# 9. GUI
 ./target/release/photocat gui
 ./target/release/photocat gui --db /путь/к/фотокат.db
 ```
@@ -77,6 +82,7 @@ bash scripts/fetch-model.sh
 | Превью видео через ffmpeg, dHash и длительность, видео в дублях и CLIP | ✅ |
 | Настройки: модель, пороги, пути к ffmpeg/ffprobe/tesseract/curl с проверкой; `doctor` | ✅ |
 | «Лучший кадр из серии»: совет по резкости/разрешению/размеру | ✅ |
+| Сверка двух копий архива (`verify`, размер → sha256) и слепок `sha256sum` (`manifest`) | ✅ |
 
 ## Продолжить в новой сессии
 
@@ -89,7 +95,7 @@ bash scripts/fetch-model.sh
 | `plan/BACKLOG.md` | задачи M2–M8 с критериями приёмки |
 | `docs/ARCHITECTURE.md` | слои, поток индексации, схема БД, замеры |
 | `docs/UI.md` | экраны, метрики, состояния, тексты, клавиатура |
-| `docs/DECISIONS.md` | 21 короткий ADR: egui, SQLite, dHash, решения в БД, CLIP/ONNX, лица, внешние программы, неприкосновенность файлов |
+| `docs/DECISIONS.md` | 23 коротких ADR: egui, SQLite, dHash, решения в БД, CLIP/ONNX, лица, внешние программы, неприкосновенность файлов, сверка и слепок |
 | `.pi/skills/ui-design` | процедура и рубрика для любого экрана |
 | `.pi/skills/add-view` | добавить вид/вкладку/фильтр целиком, с ловушками borrow checker |
 | `.pi/skills/enforce-architecture` | машинная проверка слоёв и запретов (`scripts/check.sh`) |

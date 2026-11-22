@@ -40,8 +40,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 
 Что проверяется:
 
-1. `use crate::<модуль>` не выходит за карту слоёв (`derive` ↓, `db` ↓, `index`/`dupes`/`organize`,
-   `app`/`main` сверху).
+1. `use crate::<модуль>` не выходит за карту слоёв (`derive` ↓, `db` ↓,
+   `index`/`dupes`/`organize`/`verify`, `app`/`main` сверху).
 2. `egui`/`eframe` встречается только в `src/app.rs`.
 3. В `src/` нет `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` — оригиналы
    архива неприкосновенны (ADR 0005).
@@ -62,10 +62,12 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 - Проверить: схема меняется только через `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE`, данные не
   теряются; `human()` — единственный форматер объёмов.
 
-### `index` / `dupes` / `organize` (L2)
-- Разрешено: L0, L1, `rayon` (только `index`), `walkdir` (только `index`).
+### `index` / `dupes` / `organize` / `verify` (L2)
+- Разрешено: L0, L1, `rayon` и `walkdir` в `index` и `verify`.
 - Запрещено: `egui`, `eframe`, чтение настроек GUI.
-- Проверить: `organize` без `--apply` ничего не создаёт; `dupes` не пишет в БД.
+- Проверить: `organize` без `--apply` ничего не создаёт; `dupes` не пишет в БД; `verify` и
+  `manifest` только читают архив, `manifest` пишет единственный файл по явному `--out`, и только
+  целиком (неполный слепок не создаётся).
 
 ### `app` (L3)
 - Разрешено: всё ниже + `eframe`/`egui`.
@@ -79,6 +81,7 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 - В `dupes.rs` появился `image::open`.
 - В `db.rs` появился `use crate::derive`.
 - `organize` научился удалять «лишнее» вместо отчёта.
+- `verify` или `manifest` пишут в каталог архива без явного `--out` или удаляют файлы.
 - Новая зависимость без строки в `docs/DECISIONS.md`.
 
 ## Итог

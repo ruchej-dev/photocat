@@ -24,11 +24,12 @@ declare -A ALLOWED=(
   [index]="derive db tools"
   [dupes]="db derive"
   [organize]="db"
+  [verify]="db derive"
   [embed]="derive db tools"
   [ocr]="derive db tools"
   [faces]="derive db embed"
   [app]="derive db index dupes organize embed ocr faces tools"
-  [main]="derive db index dupes organize embed ocr faces app tools"
+  [main]="derive db index dupes organize verify embed ocr faces app tools"
 )
 
 echo "1. зависимости между модулями"

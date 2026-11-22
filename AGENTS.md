@@ -57,6 +57,7 @@
 | `src/ocr.rs` | L2 | кандидаты на текст, проход `tesseract`, запись текста в БД | egui, декодирование картинок |
 | `src/faces.rs` | L2 | SCRFD-детекция, выравнивание, ArcFace-эмбеддинги, кластеры лиц | egui, прямые SQL-строки |
 | `src/organize.rs` | L2 | план по датам, hardlink/copy/symlink | egui |
+| `src/verify.rs` | L2 | сверка двух копий, слепок sha256sum | БД-схема, egui |
 | `src/app.rs` | L3 | весь GUI на egui | прямые вызовы SQL |
 | `src/main.rs` | L3 | разбор CLI, подкоманды | — |
 
@@ -91,6 +92,9 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat stats
 ./target/release/photocat dupes --max-dist 6
 ./target/release/photocat organize --out DIR            # dry-run
+./target/release/photocat verify A B                    # две копии: размер → sha256, код 0/1
+./target/release/photocat manifest DIR --out file.sha256 # слепок для будущих проверок
+./target/release/photocat verify --manifest file.sha256 DIR  # проверить по слепку
 ./target/release/photocat embed                          # CLIP-эмбеддинги и теги (локально)
 ./target/release/photocat search "торт" --top 20         # смысловой поиск
 ./target/release/photocat faces                          # лица: детекция, эмбеддинги, группы

@@ -6,6 +6,8 @@
 //!   photocat dupes [--max-dist 6] [--csv FILE] [--plan FILE]
 //!   photocat organize --out <каталог> [--by day|month|event] [--name ШАБЛОН]
 //!                     [--exclude-dup] [--apply] [--copy|--symlink] [--rename]
+//!   photocat verify <a> <b> [--jobs N] [--all]  |  verify --manifest FILE <dir>
+//!   photocat manifest [каталог] [--out FILE] [--jobs N]
 //!   photocat embed [--jobs N] [--batch N]
 //!   photocat ocr [--jobs N] [--all]
 //!   photocat search <запрос> [--top N] [--text]
@@ -22,6 +24,7 @@ mod index;
 mod ocr;
 mod organize;
 mod tools;
+mod verify;
 
 use anyhow::Result;
 use db::Progress;
@@ -40,6 +43,9 @@ fn usage() {
   organize --out DIR [--by day|month|event] [--name ШАБЛОН] [--exclude-dup] [--apply]
                                             план (и применение) витрины: по дням, месяцам или
                                             событиям; имена из {{date}} {{time}} {{camera}} {{tag}}
+  verify <a> <b> [--jobs N] [--all]        сверка двух копий: размер → sha256, отчёт
+  verify --manifest FILE <каталог>         проверить каталог по слепку sha256
+  manifest [DIR] [--out FILE] [--jobs N]  слепок каталога в формате sha256sum
   embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
   faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
                                             лица: детекция, эмбеддинги, группы
@@ -105,6 +111,8 @@ fn main() -> Result<()> {
         }
         "dupes" => dupes::cli(&args[1..]),
         "organize" => organize::cli(&args[1..]),
+        "verify" => verify::cli(&args[1..]),
+        "manifest" => verify::manifest_cli(&args[1..]),
         "embed" => {
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let jobs = flag_num(&args, "--jobs", 8);
