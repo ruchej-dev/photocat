@@ -18,15 +18,17 @@ echo "photocat: проверка границ ($ROOT)"
 
 # ---------------------------------------------------------------- 1. слои
 declare -A ALLOWED=(
-  [derive]=""
-  [db]=""
-  [index]="derive db"
+  [derive]="tools"
+  [db]="tools"
+  [tools]=""
+  [index]="derive db tools"
   [dupes]="db derive"
   [organize]="db"
-  [embed]="derive db"
-  [ocr]="derive db"
-  [app]="derive db index dupes organize embed ocr"
-  [main]="derive db index dupes organize embed ocr app"
+  [embed]="derive db tools"
+  [ocr]="derive db tools"
+  [faces]="derive db embed"
+  [app]="derive db index dupes organize embed ocr faces tools"
+  [main]="derive db index dupes organize embed ocr faces app tools"
 )
 
 echo "1. зависимости между модулями"
@@ -73,7 +75,16 @@ if [[ -n $bad ]]; then
 else
   pass
 fi
-bad=$(grep -nE 'Command::new\("curl"\)' src/*.rs 2>/dev/null | grep -v '^src/embed.rs:' || true)
+bad=$(grep -nE 'Command::new\("(curl|ffmpeg|ffprobe|tesseract)"\)' src/*.rs 2>/dev/null \
+  | grep -v '^src/tools.rs:' || true)
+if [[ -n $bad ]]; then
+  err "внешняя программа запускается мимо src/tools.rs (ADR 0019):"
+  echo "$bad" | sed 's/^/      /'
+else
+  pass
+fi
+# curl разрешён только загрузчику весов; сам запуск живёт в tools.rs.
+bad=$(grep -nE 'command\(Tool::Curl\)' src/*.rs 2>/dev/null | grep -v -e '^src/embed.rs:' -e '^src/tools.rs:' || true)
 if [[ -n $bad ]]; then
   err "curl запускается вне src/embed.rs (ADR 0016):"
   echo "$bad" | sed 's/^/      /'

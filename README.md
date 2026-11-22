@@ -1,6 +1,6 @@
 # photocat
 
-Каталогизатор медиаархива на Rust: индексация, поиск дублей и похожих снимков, раскладка по датам, (далее) ML-теги по содержимому.
+Каталогизатор медиаархива на Rust: индексация, поиск дублей и похожих снимков, смысловые теги, OCR и лица — всё локально; раскладка по датам.
 
 ## Сборка
 
@@ -35,7 +35,19 @@ bash scripts/fetch-model.sh
 ./target/release/photocat search "торт" --top 20
 ./target/release/photocat clusters --k 30              # → plan/M3-clusters.md
 
-# 6. GUI
+# 6. Текст на документах и скриншотах (нужен tesseract с языками rus+eng)
+./target/release/photocat ocr --dry-run
+./target/release/photocat ocr
+./target/release/photocat search "справка" --text
+
+# 7. Лица: детекция, группы, имена (модель 182.4 МиБ — в «Настройках» с согласием)
+./target/release/photocat faces --dry-run
+./target/release/photocat faces
+./target/release/photocat faces --list
+./target/release/photocat faces label --id 5 --name Лиза
+./target/release/photocat faces split --id 123
+
+# 8. GUI
 ./target/release/photocat gui
 ./target/release/photocat gui --db /путь/к/фотокат.db
 ```
@@ -56,9 +68,10 @@ bash scripts/fetch-model.sh
 | CLIP-эмбеддинги (ONNX, CPU), смысловой поиск «торт», «море», «документ» на русском | ✅ |
 | Теги CLIP (пляж, документ, скриншот, еда, животные, дети, праздник) в карточке и фильтре | ✅ |
 | Кластеры CLIP: 30 групп × 12 примеров в `plan/M3-clusters.md` | ✅ |
-| Лица (кластеры по людям) | ⏳ M6 |
-| OCR документов/скриншотов (tesseract) | ⏳ |
-| Превью видео через ffmpeg | ⏳ |
+| Лица: SCRFD + ArcFace, группы, подписи вручную, «не он» для ложных склеек | ✅ |
+| OCR документов/скриншотов (tesseract), поиск по тексту с подсветкой | ✅ |
+| Превью видео через ffmpeg, dHash и длительность, видео в дублях и CLIP | ✅ |
+| Настройки: модель, пороги, пути к ffmpeg/ffprobe/tesseract/curl с проверкой; `doctor` | ✅ |
 | «Лучший кадр из серии»: совет по резкости/разрешению/размеру | ✅ |
 
 ## Продолжить в новой сессии
@@ -72,7 +85,7 @@ bash scripts/fetch-model.sh
 | `plan/BACKLOG.md` | задачи M2–M8 с критериями приёмки |
 | `docs/ARCHITECTURE.md` | слои, поток индексации, схема БД, замеры |
 | `docs/UI.md` | экраны, метрики, состояния, тексты, клавиатура |
-| `docs/DECISIONS.md` | 13 коротких ADR: egui, SQLite, dHash, решения в БД, CLIP/ONNX, неприкосновенность файлов |
+| `docs/DECISIONS.md` | 21 короткий ADR: egui, SQLite, dHash, решения в БД, CLIP/ONNX, лица, внешние программы, неприкосновенность файлов |
 | `.pi/skills/ui-design` | процедура и рубрика для любого экрана |
 | `.pi/skills/add-view` | добавить вид/вкладку/фильтр целиком, с ловушками borrow checker |
 | `.pi/skills/enforce-architecture` | машинная проверка слоёв и запретов (`scripts/check.sh`) |

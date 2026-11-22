@@ -4,6 +4,7 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::tools::Tool;
 use anyhow::Result;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -117,7 +118,11 @@ fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>
     let images = rows.iter().filter(|r| r.kind == "image").count();
     let selected = rows
         .into_iter()
-        .filter(|r| all || wants_text(r, &tags, settings.tag_show, settings.tag_margin))
+        // `--all` расширяет эвристику до всех снимков, но не трогает видео: кадр-обложка не документ.
+        .filter(|r| {
+            r.kind == "image"
+                && (all || wants_text(r, &tags, settings.tag_show, settings.tag_margin))
+        })
         .collect();
     Ok((images, selected))
 }
@@ -151,7 +156,9 @@ fn run_selected(
 ) -> Result<Stats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
-    let lang = db::load_settings(&conn).ocr_lang;
+    let settings = db::load_settings(&conn);
+    let lang = settings.ocr_lang.clone();
+    let tools = settings.tools.clone();
     // Явно выбранный файл распознаём независимо от эвристики.
     let (_, selected) = select(&conn, all || only.is_some())?;
     let selected: Vec<FileRow> = match only {
@@ -185,10 +192,11 @@ fn run_selected(
         });
     }
 
-    if !todo.is_empty() && derive::tesseract_version().is_none() {
+    if !todo.is_empty() && tools.probe(Tool::Tesseract).is_none() {
         anyhow::bail!(
-            "tesseract не найден в PATH — установите tesseract и языковые пакеты ({lang}); \
-             остальной функционал работает без него"
+            "tesseract не запускается ({}) — установите tesseract и языковые пакеты ({lang}) \
+             или укажите путь в настройках; остальной функционал работает без него",
+            tools.source(Tool::Tesseract)
         );
     }
 
@@ -226,7 +234,7 @@ fn run_selected(
             if progress.as_ref().is_some_and(|p| p.cancelled()) {
                 return;
             }
-            match derive::ocr_image(Path::new(&f.path), &lang, MAX_SIDE) {
+            match derive::ocr_image(&tools, Path::new(&f.path), &lang, MAX_SIDE) {
                 Ok(text) => {
                     let _ = tx.send((f.id, f.sha256.clone(), text));
                 }
@@ -346,5 +354,30 @@ mod tests {
     #[test]
     fn video_is_never_an_ocr_candidate() {
         assert!(!wants_text(&row("video", None), &HashMap::new(), SHOW, MARGIN));
+    }
+
+    #[test]
+    fn all_still_skips_videos() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "pc-ocr-all-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let conn = db::open(&path).unwrap();
+        let mut image = row("image", Some("Pixel"));
+        image.path = "/a.jpg".into();
+        db::insert(&conn, &image).unwrap();
+        let mut video = row("video", None);
+        video.path = "/v.mp4".into();
+        video.id = 2;
+        db::insert(&conn, &video).unwrap();
+        drop(conn);
+
+        let plan = plan(&path, true).unwrap();
+        assert_eq!(plan.images, 1);
+        assert_eq!(plan.candidates, 1);
     }
 }

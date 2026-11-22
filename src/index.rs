@@ -2,6 +2,7 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::tools;
 use anyhow::Result;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -37,6 +38,7 @@ pub fn run(
     root: &Path,
     jobs: usize,
     db_path: &Path,
+    tools: &tools::Tools,
     progress: Option<Arc<Progress>>,
 ) -> Result<Stats> {
     let t0 = std::time::Instant::now();
@@ -91,7 +93,7 @@ pub fn run(
             if progress.as_ref().is_some_and(|p| p.cancelled()) {
                 return;
             }
-            let res = process(path, &root, &thumbs_dir);
+            let res = process(path, &root, &thumbs_dir, tools);
             match res {
                 Ok((rec, size, soft_error)) => {
                     bytes.fetch_add(size, std::sync::atomic::Ordering::Relaxed);
@@ -133,7 +135,12 @@ pub fn run(
     })
 }
 
-fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64, bool)> {
+fn process(
+    p: &Path,
+    _root: &Path,
+    thumbs_dir: &Path,
+    tools: &tools::Tools,
+) -> Result<(FileRow, i64, bool)> {
     let md = std::fs::metadata(p)?;
     let size = md.len() as i64;
     let mtime = md
@@ -170,7 +177,7 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64, b
             }
         }
     } else if kind == "video" {
-        match derive::analyze_video(p, thumbs_dir, key, 320) {
+        match derive::analyze_video(tools, p, thumbs_dir, key, 320) {
             Ok(info) => {
                 width = info.width;
                 height = info.height;

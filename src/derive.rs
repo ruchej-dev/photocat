@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 //! Извлечение метаданных: sha256, перцептивный dHash, EXIF (дата, GPS, камера), превью.
 
+use crate::tools::{self, Tool};
 use anyhow::{Context, Result};
 use image::GenericImageView;
 use image_hasher::{HashAlg, HasherConfig};
@@ -8,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub const IMG_EXT: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif",
@@ -272,21 +273,6 @@ pub fn thumb_path(thumbs_dir: &Path, rel: &str) -> PathBuf {
     thumbs_dir.join(rel)
 }
 
-/// Запустить внешнюю программу без консольного окна на Windows.
-fn quiet_command(program: &str) -> Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let mut cmd = Command::new(program);
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        cmd
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new(program)
-    }
-}
-
 /// Что ffprobe знает о видео: разрешение с учётом поворота и длительность.
 #[derive(Debug, Clone, Copy)]
 pub struct VideoMeta {
@@ -297,8 +283,9 @@ pub struct VideoMeta {
 
 /// Длительность и разрешение через `ffprobe -of json`. Поворот кадра из side data учитывается:
 /// у вертикальных видео с телефона иначе ширина и высота меняются местами.
-pub fn video_probe(src: &Path) -> Result<VideoMeta> {
-    let out = quiet_command("ffprobe")
+pub fn video_probe(tools: &tools::Tools, src: &Path) -> Result<VideoMeta> {
+    let out = tools
+        .command(Tool::Ffprobe)
         .args([
             "-v",
             "error",
@@ -347,9 +334,16 @@ fn parse_probe(out: &[u8], src: &Path) -> Result<VideoMeta> {
 }
 
 /// Кадр-обложка из видео: ищем на 10% длительности (быстрый seek до входа читает только нужное).
-fn extract_frame(src: &Path, dst: &Path, seek: f64, max_side: u32) -> Result<()> {
+fn extract_frame(
+    tools: &tools::Tools,
+    src: &Path,
+    dst: &Path,
+    seek: f64,
+    max_side: u32,
+) -> Result<()> {
     let vf = format!("scale={max_side}:{max_side}:force_original_aspect_ratio=decrease");
-    let out = quiet_command("ffmpeg")
+    let out = tools
+        .command(Tool::Ffmpeg)
         .args(["-nostdin", "-v", "error", "-ss", &format!("{seek:.3}"), "-i"])
         .arg(src)
         .args(["-frames:v", "1", "-vf", &vf, "-q:v", "3", "-y"])
@@ -380,12 +374,13 @@ pub struct VideoInfo {
 }
 
 pub fn analyze_video(
+    tools: &tools::Tools,
     src: &Path,
     thumbs_dir: &Path,
     key: &str,
     max_side: u32,
 ) -> Result<VideoInfo> {
-    let meta = video_probe(src)?;
+    let meta = video_probe(tools, src)?;
     let sub = &key[..2.min(key.len())];
     let dir = thumbs_dir.join(sub);
     std::fs::create_dir_all(&dir)?;
@@ -394,10 +389,10 @@ pub fn analyze_video(
     let empty = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(true);
     if empty {
         let seek = if meta.duration_s > 1.0 { meta.duration_s * 0.1 } else { 0.0 };
-        if let Err(e) = extract_frame(src, &path, seek, max_side) {
+        if let Err(e) = extract_frame(tools, src, &path, seek, max_side) {
             // У коротких или битых файлов seek может не найти кадр — пробуем с начала.
             if seek > 0.0 {
-                extract_frame(src, &path, 0.0, max_side)?;
+                extract_frame(tools, src, &path, 0.0, max_side)?;
             } else {
                 return Err(e);
             }
@@ -418,25 +413,13 @@ pub fn analyze_video(
     })
 }
 
-/// Версия внешней программы. Нет программы в `PATH` — `None`, а не ошибка:
-/// каждая такая программа нужна только своему виду работы (ADR 0019).
-pub fn tool_version(program: &str, args: &[&str]) -> Option<String> {
-    let out = quiet_command(program).args(args).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    Some(stdout.lines().next()?.trim().to_string())
-}
-
-/// Есть ли OCR: `tesseract` в PATH и его версия. Спрашивается один раз, не на каждый кадр.
-pub fn tesseract_version() -> Option<String> {
-    tool_version("tesseract", &["--version"])
-}
-
 /// Установленные языковые пакеты tesseract. `None` — программы нет.
-pub fn tesseract_langs() -> Option<Vec<String>> {
-    let out = quiet_command("tesseract").arg("--list-langs").output().ok()?;
+pub fn tesseract_langs(tools: &tools::Tools) -> Option<Vec<String>> {
+    let out = tools
+        .command(Tool::Tesseract)
+        .arg("--list-langs")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -456,9 +439,9 @@ fn parse_langs(out: &str) -> Vec<String> {
         .collect()
 }
 
-/// Вход для OCR: повёрнутый по EXIF кадр не больше `max_side`, PNG в памяти.
-/// Декодируем сами: `tesseract` не читает EXIF-поворот, а снимок с телефона иначе ляжет боком.
-fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
+/// Декодировать снимок с учётом EXIF-поворота: всё, что ищет координаты (лица, OCR),
+/// должно видеть кадр так же, как человек.
+pub fn load_oriented(src: &Path) -> Result<image::DynamicImage> {
     use image::ImageDecoder;
     let mut decoder = image::ImageReader::open(src)?
         .with_guessed_format()?
@@ -466,6 +449,13 @@ fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
     let orientation = decoder.orientation()?;
     let mut img = image::DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
+    Ok(img)
+}
+
+/// Вход для OCR: повёрнутый по EXIF кадр не больше `max_side`, PNG в памяти.
+/// Декодируем сами: `tesseract` не читает EXIF-поворот, а снимок с телефона иначе ляжет боком.
+fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
+    let mut img = load_oriented(src)?;
     if img.width() > max_side || img.height() > max_side {
         img = img.resize(max_side, max_side, image::imageops::FilterType::Triangle);
     }
@@ -475,8 +465,9 @@ fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
     Ok(png)
 }
 
-fn tesseract_text(png: &[u8], lang: &str) -> Result<String> {
-    let mut child = quiet_command("tesseract")
+fn tesseract_text(tools: &tools::Tools, png: &[u8], lang: &str) -> Result<String> {
+    let mut child = tools
+        .command(Tool::Tesseract)
         .args(["stdin", "stdout", "-l", lang, "--psm", "3"])
         // Один процесс tesseract не должен занимать все ядра: потоков задаёт наше планирование.
         .env("OMP_THREAD_LIMIT", "1")
@@ -501,9 +492,14 @@ fn tesseract_text(png: &[u8], lang: &str) -> Result<String> {
 
 /// Текст с картинки через внешний `tesseract` (ADR 0018).
 /// Оригинал только читается: PNG уходит процессу в stdin, временных файлов не появляется.
-pub fn ocr_image(src: &Path, lang: &str, max_side: u32) -> Result<String> {
+pub fn ocr_image(
+    tools: &tools::Tools,
+    src: &Path,
+    lang: &str,
+    max_side: u32,
+) -> Result<String> {
     let png = ocr_input_png(src, max_side)?;
-    tesseract_text(&png, lang)
+    tesseract_text(tools, &png, lang)
 }
 
 /// Один декод на файл: размеры, dHash, превью.

@@ -96,7 +96,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
 /// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
 /// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -200,6 +200,42 @@ fn init(c: &Connection) -> Result<()> {
          BEGIN
             DELETE FROM embeddings WHERE file_id = new.id;
             DELETE FROM tags WHERE file_id = new.id AND source = 'clip';
+         END;
+         CREATE TABLE IF NOT EXISTS faces(
+            id         INTEGER PRIMARY KEY,
+            file_id    INTEGER NOT NULL,
+            sha256     TEXT NOT NULL,
+            x          INTEGER NOT NULL,
+            y          INTEGER NOT NULL,
+            w          INTEGER NOT NULL,
+            h          INTEGER NOT NULL,
+            score      REAL NOT NULL,
+            quality    REAL NOT NULL,
+            thumb      TEXT,
+            embedding  BLOB NOT NULL,
+            cluster_id INTEGER,
+            manual     INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_faces_file    ON faces(file_id);
+         CREATE INDEX IF NOT EXISTS idx_faces_cluster ON faces(cluster_id);
+         CREATE TABLE IF NOT EXISTS face_clusters(
+            id         INTEGER PRIMARY KEY,
+            label      TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS face_scans(
+            file_id    INTEGER PRIMARY KEY,
+            sha256     TEXT NOT NULL,
+            faces      INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+         );
+         CREATE TRIGGER IF NOT EXISTS invalidate_faces_after_sha_change
+         AFTER UPDATE OF sha256 ON files
+         WHEN old.sha256 IS NOT new.sha256
+         BEGIN
+            DELETE FROM faces WHERE file_id = new.id;
+            DELETE FROM face_scans WHERE file_id = new.id;
          END;",
     )?;
     // Схема старых БД дополняется на месте: данные не теряются при обновлении.
@@ -233,6 +269,10 @@ pub struct Settings {
     pub tag_margin: f32,
     /// Языки tesseract для распознавания текста, например `rus+eng`.
     pub ocr_lang: String,
+    /// Пути к внешним программам; пусто — берётся из `PATH` (ADR 0020).
+    pub tools: crate::tools::Tools,
+    /// Порог косинуса для склейки лиц в одного человека (ADR 0021).
+    pub face_threshold: f32,
 }
 
 impl Default for Settings {
@@ -246,6 +286,8 @@ impl Default for Settings {
             tag_show: 0.22,
             tag_margin: 0.01,
             ocr_lang: "rus+eng".into(),
+            tools: crate::tools::Tools::default(),
+            face_threshold: 0.45,
         }
     }
 }
@@ -269,6 +311,11 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "tag_show" => s.tag_show = v.parse().unwrap_or(s.tag_show),
             "tag_margin" => s.tag_margin = v.parse().unwrap_or(s.tag_margin),
             "ocr_lang" if !v.trim().is_empty() => s.ocr_lang = v,
+            "tool_ffmpeg" => s.tools.ffmpeg = v,
+            "tool_ffprobe" => s.tools.ffprobe = v,
+            "tool_tesseract" => s.tools.tesseract = v,
+            "tool_curl" => s.tools.curl = v,
+            "face_threshold" => s.face_threshold = v.parse().unwrap_or(s.face_threshold),
             _ => {}
         }
     }
@@ -276,7 +323,7 @@ pub fn load_settings(conn: &Connection) -> Settings {
 }
 
 pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
-    let pairs = [
+    let mut pairs = vec![
         ("models_dir", s.models_dir.to_string_lossy().to_string()),
         ("model_id", s.model_id.clone()),
         ("max_model_mb", s.max_model_mb.to_string()),
@@ -285,7 +332,11 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("tag_show", s.tag_show.to_string()),
         ("tag_margin", s.tag_margin.to_string()),
         ("ocr_lang", s.ocr_lang.clone()),
+        ("face_threshold", s.face_threshold.to_string()),
     ];
+    for tool in crate::tools::ALL {
+        pairs.push((tool.setting_key(), s.tools.get(tool).to_string()));
+    }
     for (k, v) in pairs {
         conn.execute(
             "INSERT INTO settings(key,value) VALUES(?1,?2)
@@ -513,6 +564,278 @@ pub fn save_embedding(
         params![file_id, model, sha256, vec.len() as i64, blob],
     )?;
     Ok(())
+}
+
+/// Одно найденное лицо: рамка, эмбеддинг и кластер. Вектор — f32 в BLOB.
+#[derive(Debug, Clone)]
+pub struct FaceRow {
+    pub id: i64,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub score: f32,
+    pub quality: f32,
+    pub thumb: Option<String>,
+    pub embedding: Vec<f32>,
+    pub cluster_id: Option<i64>,
+    pub manual: bool,
+}
+
+/// Лицо для интерфейса: без эмбеддинга, зато с путём и датой исходного файла.
+#[derive(Debug, Clone)]
+pub struct FaceView {
+    pub id: i64,
+    pub file_id: i64,
+    pub path: String,
+    pub taken_at: Option<String>,
+    pub thumb: Option<String>,
+    pub score: f32,
+    pub cluster_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FaceCluster {
+    pub id: i64,
+    pub label: String,
+    pub faces: i64,
+    pub photos: i64,
+}
+
+fn f32_blob(v: &[f32]) -> Vec<u8> {
+    let mut blob = Vec::with_capacity(v.len() * 4);
+    for x in v {
+        blob.extend_from_slice(&x.to_le_bytes());
+    }
+    blob
+}
+
+fn f32_from_blob(blob: &[u8]) -> Vec<f32> {
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
+        .collect()
+}
+
+/// sha256 уже просканированных на лица файлов: file_id → sha256 на момент прохода.
+pub fn face_scan_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
+    let mut st = conn.prepare("SELECT file_id, sha256 FROM face_scans")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let (id, sha) = r?;
+        out.insert(id, sha);
+    }
+    Ok(out)
+}
+
+/// Заменить лица одного файла и отметить его просканированным. Пустой список — тоже результат.
+pub fn save_faces_for_file(
+    conn: &Connection,
+    file_id: i64,
+    sha256: &str,
+    faces: &[FaceRow],
+) -> Result<()> {
+    conn.execute("DELETE FROM faces WHERE file_id=?1", params![file_id])?;
+    {
+        let mut st = conn.prepare(
+            "INSERT INTO faces(file_id,sha256,x,y,w,h,score,quality,thumb,embedding,created_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        )?;
+        for f in faces {
+            st.execute(params![
+                file_id,
+                sha256,
+                f.x,
+                f.y,
+                f.w,
+                f.h,
+                f.score,
+                f.quality,
+                f.thumb,
+                f32_blob(&f.embedding),
+                now(),
+            ])?;
+        }
+    }
+    conn.execute(
+        "INSERT INTO face_scans(file_id,sha256,faces,created_at) VALUES(?1,?2,?3,?4)
+         ON CONFLICT(file_id) DO UPDATE SET
+            sha256=excluded.sha256, faces=excluded.faces, created_at=excluded.created_at",
+        params![file_id, sha256, faces.len() as i64, now()],
+    )?;
+    Ok(())
+}
+
+/// Все лица с эмбеддингами — для кластеризации.
+pub fn load_faces(conn: &Connection) -> Result<Vec<FaceRow>> {
+    let mut st = conn.prepare(
+        "SELECT id,x,y,w,h,score,quality,thumb,embedding,cluster_id,manual
+         FROM faces ORDER BY id",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok(FaceRow {
+            id: r.get(0)?,
+            x: r.get(1)?,
+            y: r.get(2)?,
+            w: r.get(3)?,
+            h: r.get(4)?,
+            score: r.get(5)?,
+            quality: r.get(6)?,
+            thumb: r.get(7)?,
+            embedding: f32_from_blob(&r.get::<_, Vec<u8>>(8)?),
+            cluster_id: r.get(9)?,
+            manual: r.get::<_, i64>(10)? != 0,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// Лица для сетки: `cluster_id=None` — все. Сначала крупные и уверенные.
+pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec<FaceView>> {
+    let mut st = conn.prepare(
+        "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id
+         FROM faces f JOIN files fi ON fi.id=f.file_id
+         WHERE ?1 IS NULL OR f.cluster_id=?1
+         ORDER BY f.quality DESC, f.id",
+    )?;
+    let rows = st.query_map([cluster_id], |r| {
+        Ok(FaceView {
+            id: r.get(0)?,
+            file_id: r.get(1)?,
+            path: r.get(2)?,
+            taken_at: r.get(3)?,
+            thumb: r.get(4)?,
+            score: r.get(5)?,
+            cluster_id: r.get(6)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+pub fn load_face_clusters(conn: &Connection) -> Result<Vec<FaceCluster>> {
+    let mut st = conn.prepare(
+        "SELECT c.id,c.label,COUNT(f.id),COUNT(DISTINCT f.file_id)
+         FROM face_clusters c JOIN faces f ON f.cluster_id=c.id
+         GROUP BY c.id ORDER BY c.label='', c.label, COUNT(DISTINCT f.file_id) DESC",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok(FaceCluster {
+            id: r.get(0)?,
+            label: r.get(1)?,
+            faces: r.get(2)?,
+            photos: r.get(3)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+pub fn create_face_cluster(conn: &Connection) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO face_clusters(label,created_at) VALUES('',?1)",
+        params![now()],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Записать привязку лиц к кластерам. `manual` — владелец поставил её вручную.
+pub fn save_face_assignments(
+    conn: &mut Connection,
+    assignments: &[(i64, Option<i64>)],
+    manual: bool,
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    {
+        let mut st = tx.prepare("UPDATE faces SET cluster_id=?1, manual=?2 WHERE id=?3")?;
+        for &(face_id, cluster_id) in assignments {
+            st.execute(params![cluster_id, manual as i64, face_id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn label_face_cluster(conn: &Connection, cluster_id: i64, label: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE face_clusters SET label=?1 WHERE id=?2",
+        params![label.trim(), cluster_id],
+    )?;
+    Ok(())
+}
+
+/// Отделить одно лицо в новую группу: ложная склейка разъединяется одним действием.
+pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO face_clusters(label,created_at) VALUES('',?1)",
+        params![now()],
+    )?;
+    let cluster_id = tx.last_insert_rowid();
+    let n = tx.execute(
+        "UPDATE faces SET cluster_id=?1, manual=1 WHERE id=?2",
+        params![cluster_id, face_id],
+    )?;
+    if n == 0 {
+        anyhow::bail!("нет такого лица: {face_id}");
+    }
+    tx.commit()?;
+    Ok(cluster_id)
+}
+
+/// Убрать кластеры без лиц. Кластер с подписью остаётся, даже если пока пуст.
+pub fn delete_empty_face_clusters(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM face_clusters
+         WHERE label='' AND id NOT IN (
+            SELECT DISTINCT cluster_id FROM faces WHERE cluster_id IS NOT NULL
+         )",
+        [],
+    )?)
+}
+
+/// План прохода по лицам: `(снимков всего, ещё не просканировано)`.
+pub fn face_scan_plan(conn: &Connection) -> Result<(usize, usize)> {
+    let images: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM files WHERE kind='image'",
+        [],
+        |r| r.get(0),
+    )?;
+    let todo: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM files f LEFT JOIN face_scans s ON s.file_id=f.id
+         WHERE f.kind='image' AND COALESCE(s.sha256,'') != COALESCE(f.sha256,'')",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok((images as usize, todo as usize))
+}
+
+/// `(лиц, снимков с лицами, кластеров)` — для панели и отчёта.
+pub fn face_summary(conn: &Connection) -> Result<(i64, i64, i64)> {
+    let faces: i64 = conn.query_row("SELECT COUNT(*) FROM faces", [], |r| r.get(0))?;
+    let photos: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT file_id) FROM faces",
+        [],
+        |r| r.get(0),
+    )?;
+    let clusters: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM face_clusters WHERE id IN (SELECT cluster_id FROM faces WHERE cluster_id IS NOT NULL)",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok((faces, photos, clusters))
 }
 
 /// Заменить теги одного источника у файла (CLIP пересчитывается целиком).
@@ -792,6 +1115,46 @@ mod tests {
     }
 
     #[test]
+    fn faces_survive_split_and_are_reset_with_content() {
+        let mut c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
+        let file_id = id_of(&c, "/a.jpg");
+        let face = FaceRow {
+            id: 0,
+            x: 10,
+            y: 20,
+            w: 30,
+            h: 40,
+            score: 0.9,
+            quality: 0.8,
+            thumb: Some("aa/a-0.jpg".into()),
+            embedding: vec![1.0, 0.0],
+            cluster_id: None,
+            manual: false,
+        };
+        save_faces_for_file(&c, file_id, "aa", &[face]).unwrap();
+        assert_eq!(load_faces(&c).unwrap().len(), 1);
+        assert_eq!(face_scan_shas(&c).unwrap().get(&file_id), Some(&"aa".into()));
+        let face_id = load_faces(&c).unwrap()[0].id;
+        let clustered = create_face_cluster(&c).unwrap();
+        save_face_assignments(&mut c, &[(face_id, Some(clustered))], false).unwrap();
+        label_face_cluster(&c, clustered, "Лиза").unwrap();
+        assert_eq!(load_face_clusters(&c).unwrap()[0].label, "Лиза");
+
+        let split = split_face(&mut c, face_id).unwrap();
+        let moved = &load_faces(&c).unwrap()[0];
+        assert_eq!(moved.cluster_id, Some(split));
+        assert!(moved.manual);
+        assert_ne!(split, clustered);
+
+        // Подмена содержимого стирает лица и отметку прохода — их нельзя показывать.
+        insert(&c, &row("/a.jpg", "bb", 1.0)).unwrap();
+        assert!(load_faces(&c).unwrap().is_empty());
+        assert!(face_scan_shas(&c).unwrap().is_empty());
+    }
+
+    #[test]
     fn schema_upgrade_keeps_old_db() {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
@@ -931,6 +1294,11 @@ mod tests {
             tag_show: 0.27,
             tag_margin: 0.02,
             ocr_lang: "rus".into(),
+            tools: crate::tools::Tools {
+                ffmpeg: "/opt/ffmpeg".into(),
+                tesseract: "/opt/tesseract".into(),
+                ..Default::default()
+            },
             ..Default::default()
         };
         save_settings(&c, &s).unwrap();
@@ -941,6 +1309,19 @@ mod tests {
         assert!((back.tag_show - 0.27).abs() < 1e-6);
         assert!((back.tag_margin - 0.02).abs() < 1e-6);
         assert_eq!(back.ocr_lang, "rus");
+        assert_eq!(back.tools.ffmpeg, "/opt/ffmpeg");
+        assert_eq!(back.tools.tesseract, "/opt/tesseract");
+        assert_eq!(back.tools.curl, "");
+    }
+
+    #[test]
+    fn face_threshold_survives_roundtrip() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let s = Settings { face_threshold: 0.51, ..Default::default() };
+        save_settings(&c, &s).unwrap();
+        let back = load_settings(&c);
+        assert!((back.face_threshold - 0.51).abs() < 1e-6);
     }
 
     #[test]

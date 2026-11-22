@@ -16,9 +16,11 @@ mod db;
 mod derive;
 mod dupes;
 mod embed;
+mod faces;
 mod index;
 mod ocr;
 mod organize;
+mod tools;
 
 use anyhow::Result;
 use db::Progress;
@@ -36,6 +38,10 @@ fn usage() {
                                             найти дубли и похожие снимки, выгрузить решения
   organize --out DIR [--apply] [--copy]    план (и применение) раскладки по датам
   embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
+  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
+                                            лица: детекция, эмбеддинги, группы
+  faces download --yes | label --id N --name ИМЯ | split --id N
+                                            веса лиц, подпись группы, разъединить лицо
   ocr [--jobs N] [--all] [--dry-run] [--file PATH]
                                             текст с документов и скриншотов (tesseract)
   search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
@@ -43,6 +49,7 @@ fn usage() {
   models [list|check|download --id ID --yes]
                                             каталог моделей, проверка и загрузка весов
   settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L]
+           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH] [--curl PATH]
                                             показать или изменить настройки
   doctor                                   что есть на машине: программы, языки OCR, модель
   gui                                       графический интерфейс (по умолчанию)
@@ -64,11 +71,11 @@ fn main() -> Result<()> {
                 }
             };
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
-            let default_jobs = {
+            let settings = {
                 let conn = db::open(&db_path)?;
-                db::load_settings(&conn).index_jobs
+                db::load_settings(&conn)
             };
-            let jobs = flag_num(&args, "--jobs", default_jobs as u64);
+            let jobs = flag_num(&args, "--jobs", settings.index_jobs as u64);
             let progress = Arc::new(Progress::default());
             let show = progress.clone();
             std::thread::spawn(move || {
@@ -85,7 +92,7 @@ fn main() -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
-            let stats = index::run(&root, jobs, &db_path, Some(progress))?;
+            let stats = index::run(&root, jobs, &db_path, &settings.tools, Some(progress))?;
             println!("{stats}");
             Ok(())
         }
@@ -121,17 +128,135 @@ fn main() -> Result<()> {
             println!("{stats}");
             Ok(())
         }
+        "faces" => {
+            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+            let settings = {
+                let conn = db::open(&db_path)?;
+                db::load_settings(&conn)
+            };
+            match args.get(1).map(String::as_str).unwrap_or("") {
+                "download" => {
+                    let progress = Arc::new(Progress::default());
+                    let show = progress.clone();
+                    std::thread::spawn(move || {
+                        while !show.finished() {
+                            eprintln!("\r{}", show.msg());
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                        }
+                    });
+                    let report =
+                        faces::download_model(&settings, has_flag(&args, "--yes"), Some(progress))?;
+                    println!("{report}");
+                    return Ok(());
+                }
+                "label" => {
+                    let id = flag_str(&args, "--id")
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    let label = flag_str(&args, "--name").unwrap_or_default();
+                    if id == 0 || label.trim().is_empty() {
+                        eprintln!("нужны номер группы и имя: faces label --id N --name ИМЯ");
+                        std::process::exit(2);
+                    }
+                    faces::label(&db_path, id, &label)?;
+                    println!("группа {id}: «{}»", label.trim());
+                    return Ok(());
+                }
+                "split" => {
+                    let id = flag_str(&args, "--id")
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    if id == 0 {
+                        eprintln!("нужен номер лица: faces split --id N");
+                        std::process::exit(2);
+                    }
+                    let cid = faces::split(&db_path, id)?;
+                    println!("лицо {id} отделено в группу {cid}");
+                    return Ok(());
+                }
+                _ => {}
+            }
+            let threshold = flag_str(&args, "--threshold")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(settings.face_threshold);
+            if has_flag(&args, "--dry-run") {
+                let plan = faces::plan(&db_path)?;
+                let model = if faces::model_present(&settings) {
+                    "на месте".to_string()
+                } else {
+                    "не скачана — «Настройки» или faces download --yes".to_string()
+                };
+                println!(
+                    "снимков: {}, ещё без лиц: {}; модель лиц: {model}",
+                    plan.images, plan.todo
+                );
+                return Ok(());
+            }
+            if has_flag(&args, "--list") {
+                let conn = db::open(&db_path)?;
+                let clusters = db::load_face_clusters(&conn)?;
+                if clusters.is_empty() {
+                    println!("групп лиц нет: запустите photocat faces");
+                }
+                for c in clusters {
+                    println!(
+                        "{} {:<24} лиц {}, фото {}",
+                        c.id,
+                        if c.label.is_empty() { "(без имени)" } else { c.label.as_str() },
+                        c.faces,
+                        c.photos
+                    );
+                }
+                return Ok(());
+            }
+            if has_flag(&args, "--recluster") {
+                let stats = faces::recluster(&db_path, threshold)?;
+                println!("{stats}");
+                return Ok(());
+            }
+            let jobs = flag_num(&args, "--jobs", settings.index_jobs as u64);
+            let progress = Arc::new(Progress::default());
+            let show = progress.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                loop {
+                    let (d, t, e) = (show.done(), show.total(), show.errors());
+                    if t > 0 {
+                        eprint!("\rлица: {d}/{t}, ошибок {e} — {}", show.msg());
+                    } else {
+                        eprint!("\r{}", show.msg());
+                    }
+                    if show.finished() {
+                        eprintln!();
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
+            });
+            let stats = faces::run(&db_path, jobs, threshold, Some(progress))?;
+            println!("{stats}");
+            Ok(())
+        }
         "ocr" => {
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let jobs = flag_num(&args, "--jobs", 4);
             let all = has_flag(&args, "--all");
             if has_flag(&args, "--dry-run") {
                 let plan = ocr::plan(&db_path, all)?;
+                let settings = {
+                    let conn = db::open(&db_path)?;
+                    db::load_settings(&conn)
+                };
                 println!(
-                    "кандидатов: {} из {} снимков; tesseract: {}",
+                    "кандидатов: {} из {} снимков; tesseract ({}): {}",
                     plan.candidates,
                     plan.images,
-                    derive::tesseract_version().unwrap_or_else(|| "не найден".into())
+                    settings.tools.source(tools::Tool::Tesseract),
+                    settings
+                        .tools
+                        .probe(tools::Tool::Tesseract)
+                        .map(|v| short_version(&v))
+                        .unwrap_or_else(|| "не найден".into())
                 );
                 return Ok(());
             }
@@ -304,6 +429,36 @@ fn main() -> Result<()> {
                 settings.max_model_mb = n.parse().unwrap_or(settings.max_model_mb);
                 changed = true;
             }
+            if let Some(v) = flag_str(&args, "--face-threshold")
+                && let Ok(x) = v.parse::<f32>()
+            {
+                settings.face_threshold = x.clamp(0.0, 1.0);
+                changed = true;
+            }
+            for (flag, tool) in [
+                ("--ffmpeg", tools::Tool::Ffmpeg),
+                ("--ffprobe", tools::Tool::Ffprobe),
+                ("--tesseract", tools::Tool::Tesseract),
+                ("--curl", tools::Tool::Curl),
+            ] {
+                let Some(path) = flag_str(&args, flag) else {
+                    continue;
+                };
+                let mut probe = settings.tools.clone();
+                *probe.get_mut(tool) = path.trim().to_string();
+                // Путь проверяется до сохранения: ошибка — сообщением, а не падением.
+                match probe.version(tool) {
+                    Ok(v) => {
+                        println!("{}: {}", tool.name(), short_version(&v));
+                        settings.tools = probe;
+                        changed = true;
+                    }
+                    Err(e) => {
+                        eprintln!("не сохранён: {e:#}");
+                        std::process::exit(2);
+                    }
+                }
+            }
             if changed {
                 db::save_settings(&conn, &settings)?;
                 println!("настройки сохранены");
@@ -315,10 +470,19 @@ fn main() -> Result<()> {
             println!("порог дублей: {}", settings.max_dist);
             println!("тег: ≥ {:.2}, отрыв {:.2}", settings.tag_show, settings.tag_margin);
             println!("языки OCR: {}", settings.ocr_lang);
-            println!(
-                "tesseract: {}",
-                derive::tesseract_version().unwrap_or_else(|| "не найден в PATH".into())
-            );
+            println!("порог лиц: {:.2}", settings.face_threshold);
+            for tool in tools::ALL {
+                println!(
+                    "{:<10} {} ({})",
+                    tool.name(),
+                    settings
+                        .tools
+                        .probe(tool)
+                        .map(|v| short_version(&v))
+                        .unwrap_or_else(|| "не найден".into()),
+                    settings.tools.source(tool)
+                );
+            }
             Ok(())
         }
         "clusters" => {            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
@@ -341,22 +505,34 @@ fn main() -> Result<()> {
             let conn = db::open(&db_path)?;
             let settings = db::load_settings(&conn);
 
-            println!("внешние программы (ищутся в PATH, без них отключается только своя работа):");
-            let tools: [(&str, &[&str], &str); 4] = [
-                ("ffmpeg", &["-version"], "видео: кадр-обложка, dHash, превью"),
-                ("ffprobe", &["-version"], "видео: длительность и разрешение"),
-                ("tesseract", &["--version"], "OCR: текст с документов и скриншотов"),
-                ("curl", &["--version"], "скачивание весов модели по согласию"),
-            ];
-            for (prog, vargs, purpose) in tools {
-                let state = match derive::tool_version(prog, vargs) {
-                    Some(v) => short_version(&v),
-                    None => "не найден".to_string(),
+            println!(
+                "внешние программы (пусто в настройках — ищутся в PATH; без программы \
+                 отключается только её работа):"
+            );
+            for tool in tools::ALL {
+                let state = match settings.tools.version(tool) {
+                    Ok(v) => short_version(&v),
+                    Err(e) => format!("не работает: {e:#}"),
                 };
-                println!("  {prog:<10} {state:<30} {purpose}");
+                let found = match settings.tools.locate(tool) {
+                    Some(p) => format!("{} ({})", p.display(), settings.tools.source(tool)),
+                    None => format!(
+                        "не найдена: {} ({})",
+                        settings.tools.program(tool),
+                        settings.tools.source(tool)
+                    ),
+                };
+                println!("  {:<10} {}", tool.name(), state);
+                println!("  {:<10} {}", "", found);
+                println!(
+                    "  {:<10} зачем: {}; без неё: {}",
+                    "",
+                    tool.purpose(),
+                    tool.without()
+                );
             }
 
-            match derive::tesseract_langs() {
+            match derive::tesseract_langs(&settings.tools) {
                 Some(langs) => {
                     let want: Vec<&str> = settings
                         .ocr_lang
@@ -393,6 +569,22 @@ fn main() -> Result<()> {
                 } else {
                     "не скачана — смысловой поиск и теги недоступны".to_string()
                 }
+            );
+            println!(
+                "модель лиц: {} · {} · {}",
+                faces::MODEL_ID,
+                db::human(faces::model_bytes(&settings)),
+                if faces::model_present(&settings) {
+                    "на месте".to_string()
+                } else {
+                    "не скачана — «Настройки» или faces download --yes".to_string()
+                }
+            );
+            let (face_faces, face_photos, face_clusters) = db::face_summary(&conn)?;
+            let (face_images, face_todo) = db::face_scan_plan(&conn)?;
+            println!(
+                "лица: {} на {} снимках, групп {}, ещё без лиц {} из {}",
+                face_faces, face_photos, face_clusters, face_todo, face_images
             );
             let (ocr_files, ocr_chars) = db::ocr_summary(&conn)?;
             let total: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;

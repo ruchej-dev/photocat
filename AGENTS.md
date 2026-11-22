@@ -49,11 +49,13 @@
 | Файл | Слой | Отвечает за | Не должен знать про |
 |---|---|---|---|
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (дата/GPS/камера), превью, дата из имени | БД, UI, индексатор |
+| `src/tools.rs` | L0 | пути к `ffmpeg`/`ffprobe`/`tesseract`/`curl`, поиск в `PATH`, проверка версии | БД, UI, декодирование |
 | `src/db.rs` | L1 | схема SQLite, вставка/выборка, `Progress`, `human()` | egui, декодирование картинок |
 | `src/index.rs` | L2 | обход `walkdir`, rayon-параллелизм, поток-писатель | egui |
 | `src/dupes.rs` | L2 | union-find, точные и похожие дубли, CSV | egui |
 | `src/embed.rs` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means | egui, БД-строки |
 | `src/ocr.rs` | L2 | кандидаты на текст, проход `tesseract`, запись текста в БД | egui, декодирование картинок |
+| `src/faces.rs` | L2 | SCRFD-детекция, выравнивание, ArcFace-эмбеддинги, кластеры лиц | egui, прямые SQL-строки |
 | `src/organize.rs` | L2 | план по датам, hardlink/copy/symlink | egui |
 | `src/app.rs` | L3 | весь GUI на egui | прямые вызовы SQL |
 | `src/main.rs` | L3 | разбор CLI, подкоманды | — |
@@ -66,11 +68,14 @@
 - БД: `~/.cache/photocat/photocat.db` (SQLite, WAL). Пересоздаётся индексацией; в каталог архива
   не пишем никогда.
 - Превью: `~/.cache/photocat/thumbs/<2 симв.>/<sha256[..24]>.jpg`, 320 px по длинной стороне.
-- Модели: по умолчанию `<кэш>/photocat/models/<id>/`; путь, лимит размера и выбор модели — в
-  настройках приложения. Загрузка — только с согласия и с проверкой sha256;
-  `scripts/fetch-model.sh` остаётся ручным запасным путём.
-- Кэш на 2230 файлов: БД 1.3 МБ, превью 29 МБ; после CLIP БД ~11 МБ (векторы 3.9 МиБ).
-  Если стало в 10 раз больше — это регресс.
+- Лица: кропы `~/.cache/photocat/faces/<2 симв.>/<sha256[..24]>-<N>.jpg`, 112×112;
+  векторы и группы — в БД.
+- Модели: по умолчанию `<кэш>/photocat/models/<id>/`, лица — `<models_dir>/faces/` (182.4 МиБ);
+  путь, лимит размера и выбор модели — в настройках приложения. Загрузка — только с согласия и с
+  проверкой sha256; `scripts/fetch-model.sh` остаётся ручным запасным путём для CLIP.
+- Кэш на 2230 файлов: БД 1.3 МБ, превью 29 МБ; после CLIP + OCR + лиц БД ~22 МБ
+  (векторы CLIP 4.4 МиБ, лица 2498 × 2 КиБ), кропы лиц ~11 МБ. Если стало в 10 раз больше —
+  это регресс.
 - Схема меняется только через `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE` в `db::init` с
   сохранением данных, и вместе с этим поднимается `db::SCHEMA_VERSION`: пока версия совпадает,
   `open` не пишет, поэтому чтение не блокируется долгим прогоном. Индекс на 2230 файлов стоит
@@ -88,6 +93,13 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat organize --out DIR            # dry-run
 ./target/release/photocat embed                          # CLIP-эмбеддинги и теги (локально)
 ./target/release/photocat search "торт" --top 20         # смысловой поиск
+./target/release/photocat faces                          # лица: детекция, эмбеддинги, группы
+./target/release/photocat faces --dry-run                # сколько снимков ещё без лиц
+./target/release/photocat faces --list                   # группы лиц с подписями и счётчиками
+./target/release/photocat faces --recluster --threshold 0.45  # пересобрать группы
+./target/release/photocat faces download --yes           # веса лиц (сеть, только по согласию)
+./target/release/photocat faces label --id 5 --name Лиза # подписать группу
+./target/release/photocat faces split --id 123           # разъединить лицо
 ./target/release/photocat ocr                            # текст с документов и скриншотов (tesseract)
 ./target/release/photocat ocr --dry-run                  # сколько файлов пойдёт в OCR
 ./target/release/photocat ocr --file photo.jpg           # текст с одного снимка
@@ -139,7 +151,10 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # замер на ре�
   `--copy`/`--symlink`.
 - CLIP-теги приблизительны: уверенный тег — только если первый отрывается от второго на 0.01;
   «не уверен» — нормальное состояние, а не баг. Модель требует AVX2 (int8-квантование), 218 МиБ.
-- Лица (M6) отсутствуют. OCR требует `tesseract` в `PATH` и языковые пакеты `rus`/`eng`; без него
+- Лица (M6): SCRFD + ArcFace, порог 0.45 по умолчанию; 2498 лиц на 856 снимках корпуса за 630 с,
+  617 групп. Детектор иногда находит «лицо» на экране/статуе и путает родственников — ложная
+  склейка разъединяется кнопкой «не он», подпись закрепляет группу. Модель лиц 182.4 МиБ.
+  OCR требует `tesseract` в `PATH` и языковые пакеты `rus`/`eng`; без него
   всё остальное работает, а кнопка «Распознать текст» погашена. Из 435 кандидатов корпуса текст
   нашёлся у 146 — снимки без надписей остаются с пустой строкой и не пересчитываются.
 - `plan/M3-clusters.md` — локальный отчёт с путями архива, в git не попадает.

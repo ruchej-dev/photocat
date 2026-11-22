@@ -5,13 +5,14 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::tools::{self, Tool};
 use anyhow::{Context, Result, bail};
 use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::Tensor;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokenizers::Tokenizer;
 
 pub const DIM: usize = 512;
@@ -253,10 +254,7 @@ impl Model {
         let dir = model_dir(&settings.models_dir, entry);
         let f = |name: &str| dir.join(name);
         let threads = threads.max(1);
-        let env = ort::init()
-            .with_name("photocat")
-            .build()
-            .map_err(oe)?;
+        let env = shared_environment()?;
         let vision = Session::builder(&env).map_err(oe)?
             .with_intra_threads(threads).map_err(oe)?
             .commit_from_file(f("vision.onnx"))
@@ -455,6 +453,18 @@ pub fn confident_tag(scores: &[(String, f32)]) -> Option<(&str, f32)> {
 
 fn oe<R>(e: ort::Error<R>) -> anyhow::Error {
     anyhow::anyhow!("ONNX Runtime: {e}")
+}
+
+/// Одно ONNX-окружение на процесс: ORT не разрешает создать второе, а CLIP и лица живут рядом.
+static ORT_ENV: OnceLock<Environment> = OnceLock::new();
+
+pub(crate) fn shared_environment() -> Result<Environment> {
+    if let Some(env) = ORT_ENV.get() {
+        return Ok(env.clone());
+    }
+    let env = ort::init().with_name("photocat").build().map_err(oe)?;
+    let _ = ORT_ENV.set(env.clone());
+    Ok(env)
 }
 
 fn read_dense(path: &Path) -> Result<Vec<f32>> {
@@ -918,15 +928,27 @@ fn download_entry(
     progress: Option<Arc<Progress>>,
 ) -> Result<usize> {
     let dir = model_dir(&settings.models_dir, e);
-    std::fs::create_dir_all(&dir)
+    download_files(settings, &dir, e.title, e.files, progress)
+}
+
+/// Скачать произвольный набор файлов модели (CLIP или лица) с проверкой sha256.
+/// Общий путь нужен, чтобы загрузчик был один и `curl` запускался только здесь (ADR 0016).
+pub(crate) fn download_files(
+    settings: &db::Settings,
+    dir: &Path,
+    title: &str,
+    model_files: &[ModelFile],
+    progress: Option<Arc<Progress>>,
+) -> Result<usize> {
+    std::fs::create_dir_all(dir)
         .with_context(|| format!("не создать {}", dir.display()))?;
     if let Some(p) = &progress {
         p.reset();
-        p.set_total(e.files.len());
-        p.set_msg(format!("модель {}: подготовка", e.title));
+        p.set_total(model_files.len());
+        p.set_msg(format!("модель {title}: подготовка"));
     }
     let mut files = 0usize;
-    for f in e.files {
+    for f in model_files {
         let path = dir.join(f.name);
         let ok = path.is_file()
             && derive::sha256_file(&path)
@@ -936,9 +958,9 @@ fn download_entry(
             files += 1;
         } else {
             if let Some(p) = &progress {
-                p.set_msg(format!("модель {}: {}", e.title, f.name));
+                p.set_msg(format!("модель {title}: {}", f.name));
             }
-            fetch_with_fallback(f.url, &path)?;
+            fetch_with_fallback(&settings.tools, f.url, &path)?;
             let got = derive::sha256_file(&path)
                 .with_context(|| format!("не прочитать {}", path.display()))?;
             if got != f.sha256 {
@@ -962,14 +984,14 @@ fn download_entry(
 }
 
 /// Основной адрес и зеркало: если HuggingFace недоступен, пробуем hf-mirror.
-fn fetch_with_fallback(url: &str, dst: &Path) -> Result<()> {
+fn fetch_with_fallback(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()> {
     let mirror = url.replace("https://huggingface.co/", "https://hf-mirror.com/");
     let mut last = String::new();
     for u in [url, mirror.as_str()] {
         if u.is_empty() {
             continue;
         }
-        match curl_get(u, dst) {
+        match curl_get(tools, u, dst) {
             Ok(()) => return Ok(()),
             Err(e) => last = format!("{u}: {e}"),
         }
@@ -977,9 +999,8 @@ fn fetch_with_fallback(url: &str, dst: &Path) -> Result<()> {
     bail!("{last}");
 }
 
-fn curl_get(url: &str, dst: &Path) -> Result<()> {
-    #[allow(unused_mut)]
-    let mut cmd = std::process::Command::new("curl");
+fn curl_get(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()> {
+    let mut cmd = tools.command(Tool::Curl);
     cmd.args([
         "-fL",
         "--retry",
@@ -994,14 +1015,13 @@ fn curl_get(url: &str, dst: &Path) -> Result<()> {
     ])
     .arg(dst)
     .arg(url);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let out = cmd
-        .output()
-        .context("не запустить curl: скачивание моделей требует curl в PATH")?;
+    let out = cmd.output().with_context(|| {
+        format!(
+            "не запустить curl ({}: {}): скачивание моделей требует curl",
+            tools.source(Tool::Curl),
+            tools.program(Tool::Curl)
+        )
+    })?;
     if !out.status.success() {
         bail!(
             "curl: {}",
