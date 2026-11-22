@@ -1,7 +1,7 @@
 //! CLIP-эмбеддинги: локальная ONNX-модель, векторы в БД, теги, косинусный поиск, k-means.
 //!
-//! Модель лежит файлами в `~/.cache/photocat/models/clip-vit-b32/` и проверяется по sha256.
-//! Приложение никогда не ходит в сеть: веса скачивает `scripts/fetch-model.sh` по явной команде.
+//! Модели лежат файлами в папке из настроек (по умолчанию `~/.cache/photocat/models/`) и
+//! проверяются по sha256. Сеть — только за весами из каталога, по согласию владельца (ADR 0015).
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
@@ -14,81 +14,208 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-pub const MODEL: &str = "clip-vit-b32-multilingual";
 pub const DIM: usize = 512;
 pub const IMAGE_SIDE: u32 = 224;
 /// Максимальная длина текста (sentence_bert_config.json: 128).
 pub const MAX_TOKENS: usize = 128;
-pub const TAG_SOURCE: &str = "clip";
-/// Порог, ниже которого тег не показываем и не фильтруем (калиброван на корпусе).
+/// Пороги по умолчанию (их же хранят настройки; калибровано на корпусе).
+#[allow(dead_code)]
 pub const TAG_SHOW: f32 = 0.22;
 /// Насколько первый тег должен отрываться от второго, чтобы ему можно было верить.
+#[allow(dead_code)]
 pub const TAG_MARGIN: f32 = 0.01;
 
-/// Русские подписи и промпты для мультиязычного текстового энкодера.
-pub const TAGS: [(&str, &str); 7] = [
-    ("пляж", "фотография пляжа и моря"),
-    ("документ", "фотография документа, лист бумаги с текстом"),
-    ("скриншот", "снимок экрана, интерфейс программы"),
-    ("еда", "фотография еды, тарелка с едой"),
-    ("животные", "фотография животного, кошка или собака"),
-    ("дети", "фотография детей, ребёнок"),
-    ("праздник", "праздник, торт со свечами, вечеринка"),
+/// Русские подписи тегов. Промпты зависят от модели (русские или английские).
+pub const TAG_LABELS: [&str; 7] = [
+    "пляж", "документ", "скриншот", "еда", "животные", "дети", "праздник",
 ];
 
-const VISION_SHA: &str = "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299";
-const TEXT_SHA: &str = "fbc8fbeaa5237d96bd1bf430057c70d34de8334a463e933a5faa305f6caeed9c";
-const TOKENIZER_SHA: &str = "5b4e1a8171c81dfd666ae40265b9530c6e0b3d53923fe8ac493dcc84229adf81";
-const DENSE_SHA: &str = "d12568dc7300970a4d3dbb49068ad16cd89b99840b74b026f8e48071e9414f74";
+const PROMPTS_RU: [&str; 7] = [
+    "фотография пляжа и моря",
+    "фотография документа, лист бумаги с текстом",
+    "снимок экрана, интерфейс программы",
+    "фотография еды, тарелка с едой",
+    "фотография животного, кошка или собака",
+    "фотография детей, ребёнок",
+    "праздник, торт со свечами, вечеринка",
+];
 
-pub fn model_dir() -> PathBuf {
-    db::cache_dir().join("models/clip-vit-b32")
+const PROMPTS_EN: [&str; 7] = [
+    "a photo of a beach and the sea",
+    "a photo of a document, a sheet of paper with text",
+    "a screenshot of a computer screen",
+    "a photo of food, a plate with food",
+    "a photo of an animal, a cat or a dog",
+    "a photo of children, a child",
+    "a party, a birthday cake with candles",
+];
+
+/// Как текстовая башня отдаёт вектор: через проекцию 768→512 или сразу `text_embeds`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TextKind {
+    /// Multilingual DistilBERT + Dense 768→512 (русский поиск).
+    Projected,
+    /// CLIP text tower, выход `text_embeds` 512, без проекции (английский).
+    Direct,
 }
 
-struct Files {
-    vision: PathBuf,
-    text: PathBuf,
-    tokenizer: PathBuf,
-    dense: PathBuf,
+pub struct ModelFile {
+    pub name: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub bytes: u64,
 }
 
-fn files() -> Files {
-    let d = model_dir();
-    Files {
-        vision: d.join("vision.onnx"),
-        text: d.join("text.onnx"),
-        tokenizer: d.join("tokenizer.json"),
-        dense: d.join("text_dense.safetensors"),
+pub struct ModelEntry {
+    /// Ключ эмбеддингов в БД.
+    pub id: &'static str,
+    /// Имя подкаталога в папке моделей (исторически `clip-vit-b32`, не меняем).
+    pub dir: &'static str,
+    pub title: &'static str,
+    pub note: &'static str,
+    pub kind: TextKind,
+    pub files: &'static [ModelFile],
+    pub prompts: &'static [&'static str],
+}
+
+impl ModelEntry {
+    pub fn bytes(&self) -> u64 {
+        self.files.iter().map(|f| f.bytes).sum()
+    }
+    /// Влезает ли модель в лимит настроек (МиБ).
+    pub fn fits(&self, max_mb: u64) -> bool {
+        self.bytes() <= max_mb.saturating_mul(1024 * 1024)
     }
 }
 
+pub const DEFAULT_MODEL: &str = "clip-vit-b32-multilingual";
+
+const VISION: ModelFile = ModelFile {
+    name: "vision.onnx",
+    url: "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
+    sha256: "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299",
+    bytes: 89_117_001,
+};
+
+const MULTILINGUAL_FILES: [ModelFile; 4] = [
+    VISION,
+    ModelFile {
+        name: "text.onnx",
+        url: "https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1/resolve/main/onnx/model_quint8_avx2.onnx",
+        sha256: "fbc8fbeaa5237d96bd1bf430057c70d34de8334a463e933a5faa305f6caeed9c",
+        bytes: 135_377_779,
+    },
+    ModelFile {
+        name: "tokenizer.json",
+        url: "https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1/resolve/main/tokenizer.json",
+        sha256: "5b4e1a8171c81dfd666ae40265b9530c6e0b3d53923fe8ac493dcc84229adf81",
+        bytes: 1_961_847,
+    },
+    ModelFile {
+        name: "text_dense.safetensors",
+        url: "https://huggingface.co/sentence-transformers/clip-ViT-B-32-multilingual-v1/resolve/main/2_Dense/model.safetensors",
+        sha256: "d12568dc7300970a4d3dbb49068ad16cd89b99840b74b026f8e48071e9414f74",
+        bytes: 1_572_984,
+    },
+];
+
+const ENGLISH_FILES: [ModelFile; 3] = [
+    VISION,
+    ModelFile {
+        name: "text.onnx",
+        url: "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
+        sha256: "73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a",
+        bytes: 64_504_507,
+    },
+    ModelFile {
+        name: "tokenizer.json",
+        url: "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
+        sha256: "f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd",
+        bytes: 2_224_119,
+    },
+];
+
+static CATALOG: [ModelEntry; 2] = [
+    ModelEntry {
+        id: DEFAULT_MODEL,
+        dir: "clip-vit-b32",
+        title: "CLIP ViT-B/32, мультиязычная",
+        note: "русский поиск и теги, лучшее качество",
+        kind: TextKind::Projected,
+        files: &MULTILINGUAL_FILES,
+        prompts: &PROMPTS_RU,
+    },
+    ModelEntry {
+        id: "clip-vit-b32-en",
+        dir: "clip-vit-b32-en",
+        title: "CLIP ViT-B/32, английская",
+        note: "меньше по размеру, запросы только по-английски",
+        kind: TextKind::Direct,
+        files: &ENGLISH_FILES,
+        prompts: &PROMPTS_EN,
+    },
+];
+
+pub fn catalog() -> &'static [ModelEntry] {
+    &CATALOG
+}
+
+/// Модель по id; пустой id — первая из каталога.
+pub fn entry(id: &str) -> Option<&'static ModelEntry> {
+    if id.is_empty() {
+        CATALOG.first()
+    } else {
+        CATALOG.iter().find(|e| e.id == id)
+    }
+}
+
+/// Активная модель из настроек; если id устарел — первая совместимая.
+pub fn active_entry(settings: &db::Settings) -> &'static ModelEntry {
+    entry(&settings.model_id).unwrap_or(&CATALOG[0])
+}
+
+pub fn tag_source(e: &ModelEntry) -> String {
+    format!("clip:{}", e.id)
+}
+
+pub fn model_dir(models_dir: &Path, e: &ModelEntry) -> PathBuf {
+    models_dir.join(e.dir)
+}
+
+fn file_paths(dir: &Path, e: &ModelEntry) -> Vec<PathBuf> {
+    e.files.iter().map(|f| dir.join(f.name)).collect()
+}
+
 /// Файлы модели на месте (без проверки sha256 — она при загрузке).
-pub fn model_present() -> bool {
-    let f = files();
-    f.vision.is_file() && f.text.is_file() && f.tokenizer.is_file() && f.dense.is_file()
+pub fn model_present_in(models_dir: &Path, e: &ModelEntry) -> bool {
+    let dir = model_dir(models_dir, e);
+    file_paths(&dir, e).iter().all(|p| p.is_file())
+}
+
+pub fn model_present(settings: &db::Settings) -> bool {
+    model_present_in(&settings.models_dir, active_entry(settings))
 }
 
 /// Проверить наличие и sha256 всех файлов модели.
-pub fn check_model() -> Result<()> {
-    let f = files();
-    for (path, want, what) in [
-        (&f.vision, VISION_SHA, "зрительная часть"),
-        (&f.text, TEXT_SHA, "текстовая часть"),
-        (&f.tokenizer, TOKENIZER_SHA, "токенизатор"),
-        (&f.dense, DENSE_SHA, "проекция текста"),
-    ] {
+pub fn check_model_in(models_dir: &Path, e: &ModelEntry) -> Result<()> {
+    let dir = model_dir(models_dir, e);
+    for f in e.files {
+        let path = dir.join(f.name);
         if !path.is_file() {
             bail!(
-                "нет модели CLIP: {}\nскачайте веса: bash scripts/fetch-model.sh",
+                "нет файлов модели «{}»: {}\nскачайте в «Настройках» или: bash scripts/fetch-model.sh",
+                e.title,
                 path.display()
             );
         }
-        let got = derive::sha256_file(path)
+        let got = derive::sha256_file(&path)
             .with_context(|| format!("не прочитать {}", path.display()))?;
-        if got != want {
+        if got != f.sha256 {
             bail!(
-                "файл модели повреждён ({what}): {} \nsha256 {got}, ожидался {want}\nперекачайте: bash scripts/fetch-model.sh",
-                path.display()
+                "файл модели повреждён ({}): {} \nsha256 {got}, ожидался {}\nскачайте заново в «Настройках»",
+                f.name,
+                path.display(),
+                f.sha256
             );
         }
     }
@@ -96,13 +223,17 @@ pub fn check_model() -> Result<()> {
 }
 
 /// Размер файлов модели в байтах (для интерфейса и отчётов).
-pub fn model_bytes() -> i64 {
-    let f = files();
-    [f.vision, f.text, f.tokenizer, f.dense]
+pub fn model_bytes_in(models_dir: &Path, e: &ModelEntry) -> i64 {
+    let dir = model_dir(models_dir, e);
+    file_paths(&dir, e)
         .iter()
         .filter_map(|p| std::fs::metadata(p).ok())
         .map(|m| m.len() as i64)
         .sum()
+}
+
+pub fn check_model(settings: &db::Settings) -> Result<()> {
+    check_model_in(&settings.models_dir, active_entry(settings))
 }
 
 pub struct Model {
@@ -112,12 +243,15 @@ pub struct Model {
     tokenizer: Tokenizer,
     dense: Vec<f32>,
     tag_vectors: Vec<Vec<f32>>,
+    pub entry: &'static ModelEntry,
 }
 
 impl Model {
-    pub fn load(threads: usize) -> Result<Self> {
-        check_model()?;
-        let f = files();
+    pub fn load(settings: &db::Settings, threads: usize) -> Result<Self> {
+        let entry = active_entry(settings);
+        check_model_in(&settings.models_dir, entry)?;
+        let dir = model_dir(&settings.models_dir, entry);
+        let f = |name: &str| dir.join(name);
         let threads = threads.max(1);
         let env = ort::init()
             .with_name("photocat")
@@ -125,15 +259,19 @@ impl Model {
             .map_err(oe)?;
         let vision = Session::builder(&env).map_err(oe)?
             .with_intra_threads(threads).map_err(oe)?
-            .commit_from_file(&f.vision)
+            .commit_from_file(f("vision.onnx"))
             .map_err(oe)?;
         let text = Session::builder(&env).map_err(oe)?
             .with_intra_threads(threads).map_err(oe)?
-            .commit_from_file(&f.text)
+            .commit_from_file(f("text.onnx"))
             .map_err(oe)?;
-        let tokenizer = Tokenizer::from_file(&f.tokenizer)
+        let tokenizer = Tokenizer::from_file(f("tokenizer.json"))
             .map_err(|e| anyhow::anyhow!("не загрузить токенизатор: {e}"))?;
-        let dense = read_dense(&f.dense)?;
+        let dense = if entry.kind == TextKind::Projected {
+            read_dense(&f("text_dense.safetensors"))?
+        } else {
+            Vec::new()
+        };
         let mut me = Self {
             _env: env,
             vision,
@@ -141,18 +279,14 @@ impl Model {
             tokenizer,
             dense,
             tag_vectors: Vec::new(),
+            entry,
         };
-        let prompts: Vec<&str> = TAGS.iter().map(|(_, p)| *p).collect();
-        let tag_vectors = me.encode_texts(&prompts)?;
+        let tag_vectors = me.encode_texts(entry.prompts)?;
         me.tag_vectors = tag_vectors;
         Ok(me)
     }
 
-    /// Текстовые эмбеддинги (для запроса и промптов). Векторы нормализованы.
-    pub fn encode_texts(&mut self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        if texts.is_empty() {
-            return Ok(Vec::new());
-        }
+    fn tokenize(&self, texts: &[&str]) -> Result<(Vec<i64>, Vec<i64>, usize, usize)> {
         let mut rows: Vec<Vec<i64>> = Vec::with_capacity(texts.len());
         let mut max_len = 1usize;
         for t in texts {
@@ -177,6 +311,37 @@ impl Model {
                 mask[b * max_len + i] = 1;
             }
         }
+        Ok((ids, mask, batch, max_len))
+    }
+
+    /// Текстовые эмбеддинги (для запроса и промптов). Векторы нормализованы.
+    pub fn encode_texts(&mut self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (ids, mask, batch, max_len) = self.tokenize(texts)?;
+        let mut out = Vec::with_capacity(batch);
+        if self.entry.kind == TextKind::Direct {
+            let outputs = self.text.run(ort::inputs![
+                "input_ids" => Tensor::from_array((vec![batch as i64, max_len as i64], ids)).map_err(oe)?,
+            ]).map_err(oe)?;
+            let (shape, data) = outputs["text_embeds"]
+                .try_extract_tensor::<f32>()
+                .map_err(oe)?;
+            let dim = *shape.last().unwrap_or(&0) as usize;
+            if dim != DIM {
+                bail!("текстовая модель вернула {dim} признаков, ожидалось {DIM}");
+            }
+            for row in data.chunks(DIM) {
+                let mut v = row.to_vec();
+                normalize(&mut v);
+                out.push(v);
+            }
+            if out.len() != batch {
+                bail!("текстовая модель вернула {} векторов на {batch} запросов", out.len());
+            }
+            return Ok(out);
+        }
         let outputs = self.text.run(ort::inputs![
             "input_ids" => Tensor::from_array((vec![batch as i64, max_len as i64], ids)).map_err(oe)?,
             "attention_mask" => Tensor::from_array((vec![batch as i64, max_len as i64], mask.clone())).map_err(oe)?,
@@ -189,7 +354,6 @@ impl Model {
                 self.dense.len() / DIM
             );
         }
-        let mut out = Vec::with_capacity(batch);
         for b in 0..batch {
             let mut pooled = vec![0f32; hidden];
             let mut n = 0f32;
@@ -255,28 +419,38 @@ impl Model {
 
     /// Теги для одного вектора: все промпты с весом по убыванию.
     pub fn tag_scores(&self, image: &[f32]) -> Vec<(String, f32)> {
-        let mut out: Vec<(String, f32)> = TAGS
+        let mut out: Vec<(String, f32)> = TAG_LABELS
             .iter()
             .zip(&self.tag_vectors)
-            .map(|((label, _), v)| ((*label).to_string(), cosine(image, v)))
+            .map(|(label, v)| ((*label).to_string(), cosine(image, v)))
             .collect();
         out.sort_by(|a, b| b.1.total_cmp(&a.1));
         out
     }
 }
 
-/// Уверенный тег — только первый, если он выше порога и заметно отрывается от второго.
-pub fn confident_tag(scores: &[(String, f32)]) -> Option<(&str, f32)> {
+/// Уверенный тег с настраиваемыми порогами.
+pub fn confident_tag_with(
+    scores: &[(String, f32)],
+    show: f32,
+    margin: f32,
+) -> Option<(&str, f32)> {
     let (tag, top) = scores.first()?;
-    if *top < TAG_SHOW {
+    if *top < show {
         return None;
     }
     if let Some((_, second)) = scores.get(1)
-        && top - second < TAG_MARGIN
+        && top - second < margin
     {
         return None;
     }
     Some((tag.as_str(), *top))
+}
+
+/// Пороги по умолчанию.
+#[allow(dead_code)]
+pub fn confident_tag(scores: &[(String, f32)]) -> Option<(&str, f32)> {
+    confident_tag_with(scores, TAG_SHOW, TAG_MARGIN)
 }
 
 fn oe<R>(e: ort::Error<R>) -> anyhow::Error {
@@ -350,7 +524,7 @@ pub fn search(
         .context("пустой текстовый эмбеддинг")?;
     normalize(&mut q);
     let conn = db::open(db_path)?;
-    let vectors = db::load_embeddings(&conn, MODEL)?;
+    let vectors = db::load_embeddings(&conn, model.entry.id)?;
     let mut scored: Vec<(i64, f32)> = vectors
         .into_iter()
         .map(|(id, v)| (id, cosine(&q, &v)))
@@ -361,6 +535,7 @@ pub fn search(
 }
 
 pub struct EmbedStats {
+    pub model: &'static str,
     pub total: usize,
     pub computed: usize,
     pub skipped: usize,
@@ -373,7 +548,8 @@ impl std::fmt::Display for EmbedStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "CLIP: посчитано {}/{}, пропущено {}, ошибок {}, за {:.1} с, модель {}",
+            "CLIP ({}): посчитано {}/{}, пропущено {}, ошибок {}, за {:.1} с, модель {}",
+            self.model,
             self.computed,
             self.total,
             self.skipped,
@@ -393,14 +569,16 @@ pub fn embed_missing(
 ) -> Result<EmbedStats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
+    let settings = db::load_settings(&conn);
+    let entry = active_entry(&settings);
     let rows = db::load_all(&conn)?;
-    let done = db::embedding_shas(&conn, MODEL)?;
+    let done = db::embedding_shas(&conn, entry.id)?;
     let todo: Vec<&FileRow> = rows
         .iter()
-        .filter(|r| r.kind == "image" && r.thumb.is_some())
+        .filter(|r| r.thumb.is_some())
         .filter(|r| done.get(&r.id) != Some(&r.sha256))
         .collect();
-    let total = rows.iter().filter(|r| r.kind == "image").count();
+    let total = rows.iter().filter(|r| r.thumb.is_some()).count();
     let skipped = total.saturating_sub(todo.len());
     if let Some(p) = &progress {
         p.set_total(todo.len());
@@ -412,15 +590,16 @@ pub fn embed_missing(
             p.finish();
         }
         return Ok(EmbedStats {
+            model: entry.id,
             total,
             computed: 0,
             skipped,
             errors: 0,
             seconds: t0.elapsed().as_secs_f64(),
-            model_bytes: model_bytes(),
+            model_bytes: model_bytes_in(&settings.models_dir, entry),
         });
     }
-    let mut model = Model::load(threads)?;
+    let mut model = Model::load(&settings, threads)?;
     if let Some(p) = &progress {
         p.set_msg("CLIP: эмбеддинги…");
     }
@@ -470,8 +649,8 @@ pub fn embed_missing(
                 }
                 continue;
             }
-            db::save_embedding(&tx, r.id, MODEL, &r.sha256, &vec)?;
-            db::replace_tags(&tx, r.id, TAG_SOURCE, &model.tag_scores(&vec))?;
+            db::save_embedding(&tx, r.id, entry.id, &r.sha256, &vec)?;
+            db::replace_tags(&tx, r.id, &tag_source(entry), &model.tag_scores(&vec))?;
             computed += 1;
             if let Some(p) = &progress {
                 p.tick();
@@ -484,12 +663,13 @@ pub fn embed_missing(
         p.finish();
     }
     Ok(EmbedStats {
+        model: entry.id,
         total,
         computed,
         skipped,
         errors,
         seconds: t0.elapsed().as_secs_f64(),
-        model_bytes: model_bytes(),
+        model_bytes: model_bytes_in(&settings.models_dir, entry),
     })
 }
 
@@ -601,9 +781,11 @@ pub struct ClusterStats {
 pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterStats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
+    let settings = db::load_settings(&conn);
+    let entry = active_entry(&settings);
     let rows = db::load_all(&conn)?;
     let by_id: HashMap<i64, &FileRow> = rows.iter().map(|r| (r.id, r)).collect();
-    let vectors = db::load_embeddings(&conn, MODEL)?;
+    let vectors = db::load_embeddings(&conn, entry.id)?;
     if vectors.len() < 2 {
         bail!("нет эмбеддингов: сначала запустите `photocat embed`");
     }
@@ -618,7 +800,8 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
 
     let mut md = String::from("# Кластеры CLIP (M3)\n\n");
     md.push_str(&format!(
-        "Модель `{MODEL}`, фото с эмбеддингами: {}, кластеров: {}, k={k}.\n\n",
+        "Модель `{}`, файлов с эмбеддингами: {}, кластеров: {}, k={k}.\n\n",
+        entry.id,
         xs.len(),
         buckets.len()
     ));
@@ -645,6 +828,178 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
         out: out.to_path_buf(),
         seconds: t0.elapsed().as_secs_f64(),
     })
+}
+
+/// Итог загрузки: какая модель в итоге скачана и какие варианты не подошли.
+pub struct DownloadReport {
+    pub model: &'static str,
+    pub bytes: u64,
+    pub files: usize,
+    pub fallbacks: Vec<String>,
+}
+
+impl std::fmt::Display for DownloadReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "модель {}: файлов {}, {}",
+            self.model,
+            self.files,
+            db::human(self.bytes as i64)
+        )?;
+        if !self.fallbacks.is_empty() {
+            write!(f, " (не подошли: {})", self.fallbacks.join("; "))?;
+        }
+        Ok(())
+    }
+}
+
+/// Скачать модель с согласия владельца. Сначала выбранная, затем — совместимые варианты
+/// из каталога в пределах лимита размера (ADR 0015).
+pub fn download_model(
+    settings: &db::Settings,
+    requested: &str,
+    consent: bool,
+    progress: Option<Arc<Progress>>,
+) -> Result<DownloadReport> {
+    if !consent {
+        bail!("скачивание модели требует явного согласия владельца");
+    }
+    let max_bytes = settings.max_model_mb.saturating_mul(1024 * 1024);
+    let mut candidates: Vec<&'static ModelEntry> = Vec::new();
+    if let Some(e) = entry(requested) {
+        candidates.push(e);
+    }
+    let mut rest: Vec<&'static ModelEntry> = catalog()
+        .iter()
+        .filter(|e| candidates.iter().all(|c| c.id != e.id))
+        .collect();
+    rest.sort_by_key(|e| e.bytes());
+    candidates.extend(rest);
+
+    let mut failed = Vec::new();
+    for e in candidates {
+        if max_bytes > 0 && e.bytes() > max_bytes {
+            failed.push(format!(
+                "{} — {} больше лимита {} МиБ",
+                e.title,
+                db::human(e.bytes() as i64),
+                settings.max_model_mb
+            ));
+            continue;
+        }
+        match download_entry(settings, e, progress.clone()) {
+            Ok(files) => {
+                return Ok(DownloadReport {
+                    model: e.id,
+                    bytes: e.bytes(),
+                    files,
+                    fallbacks: failed,
+                });
+            }
+            Err(err) => failed.push(format!("{} — {err}", e.title)),
+        }
+    }
+    bail!("не удалось скачать модель: {}", failed.join("; "))
+}
+
+fn download_entry(
+    settings: &db::Settings,
+    e: &'static ModelEntry,
+    progress: Option<Arc<Progress>>,
+) -> Result<usize> {
+    let dir = model_dir(&settings.models_dir, e);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("не создать {}", dir.display()))?;
+    if let Some(p) = &progress {
+        p.reset();
+        p.set_total(e.files.len());
+        p.set_msg(format!("модель {}: подготовка", e.title));
+    }
+    let mut files = 0usize;
+    for f in e.files {
+        let path = dir.join(f.name);
+        let ok = path.is_file()
+            && derive::sha256_file(&path)
+                .map(|got| got == f.sha256)
+                .unwrap_or(false);
+        if ok {
+            files += 1;
+        } else {
+            if let Some(p) = &progress {
+                p.set_msg(format!("модель {}: {}", e.title, f.name));
+            }
+            fetch_with_fallback(f.url, &path)?;
+            let got = derive::sha256_file(&path)
+                .with_context(|| format!("не прочитать {}", path.display()))?;
+            if got != f.sha256 {
+                bail!(
+                    "sha256 {} не совпал: {got}, ожидался {}",
+                    f.name,
+                    f.sha256
+                );
+            }
+            files += 1;
+        }
+        if let Some(p) = &progress {
+            p.tick();
+        }
+    }
+    if let Some(p) = &progress {
+        p.set_msg("модель скачана");
+        p.finish();
+    }
+    Ok(files)
+}
+
+/// Основной адрес и зеркало: если HuggingFace недоступен, пробуем hf-mirror.
+fn fetch_with_fallback(url: &str, dst: &Path) -> Result<()> {
+    let mirror = url.replace("https://huggingface.co/", "https://hf-mirror.com/");
+    let mut last = String::new();
+    for u in [url, mirror.as_str()] {
+        if u.is_empty() {
+            continue;
+        }
+        match curl_get(u, dst) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = format!("{u}: {e}"),
+        }
+    }
+    bail!("{last}");
+}
+
+fn curl_get(url: &str, dst: &Path) -> Result<()> {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new("curl");
+    cmd.args([
+        "-fL",
+        "--retry",
+        "3",
+        "--connect-timeout",
+        "20",
+        "--max-time",
+        "1800",
+        "--silent",
+        "--show-error",
+        "-o",
+    ])
+    .arg(dst)
+    .arg(url);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd
+        .output()
+        .context("не запустить curl: скачивание моделей требует curl в PATH")?;
+    if !out.status.success() {
+        bail!(
+            "curl: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -687,9 +1042,10 @@ mod tests {
     fn model_roundtrip_on_real_photo() {
         let db_path = db::resolve_db(None).unwrap();
         let conn = db::open(&db_path).unwrap();
+        let settings = db::load_settings(&conn);
         let rows = db::load_all(&conn).unwrap();
         let r = rows.iter().find(|r| r.thumb.is_some()).expect("нет фото с превью");
-        let mut m = Model::load(4).unwrap();
+        let mut m = Model::load(&settings, 4).unwrap();
         let thumb = db::cache_dir().join("thumbs").join(r.thumb.as_ref().unwrap());
         let v = m.embed_thumbs(&[thumb]).unwrap();
         assert_eq!(v.len(), 1);

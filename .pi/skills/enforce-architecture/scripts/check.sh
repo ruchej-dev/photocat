@@ -65,13 +65,28 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. сеть
-echo "4. никаких HTTP-клиентов"
+echo "4. сеть только для моделей"
 bad=$(grep -nE '^(reqwest|hyper|ureq|curl|isahc|attohttpc)\s*=' Cargo.toml 2>/dev/null || true)
 if [[ -n $bad ]]; then
-  err "сетевой клиент в Cargo.toml (ADR 0011): $bad"
+  err "HTTP-клиент в Cargo.toml: сеть только через curl-процесс (ADR 0016): $bad"
 else
   pass
-  note "ок" "сеть запрещена"
+fi
+bad=$(grep -nE 'Command::new\("curl"\)' src/*.rs 2>/dev/null | grep -v '^src/embed.rs:' || true)
+if [[ -n $bad ]]; then
+  err "curl запускается вне src/embed.rs (ADR 0016):"
+  echo "$bad" | sed 's/^/      /'
+else
+  pass
+fi
+# upload-флаги в загрузчике запрещены: наружу уходят только GET-запросы за весами
+bad=$(grep -nE '\s(-F|--data|-T|--upload-file)\s' src/embed.rs 2>/dev/null || true)
+if [[ -n $bad ]]; then
+  err "загрузчик умеет отправлять данные (ADR 0015):"
+  echo "$bad" | sed 's/^/      /'
+else
+  pass
+  note "ок" "сеть только за моделями, без отправки данных"
 fi
 
 # ---------------------------------------------------------------- 5. зависимости

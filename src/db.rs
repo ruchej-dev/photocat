@@ -21,6 +21,13 @@ impl Progress {
     pub fn set_total(&self, n: usize) {
         self.total.store(n, Ordering::Relaxed);
     }
+    /// Начать заново (например, при переходе к следующей модели-кандидату).
+    pub fn reset(&self) {
+        self.done.store(0, Ordering::Relaxed);
+        self.total.store(0, Ordering::Relaxed);
+        self.errors.store(0, Ordering::Relaxed);
+        self.finished.store(false, Ordering::Relaxed);
+    }
     pub fn tick(&self) {
         self.done.fetch_add(1, Ordering::Relaxed);
     }
@@ -51,11 +58,12 @@ impl Progress {
 }
 
 pub fn cache_dir() -> PathBuf {
-    let base = std::env::var("XDG_CACHE_HOME")
+    // Linux — XDG, Windows — LOCALAPPDATA, macOS — обычный ~/.cache: без платформенных крейтов.
+    let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".cache")
-        });
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
     base.join("photocat")
 }
 
@@ -111,6 +119,16 @@ fn init(c: &Connection) -> Result<()> {
             PRIMARY KEY(file_id, tag)
          );
          CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);
+         CREATE TABLE IF NOT EXISTS tag_hidden(
+            file_id INTEGER NOT NULL,
+            tag     TEXT NOT NULL,
+            hidden_at INTEGER NOT NULL,
+            PRIMARY KEY(file_id, tag)
+         );
+         CREATE TABLE IF NOT EXISTS settings(
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS embeddings(
             file_id INTEGER NOT NULL,
             model   TEXT NOT NULL,
@@ -120,6 +138,12 @@ fn init(c: &Connection) -> Result<()> {
             PRIMARY KEY(file_id, model)
          );
          CREATE INDEX IF NOT EXISTS idx_emb_model ON embeddings(model);
+         CREATE TRIGGER IF NOT EXISTS clear_hidden_tags_after_sha_change
+         AFTER UPDATE OF sha256 ON files
+         WHEN old.sha256 IS NOT new.sha256
+         BEGIN
+            DELETE FROM tag_hidden WHERE file_id = new.id;
+         END;
          CREATE TRIGGER IF NOT EXISTS invalidate_clip_after_sha_change
          AFTER UPDATE OF sha256 ON files
          WHEN old.sha256 IS NOT new.sha256
@@ -131,8 +155,119 @@ fn init(c: &Connection) -> Result<()> {
     // Схема старых БД дополняется на месте: данные не теряются при обновлении.
     ensure_column(c, "files", "sharpness", "REAL")?;
     ensure_column(c, "files", "decision", "TEXT")?;
+    ensure_column(c, "files", "duration_s", "REAL")?;
+    // Теги старых версий были без модели в источнике; переводим на id текущей модели.
+    c.execute(
+        "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
+        [],
+    )?;
     Ok(())
 }
+
+/// Настройки приложения. Хранятся в БД (рядом с индексом), а не в файле у архива.
+#[derive(Debug, Clone)]
+pub struct Settings {
+    /// Куда скачивать модели и откуда их читать.
+    pub models_dir: PathBuf,
+    /// id модели из каталога; пусто — первая доступная.
+    pub model_id: String,
+    /// Потолок размера скачиваемой модели, МиБ.
+    pub max_model_mb: u64,
+    /// Потоков на индексацию по умолчанию.
+    pub index_jobs: usize,
+    /// Порог похожести dHash по умолчанию.
+    pub max_dist: u32,
+    /// Порог уверенного тега и отрыв от второго.
+    pub tag_show: f32,
+    pub tag_margin: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            models_dir: cache_dir().join("models"),
+            model_id: String::new(),
+            max_model_mb: 250,
+            index_jobs: 8,
+            max_dist: 6,
+            tag_show: 0.22,
+            tag_margin: 0.01,
+        }
+    }
+}
+
+pub fn load_settings(conn: &Connection) -> Settings {
+    let mut s = Settings::default();
+    let Ok(mut st) = conn.prepare("SELECT key, value FROM settings") else {
+        return s;
+    };
+    let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else {
+        return s;
+    };
+    for row in rows.flatten() {
+        let (k, v) = row;
+        match k.as_str() {
+            "models_dir" => s.models_dir = PathBuf::from(v),
+            "model_id" => s.model_id = v,
+            "max_model_mb" => s.max_model_mb = v.parse().unwrap_or(s.max_model_mb),
+            "index_jobs" => s.index_jobs = v.parse().unwrap_or(s.index_jobs),
+            "max_dist" => s.max_dist = v.parse().unwrap_or(s.max_dist),
+            "tag_show" => s.tag_show = v.parse().unwrap_or(s.tag_show),
+            "tag_margin" => s.tag_margin = v.parse().unwrap_or(s.tag_margin),
+            _ => {}
+        }
+    }
+    s
+}
+
+pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
+    let pairs = [
+        ("models_dir", s.models_dir.to_string_lossy().to_string()),
+        ("model_id", s.model_id.clone()),
+        ("max_model_mb", s.max_model_mb.to_string()),
+        ("index_jobs", s.index_jobs.to_string()),
+        ("max_dist", s.max_dist.to_string()),
+        ("tag_show", s.tag_show.to_string()),
+        ("tag_margin", s.tag_margin.to_string()),
+    ];
+    for (k, v) in pairs {
+        conn.execute(
+            "INSERT INTO settings(key,value) VALUES(?1,?2)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![k, v],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn hide_tag(db: &Path, file_id: i64, tag: &str) -> Result<()> {
+    let conn = open(db)?;
+    conn.execute(
+        "INSERT INTO tag_hidden(file_id,tag,hidden_at) VALUES(?1,?2,?3)
+         ON CONFLICT(file_id,tag) DO NOTHING",
+        params![file_id, tag, now()],
+    )?;
+    Ok(())
+}
+
+/// Вернуть все скрытые теги файла (оригинал не трогается, решение живёт в БД).
+pub fn unhide_tags(db: &Path, file_id: i64) -> Result<usize> {
+    let conn = open(db)?;
+    Ok(conn.execute("DELETE FROM tag_hidden WHERE file_id=?1", params![file_id])?)
+}
+
+/// file_id → сколько тегов скрыто владельцем.
+pub fn load_hidden_counts(conn: &Connection) -> Result<HashMap<i64, usize>> {
+    let mut st = conn.prepare("SELECT file_id, COUNT(*) FROM tag_hidden GROUP BY file_id")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let (id, n) = r?;
+        out.insert(id, n as usize);
+    }
+    Ok(out)
+}
+
 
 fn ensure_column(c: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
     let exists = {
@@ -171,6 +306,8 @@ pub struct FileRow {
     pub camera: Option<String>,
     pub dhash: Option<i64>,
     pub sharpness: Option<f64>,
+    /// Длительность видео в секундах; `NULL` у фото и у файлов без ffprobe.
+    pub duration_s: Option<f64>,
     pub thumb: Option<String>,
     /// Решение владельца по дублю: `keep` | `drop` | `NULL` (не решено).
     pub decision: Option<String>,
@@ -178,13 +315,14 @@ pub struct FileRow {
 
 pub fn insert(conn: &Connection, r: &FileRow) -> Result<()> {
     conn.execute(
-        "INSERT INTO files(path,size,mtime,sha256,kind,width,height,taken_at,taken_src,lat,lon,camera,dhash,sharpness,thumb,decision,indexed_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+        "INSERT INTO files(path,size,mtime,sha256,kind,width,height,taken_at,taken_src,lat,lon,camera,dhash,sharpness,duration_s,thumb,decision,indexed_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
          ON CONFLICT(path) DO UPDATE SET
             size=excluded.size, sha256=excluded.sha256, kind=excluded.kind,
             width=excluded.width, height=excluded.height, taken_at=excluded.taken_at,
             taken_src=excluded.taken_src, lat=excluded.lat, lon=excluded.lon,
             camera=excluded.camera, dhash=excluded.dhash, sharpness=excluded.sharpness,
+            duration_s=excluded.duration_s,
             thumb=excluded.thumb, indexed_at=excluded.indexed_at,
             decision=CASE WHEN files.sha256 IS excluded.sha256 THEN files.decision ELSE NULL END",
         params![
@@ -202,6 +340,7 @@ pub fn insert(conn: &Connection, r: &FileRow) -> Result<()> {
             r.camera,
             r.dhash,
             r.sharpness,
+            r.duration_s,
             r.thumb,
             r.decision,
             now(),
@@ -236,7 +375,7 @@ pub fn now() -> i64 {
 pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
     let mut st = conn.prepare(
         "SELECT id,path,size,sha256,kind,COALESCE(width,0),COALESCE(height,0),
-                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,thumb,decision
+                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,duration_s,thumb,decision
          FROM files ORDER BY COALESCE(taken_at,'9999') , path",
     )?;
     let rows = st.query_map([], |r| {
@@ -256,8 +395,9 @@ pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
             camera: r.get(11)?,
             dhash: r.get(12)?,
             sharpness: r.get(13)?,
-            thumb: r.get(14)?,
-            decision: r.get(15)?,
+            duration_s: r.get(14)?,
+            thumb: r.get(15)?,
+            decision: r.get(16)?,
         })
     })?;
     let mut out = Vec::new();
@@ -340,11 +480,17 @@ pub fn replace_tags(
 }
 
 /// Все теги: file_id → [(тег, вес)] по убыванию веса.
-pub fn load_tags(conn: &Connection) -> Result<HashMap<i64, Vec<(String, f32)>>> {
+/// Все видимые теги выбранного источника: file_id → [(тег, вес)] по убыванию.
+/// Скрытые владельцем теги (`tag_hidden`) в результат не попадают.
+pub fn load_tags(conn: &Connection, source: &str) -> Result<HashMap<i64, Vec<(String, f32)>>> {
     let mut st = conn.prepare(
-        "SELECT file_id, tag, COALESCE(score,0) FROM tags ORDER BY file_id, score DESC",
+        "SELECT t.file_id, t.tag, COALESCE(t.score,0)
+         FROM tags t
+         LEFT JOIN tag_hidden h ON h.file_id=t.file_id AND h.tag=t.tag
+         WHERE t.source=?1 AND h.tag IS NULL
+         ORDER BY t.file_id, t.score DESC",
     )?;
-    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?)))?;
+    let rows = st.query_map([source], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?)))?;
     let mut out: HashMap<i64, Vec<(String, f32)>> = HashMap::new();
     for r in rows {
         let (id, tag, score) = r?;
@@ -366,6 +512,17 @@ pub fn human(bytes: i64) -> String {
         format!("{v:.0} {}", units[i])
     } else {
         format!("{v:.1} {}", units[i])
+    }
+}
+
+/// Длительность видео: `М:СС`, от часа — `Ч:ММ:СС`. Округление до секунды.
+pub fn duration(secs: f64) -> String {
+    let total = secs.round().max(0.0) as u64;
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
     }
 }
 
@@ -416,6 +573,13 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
     println!("без перцептивного хеша: {no_hash}");
     println!("уникальных sha256: {uniq_sha}  (точных копий: {})", total_n - uniq_sha);
     println!("уникальных dhash: {uniq_dhash}");
+    let (vid_n, vid_dur): (i64, f64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(duration_s),0) FROM files
+         WHERE kind='video' AND duration_s IS NOT NULL",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    println!("видео с длительностью: {vid_n}, суммарно {}", duration(vid_dur));
     Ok(())
 }
 
@@ -440,6 +604,7 @@ mod tests {
             camera: None,
             dhash: Some(1),
             sharpness: Some(sharpness),
+            duration_s: None,
             thumb: None,
             decision: None,
         }
@@ -469,6 +634,88 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].sharpness, Some(7.5));
         assert_eq!(loaded[0].decision, None);
+        assert_eq!(loaded[0].duration_s, None);
+    }
+
+    #[test]
+    fn hidden_tag_disappears_from_filter() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let r = row("/a.jpg", "aa", 10.0);
+        insert(&c, &r).unwrap();
+        let id = id_of(&c, "/a.jpg");
+        replace_tags(&c, id, "clip", &[("пляж".into(), 0.3), ("еда".into(), 0.1)])
+            .unwrap();
+        assert_eq!(load_tags(&c, "clip").unwrap()[&id].len(), 2);
+        c.execute(
+            "INSERT INTO tag_hidden(file_id,tag,hidden_at) VALUES(?1,'пляж',0)",
+            params![id],
+        )
+        .unwrap();
+        let left = load_tags(&c, "clip").unwrap();
+        assert_eq!(left[&id].len(), 1);
+        assert_eq!(left[&id][0].0, "еда");
+    }
+
+    #[test]
+    fn hidden_tag_cleared_when_file_content_changes() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let r = row("/a.jpg", "aa", 10.0);
+        insert(&c, &r).unwrap();
+        let id = id_of(&c, "/a.jpg");
+        c.execute(
+            "INSERT INTO tag_hidden(file_id,tag,hidden_at) VALUES(?1,'пляж',0)",
+            params![id],
+        )
+        .unwrap();
+        let mut changed = r.clone();
+        changed.sha256 = "bb".into();
+        insert(&c, &changed).unwrap();
+        assert_eq!(load_hidden_counts(&c).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn settings_survive_roundtrip() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let s = Settings {
+            model_id: "clip-vit-b32-en".into(),
+            models_dir: PathBuf::from("/tmp/models"),
+            max_model_mb: 160,
+            tag_show: 0.27,
+            tag_margin: 0.02,
+            ..Default::default()
+        };
+        save_settings(&c, &s).unwrap();
+        let back = load_settings(&c);
+        assert_eq!(back.model_id, "clip-vit-b32-en");
+        assert_eq!(back.models_dir, PathBuf::from("/tmp/models"));
+        assert_eq!(back.max_model_mb, 160);
+        assert!((back.tag_show - 0.27).abs() < 1e-6);
+        assert!((back.tag_margin - 0.02).abs() < 1e-6);
+    }
+
+    #[test]
+    fn video_duration_survives_roundtrip() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let mut r = row("/v.mp4", "bb", 0.0);
+        r.kind = "video".into();
+        r.duration_s = Some(42.4);
+        insert(&c, &r).unwrap();
+        let loaded = load_all(&c).unwrap();
+        assert_eq!(loaded[0].duration_s, Some(42.4));
+    }
+
+    #[test]
+    fn duration_is_readable_in_minutes_and_hours() {
+        assert_eq!(duration(0.0), "0:00");
+        assert_eq!(duration(12.4), "0:12");
+        assert_eq!(duration(65.0), "1:05");
+        assert_eq!(duration(3725.0), "1:02:05");
+        assert_eq!(duration(-5.0), "0:00");
+        assert_eq!(duration(f64::NAN), "0:00");
     }
 
     #[test]
@@ -481,13 +728,13 @@ mod tests {
         save_embedding(&c, id, "m", "aa", &[1.0, 0.0]).unwrap();
         replace_tags(&c, id, "clip", &[("пляж".into(), 0.3)]).unwrap();
         assert_eq!(embedding_shas(&c, "m").unwrap().len(), 1);
-        assert_eq!(load_tags(&c).unwrap().len(), 1);
+        assert_eq!(load_tags(&c, "clip").unwrap().len(), 1);
 
         let mut changed = r.clone();
         changed.sha256 = "bb".into();
         insert(&c, &changed).unwrap();
         assert!(embedding_shas(&c, "m").unwrap().is_empty());
-        assert!(load_tags(&c).unwrap().is_empty());
+        assert!(load_tags(&c, "clip").unwrap().is_empty());
     }
 
     #[test]

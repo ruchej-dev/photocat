@@ -86,9 +86,16 @@ pub fn run(
         files.par_iter().for_each_with(tx, |tx, path| {
             let res = process(path, &root, &thumbs_dir);
             match res {
-                Ok((rec, size)) => {
+                Ok((rec, size, soft_error)) => {
                     bytes.fetch_add(size, std::sync::atomic::Ordering::Relaxed);
                     let _ = tx.send(rec);
+                    if soft_error {
+                        // Файл в индексе, но без превью/метаданных: ошибка видна в счётчике.
+                        errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if let Some(p) = &progress {
+                            p.error();
+                        }
+                    }
                 }
                 Err(e) => {
                     errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -118,7 +125,7 @@ pub fn run(
     })
 }
 
-fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> {
+fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64, bool)> {
     let md = std::fs::metadata(p)?;
     let size = md.len() as i64;
     let mtime = md
@@ -135,7 +142,9 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> 
     let mut height = 0u32;
     let mut dhash: Option<u64> = None;
     let mut sharpness: Option<f64> = None;
+    let mut duration: Option<f64> = None;
     let mut thumb: Option<String> = None;
+    let mut soft_error = false;
 
     if kind == "image" {
         match derive::analyze_image(p, thumbs_dir, key, 320) {
@@ -148,7 +157,24 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> 
             }
             Err(e) => {
                 // битый/нечитаемый файл: индексируем без хеша и превью
-                eprintln!("\nне декодируется {}: {e}", p.display());
+                soft_error = true;
+                eprintln!("\nне декодируется {}: {e:#}", p.display());
+            }
+        }
+    } else if kind == "video" {
+        match derive::analyze_video(p, thumbs_dir, key, 320) {
+            Ok(info) => {
+                width = info.width;
+                height = info.height;
+                dhash = Some(info.dhash);
+                sharpness = Some(info.sharpness as f64);
+                duration = Some(info.duration_s);
+                thumb = Some(info.thumb);
+            }
+            Err(e) => {
+                // Нет ffmpeg/битый файл: видео остаётся в индексе, но без превью и хеша.
+                soft_error = true;
+                eprintln!("\nвидео без превью {}: {e:#}", p.display());
             }
         }
     }
@@ -178,8 +204,9 @@ fn process(p: &Path, _root: &Path, thumbs_dir: &Path) -> Result<(FileRow, i64)> 
         camera: meta.camera,
         dhash: dhash.map(|v| v as i64),
         sharpness,
+        duration_s: duration,
         thumb,
         decision: None,
     };
-    Ok((row, size))
+    Ok((row, size, soft_error))
 }

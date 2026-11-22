@@ -45,7 +45,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 2. `egui`/`eframe` встречается только в `src/app.rs`.
 3. В `src/` нет `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` — оригиналы
    архива неприкосновенны (ADR 0005).
-4. В `Cargo.toml` нет сетевых HTTP-клиентов (`reqwest`, `hyper`, `ureq`, `curl`, `isahc`) — ADR 0011.
+4. Сеть только за весами моделей: в `Cargo.toml` нет HTTP-клиентов, `curl` запускается лишь в
+   `src/embed.rs` и без флагов отправки данных — ADR 0015, 0016.
 5. Каждая зависимость упомянута в `docs/DECISIONS.md` (предупреждение, не ошибка).
 
 ## Ручной чек-лист по модулям

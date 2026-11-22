@@ -372,6 +372,7 @@ mod tests {
             camera: None,
             dhash: Some(1),
             sharpness: Some(sharp),
+            duration_s: None,
             thumb: None,
             decision: None,
         }

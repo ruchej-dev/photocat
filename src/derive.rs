@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub const IMG_EXT: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif",
@@ -271,6 +272,152 @@ pub fn thumb_path(thumbs_dir: &Path, rel: &str) -> PathBuf {
     thumbs_dir.join(rel)
 }
 
+/// Запустить внешнюю программу без консольного окна на Windows.
+fn quiet_command(program: &str) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new(program);
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(program)
+    }
+}
+
+/// Что ffprobe знает о видео: разрешение с учётом поворота и длительность.
+#[derive(Debug, Clone, Copy)]
+pub struct VideoMeta {
+    pub width: u32,
+    pub height: u32,
+    pub duration_s: f64,
+}
+
+/// Длительность и разрешение через `ffprobe -of json`. Поворот кадра из side data учитывается:
+/// у вертикальных видео с телефона иначе ширина и высота меняются местами.
+pub fn video_probe(src: &Path) -> Result<VideoMeta> {
+    let out = quiet_command("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height:stream_tags=rotate:stream_side_data=rotation:format=duration",
+            "-of",
+            "json",
+        ])
+        .arg(src)
+        .output()
+        .with_context(|| format!("запуск ffprobe для {}", src.display()))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "ffprobe {}: {}",
+            src.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    parse_probe(&out.stdout, src)
+}
+
+/// Разбор JSON от ffprobe: вынесен отдельно, чтобы проверять поворот без запуска процесса.
+fn parse_probe(out: &[u8], src: &Path) -> Result<VideoMeta> {
+    let v: serde_json::Value = serde_json::from_slice(out).context("разбор ответа ffprobe")?;
+    let stream = &v["streams"][0];
+    let mut width = stream["width"].as_u64().unwrap_or(0) as u32;
+    let mut height = stream["height"].as_u64().unwrap_or(0) as u32;
+    let rotation = stream["side_data_list"][0]["rotation"]
+        .as_i64()
+        .or_else(|| stream["tags"]["rotate"].as_str().and_then(|s| s.trim().parse().ok()))
+        .unwrap_or(0);
+    if rotation.rem_euclid(180) == 90 {
+        std::mem::swap(&mut width, &mut height);
+    }
+    let duration_s = v["format"]["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| v["format"]["duration"].as_f64())
+        .unwrap_or(0.0);
+    if width == 0 || height == 0 {
+        anyhow::bail!("ffprobe не дал разрешение для {}", src.display());
+    }
+    Ok(VideoMeta { width, height, duration_s })
+}
+
+/// Кадр-обложка из видео: ищем на 10% длительности (быстрый seek до входа читает только нужное).
+fn extract_frame(src: &Path, dst: &Path, seek: f64, max_side: u32) -> Result<()> {
+    let vf = format!("scale={max_side}:{max_side}:force_original_aspect_ratio=decrease");
+    let out = quiet_command("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-ss", &format!("{seek:.3}"), "-i"])
+        .arg(src)
+        .args(["-frames:v", "1", "-vf", &vf, "-q:v", "3", "-y"])
+        .arg(dst)
+        .output()
+        .with_context(|| format!("запуск ffmpeg для {}", src.display()))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "ffmpeg {}: {}",
+            src.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    if !dst.exists() {
+        anyhow::bail!("ffmpeg не создал кадр для {}", src.display());
+    }
+    Ok(())
+}
+
+/// Полный проход по видео: ffprobe, кадр-обложка, dHash и резкость по кадру.
+pub struct VideoInfo {
+    pub width: u32,
+    pub height: u32,
+    pub duration_s: f64,
+    pub dhash: u64,
+    pub sharpness: f32,
+    pub thumb: String,
+}
+
+pub fn analyze_video(
+    src: &Path,
+    thumbs_dir: &Path,
+    key: &str,
+    max_side: u32,
+) -> Result<VideoInfo> {
+    let meta = video_probe(src)?;
+    let sub = &key[..2.min(key.len())];
+    let dir = thumbs_dir.join(sub);
+    std::fs::create_dir_all(&dir)?;
+    let rel = format!("{sub}/{key}.jpg");
+    let path = thumbs_dir.join(&rel);
+    let empty = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(true);
+    if empty {
+        let seek = if meta.duration_s > 1.0 { meta.duration_s * 0.1 } else { 0.0 };
+        if let Err(e) = extract_frame(src, &path, seek, max_side) {
+            // У коротких или битых файлов seek может не найти кадр — пробуем с начала.
+            if seek > 0.0 {
+                extract_frame(src, &path, 0.0, max_side)?;
+            } else {
+                return Err(e);
+            }
+        }
+    }
+    let img = image::ImageReader::open(&path)?
+        .with_guessed_format()?
+        .decode()
+        .with_context(|| format!("декодирование кадра {}", path.display()))?;
+    let gray = img.to_luma8();
+    Ok(VideoInfo {
+        width: meta.width,
+        height: meta.height,
+        duration_s: meta.duration_s,
+        dhash: dhash_of(&gray),
+        sharpness: sharpness(&gray),
+        thumb: rel,
+    })
+}
+
 /// Один декод на файл: размеры, dHash, превью.
 pub struct ImageInfo {
     pub width: u32,
@@ -346,4 +493,46 @@ pub fn clip_input(thumb: &Path, size: u32) -> Result<Vec<f32>> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn probe(json: &str) -> Result<VideoMeta> {
+        parse_probe(json.as_bytes(), Path::new("/v.mp4"))
+    }
+
+    #[test]
+    fn side_data_rotation_swaps_width_and_height() {
+        let m = probe(
+            r#"{"streams":[{"width":1280,"height":720,
+                "side_data_list":[{"rotation":90}]}],"format":{"duration":"12.5"}}"#,
+        )
+        .unwrap();
+        assert_eq!((m.width, m.height), (720, 1280));
+        assert!((m.duration_s - 12.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tag_rotation_270_also_swaps() {
+        let m = probe(
+            r#"{"streams":[{"width":1920,"height":1080,"tags":{"rotate":"270"}}],
+                "format":{"duration":"3.0"}}"#,
+        )
+        .unwrap();
+        assert_eq!((m.width, m.height), (1080, 1920));
+    }
+
+    #[test]
+    fn landscape_without_rotation_is_left_alone() {
+        let m = probe(r#"{"streams":[{"width":1920,"height":1080}],"format":{}}"#).unwrap();
+        assert_eq!((m.width, m.height), (1920, 1080));
+        assert_eq!(m.duration_s, 0.0);
+    }
+
+    #[test]
+    fn missing_resolution_is_an_error() {
+        assert!(probe(r#"{"streams":[{}],"format":{}}"#).is_err());
+    }
 }

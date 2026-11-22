@@ -36,6 +36,10 @@ fn usage() {
   embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
   search <запрос> [--top N]                 смысловой поиск по эмбеддингам
   clusters [--k N] [--out FILE]             кластеры CLIP → отчёт с примерами
+  models [list|check|download --id ID --yes]
+                                            каталог моделей, проверка и загрузка весов
+  settings [--models-dir DIR] [--model ID] [--max-model-mb N]
+                                            показать или изменить настройки
   gui                                       графический интерфейс (по умолчанию)
 
 по умолчанию: GUI"
@@ -54,10 +58,13 @@ fn main() -> Result<()> {
                     std::process::exit(2);
                 }
             };
-            let jobs = flag_num(&args, "--jobs", 8);
-            let db_path = flag_str(&args, "--db").map(PathBuf::from);
+            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+            let default_jobs = {
+                let conn = db::open(&db_path)?;
+                db::load_settings(&conn).index_jobs
+            };
+            let jobs = flag_num(&args, "--jobs", default_jobs as u64);
             let progress = Arc::new(Progress::default());
-            let db_path = db::resolve_db(db_path.as_deref())?;
             let show = progress.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(300));
@@ -121,7 +128,11 @@ fn main() -> Result<()> {
             let top = flag_num(&args, "--top", 30);
             let repeat = flag_num(&args, "--repeat", 1).max(1);
             eprintln!("загрузка модели CLIP…");
-            let mut model = embed::Model::load(flag_num(&args, "--jobs", 8))?;
+            let settings = {
+                let conn = db::open(&db_path)?;
+                db::load_settings(&conn)
+            };
+            let mut model = embed::Model::load(&settings, flag_num(&args, "--jobs", 8))?;
             let mut first = Vec::new();
             let mut total = 0f32;
             for n in 0..repeat {
@@ -148,6 +159,87 @@ fn main() -> Result<()> {
                     println!("  {score:.3}  {path}");
                 }
             }
+            Ok(())
+        }
+        "models" => {
+            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+            let settings = {
+                let conn = db::open(&db_path)?;
+                db::load_settings(&conn)
+            };
+            match args.get(1).map(String::as_str).unwrap_or("list") {
+                "list" => {
+                    let active = embed::active_entry(&settings);
+                    for e in embed::catalog() {
+                        let present = embed::model_present_in(&settings.models_dir, e);
+                        println!(
+                            "{} {:<10} {} · {} · {}",
+                            if std::ptr::eq(e, active) { "*" } else { " " },
+                            e.id,
+                            db::human(e.bytes() as i64),
+                            if present { "на месте" } else { "не скачана" },
+                            e.note
+                        );
+                    }
+                    println!("папка моделей: {}", settings.models_dir.display());
+                    println!("лимит: {} МиБ", settings.max_model_mb);
+                }
+                "check" => {
+                    embed::check_model(&settings)?;
+                    println!("модель в порядке: {}", embed::active_entry(&settings).title);
+                }
+                "download" => {
+                    let id = flag_str(&args, "--id").unwrap_or_default();
+                    let consent = has_flag(&args, "--yes");
+                    let progress = Arc::new(Progress::default());
+                    let show = progress.clone();
+                    std::thread::spawn(move || {
+                        while !show.finished() {
+                            eprintln!("\r{}", show.msg());
+                            std::thread::sleep(std::time::Duration::from_millis(300));
+                        }
+                    });
+                    let report = embed::download_model(&settings, &id, consent, Some(progress))?;
+                    println!("{report}");
+                }
+                other => {
+                    eprintln!("неизвестная подкоманда models: {other}\nmodels [list|check|download]");
+                    std::process::exit(2);
+                }
+            }
+            Ok(())
+        }
+        "settings" => {
+            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
+            let conn = db::open(&db_path)?;
+            let mut settings = db::load_settings(&conn);
+            let mut changed = false;
+            if let Some(dir) = flag_str(&args, "--models-dir") {
+                settings.models_dir = PathBuf::from(dir);
+                changed = true;
+            }
+            if let Some(id) = flag_str(&args, "--model") {
+                if embed::entry(&id).is_none() {
+                    eprintln!("нет такой модели: {id} (см. models list)");
+                    std::process::exit(2);
+                }
+                settings.model_id = id;
+                changed = true;
+            }
+            if let Some(n) = flag_str(&args, "--max-model-mb") {
+                settings.max_model_mb = n.parse().unwrap_or(settings.max_model_mb);
+                changed = true;
+            }
+            if changed {
+                db::save_settings(&conn, &settings)?;
+                println!("настройки сохранены");
+            }
+            println!("модель: {}", embed::active_entry(&settings).id);
+            println!("папка моделей: {}", settings.models_dir.display());
+            println!("лимит: {} МиБ", settings.max_model_mb);
+            println!("потоков: {}", settings.index_jobs);
+            println!("порог дублей: {}", settings.max_dist);
+            println!("тег: ≥ {:.2}, отрыв {:.2}", settings.tag_show, settings.tag_margin);
             Ok(())
         }
         "clusters" => {

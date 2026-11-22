@@ -72,8 +72,19 @@ pub fn build_plan(rows: &[FileRow], out: &Path, rename: bool) -> Vec<PlanItem> {
     plan
 }
 
-pub fn apply(plan: &[PlanItem], mode: LinkMode) -> Result<(usize, usize)> {
-    let mut ok = 0;
+/// Символическая ссылка на файл. На Windows нужен режим разработчика или права администратора;
+/// без них ошибка попадает в счётчик `fail`, а не роняет применение плана.
+#[cfg(unix)]
+fn symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(src, dst)
+}
+
+#[cfg(windows)]
+fn symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(src, dst)
+}
+
+pub fn apply(plan: &[PlanItem], mode: LinkMode) -> Result<(usize, usize)> {    let mut ok = 0;
     let mut fail = 0;
     for it in plan {
         let res = (|| -> Result<()> {
@@ -91,7 +102,7 @@ pub fn apply(plan: &[PlanItem], mode: LinkMode) -> Result<(usize, usize)> {
                         .with_context(|| format!("copy {}", it.dst.display()))?;
                 }
                 LinkMode::Symlink => {
-                    std::os::unix::fs::symlink(&it.src, &it.dst)
+                    symlink(&it.src, &it.dst)
                         .with_context(|| format!("symlink {}", it.dst.display()))?;
                 }
             }
