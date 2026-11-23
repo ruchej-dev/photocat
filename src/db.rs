@@ -272,9 +272,13 @@ pub struct Settings {
     pub index_jobs: usize,
     /// Порог похожести dHash по умолчанию.
     pub max_dist: u32,
-    /// Порог уверенного тега и отрыв от второго.
+    /// Порог уверенного тега (сырой косинус) и отрыв от второго.
+    /// Это про карточку, OCR и `{tag}` в витрине, а не про фильтр.
     pub tag_show: f32,
     pub tag_margin: f32,
+    /// Порог отбора в фильтре по тегу — процентиль 0–100 (ADR 0032).
+    /// 100% — самый сильный снимок этого тега, 0% — все; 70% — верхние 30%.
+    pub tag_show_pct: i32,
     /// Языки tesseract для распознавания текста, например `rus+eng`.
     pub ocr_lang: String,
     /// Пути к внешним программам; пусто — берётся из `PATH` (ADR 0020).
@@ -300,6 +304,7 @@ impl Default for Settings {
             max_dist: 6,
             tag_show: 0.22,
             tag_margin: 0.01,
+            tag_show_pct: 70,
             ocr_lang: "rus+eng".into(),
             tools: crate::tools::Tools::default(),
             face_threshold: 0.45,
@@ -311,6 +316,7 @@ impl Default for Settings {
 
 pub fn load_settings(conn: &Connection) -> Settings {
     let mut s = Settings::default();
+    let mut has_tag_pct = false;
     let Ok(mut st) = conn.prepare("SELECT key, value FROM settings") else {
         return s;
     };
@@ -328,6 +334,10 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "max_dist" => s.max_dist = v.parse().unwrap_or(s.max_dist),
             "tag_show" => s.tag_show = v.parse().unwrap_or(s.tag_show),
             "tag_margin" => s.tag_margin = v.parse().unwrap_or(s.tag_margin),
+            "tag_show_pct" => {
+                s.tag_show_pct = v.parse().unwrap_or(s.tag_show_pct).clamp(0, 100);
+                has_tag_pct = true;
+            }
             "ocr_lang" if !v.trim().is_empty() => s.ocr_lang = v,
             "tool_ffmpeg" => s.tools.ffmpeg = v,
             "tool_ffprobe" => s.tools.ffprobe = v,
@@ -346,6 +356,13 @@ pub fn load_settings(conn: &Connection) -> Settings {
             _ => {}
         }
     }
+    if !has_tag_pct {
+        // Миграция M15.2: раньше `tag_show` был и фильтром, и порогом уверенности,
+        // поэтому ползунок уводил его до 0.50. Фильтр теперь в процентилях (70% по
+        // умолчанию), а уверенность возвращается к ADR 0013 — 0.22 и отрыв 0.01.
+        s.tag_show = 0.22;
+        s.tag_show_pct = 70;
+    }
     s
 }
 
@@ -358,6 +375,7 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("max_dist", s.max_dist.to_string()),
         ("tag_show", s.tag_show.to_string()),
         ("tag_margin", s.tag_margin.to_string()),
+        ("tag_show_pct", s.tag_show_pct.to_string()),
         ("ocr_lang", s.ocr_lang.clone()),
         ("face_threshold", s.face_threshold.to_string()),
         ("tile_size", s.tile_size.to_string()),
@@ -1549,6 +1567,28 @@ mod tests {
     }
 
     #[test]
+    fn старый_порог_тегов_мигрирует_в_процентиль() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        // Старая база: ползунок фильтра увёл tag_show до 0.50, ключа процентиля нет.
+        c.execute(
+            "INSERT INTO settings(key,value) VALUES('tag_show','0.50')",
+            [],
+        )
+        .unwrap();
+        let s = load_settings(&c);
+        assert_eq!(s.tag_show_pct, 70);
+        assert!((s.tag_show - 0.22).abs() < 1e-6);
+        // После сохранения миграция закреплена в БД и не повторяется.
+        c.execute("UPDATE settings SET value='0.31' WHERE key='tag_show'", []).unwrap();
+        save_settings(&c, &s).unwrap();
+        c.execute("UPDATE settings SET value='0.31' WHERE key='tag_show'", []).unwrap();
+        let back = load_settings(&c);
+        assert_eq!(back.tag_show_pct, 70);
+        assert!((back.tag_show - 0.31).abs() < 1e-6);
+    }
+
+    #[test]
     fn settings_survive_roundtrip() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
@@ -1558,6 +1598,7 @@ mod tests {
             max_model_mb: 160,
             tag_show: 0.27,
             tag_margin: 0.02,
+            tag_show_pct: 42,
             ocr_lang: "rus".into(),
             tools: crate::tools::Tools {
                 ffmpeg: "/opt/ffmpeg".into(),
@@ -1572,6 +1613,7 @@ mod tests {
         assert_eq!(back.models_dir, PathBuf::from("/tmp/models"));
         assert_eq!(back.max_model_mb, 160);
         assert!((back.tag_show - 0.27).abs() < 1e-6);
+        assert_eq!(back.tag_show_pct, 42);
         assert!((back.tag_margin - 0.02).abs() < 1e-6);
         assert_eq!(back.ocr_lang, "rus");
         assert_eq!(back.tools.ffmpeg, "/opt/ffmpeg");

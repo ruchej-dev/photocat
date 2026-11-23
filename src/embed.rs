@@ -482,6 +482,47 @@ pub fn max_score(scores: &[(String, f32)]) -> Option<f32> {
     scores.iter().map(|(_, s)| *s).reduce(f32::max)
 }
 
+/// Распределение весов каждого тега по каталогу, по убыванию — для процентильного порога.
+/// Считается один раз при загрузке тегов, а не на каждый кадр интерфейса.
+pub fn tag_distributions(
+    tags: &HashMap<i64, Vec<(String, f32)>>,
+) -> HashMap<String, Vec<f32>> {
+    let mut out: HashMap<String, Vec<f32>> = HashMap::new();
+    for scores in tags.values() {
+        for (tag, score) in scores {
+            out.entry(tag.clone()).or_default().push(*score);
+        }
+    }
+    for v in out.values_mut() {
+        v.sort_by(|a, b| b.total_cmp(a));
+    }
+    out
+}
+
+/// Распределение лучшего веса каждого файла, по убыванию — процентиль «все теги».
+pub fn top_score_distribution(tags: &HashMap<i64, Vec<(String, f32)>>) -> Vec<f32> {
+    let mut v: Vec<f32> = tags.values().filter_map(|t| max_score(t)).collect();
+    v.sort_by(|a, b| b.total_cmp(a));
+    v
+}
+
+/// Порог-процентиль по убывающему списку: 0% — все, 100% — только самый сильный.
+/// Возвращает вес, при котором проходит не меньше `count` снимков, где `count` —
+/// верхние `100 − pct` процентов (на 100% всегда хотя бы один). Пусто — `None`.
+pub fn percentile_threshold(sorted_desc: &[f32], pct: i32) -> Option<f32> {
+    let n = sorted_desc.len();
+    if n == 0 {
+        return None;
+    }
+    let pct = pct.clamp(0, 100);
+    let count = if pct == 0 {
+        n
+    } else {
+        ((((100 - pct) as f64 / 100.0) * n as f64).ceil() as usize).clamp(1, n)
+    };
+    Some(sorted_desc[count - 1])
+}
+
 /// Усреднить векторы кадров одного снимка (по два на снимок) и нормализовать.
 /// Без нормализации среднее двух единичных векторов короче единицы, и косинус с промптами врёт.
 fn average_pairs(values: &[f32], images: usize, dim: usize) -> Vec<Vec<f32>> {
@@ -1213,6 +1254,33 @@ mod tests {
         assert_ne!(a, b);
         assert!(labels.iter().step_by(2).all(|&l| l == a));
         assert!(labels.iter().skip(1).step_by(2).all(|&l| l == b));
+    }
+
+    #[test]
+    fn процентиль_оставляет_верхнюю_долю_и_всегда_хотя_бы_один() {
+        let scores = [0.30, 0.20, 0.10, 0.05];
+        assert_eq!(percentile_threshold(&scores, 100), Some(0.30));
+        assert_eq!(percentile_threshold(&scores, 0), Some(0.05));
+        // 50% — верхние две записи; 70% — тоже две (ceil(0.3*4) = 2).
+        assert_eq!(percentile_threshold(&scores, 50), Some(0.20));
+        assert_eq!(percentile_threshold(&scores, 70), Some(0.20));
+        assert_eq!(percentile_threshold(&scores, 90), Some(0.30));
+        assert_eq!(percentile_threshold(&[], 70), None);
+    }
+
+    #[test]
+    fn распределение_тегов_отсортировано_по_убыванию() {
+        let mut tags = HashMap::new();
+        tags.insert(1, vec![("мебель".to_string(), 0.1), ("дети".to_string(), 0.3)]);
+        tags.insert(2, vec![("мебель".to_string(), 0.4), ("дети".to_string(), 0.2)]);
+        let d = tag_distributions(&tags);
+        assert_eq!(d["мебель"], vec![0.4, 0.1]);
+        assert_eq!(d["дети"], vec![0.3, 0.2]);
+        assert_eq!(top_score_distribution(&tags), vec![0.4, 0.3]);
+        // На 100% у каждого тега остаётся хотя бы один снимок.
+        for v in d.values() {
+            assert!(percentile_threshold(v, 100).is_some());
+        }
     }
 
     #[test]

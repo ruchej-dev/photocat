@@ -490,7 +490,8 @@ fn main() -> Result<()> {
             println!("лимит: {} МиБ", settings.max_model_mb);
             println!("потоков: {}", settings.index_jobs);
             println!("порог дублей: {}", settings.max_dist);
-            println!("тег: ≥ {:.2}, отрыв {:.2}", settings.tag_show, settings.tag_margin);
+            println!("тег: уверенный ≥ {:.2}, отрыв {:.2}", settings.tag_show, settings.tag_margin);
+            println!("фильтр по тегу: порог {}% (процентиль)", settings.tag_show_pct);
             println!("языки OCR: {}", settings.ocr_lang);
             println!("порог лиц: {:.2}", settings.face_threshold);
             for tool in tools::ALL {
