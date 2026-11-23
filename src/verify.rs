@@ -676,7 +676,7 @@ pub fn cli(args: &[String]) -> Result<()> {
         let show = progress.clone();
         std::thread::spawn(move || status_line("проверка", show));
         let report = check_manifest(&root, Path::new(&file), jobs, Some(progress))?;
-        print_check(&file, &root, &report, all);
+        print!("{}", check_report(Path::new(&file), &root, &report, all));
         if !report.identical() {
             std::process::exit(1);
         }
@@ -692,7 +692,7 @@ pub fn cli(args: &[String]) -> Result<()> {
     let show = progress.clone();
     std::thread::spawn(move || status_line("сверка", show));
     let report = verify(&a, &b, jobs, Some(progress))?;
-    print_verify(&a, &b, &report, all);
+    print!("{}", verify_report(&a, &b, &report, all));
     if !report.identical() {
         std::process::exit(1);
     }
@@ -710,27 +710,11 @@ pub fn manifest_cli(args: &[String]) -> Result<()> {
     let show = progress.clone();
     std::thread::spawn(move || status_line("слепок", show));
     let stats = manifest(&root, out.as_deref(), jobs, Some(progress))?;
-    let summary = format!(
-        "{}слепок {}: {} файлов ({}), пропущено {}, ошибок {}, не проверено {}, за {:.1} с",
-        if stats.written {
-            ""
-        } else if stats.cancelled {
-            "отменено: "
-        } else {
-            "не записан: "
-        },
-        root.display(),
-        stats.files,
-        db::human(stats.bytes as i64),
-        stats.skipped,
-        stats.errors,
-        stats.unchecked,
-        stats.seconds
-    );
-    match out {
-        Some(p) if stats.written => println!("{summary} → {}", p.display()),
-        Some(_) => eprintln!("{summary}"),
-        None => eprintln!("{summary}"),
+    let summary = manifest_report(&root, out.as_deref(), &stats);
+    if out.is_some() && stats.written {
+        print!("{summary}");
+    } else {
+        eprint!("{summary}");
     }
     if !stats.written {
         std::process::exit(1);
@@ -775,10 +759,15 @@ fn positional(args: &[String]) -> Vec<String> {
     out
 }
 
-fn print_verify(a: &Path, b: &Path, r: &Report, all: bool) {
-    println!("сверка: {}", a.display());
-    println!("     с: {}", b.display());
-    println!(
+/// Текст отчёта сверки. Его печатает CLI и копирует GUI: слова и числа живут
+/// в одном месте, `app.rs` отчёт сам не собирает.
+pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(s, "сверка: {}", a.display());
+    let _ = writeln!(s, "     с: {}", b.display());
+    let _ = writeln!(
+        s,
         "файлов: A {}, B {}; совпало по содержимому {}; sha256 проверено {} файлов ({})",
         r.files_a,
         r.files_b,
@@ -786,31 +775,33 @@ fn print_verify(a: &Path, b: &Path, r: &Report, all: bool) {
         r.hashed,
         db::human(r.hashed_bytes as i64)
     );
-    println!("размер отличается: {}", r.size_diff.len());
-    println!("содержимое отличается: {}", r.content_diff.len());
-    println!("только в A: {}", r.only_a.len());
-    println!("только в B: {}", r.only_b.len());
+    let _ = writeln!(s, "размер отличается: {}", r.size_diff.len());
+    let _ = writeln!(s, "содержимое отличается: {}", r.content_diff.len());
+    let _ = writeln!(s, "только в A: {}", r.only_a.len());
+    let _ = writeln!(s, "только в B: {}", r.only_b.len());
     if r.scan_errors > 0 {
-        println!("ошибок обхода: {}", r.scan_errors);
+        let _ = writeln!(s, "ошибок обхода: {}", r.scan_errors);
     }
     if !r.read_errors.is_empty() {
-        println!("ошибок чтения: {}", r.read_errors.len());
+        let _ = writeln!(s, "ошибок чтения: {}", r.read_errors.len());
     }
     if r.unchecked > 0 {
-        println!("не проверено из-за отмены: {}", r.unchecked);
+        let _ = writeln!(s, "не проверено из-за отмены: {}", r.unchecked);
     }
     if r.skipped_a > 0 || r.skipped_b > 0 {
-        println!(
+        let _ = writeln!(
+            s,
             "пропущено (симлинки/особые): A {}, B {}",
             r.skipped_a, r.skipped_b
         );
     }
-    print_list("только в A", &r.only_a, all);
-    print_list("только в B", &r.only_b, all);
-    print_size_diff(&r.size_diff, all);
-    print_list("содержимое отличается", &r.content_diff, all);
-    print_list("ошибки чтения", &r.read_errors, all);
-    println!(
+    write_list(&mut s, "только в A", &r.only_a, all);
+    write_list(&mut s, "только в B", &r.only_b, all);
+    write_size_diff(&mut s, &r.size_diff, all);
+    write_list(&mut s, "содержимое отличается", &r.content_diff, all);
+    write_list(&mut s, "ошибки чтения", &r.read_errors, all);
+    let _ = writeln!(
+        s,
         "\nвердикт: {} (за {:.1} с)",
         if r.identical() {
             "копии совпадают"
@@ -819,12 +810,17 @@ fn print_verify(a: &Path, b: &Path, r: &Report, all: bool) {
         },
         r.seconds
     );
+    s
 }
 
-fn print_check(file: &str, root: &Path, r: &CheckReport, all: bool) {
-    println!("проверка слепка: {file}");
-    println!("           каталог: {}", root.display());
-    println!(
+/// Текст проверки по слепку: тот же источник для CLI и экрана «Целостность».
+pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(s, "проверка слепка: {}", file.display());
+    let _ = writeln!(s, "           каталог: {}", root.display());
+    let _ = writeln!(
+        s,
         "совпало: {}, изменено: {}, нет в каталоге: {}, нет в слепке: {}",
         r.same,
         r.changed.len(),
@@ -832,22 +828,23 @@ fn print_check(file: &str, root: &Path, r: &CheckReport, all: bool) {
         r.extra.len()
     );
     if r.scan_errors > 0 {
-        println!("ошибок обхода: {}", r.scan_errors);
+        let _ = writeln!(s, "ошибок обхода: {}", r.scan_errors);
     }
     if !r.read_errors.is_empty() {
-        println!("ошибок чтения: {}", r.read_errors.len());
+        let _ = writeln!(s, "ошибок чтения: {}", r.read_errors.len());
     }
     if r.unchecked > 0 {
-        println!("не проверено из-за отмены: {}", r.unchecked);
+        let _ = writeln!(s, "не проверено из-за отмены: {}", r.unchecked);
     }
     if r.skipped > 0 {
-        println!("пропущено (симлинки/особые): {}", r.skipped);
+        let _ = writeln!(s, "пропущено (симлинки/особые): {}", r.skipped);
     }
-    print_list("нет в каталоге", &r.missing, all);
-    print_list("нет в слепке", &r.extra, all);
-    print_list("изменено", &r.changed, all);
-    print_list("ошибки чтения", &r.read_errors, all);
-    println!(
+    write_list(&mut s, "нет в каталоге", &r.missing, all);
+    write_list(&mut s, "нет в слепке", &r.extra, all);
+    write_list(&mut s, "изменено", &r.changed, all);
+    write_list(&mut s, "ошибки чтения", &r.read_errors, all);
+    let _ = writeln!(
+        s,
         "\nвердикт: {} (за {:.1} с)",
         if r.identical() {
             "каталог совпадает со слепком"
@@ -856,31 +853,60 @@ fn print_check(file: &str, root: &Path, r: &CheckReport, all: bool) {
         },
         r.seconds
     );
+    s
 }
 
-fn print_list(title: &str, list: &[String], all: bool) {
+/// Итог записи слепка: путь дописывается только тогда, когда файл действительно записан.
+pub fn manifest_report(root: &Path, out: Option<&Path>, stats: &ManifestStats) -> String {
+    let prefix = if stats.written {
+        ""
+    } else if stats.cancelled {
+        "отменено: "
+    } else {
+        "не записан: "
+    };
+    let arrow = match out {
+        Some(p) if stats.written => format!(" → {}", p.display()),
+        _ => String::new(),
+    };
+    format!(
+        "{prefix}слепок {}: {} файлов ({}), пропущено {}, ошибок {}, не проверено {}, за {:.1} с{arrow}\n",
+        root.display(),
+        stats.files,
+        db::human(stats.bytes as i64),
+        stats.skipped,
+        stats.errors,
+        stats.unchecked,
+        stats.seconds
+    )
+}
+
+fn write_list(s: &mut String, title: &str, list: &[String], all: bool) {
+    use std::fmt::Write;
     if list.is_empty() {
         return;
     }
-    println!("\n{title}:");
+    let _ = writeln!(s, "\n{title}:");
     let limit = if all { list.len() } else { 20 };
     for path in list.iter().take(limit) {
-        println!("  {path}");
+        let _ = writeln!(s, "  {path}");
     }
     if list.len() > limit {
-        println!("  … ещё {} (--all покажет все)", list.len() - limit);
+        let _ = writeln!(s, "  … ещё {} (показать все)", list.len() - limit);
     }
 }
 
-fn print_size_diff(list: &[(String, u64, u64)], all: bool) {
+fn write_size_diff(s: &mut String, list: &[(String, u64, u64)], all: bool) {
+    use std::fmt::Write;
     if list.is_empty() {
         return;
     }
-    println!("\nразмер отличается:");
+    let _ = writeln!(s, "\nразмер отличается:");
     let limit = if all { list.len() } else { 20 };
     for (path, a, b) in list.iter().take(limit) {
         let delta = *b as i64 - *a as i64;
-        println!(
+        let _ = writeln!(
+            s,
             "  {path}  A {}  B {}  ({}{} Б)",
             db::human(*a as i64),
             db::human(*b as i64),
@@ -889,7 +915,7 @@ fn print_size_diff(list: &[(String, u64, u64)], all: bool) {
         );
     }
     if list.len() > limit {
-        println!("  … ещё {} (--all покажет все)", list.len() - limit);
+        let _ = writeln!(s, "  … ещё {} (показать все)", list.len() - limit);
     }
 }
 
@@ -1116,5 +1142,101 @@ mod tests {
         assert_eq!(stats.unchecked, 1);
         assert_eq!(stats.errors, 0);
         assert!(!out.exists());
+    }
+
+    /// Один и тот же текст видят CLI и экран «Целостность»: счётчики, пути и вердикт.
+    #[test]
+    fn отчёт_сверки_пишет_счётчики_пути_и_вердикт() {
+        let r = Report {
+            files_a: 2,
+            files_b: 2,
+            only_a: vec!["only.jpg".into()],
+            only_b: Vec::new(),
+            size_diff: vec![("size.jpg".into(), 10, 20)],
+            content_diff: Vec::new(),
+            read_errors: Vec::new(),
+            same: 1,
+            hashed: 1,
+            hashed_bytes: 10,
+            unchecked: 0,
+            scan_errors: 0,
+            skipped_a: 0,
+            skipped_b: 0,
+            cancelled: false,
+            seconds: 1.5,
+        };
+        let text = verify_report(Path::new("/a"), Path::new("/b"), &r, true);
+        assert!(text.contains("только в A: 1"), "{text}");
+        assert!(text.contains("только в A:\n  only.jpg"), "{text}");
+        assert!(text.contains("размер отличается:\n  size.jpg"), "{text}");
+        assert!(text.contains("вердикт: найдены расхождения"), "{text}");
+
+        // Без «показать все» список обрезается и говорит об этом.
+        let mut many = r;
+        many.only_a = (0..25).map(|n| format!("p{n}.jpg")).collect();
+        let text = verify_report(Path::new("/a"), Path::new("/b"), &many, false);
+        assert!(text.contains("… ещё 5 (показать все)"), "{text}");
+        assert!(!text.contains("p24.jpg"), "{text}");
+    }
+
+    /// Путь слепка в отчёте появляется только тогда, когда файл действительно записан:
+    /// отменённый или неудачный проход не должен выглядеть как успех.
+    #[test]
+    fn отчёт_слепка_не_выдаёт_отмену_за_запись() {
+        let stats = ManifestStats {
+            files: 3,
+            bytes: 30,
+            skipped: 0,
+            errors: 0,
+            unchecked: 0,
+            cancelled: false,
+            written: true,
+            seconds: 0.5,
+        };
+        let text = manifest_report(
+            Path::new("/archive"),
+            Some(Path::new("/tmp/list.sha256")),
+            &stats,
+        );
+        assert!(text.contains("слепок /archive: 3 файлов"), "{text}");
+        assert!(text.contains("→ /tmp/list.sha256"), "{text}");
+
+        let cancelled = ManifestStats {
+            cancelled: true,
+            written: false,
+            ..stats
+        };
+        let text = manifest_report(
+            Path::new("/archive"),
+            Some(Path::new("/tmp/list.sha256")),
+            &cancelled,
+        );
+        assert!(text.starts_with("отменено: "), "{text}");
+        assert!(!text.contains("→"), "{text}");
+    }
+
+    #[test]
+    fn отчёт_проверки_по_слепку_называет_расхождения() {
+        let r = CheckReport {
+            missing: vec!["gone.jpg".into()],
+            extra: Vec::new(),
+            changed: vec!["edit.jpg".into()],
+            read_errors: Vec::new(),
+            same: 4,
+            unchecked: 0,
+            scan_errors: 0,
+            skipped: 1,
+            cancelled: false,
+            seconds: 0.2,
+        };
+        let text = check_report(
+            Path::new("/tmp/list.sha256"),
+            Path::new("/archive"),
+            &r,
+            true,
+        );
+        assert!(text.contains("совпало: 4, изменено: 1"), "{text}");
+        assert!(text.contains("нет в каталоге:\n  gone.jpg"), "{text}");
+        assert!(text.contains("каталог расходится со слепком"), "{text}");
     }
 }

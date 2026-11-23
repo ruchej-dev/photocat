@@ -31,7 +31,7 @@ declare -A ALLOWED=(
   [ocr]="derive db tools"
   [faces]="derive db embed"
   [player]=""
-  [app]="derive db index dupes organize embed ocr faces player tools recycle storage"
+  [app]="derive db index dupes organize verify embed ocr faces player tools recycle storage"
   [main]="derive db index dupes organize verify embed ocr faces player app tools"
 )
 

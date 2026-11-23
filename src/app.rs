@@ -12,6 +12,7 @@ use crate::player;
 use crate::recycle;
 use crate::storage;
 use crate::tools::{self, Tool};
+use crate::verify;
 use anyhow::{Context, Result};
 use chrono::Datelike;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -24,6 +25,7 @@ type EmbedReply = Result<(embed::EmbedStats, embed::RetagStats)>;
 type OcrReply = Result<ocr::Stats>;
 type TrashReply = Result<recycle::Report>;
 type PhotoReply = (i64, Result<(usize, usize, Vec<u8>)>);
+type IntegrityReply = (IntegrityJob, Result<IntegrityOutcome>);
 
 enum FaceReply {
     Scan(Result<faces::Stats>),
@@ -38,6 +40,165 @@ enum View {
     Calendar,
     Faces,
     Trash,
+    Integrity,
+}
+
+/// Что делает экран «Целостность»: сверка двух копий, слепок каталога или проверка
+/// каталога по слепку. Три кнопки — три фоновых прохода одних и тех же функций CLI.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum IntegrityJob {
+    Verify,
+    Manifest,
+    Check,
+}
+
+impl IntegrityJob {
+    fn title(self) -> &'static str {
+        match self {
+            IntegrityJob::Verify => "сверка копий",
+            IntegrityJob::Manifest => "запись слепка",
+            IntegrityJob::Check => "проверка по слепку",
+        }
+    }
+}
+
+/// Готовый результат прохода: хранит и отчёт, и пути, по которым он получен.
+enum IntegrityOutcome {
+    Verify {
+        a: PathBuf,
+        b: PathBuf,
+        report: verify::Report,
+    },
+    Manifest {
+        root: PathBuf,
+        out: PathBuf,
+        stats: verify::ManifestStats,
+    },
+    Check {
+        root: PathBuf,
+        file: PathBuf,
+        report: verify::CheckReport,
+    },
+}
+
+impl IntegrityOutcome {
+    fn job(&self) -> IntegrityJob {
+        match self {
+            IntegrityOutcome::Verify { .. } => IntegrityJob::Verify,
+            IntegrityOutcome::Manifest { .. } => IntegrityJob::Manifest,
+            IntegrityOutcome::Check { .. } => IntegrityJob::Check,
+        }
+    }
+
+    /// Проход остановлен «Стоп»: часть файлов не проверена, и это не «совпало».
+    fn cancelled(&self) -> bool {
+        match self {
+            IntegrityOutcome::Verify { report, .. } => report.cancelled,
+            IntegrityOutcome::Manifest { stats, .. } => stats.cancelled,
+            IntegrityOutcome::Check { report, .. } => report.cancelled,
+        }
+    }
+
+    /// Совпало всё или файл записан. Отмена и ошибка чтения — не «успех».
+    fn identical(&self) -> bool {
+        match self {
+            IntegrityOutcome::Verify { report, .. } => report.identical(),
+            IntegrityOutcome::Manifest { stats, .. } => stats.written,
+            IntegrityOutcome::Check { report, .. } => report.identical(),
+        }
+    }
+
+    /// Одна строка вердикта для экрана: словами, без догадок.
+    fn verdict(&self) -> String {
+        match self {
+            IntegrityOutcome::Verify { report, .. } => {
+                if report.cancelled {
+                    "сверка остановлена: проверено не всё".into()
+                } else if report.identical() {
+                    "копии совпадают".into()
+                } else {
+                    format!(
+                        "найдены расхождения: только A {}, только B {}, размер {}, содержимое {}, ошибок {}",
+                        report.only_a.len(),
+                        report.only_b.len(),
+                        report.size_diff.len(),
+                        report.content_diff.len(),
+                        report.errors()
+                    )
+                }
+            }
+            IntegrityOutcome::Manifest { stats, out, .. } => {
+                if stats.written {
+                    format!(
+                        "слепок записан: {} файлов ({}) → {}",
+                        stats.files,
+                        db::human(stats.bytes as i64),
+                        out.display()
+                    )
+                } else if stats.cancelled {
+                    "слепок не записан: проход остановлен".into()
+                } else {
+                    format!("слепок не записан: ошибок {}", stats.errors)
+                }
+            }
+            IntegrityOutcome::Check { report, .. } => {
+                if report.cancelled {
+                    "проверка остановлена: проверено не всё".into()
+                } else if report.identical() {
+                    "каталог совпадает со слепком".into()
+                } else {
+                    format!(
+                        "каталог расходится со слепком: изменено {}, нет в каталоге {}, нет в слепке {}, ошибок {}",
+                        report.changed.len(),
+                        report.missing.len(),
+                        report.extra.len(),
+                        report.errors()
+                    )
+                }
+            }
+        }
+    }
+
+    /// Текст отчёта — те же функции `verify`, что печатает CLI.
+    fn report(&self, all: bool) -> String {
+        match self {
+            IntegrityOutcome::Verify { a, b, report } => verify::verify_report(a, b, report, all),
+            IntegrityOutcome::Manifest { root, out, stats } => {
+                verify::manifest_report(root, Some(out), stats)
+            }
+            IntegrityOutcome::Check { root, file, report } => {
+                verify::check_report(file, root, report, all)
+            }
+        }
+    }
+
+    fn status(&self) -> String {
+        match self {
+            IntegrityOutcome::Verify { report, .. } => format!(
+                "{}; A {}, B {}; за {:.1} с",
+                self.verdict(),
+                report.files_a,
+                report.files_b,
+                report.seconds
+            ),
+            IntegrityOutcome::Manifest { stats, .. } => {
+                format!("{}, за {:.1} с", self.verdict(), stats.seconds)
+            }
+            IntegrityOutcome::Check { report, .. } => format!(
+                "{}; совпало {}; за {:.1} с",
+                self.verdict(),
+                report.same,
+                report.seconds
+            ),
+        }
+    }
+}
+
+/// Что именно запускать после проверки полей: каталоги уже разобраны в `PathBuf`.
+enum IntegrityPlan {
+    Verify(PathBuf, PathBuf),
+    Manifest(PathBuf, PathBuf),
+    Check(PathBuf, PathBuf),
 }
 
 /// Формат в сетке: всё, только снимки, только видео (M16). Одно понятие «фильтр»
@@ -898,6 +1059,18 @@ struct App {
     export_report: Option<organize::ExportReport>,
     export_progress: Option<Arc<Progress>>,
     export_rx: Option<mpsc::Receiver<organize::ExportReport>>,
+    /// Целостность (M9): два каталога, файл слепка и результат последнего прохода.
+    /// Фоновые проходы те же, что у CLI (`verify`), плюс «Стоп» и прогресс в верхней панели.
+    integrity_a: String,
+    integrity_b: String,
+    integrity_manifest: String,
+    integrity_show_all: bool,
+    integrity_result: Option<IntegrityOutcome>,
+    integrity_error: String,
+    integrity_progress: Option<Arc<Progress>>,
+    integrity_rx: Option<mpsc::Receiver<IntegrityReply>>,
+    /// Файл слепка уже есть: перезапись только после второго нажатия.
+    integrity_overwrite: bool,
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
@@ -1081,6 +1254,15 @@ impl App {
             export_report: None,
             export_progress: None,
             export_rx: None,
+            integrity_a: String::new(),
+            integrity_b: String::new(),
+            integrity_manifest: String::new(),
+            integrity_show_all: false,
+            integrity_result: None,
+            integrity_error: String::new(),
+            integrity_progress: None,
+            integrity_rx: None,
+            integrity_overwrite: false,
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
@@ -1286,6 +1468,19 @@ impl App {
                     && let Some(first) = self.roots.first()
                 {
                     self.path_input = first.clone();
+                }
+                // Экран «Целостность» по умолчанию знает архив и место для слепка:
+                // одно нажатие, а не три поля, набранных руками.
+                if self.integrity_a.trim().is_empty()
+                    && let Some(first) = self.roots.first()
+                {
+                    self.integrity_a = first.clone();
+                }
+                if self.integrity_manifest.trim().is_empty() {
+                    self.integrity_manifest = db::cache_dir()
+                        .join("manifest.sha256")
+                        .to_string_lossy()
+                        .into_owned();
                 }
                 self.items = rows;
                 self.trash_items = trashed;
@@ -1661,6 +1856,314 @@ impl App {
         self.export_report = None;
         self.export_error.clear();
         self.status = "выгрузка альбома идёт в фоне".into();
+    }
+
+    /// Проверка полей экрана «Целостность» и разбор путей. Только чтение: ни одного
+    /// создания файла здесь нет — слепок пишется в фоне по кнопке.
+    fn integrity_plan(&self, job: IntegrityJob) -> Result<IntegrityPlan, String> {
+        let dir = |s: &str, what: &str| -> Result<PathBuf, String> {
+            let t = s.trim();
+            if t.is_empty() {
+                return Err(format!("укажите {what}"));
+            }
+            let p = PathBuf::from(t);
+            if !p.is_dir() {
+                return Err(format!("{what} не каталог: {t}"));
+            }
+            Ok(p)
+        };
+        match job {
+            IntegrityJob::Verify => {
+                let a = dir(&self.integrity_a, "каталог A (архив)")?;
+                let b = dir(&self.integrity_b, "каталог B (копия)")?;
+                let ca = a.canonicalize().unwrap_or_else(|_| a.clone());
+                let cb = b.canonicalize().unwrap_or_else(|_| b.clone());
+                if ca == cb {
+                    return Err(
+                        "каталог A и каталог B — один и тот же путь; сверять нечего".into()
+                    );
+                }
+                Ok(IntegrityPlan::Verify(a, b))
+            }
+            IntegrityJob::Manifest => {
+                let a = dir(&self.integrity_a, "каталог A (архив)")?;
+                let m = self.integrity_manifest.trim();
+                if m.is_empty() {
+                    return Err(
+                        "укажите файл слепка: это путь, по которому он будет записан".into()
+                    );
+                }
+                let out = PathBuf::from(m);
+                if out.is_dir() {
+                    return Err(format!("файл слепка — это каталог: {m}"));
+                }
+                if let Some(parent) = out.parent()
+                    && !parent.as_os_str().is_empty()
+                    && !parent.is_dir()
+                {
+                    return Err(format!(
+                        "каталог для слепка не существует: {}",
+                        parent.display()
+                    ));
+                }
+                Ok(IntegrityPlan::Manifest(a, out))
+            }
+            IntegrityJob::Check => {
+                let a = dir(&self.integrity_a, "каталог A (архив)")?;
+                let m = self.integrity_manifest.trim();
+                if m.is_empty() {
+                    return Err("укажите файл слепка, по которому проверять".into());
+                }
+                let file = PathBuf::from(m);
+                if !file.is_file() {
+                    return Err(format!("файл слепка не найден: {m}"));
+                }
+                Ok(IntegrityPlan::Check(a, file))
+            }
+        }
+    }
+
+    /// Запуск фонового прохода. Существующий слепок не перезаписывается без второго
+    /// нажатия: возвращает `true`, если вместо запуска попросили подтверждение.
+    fn integrity_start(&mut self, job: IntegrityJob) {
+        if self.integrity_rx.is_some() {
+            self.status = "проход уже идёт: дождитесь конца или нажмите «Стоп»".into();
+            return;
+        }
+        if job == IntegrityJob::Manifest && !self.integrity_overwrite {
+            let path = Path::new(self.integrity_manifest.trim());
+            if path.is_file() {
+                self.integrity_overwrite = true;
+                self.integrity_error = format!(
+                    "файл слепка уже есть: {}. Нажмите «Перезаписать слепок», чтобы заменить \
+                     его целиком, или «Отмена».",
+                    path.display()
+                );
+                self.status = "слепок не записан: нужно подтверждение перезаписи".into();
+                return;
+            }
+        }
+        let plan = match self.integrity_plan(job) {
+            Ok(plan) => plan,
+            Err(e) => {
+                self.integrity_error = e.clone();
+                self.status = format!("{}: {e}", job.title());
+                return;
+            }
+        };
+        let jobs = self.settings.index_jobs;
+        let progress = Arc::new(Progress::default());
+        let worker = progress.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let res = match plan {
+                IntegrityPlan::Verify(a, b) => verify::verify(&a, &b, jobs, Some(worker))
+                    .map(|report| IntegrityOutcome::Verify { a, b, report }),
+                IntegrityPlan::Manifest(root, out) => {
+                    verify::manifest(&root, Some(&out), jobs, Some(worker))
+                        .map(|stats| IntegrityOutcome::Manifest { root, out, stats })
+                }
+                IntegrityPlan::Check(root, file) => {
+                    verify::check_manifest(&root, &file, jobs, Some(worker))
+                        .map(|report| IntegrityOutcome::Check { root, file, report })
+                }
+            };
+            let _ = tx.send((job, res));
+        });
+        self.integrity_progress = Some(progress);
+        self.integrity_rx = Some(rx);
+        self.integrity_result = None;
+        self.integrity_error.clear();
+        self.status = format!("{}: идёт в фоне", job.title());
+    }
+
+    /// Экран «Целостность»: поля, три кнопки, прогресс в верхней панели и отчёт.
+    /// Рисуется до сетки: ей не нужны ни плитки, ни кэш превью.
+    fn integrity_panel(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("Целостность").size(18.0));
+        ui.label(
+            egui::RichText::new("сверка копий и слепок sha256")
+                .size(12.0)
+                .color(DIM),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(
+                "Сверка только читает: сначала размеры, sha256 — лишь у файлов одинакового \
+                 размера. Слепок — файл формата sha256sum для будущих проверок; он пишется \
+                 только по кнопке. В каталог архива не записывается ничего.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+        ui.add_space(8.0);
+        let mut a_changed = false;
+        let mut manifest_changed = false;
+        egui::Grid::new("integrity-fields")
+            .num_columns(2)
+            .spacing([8.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Каталог A (архив):");
+                a_changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.integrity_a)
+                            .hint_text("/home/…/Фотографии с телефона")
+                            .desired_width(460.0),
+                    )
+                    .changed();
+                ui.end_row();
+                ui.label("Каталог B (копия):");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.integrity_b)
+                        .hint_text("/mnt/backup/Фотографии с телефона")
+                        .desired_width(460.0),
+                );
+                ui.end_row();
+                ui.label("Файл слепка:");
+                manifest_changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.integrity_manifest)
+                            .hint_text("<кэш>/photocat/manifest.sha256")
+                            .desired_width(460.0),
+                    )
+                    .changed();
+                ui.end_row();
+            });
+        if a_changed {
+            // Новый каталог — новый отчёт: старый вердикт к нему не относится.
+            self.integrity_result = None;
+        }
+        if manifest_changed {
+            // Подтверждение относилось к старому пути — сбрасываем, чтобы не затереть
+            // чужой файл на новом.
+            self.integrity_overwrite = false;
+            self.integrity_error.clear();
+            self.integrity_result = None;
+        }
+        ui.add_space(4.0);
+        ui.checkbox(&mut self.integrity_show_all, "Показать все пути");
+        ui.add_space(4.0);
+        let running = self.integrity_rx.is_some();
+        let manifest_label = if self.integrity_overwrite {
+            "Перезаписать слепок"
+        } else {
+            "Записать слепок"
+        };
+        let mut verify_clicked = false;
+        let mut manifest_clicked = false;
+        let mut check_clicked = false;
+        let mut cancel_overwrite = false;
+        let mut copy = false;
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(!running, primary_button("Сверить копии"))
+                .on_hover_text("сравнить каталог A и каталог B побайтово")
+                .clicked()
+            {
+                verify_clicked = true;
+            }
+            if ui
+                .add_enabled(!running, egui::Button::new(manifest_label))
+                .on_hover_text("sha256 всех файлов каталога A в файл слепка")
+                .clicked()
+            {
+                manifest_clicked = true;
+            }
+            if ui
+                .add_enabled(
+                    !running,
+                    egui::Button::new("Проверить по слепку"),
+                )
+                .on_hover_text("сравнить каталог A с сохранённым слепком")
+                .clicked()
+            {
+                check_clicked = true;
+            }
+            if self.integrity_overwrite && ui.button("Отмена").clicked() {
+                cancel_overwrite = true;
+            }
+        });
+        if running {
+            ui.label(
+                egui::RichText::new("проход идёт: прогресс и «Стоп» — в верхней панели")
+                    .size(11.0)
+                    .color(DIM),
+            );
+        }
+        if !self.integrity_error.is_empty() {
+            ui.label(
+                egui::RichText::new(&self.integrity_error)
+                    .size(11.0)
+                    .color(ui.visuals().error_fg_color),
+            );
+        }
+        let verdict = self.integrity_result.as_ref().map(|r| {
+            (
+                r.verdict(),
+                r.identical(),
+                r.cancelled(),
+                r.report(self.integrity_show_all),
+                r.job().title(),
+            )
+        });
+        if let Some((verdict, ok, cancelled, report, job)) = verdict {
+            ui.add_space(6.0);
+            ui.separator();
+            let color = if cancelled {
+                DIM
+            } else if ok {
+                ACCENT
+            } else {
+                ui.visuals().error_fg_color
+            };
+            ui.label(
+                egui::RichText::new(&verdict)
+                    .size(14.0)
+                    .color(color),
+            );
+            ui.horizontal(|ui| {
+                if ui.button("Скопировать отчёт").clicked() {
+                    copy = true;
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{job}: тот же отчёт, что печатает CLI; в архив ничего не записано"
+                    ))
+                    .size(11.0)
+                    .color(DIM),
+                );
+            });
+            ui.add_space(4.0);
+            let h = (ui.available_height() - 12.0).max(160.0);
+            egui::ScrollArea::both()
+                .id_salt("integrity-report")
+                .max_height(h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(&report).monospace().size(11.0));
+                });
+        }
+        if cancel_overwrite {
+            self.integrity_overwrite = false;
+            self.integrity_error.clear();
+            self.status = "перезапись слепка отменена".into();
+        }
+        if copy {
+            if let Some(r) = &self.integrity_result {
+                ui.ctx().copy_text(r.report(self.integrity_show_all));
+            }
+            self.status = "отчёт скопирован в буфер обмена".into();
+        }
+        if verify_clicked {
+            self.integrity_start(IntegrityJob::Verify);
+        }
+        if manifest_clicked {
+            self.integrity_start(IntegrityJob::Manifest);
+        }
+        if check_clicked {
+            self.integrity_start(IntegrityJob::Check);
+        }
     }
 
     /// Действия панели вида «Альбомы». Ошибки — в статус, данные не теряются.
@@ -3453,6 +3956,12 @@ impl App {
                 p.cancel();
             }
         }
+        if let Some(p) = &self.integrity_progress {
+            let running = self.integrity_rx.is_some();
+            if progress_row(ui, "Целостность", p, running) {
+                p.cancel();
+            }
+        }
         ui.add_space(4.0);
     }
 
@@ -3571,6 +4080,7 @@ impl App {
             "Дубли и серии",
             Some(self.groups.len().to_string()),
         );
+        nav_item(ui, &mut self.view, View::Integrity, "Целостность", None);
         nav_item(
             ui,
             &mut self.view,
@@ -7103,6 +7613,38 @@ impl eframe::App for App {
             }
         }
 
+        if let Some(rx) = &self.integrity_rx {
+            match rx.try_recv() {
+                Ok((job, res)) => {
+                    self.integrity_rx = None;
+                    self.integrity_progress = None;
+                    // Следующая запись слепка снова спросит подтверждение.
+                    if job == IntegrityJob::Manifest {
+                        self.integrity_overwrite = false;
+                    }
+                    match res {
+                        Ok(outcome) => {
+                            self.status = outcome.status();
+                            self.integrity_error.clear();
+                            self.integrity_result = Some(outcome);
+                        }
+                        Err(e) => {
+                            self.integrity_error = format!("{e:#}");
+                            self.status = format!("{}: ошибка", job.title());
+                        }
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.integrity_rx = None;
+                    self.integrity_progress = None;
+                    self.status = "проверка прервана без отчёта".into();
+                }
+            }
+        }
+
         egui::Panel::top("top")
             .resizable(false)
             .show(ui, |ui| self.top_bar(ui));
@@ -7112,8 +7654,11 @@ impl eframe::App for App {
 
         // Сведения живут в правой панели, пока в сетке остаются 4 колонки;
         // на узком окне карточка уходит в левую, а сетка не «съёживется».
-        let details = self.details_open && ui.available_width() >= DETAILS_MIN_W;
-        let show_card = self.details_open && !details;
+        // На «Целостности» карточки нет: там проверка каталогов, а не файлов.
+        let details = self.details_open
+            && self.view != View::Integrity
+            && ui.available_width() >= DETAILS_MIN_W;
+        let show_card = self.details_open && self.view != View::Integrity && !details;
         egui::Panel::left("left")
             .exact_size(LEFT_W)
             .resizable(false)
@@ -7134,6 +7679,13 @@ impl eframe::App for App {
         self.trash_modal(ctx);
         self.poll_photo(ctx);
         self.poll_video(ctx);
+
+        // «Целостность» — форма, а не сетка: плитки, их кэш и порядок ей не нужны.
+        // Экран рисуется до заимствования `self.items`/`self.textures` и сам выходит из кадра.
+        if self.view == View::Integrity {
+            egui::CentralPanel::default().show(ui, |ui| self.integrity_panel(ui));
+            return;
+        }
 
         let visible = self.filtered();
         // Порядок плиток считается здесь и больше нигде (M17): сетка, полный экран
@@ -7271,6 +7823,12 @@ impl eframe::App for App {
                     self.trash_items.len(),
                     db::human(self.trash_items.iter().map(|r| r.size).sum())
                 ),
+            ),
+            // Экран «Целостность» рисуется раньше сетки (см. `ui`), ветка нужна
+            // только для полноты разбора перечисления.
+            View::Integrity => (
+                "Целостность".to_string(),
+                "сверка копий и слепок sha256".to_string(),
             ),
         };
 
@@ -8518,6 +9076,9 @@ impl eframe::App for App {
                         });
                 }
             }
+            // Недостижимо: экран рисуется до сетки (см. `ui`), но перечисление
+            // должно быть разобрано целиком.
+            View::Integrity => {}
             }
         });
 
@@ -8721,9 +9282,10 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CalScale, KindFilter, PickClick, View, Viewer, days_in_month, db,
-        first_weekday_monday, fit_rect, monday_of, month_groups, nearest_file_month,
-        parse_date, pick_kind, score_percentile, shift_month, shift_to_file_month,
+        App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick, View,
+        Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of, month_groups,
+        nearest_file_month, parse_date, pick_kind, score_percentile, shift_month,
+        shift_to_file_month,
     };
     use crate::embed;
     use std::collections::BTreeSet;
@@ -9608,4 +10170,142 @@ mod tests {
         assert!(err.contains("внутри каталога архива"), "{err}");
     }
 
+    /// Экран «Целостность» существует без терминала: поля, три действия, подсказка.
+    #[test]
+    fn экран_целостности_показывает_поля_и_кнопки() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.view = View::Integrity;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        for want in [
+            "Целостность",
+            "Каталог A (архив):",
+            "Каталог B (копия):",
+            "Файл слепка:",
+            "Показать все пути",
+            "Сверить копии",
+            "Записать слепок",
+            "Проверить по слепку",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "нет «{want}»: {texts:?}"
+            );
+        }
+    }
+
+    /// Сверка одного и того же каталога с самим собой — не проверка, а трата времени:
+    /// отказ приходит до запуска фонового потока.
+    #[test]
+    fn сверка_отказывается_от_одного_пути_дважды() {
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-integrity-same-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.integrity_a = dir.to_string_lossy().to_string();
+        app.integrity_b = dir.to_string_lossy().to_string();
+        let err = app
+            .integrity_plan(IntegrityJob::Verify)
+            .err()
+            .expect("одинаковые пути — ошибка");
+        assert!(err.contains("один и тот же путь"), "{err}");
+        app.integrity_start(IntegrityJob::Verify);
+        assert!(app.integrity_rx.is_none(), "проход не запускается");
+    }
+
+    /// Существующий слепок не затирается первым нажатием: сначала подтверждение,
+    /// и только оно открывает запуск. Файл до подтверждения остаётся целым.
+    #[test]
+    fn слепок_требует_подтверждения_перезаписи() {
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-integrity-manifest-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = dir.join("list.sha256");
+        std::fs::write(&manifest, b"old").unwrap();
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.integrity_a = dir.to_string_lossy().to_string();
+        app.integrity_manifest = manifest.to_string_lossy().to_string();
+        app.integrity_start(IntegrityJob::Manifest);
+        assert!(app.integrity_rx.is_none(), "без подтверждения не пишем");
+        assert!(app.integrity_overwrite, "ждём подтверждения");
+        assert!(app.integrity_error.contains("уже есть"), "{}", app.integrity_error);
+        assert_eq!(std::fs::read(&manifest).unwrap(), b"old", "старый слепок цел");
+        // Пути разбираются и при подтверждении: план готов, поток ещё не запущен.
+        assert!(matches!(
+            app.integrity_plan(IntegrityJob::Manifest),
+            Ok(IntegrityPlan::Manifest(_, _))
+        ));
+    }
+
+    /// Фоновый проход — не заглушка: поток считает sha256 и возвращает отчёт через `mpsc`,
+    /// который потом забирает кадр окна.
+    #[test]
+    fn сверка_идёт_в_фоне_и_возвращает_отчёт() {
+        let base = std::env::temp_dir().join(format!(
+            "photocat-integrity-bg-{}",
+            std::process::id()
+        ));
+        let a = base.join("a");
+        let b = base.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("x.jpg"), b"same").unwrap();
+        std::fs::write(b.join("x.jpg"), b"same").unwrap();
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.integrity_a = a.to_string_lossy().to_string();
+        app.integrity_b = b.to_string_lossy().to_string();
+        app.integrity_start(IntegrityJob::Verify);
+        let rx = app.integrity_rx.take().expect("проход запущен");
+        let (job, res) = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("проход вернул результат");
+        assert_eq!(job, IntegrityJob::Verify);
+        match res.expect("без ошибки") {
+            IntegrityOutcome::Verify { report, .. } => {
+                assert!(report.identical(), "копии одинаковые");
+                assert_eq!(report.same, 1);
+            }
+            _ => panic!("не тот вид отчёта"),
+        }
+    }
+
+    /// Готовый отчёт виден словами: вердикт, счётчики и кнопка копирования
+    /// берут текст из `verify`, а не собирают свой.
+    #[test]
+    fn результат_сверки_виден_на_экране() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.view = View::Integrity;
+        app.integrity_result = Some(IntegrityOutcome::Verify {
+            a: std::path::PathBuf::from("/tmp/a"),
+            b: std::path::PathBuf::from("/tmp/b"),
+            report: crate::verify::Report {
+                files_a: 2,
+                files_b: 2,
+                only_a: Vec::new(),
+                only_b: Vec::new(),
+                size_diff: Vec::new(),
+                content_diff: Vec::new(),
+                read_errors: Vec::new(),
+                same: 2,
+                hashed: 2,
+                hashed_bytes: 20,
+                unchecked: 0,
+                scan_errors: 0,
+                skipped_a: 0,
+                skipped_b: 0,
+                cancelled: false,
+                seconds: 1.0,
+            },
+        });
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(texts.iter().any(|t| t == "копии совпадают"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Скопировать отчёт"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
+            "отчёт печатает ту же формулировку: {texts:?}"
+        );
+    }
 }
