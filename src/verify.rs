@@ -7,6 +7,7 @@
 
 use crate::db::{self, Progress};
 use crate::derive;
+use crate::i18n::{self, Lang};
 use crate::{flag_num, flag_str, has_flag};
 use anyhow::{Context, Result};
 use rayon::prelude::*;
@@ -51,6 +52,8 @@ pub struct Report {
     pub skipped_b: usize,
     pub cancelled: bool,
     pub seconds: f64,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl Report {
@@ -80,6 +83,8 @@ pub struct ManifestStats {
     /// Слепок записан целиком. При отмене или ошибке чтения — false.
     pub written: bool,
     pub seconds: f64,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 pub struct CheckReport {
@@ -96,6 +101,8 @@ pub struct CheckReport {
     pub skipped: usize,
     pub cancelled: bool,
     pub seconds: f64,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl CheckReport {
@@ -272,6 +279,7 @@ where
                 skipped_b: b.skipped,
                 cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
                 seconds: 0.0,
+                lang: Lang::default(),
             };
         }
     };
@@ -293,6 +301,7 @@ where
         skipped_b: b.skipped,
         cancelled: false,
         seconds: 0.0,
+        lang: Lang::default(),
     };
     for out in outcomes {
         match out {
@@ -393,6 +402,7 @@ pub fn manifest(
         cancelled,
         written: false,
         seconds: 0.0,
+        lang: Lang::default(),
     };
     // Неполный слепок опаснее отсутствующего: проверка объявит пропущенные файлы «лишними».
     if errors == 0 && !cancelled {
@@ -498,6 +508,7 @@ pub fn check_manifest(
         skipped: scan.skipped,
         cancelled: false,
         seconds: 0.0,
+        lang: Lang::default(),
     };
     for out in outcomes {
         match out {
@@ -661,21 +672,25 @@ fn resolve_new_path(p: &Path) -> PathBuf {
     }
 }
 
-pub fn cli(args: &[String]) -> Result<()> {
+pub fn cli(args: &[String], lang: Lang) -> Result<()> {
     let jobs = flag_num(args, "--jobs", 4).max(1);
     let all = has_flag(args, "--all");
     if let Some(file) = flag_str(args, "--manifest") {
         let root = match positional(args).first() {
             Some(p) => PathBuf::from(p),
             None => {
-                eprintln!("нужен каталог: photocat verify --manifest FILE DIR");
+                eprintln!(
+                    "{}",
+                    i18n::t(lang, "нужен каталог: photocat verify --manifest FILE DIR")
+                );
                 std::process::exit(2);
             }
         };
         let progress = Arc::new(Progress::default());
         let show = progress.clone();
-        std::thread::spawn(move || status_line("проверка", show));
-        let report = check_manifest(&root, Path::new(&file), jobs, Some(progress))?;
+        std::thread::spawn(move || status_line(i18n::t(lang, "проверка"), lang, show));
+        let mut report = check_manifest(&root, Path::new(&file), jobs, Some(progress))?;
+        report.lang = lang;
         print!("{}", check_report(Path::new(&file), &root, &report, all));
         if !report.identical() {
             std::process::exit(1);
@@ -684,14 +699,18 @@ pub fn cli(args: &[String]) -> Result<()> {
     }
     let pos = positional(args);
     if pos.len() != 2 {
-        eprintln!("нужны два каталога: photocat verify A B [--jobs N] [--all]");
+        eprintln!(
+            "{}",
+            i18n::t(lang, "нужны два каталога: photocat verify A B [--jobs N] [--all]")
+        );
         std::process::exit(2);
     }
     let (a, b) = (PathBuf::from(&pos[0]), PathBuf::from(&pos[1]));
     let progress = Arc::new(Progress::default());
     let show = progress.clone();
-    std::thread::spawn(move || status_line("сверка", show));
-    let report = verify(&a, &b, jobs, Some(progress))?;
+    std::thread::spawn(move || status_line(i18n::t(lang, "сверка"), lang, show));
+    let mut report = verify(&a, &b, jobs, Some(progress))?;
+    report.lang = lang;
     print!("{}", verify_report(&a, &b, &report, all));
     if !report.identical() {
         std::process::exit(1);
@@ -699,7 +718,7 @@ pub fn cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub fn manifest_cli(args: &[String]) -> Result<()> {
+pub fn manifest_cli(args: &[String], lang: Lang) -> Result<()> {
     let jobs = flag_num(args, "--jobs", 4).max(1);
     let out = flag_str(args, "--out").map(PathBuf::from);
     let root = positional(args)
@@ -708,8 +727,9 @@ pub fn manifest_cli(args: &[String]) -> Result<()> {
         .unwrap_or_else(|| PathBuf::from("."));
     let progress = Arc::new(Progress::default());
     let show = progress.clone();
-    std::thread::spawn(move || status_line("слепок", show));
-    let stats = manifest(&root, out.as_deref(), jobs, Some(progress))?;
+    std::thread::spawn(move || status_line(i18n::t(lang, "слепок"), lang, show));
+    let mut stats = manifest(&root, out.as_deref(), jobs, Some(progress))?;
+    stats.lang = lang;
     let summary = manifest_report(&root, out.as_deref(), &stats);
     if out.is_some() && stats.written {
         print!("{summary}");
@@ -722,12 +742,17 @@ pub fn manifest_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn status_line(prefix: &'static str, p: Arc<Progress>) {
+fn status_line(prefix: &str, lang: Lang, p: Arc<Progress>) {
     std::thread::sleep(std::time::Duration::from_millis(300));
     loop {
         let (d, t, e) = (p.done(), p.total(), p.errors());
         if t > 0 {
-            eprint!("\r{prefix}: {d}/{t}, ошибок {e} — {}", p.msg());
+            let line = i18n::fill(
+                lang,
+                "{}/{} файлов, ошибок {} — {}",
+                &[d.to_string(), t.to_string(), e.to_string(), p.msg()],
+            );
+            eprint!("\r{prefix}: {line}");
         } else {
             eprint!("\r{prefix}: {}", p.msg());
         }
@@ -763,159 +788,305 @@ fn positional(args: &[String]) -> Vec<String> {
 /// в одном месте, `app.rs` отчёт сам не собирает.
 pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
     use std::fmt::Write;
+    let lang = r.lang;
     let mut s = String::new();
-    let _ = writeln!(s, "сверка: {}", a.display());
-    let _ = writeln!(s, "     с: {}", b.display());
+    let _ = writeln!(s, "{}", i18n::fill(lang, "сверка: {}", &[a.display().to_string()]));
+    let _ = writeln!(s, "{}", i18n::fill(lang, "     с: {}", &[b.display().to_string()]));
     let _ = writeln!(
         s,
-        "файлов: A {}, B {}; совпало по содержимому {}; sha256 проверено {} файлов ({})",
-        r.files_a,
-        r.files_b,
-        r.same,
-        r.hashed,
-        db::human(r.hashed_bytes as i64)
+        "{}",
+        i18n::fill(
+            lang,
+            "файлов: A {}, B {}; совпало по содержимому {}; sha256 проверено {} файлов ({})",
+            &[
+                r.files_a.to_string(),
+                r.files_b.to_string(),
+                r.same.to_string(),
+                r.hashed.to_string(),
+                db::human_in(lang, r.hashed_bytes as i64),
+            ]
+        )
     );
-    let _ = writeln!(s, "размер отличается: {}", r.size_diff.len());
-    let _ = writeln!(s, "содержимое отличается: {}", r.content_diff.len());
-    let _ = writeln!(s, "только в A: {}", r.only_a.len());
-    let _ = writeln!(s, "только в B: {}", r.only_b.len());
+    let _ = writeln!(
+        s,
+        "{}",
+        i18n::fill(lang, "размер отличается: {}", &[r.size_diff.len().to_string()])
+    );
+    let _ = writeln!(
+        s,
+        "{}",
+        i18n::fill(
+            lang,
+            "содержимое отличается: {}",
+            &[r.content_diff.len().to_string()]
+        )
+    );
+    let _ = writeln!(
+        s,
+        "{}",
+        i18n::fill(lang, "только в A: {}", &[r.only_a.len().to_string()])
+    );
+    let _ = writeln!(
+        s,
+        "{}",
+        i18n::fill(lang, "только в B: {}", &[r.only_b.len().to_string()])
+    );
     if r.scan_errors > 0 {
-        let _ = writeln!(s, "ошибок обхода: {}", r.scan_errors);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(lang, "ошибок обхода: {}", &[r.scan_errors.to_string()])
+        );
     }
     if !r.read_errors.is_empty() {
-        let _ = writeln!(s, "ошибок чтения: {}", r.read_errors.len());
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "ошибок чтения: {}",
+                &[r.read_errors.len().to_string()]
+            )
+        );
     }
     if r.unchecked > 0 {
-        let _ = writeln!(s, "не проверено из-за отмены: {}", r.unchecked);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "не проверено из-за отмены: {}",
+                &[r.unchecked.to_string()]
+            )
+        );
     }
     if r.skipped_a > 0 || r.skipped_b > 0 {
         let _ = writeln!(
             s,
-            "пропущено (симлинки/особые): A {}, B {}",
-            r.skipped_a, r.skipped_b
+            "{}",
+            i18n::fill(
+                lang,
+                "пропущено (симлинки/особые): A {}, B {}",
+                &[r.skipped_a.to_string(), r.skipped_b.to_string()]
+            )
         );
     }
-    write_list(&mut s, "только в A", &r.only_a, all);
-    write_list(&mut s, "только в B", &r.only_b, all);
-    write_size_diff(&mut s, &r.size_diff, all);
-    write_list(&mut s, "содержимое отличается", &r.content_diff, all);
-    write_list(&mut s, "ошибки чтения", &r.read_errors, all);
-    let _ = writeln!(
-        s,
-        "\nвердикт: {} (за {:.1} с)",
-        if r.identical() {
-            "копии совпадают"
-        } else {
-            "найдены расхождения"
-        },
-        r.seconds
+    write_list(&mut s, lang, "только в A", &r.only_a, all);
+    write_list(&mut s, lang, "только в B", &r.only_b, all);
+    write_size_diff(&mut s, lang, &r.size_diff, all);
+    write_list(&mut s, lang, "содержимое отличается", &r.content_diff, all);
+    write_list(&mut s, lang, "ошибки чтения", &r.read_errors, all);
+    let verdict = i18n::fill(
+        lang,
+        "вердикт: {} (за {} с)",
+        &[
+            i18n::t(
+                lang,
+                if r.identical() {
+                    "копии совпадают"
+                } else {
+                    "найдены расхождения"
+                },
+            )
+            .to_string(),
+            format!("{:.1}", r.seconds),
+        ],
     );
+    let _ = writeln!(s, "\n{verdict}");
     s
 }
 
 /// Текст проверки по слепку: тот же источник для CLI и экрана «Целостность».
 pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> String {
     use std::fmt::Write;
+    let lang = r.lang;
     let mut s = String::new();
-    let _ = writeln!(s, "проверка слепка: {}", file.display());
-    let _ = writeln!(s, "           каталог: {}", root.display());
     let _ = writeln!(
         s,
-        "совпало: {}, изменено: {}, нет в каталоге: {}, нет в слепке: {}",
-        r.same,
-        r.changed.len(),
-        r.missing.len(),
-        r.extra.len()
+        "{}",
+        i18n::fill(lang, "проверка слепка: {}", &[file.display().to_string()])
+    );
+    let _ = writeln!(
+        s,
+        "{}",
+        i18n::fill(lang, "           каталог: {}", &[root.display().to_string()])
+    );
+    let _ = writeln!(
+        s,
+        "{}",
+        i18n::fill(
+            lang,
+            "совпало: {}, изменено: {}, нет в каталоге: {}, нет в слепке: {}",
+            &[
+                r.same.to_string(),
+                r.changed.len().to_string(),
+                r.missing.len().to_string(),
+                r.extra.len().to_string(),
+            ]
+        )
     );
     if r.scan_errors > 0 {
-        let _ = writeln!(s, "ошибок обхода: {}", r.scan_errors);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(lang, "ошибок обхода: {}", &[r.scan_errors.to_string()])
+        );
     }
     if !r.read_errors.is_empty() {
-        let _ = writeln!(s, "ошибок чтения: {}", r.read_errors.len());
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "ошибок чтения: {}",
+                &[r.read_errors.len().to_string()]
+            )
+        );
     }
     if r.unchecked > 0 {
-        let _ = writeln!(s, "не проверено из-за отмены: {}", r.unchecked);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "не проверено из-за отмены: {}",
+                &[r.unchecked.to_string()]
+            )
+        );
     }
     if r.skipped > 0 {
-        let _ = writeln!(s, "пропущено (симлинки/особые): {}", r.skipped);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "пропущено (симлинки/особые): {}",
+                &[r.skipped.to_string()]
+            )
+        );
     }
-    write_list(&mut s, "нет в каталоге", &r.missing, all);
-    write_list(&mut s, "нет в слепке", &r.extra, all);
-    write_list(&mut s, "изменено", &r.changed, all);
-    write_list(&mut s, "ошибки чтения", &r.read_errors, all);
-    let _ = writeln!(
-        s,
-        "\nвердикт: {} (за {:.1} с)",
-        if r.identical() {
-            "каталог совпадает со слепком"
-        } else {
-            "каталог расходится со слепком"
-        },
-        r.seconds
+    write_list(&mut s, lang, "нет в каталоге", &r.missing, all);
+    write_list(&mut s, lang, "нет в слепке", &r.extra, all);
+    write_list(&mut s, lang, "изменено", &r.changed, all);
+    write_list(&mut s, lang, "ошибки чтения", &r.read_errors, all);
+    let verdict = i18n::fill(
+        lang,
+        "вердикт: {} (за {} с)",
+        &[
+            i18n::t(
+                lang,
+                if r.identical() {
+                    "каталог совпадает со слепком"
+                } else {
+                    "каталог расходится со слепком"
+                },
+            )
+            .to_string(),
+            format!("{:.1}", r.seconds),
+        ],
     );
+    let _ = writeln!(s, "\n{verdict}");
     s
 }
 
 /// Итог записи слепка: путь дописывается только тогда, когда файл действительно записан.
 pub fn manifest_report(root: &Path, out: Option<&Path>, stats: &ManifestStats) -> String {
+    let lang = stats.lang;
     let prefix = if stats.written {
         ""
     } else if stats.cancelled {
-        "отменено: "
+        i18n::t(lang, "отменено: ")
     } else {
-        "не записан: "
+        i18n::t(lang, "не записан: ")
     };
     let arrow = match out {
         Some(p) if stats.written => format!(" → {}", p.display()),
         _ => String::new(),
     };
     format!(
-        "{prefix}слепок {}: {} файлов ({}), пропущено {}, ошибок {}, не проверено {}, за {:.1} с{arrow}\n",
-        root.display(),
-        stats.files,
-        db::human(stats.bytes as i64),
-        stats.skipped,
-        stats.errors,
-        stats.unchecked,
-        stats.seconds
+        "{prefix}{}{arrow}\n",
+        i18n::fill(
+            lang,
+            "слепок {}: {} файлов ({}), пропущено {}, ошибок {}, не проверено {}, за {} с",
+            &[
+                root.display().to_string(),
+                stats.files.to_string(),
+                db::human_in(lang, stats.bytes as i64),
+                stats.skipped.to_string(),
+                stats.errors.to_string(),
+                stats.unchecked.to_string(),
+                format!("{:.1}", stats.seconds),
+            ]
+        )
     )
 }
 
-fn write_list(s: &mut String, title: &str, list: &[String], all: bool) {
+fn write_list(s: &mut String, lang: Lang, title: &'static str, list: &[String], all: bool) {
     use std::fmt::Write;
     if list.is_empty() {
         return;
     }
-    let _ = writeln!(s, "\n{title}:");
+    let _ = writeln!(s, "\n{}:", i18n::t(lang, title));
     let limit = if all { list.len() } else { 20 };
     for path in list.iter().take(limit) {
         let _ = writeln!(s, "  {path}");
     }
     if list.len() > limit {
-        let _ = writeln!(s, "  … ещё {} (показать все)", list.len() - limit);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "  … ещё {} (показать все)",
+                &[(list.len() - limit).to_string()]
+            )
+        );
     }
 }
 
-fn write_size_diff(s: &mut String, list: &[(String, u64, u64)], all: bool) {
+fn write_size_diff(s: &mut String, lang: Lang, list: &[(String, u64, u64)], all: bool) {
     use std::fmt::Write;
     if list.is_empty() {
         return;
     }
-    let _ = writeln!(s, "\nразмер отличается:");
+    let _ = writeln!(s, "\n{}:", i18n::t(lang, "размер отличается"));
     let limit = if all { list.len() } else { 20 };
     for (path, a, b) in list.iter().take(limit) {
         let delta = *b as i64 - *a as i64;
+        let bytes = format!(
+            "{}{} {}",
+            if delta >= 0 { "+" } else { "" },
+            delta,
+            match lang {
+                Lang::En => "B",
+                Lang::Ru => "Б",
+            }
+        );
         let _ = writeln!(
             s,
-            "  {path}  A {}  B {}  ({}{} Б)",
-            db::human(*a as i64),
-            db::human(*b as i64),
-            if delta >= 0 { "+" } else { "" },
-            delta
+            "  {}",
+            i18n::fill(
+                lang,
+                "{}  A {}  B {}  ({})",
+                &[
+                    path.clone(),
+                    db::human_in(lang, *a as i64),
+                    db::human_in(lang, *b as i64),
+                    bytes,
+                ]
+            )
         );
     }
     if list.len() > limit {
-        let _ = writeln!(s, "  … ещё {} (показать все)", list.len() - limit);
+        let _ = writeln!(
+            s,
+            "{}",
+            i18n::fill(
+                lang,
+                "  … ещё {} (показать все)",
+                &[(list.len() - limit).to_string()]
+            )
+        );
     }
 }
 
@@ -1164,6 +1335,7 @@ mod tests {
             skipped_b: 0,
             cancelled: false,
             seconds: 1.5,
+            lang: Lang::Ru,
         };
         let text = verify_report(Path::new("/a"), Path::new("/b"), &r, true);
         assert!(text.contains("только в A: 1"), "{text}");
@@ -1192,6 +1364,7 @@ mod tests {
             cancelled: false,
             written: true,
             seconds: 0.5,
+            lang: Lang::Ru,
         };
         let text = manifest_report(
             Path::new("/archive"),
@@ -1228,6 +1401,7 @@ mod tests {
             skipped: 1,
             cancelled: false,
             seconds: 0.2,
+            lang: Lang::Ru,
         };
         let text = check_report(
             Path::new("/tmp/list.sha256"),

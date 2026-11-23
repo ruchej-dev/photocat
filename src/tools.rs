@@ -3,6 +3,7 @@
 //! Пустое поле в настройках — программа ищется в `PATH`; непустое — запускается по указанному пути.
 //! Отсутствие программы — состояние, а не падение: отключается только её вид работы (ADR 0019, 0020).
 
+use crate::i18n::{self, Lang};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -47,24 +48,32 @@ impl Tool {
         }
     }
 
-    /// Зачем нужна — для «Настроек» и `doctor`.
-    pub fn purpose(self) -> &'static str {
-        match self {
-            Tool::Ffmpeg => "видео: кадр-обложка, dHash, превью",
-            Tool::Ffprobe => "видео: длительность и разрешение",
-            Tool::Tesseract => "OCR: текст с документов и скриншотов",
-            Tool::Curl => "скачивание весов модели по согласию",
-        }
+    /// Зачем нужна — для «Настроек» и `doctor` (M21.6: язык интерфейса или отчёта).
+    pub fn purpose(self, lang: Lang) -> &'static str {
+        i18n::t(
+            lang,
+            match self {
+                Tool::Ffmpeg => "видео: кадр-обложка, dHash, превью",
+                Tool::Ffprobe => "видео: длительность и разрешение",
+                Tool::Tesseract => "OCR: текст с документов и скриншотов",
+                Tool::Curl => "скачивание весов модели по согласию",
+            },
+        )
     }
 
     /// Что перестанет работать без неё. Остальное приложение работает всегда.
-    pub fn without(self) -> &'static str {
-        match self {
-            Tool::Ffmpeg => "видео в индексе без превью и dHash, ошибка в счётчике; фото не страдают",
-            Tool::Ffprobe => "видео без длительности и разрешения",
-            Tool::Tesseract => "OCR выключен: кнопка погашена, поиск по тексту пуст",
-            Tool::Curl => "веса модели придётся положить вручную (scripts/fetch-model.sh)",
-        }
+    pub fn without(self, lang: Lang) -> &'static str {
+        i18n::t(
+            lang,
+            match self {
+                Tool::Ffmpeg => {
+                    "видео в индексе без превью и dHash, ошибка в счётчике; фото не страдают"
+                }
+                Tool::Ffprobe => "видео без длительности и разрешения",
+                Tool::Tesseract => "OCR выключен: кнопка погашена, поиск по тексту пуст",
+                Tool::Curl => "веса модели придётся положить вручную (scripts/fetch-model.sh)",
+            },
+        )
     }
 }
 
@@ -162,8 +171,15 @@ impl Tools {
     }
 
     /// Откуда взята программа — словами для интерфейса и `doctor`.
-    pub fn source(&self, tool: Tool) -> &'static str {
-        if self.configured(tool) { "задано в настройках" } else { "из PATH" }
+    pub fn source(&self, tool: Tool, lang: Lang) -> &'static str {
+        i18n::t(
+            lang,
+            if self.configured(tool) {
+                "задано в настройках"
+            } else {
+                "из PATH"
+            },
+        )
     }
 
     /// Где программа лежит на самом деле: явный путь или первый найденный в `PATH`.
@@ -255,7 +271,7 @@ mod tests {
         let t = Tools::default();
         for tool in ALL {
             assert_eq!(t.program(tool), tool.name());
-            assert_eq!(t.source(tool), "из PATH");
+            assert_eq!(t.source(tool, Lang::Ru), "из PATH");
             assert!(!t.configured(tool));
         }
     }
@@ -265,7 +281,7 @@ mod tests {
         let mut t = Tools::default();
         *t.get_mut(Tool::Tesseract) = "/opt/ocr/bin/tesseract".into();
         assert_eq!(t.program(Tool::Tesseract), "/opt/ocr/bin/tesseract");
-        assert_eq!(t.source(Tool::Tesseract), "задано в настройках");
+        assert_eq!(t.source(Tool::Tesseract, Lang::Ru), "задано в настройках");
         // Пробелы вокруг пути не должны ломать запуск.
         *t.get_mut(Tool::Ffmpeg) = "  ffmpeg  ".into();
         assert_eq!(t.program(Tool::Ffmpeg), "ffmpeg");

@@ -1,5 +1,6 @@
 //! Работа с SQLite: схема, вставка, чтение, статистика.
 
+use crate::i18n::{self, Lang};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
@@ -2161,8 +2162,18 @@ pub fn albums_of_file(conn: &Connection, file_id: i64) -> Result<Vec<String>> {
         .collect())
 }
 
-pub fn print_stats(db_path: &Path) -> Result<()> {
+/// Печать статистики индекса на языке интерфейса (M21.6).
+pub fn print_stats(lang: Lang, db_path: &Path) -> Result<()> {
+    print!("{}", stats_text(lang, db_path)?);
+    Ok(())
+}
+
+/// Текст статистики отдельной функцией: его печатает CLI, а тест проверяет язык
+/// и числа, не перехватывая stdout.
+pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
+    use std::fmt::Write;
     let conn = open(db_path)?;
+    let mut out = String::new();
     let mut st = conn.prepare(
         "SELECT kind, COUNT(*), SUM(size) FROM files GROUP BY kind ORDER BY SUM(size) DESC",
     )?;
@@ -2175,12 +2186,18 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
     })?;
     let mut total_n = 0;
     let mut total_b = 0;
-    println!("{:<10} {:>10} {:>12}", "тип", "файлов", "объём");
+    let _ = writeln!(
+        out,
+        "{:<10} {:>10} {:>12}",
+        i18n::t(lang, "тип"),
+        i18n::t(lang, "файлов"),
+        i18n::t(lang, "объём")
+    );
     for r in rows {
         let (k, n, b) = r?;
         total_n += n;
         total_b += b;
-        println!("{:<10} {:>10} {:>12}", k, n, human(b));
+        let _ = writeln!(out, "{:<10} {:>10} {:>12}", k, n, human_in(lang, b));
     }
     let no_date: i64 = conn.query_row(
         "SELECT COUNT(*) FROM files WHERE taken_at IS NULL",
@@ -2201,30 +2218,76 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
         [],
         |r| r.get(0),
     )?;
-    println!("---");
-    println!("всего: {total_n} файлов, {}", human(total_b));
-    println!("без даты съёмки: {no_date}");
-    println!("без перцептивного хеша: {no_hash}");
-    println!(
-        "уникальных sha256: {uniq_sha}  (точных копий: {})",
-        total_n - uniq_sha
+    let _ = writeln!(out, "---");
+    let _ = writeln!(
+        out,
+        "{}",
+        i18n::fill(
+            lang,
+            "всего: {} файлов, {}",
+            &[total_n.to_string(), human_in(lang, total_b)]
+        )
     );
-    println!("уникальных dhash: {uniq_dhash}");
+    let _ = writeln!(
+        out,
+        "{}",
+        i18n::fill(lang, "без даты съёмки: {}", &[no_date.to_string()])
+    );
+    let _ = writeln!(
+        out,
+        "{}",
+        i18n::fill(
+            lang,
+            "без перцептивного хеша: {}",
+            &[no_hash.to_string()]
+        )
+    );
+    let _ = writeln!(
+        out,
+        "{}",
+        i18n::fill(
+            lang,
+            "уникальных sha256: {}  (точных копий: {})",
+            &[uniq_sha.to_string(), (total_n - uniq_sha).to_string()]
+        )
+    );
+    let _ = writeln!(
+        out,
+        "{}",
+        i18n::fill(
+            lang,
+            "уникальных dhash: {}",
+            &[uniq_dhash.to_string()]
+        )
+    );
     let (vid_n, vid_dur): (i64, f64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(duration_s),0) FROM files
          WHERE kind='video' AND duration_s IS NOT NULL",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    println!(
-        "видео с длительностью: {vid_n}, суммарно {}",
-        duration(vid_dur)
+    let _ = writeln!(
+        out,
+        "{}",
+        i18n::fill(
+            lang,
+            "видео с длительностью: {}, суммарно {}",
+            &[vid_n.to_string(), duration(vid_dur)]
+        )
     );
     let (ocr_n, ocr_chars) = ocr_summary(&conn)?;
     if ocr_n > 0 {
-        println!("файлов с распознанным текстом: {ocr_n}, знаков: {ocr_chars}");
+        let _ = writeln!(
+            out,
+            "{}",
+            i18n::fill(
+                lang,
+                "файлов с распознанным текстом: {}, знаков: {}",
+                &[ocr_n.to_string(), ocr_chars.to_string()]
+            )
+        );
     }
-    Ok(())
+    Ok(out)
 }
 
 #[cfg(test)]

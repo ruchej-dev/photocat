@@ -2095,15 +2095,23 @@ impl App {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let res = match plan {
-                IntegrityPlan::Verify(a, b) => verify::verify(&a, &b, jobs, Some(worker))
-                    .map(|report| IntegrityOutcome::Verify { a, b, report }),
+                IntegrityPlan::Verify(a, b) => verify::verify(&a, &b, jobs, Some(worker)).map(
+                    |mut report| {
+                        report.lang = lang;
+                        IntegrityOutcome::Verify { a, b, report }
+                    },
+                ),
                 IntegrityPlan::Manifest(root, out) => {
-                    verify::manifest(&root, Some(&out), jobs, Some(worker))
-                        .map(|stats| IntegrityOutcome::Manifest { root, out, stats })
+                    verify::manifest(&root, Some(&out), jobs, Some(worker)).map(|mut stats| {
+                        stats.lang = lang;
+                        IntegrityOutcome::Manifest { root, out, stats }
+                    })
                 }
                 IntegrityPlan::Check(root, file) => {
-                    verify::check_manifest(&root, &file, jobs, Some(worker))
-                        .map(|report| IntegrityOutcome::Check { root, file, report })
+                    verify::check_manifest(&root, &file, jobs, Some(worker)).map(|mut report| {
+                        report.lang = lang;
+                        IntegrityOutcome::Check { root, file, report }
+                    })
                 }
             };
             let _ = tx.send((job, res));
@@ -3140,7 +3148,11 @@ impl App {
             }
             if let Some(plan) = &plan {
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(plan.summary()).size(11.0).color(DIM));
+                ui.label(
+                    egui::RichText::new(plan.summary(self.settings.lang))
+                        .size(11.0)
+                        .color(DIM),
+                );
                 egui::ScrollArea::both()
                     .id_salt("export-plan")
                     .max_height(240.0)
@@ -4342,7 +4354,7 @@ impl App {
                 egui::RichText::new(format!(
                     "{}: {}",
                     t(lang, "без неё"),
-                    t(lang, tool.without())
+                    tool.without(lang)
                 ))
                 .size(11.0)
                 .color(DIM),
@@ -4883,7 +4895,7 @@ impl App {
                 .clicked()
             {
                 let path = db::cache_dir().join("plan.csv");
-                let csv = dupes::plan_csv(&self.items, &self.groups);
+                let csv = dupes::plan_csv(&self.items, &self.groups, self.settings.lang);
                 let rows = csv.lines().count().saturating_sub(1);
                 match std::fs::write(&path, &csv) {
                     Ok(()) => {
@@ -4907,7 +4919,7 @@ impl App {
                 .clicked()
             {
                 ui.ctx()
-                    .copy_text(dupes::plan_csv(&self.items, &self.groups));
+                    .copy_text(dupes::plan_csv(&self.items, &self.groups, self.settings.lang));
                 self.status = t(lang, "план скопирован в буфер обмена").into();
             }
             ui.label(
@@ -6683,24 +6695,24 @@ impl App {
                 Some(p) => format!(
                     "{} ({})",
                     p.display(),
-                    t(lang, self.settings.tools.source(tool))
+                    self.settings.tools.source(tool, lang)
                 ),
                 None => format!(
                     "{} ({})",
                     self.settings.tools.program(tool),
-                    t(lang, self.settings.tools.source(tool))
+                    self.settings.tools.source(tool, lang)
                 ),
             };
             match self.settings.tools.version(tool) {
                 Ok(v) => format!(
                     "{} · {where_} · {}",
                     short_version(&v),
-                    t(lang, tool.purpose())
+                    tool.purpose(lang)
                 ),
                 Err(e) => format!(
                     "{}: {e:#} · {where_} · {}",
                     t(lang, "не работает"),
-                    t(lang, tool.purpose())
+                    tool.purpose(lang)
                 ),
             }
         });
@@ -7358,6 +7370,7 @@ impl App {
         let db_path = self.db_path.clone();
         let tools = self.settings.tools.clone();
         let jobs = self.settings.index_jobs;
+        let lang = self.settings.lang;
         let progress = Arc::new(Progress::default());
         self.progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
@@ -7406,6 +7419,7 @@ impl App {
                 bytes,
                 seconds: t0.elapsed().as_secs_f64(),
                 cancelled,
+                lang,
             }));
         });
     }
@@ -8247,7 +8261,10 @@ impl eframe::App for App {
             match rx.try_recv() {
                 Ok(res) => {
                     self.status = match res {
-                        Ok(s) => s.to_string(),
+                        Ok(mut s) => {
+                            s.lang = self.settings.lang;
+                            s.to_string()
+                        }
                         Err(e) => format!("индексация не удалась: {e}"),
                     };
                     self.rx = None;
@@ -8270,8 +8287,10 @@ impl eframe::App for App {
                     self.embed_rx = None;
                     self.embed_progress = None;
                     match res {
-                        Ok((embed, tags)) => {
+                        Ok((mut embed, mut tags)) => {
                             self.reload();
+                            embed.lang = self.settings.lang;
+                            tags.lang = self.settings.lang;
                             self.status = format!("{embed}; {tags}");
                         }
                         Err(e) => self.status = format!("CLIP не посчитан: {e}"),
@@ -8293,9 +8312,10 @@ impl eframe::App for App {
                     self.retag_rx = None;
                     self.embed_progress = None;
                     match res {
-                        Ok(stats) => {
+                        Ok(mut stats) => {
                             self.tag_dict_dirty = false;
                             self.reload();
+                            stats.lang = self.settings.lang;
                             self.status = stats.to_string();
                         }
                         Err(e) => self.status = format!("теги не пересчитаны: {e}"),
@@ -8340,12 +8360,13 @@ impl eframe::App for App {
                     self.download_rx = None;
                     self.download_progress = None;
                     match res {
-                        Ok(report) => {
+                        Ok(mut report) => {
                             self.settings.model_id = report.model.to_string();
                             self.ml_model = None;
                             self.semantic_hits = None;
                             self.save_settings();
                             self.reload();
+                            report.lang = self.settings.lang;
                             self.status = report.to_string();
                         }
                         Err(e) => self.status = format!("модель не скачана: {e}"),
@@ -8367,8 +8388,9 @@ impl eframe::App for App {
                     self.ocr_rx = None;
                     self.ocr_progress = None;
                     match res {
-                        Ok(stats) => {
+                        Ok(mut stats) => {
                             self.reload();
+                            stats.lang = self.settings.lang;
                             self.status = if stats.cancelled {
                                 stats.to_string()
                             } else if stats.candidates == 1 {
@@ -8400,16 +8422,18 @@ impl eframe::App for App {
                     self.face_rx = None;
                     self.face_progress = None;
                     match res {
-                        FaceReply::Scan(Ok(stats)) => {
+                        FaceReply::Scan(Ok(mut stats)) => {
                             self.reload();
+                            stats.lang = self.settings.lang;
                             self.status = stats.to_string();
                         }
                         FaceReply::Scan(Err(e)) => {
                             let lang = self.settings.lang;
                             self.status = format!("{}: {e:#}", t(lang, "лица не найдены"))
                         }
-                        FaceReply::Cluster(Ok(stats)) => {
+                        FaceReply::Cluster(Ok(mut stats)) => {
                             self.reload();
+                            stats.lang = self.settings.lang;
                             self.status = stats.to_string();
                         }
                         FaceReply::Cluster(Err(e)) => {
@@ -8461,7 +8485,8 @@ impl eframe::App for App {
                     self.face_download_rx = None;
                     self.face_download_progress = None;
                     match res {
-                        Ok(report) => {
+                        Ok(mut report) => {
+                            report.lang = self.settings.lang;
                             self.status = report.to_string();
                             self.reload();
                         }
@@ -8484,9 +8509,10 @@ impl eframe::App for App {
 
         if let Some(rx) = &self.export_rx {
             match rx.try_recv() {
-                Ok(report) => {
+                Ok(mut report) => {
                     self.export_rx = None;
                     self.export_progress = None;
+                    report.lang = self.settings.lang;
                     self.status = report.to_string();
                     self.export_report = Some(report);
                 }
@@ -9181,18 +9207,20 @@ impl eframe::App for App {
                     .show(ui, |ui| {
                         for (n, g) in groups.iter().enumerate() {
                             ui.group(|ui| {
+                                let reason = g.reason.label(lang);
+                                let advice_text = g.advice.label(lang);
                                 let head = match lang {
                                     i18n::Lang::En => format!(
                                         "#{} — {} · {} · {} wasted",
                                         n + 1,
-                                        g.reason,
+                                        reason,
                                         files_n(g.members.len()),
                                         db::human_in(lang, g.waste)
                                     ),
                                     i18n::Lang::Ru => format!(
                                         "#{} — {} · файлов {} · зря {}",
                                         n + 1,
-                                        g.reason,
+                                        reason,
                                         g.members.len(),
                                         db::human(g.waste)
                                     ),
@@ -9214,12 +9242,12 @@ impl eframe::App for App {
                                             lang,
                                             if decided { "решение" } else { "совет" }
                                         ),
-                                        g.advice
+                                        advice_text
                                     ),
                                     i18n::Lang::Ru => format!(
                                         "{}: оставить {name} — {}",
                                         if decided { "решение" } else { "совет" },
-                                        g.advice
+                                        advice_text
                                     ),
                                 };
                                 ui.label(advice);
@@ -10935,6 +10963,7 @@ mod tests {
                 skipped_b: 0,
                 cancelled: false,
                 seconds: 1.0,
+                lang: i18n::Lang::En,
             },
         });
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -10973,10 +11002,15 @@ mod tests {
                 "русская подпись «{ru}» осталась: {texts:?}"
             );
         }
-        // Текст отчёта пока русский: это вывод `verify`, M21.6 отдаст ему `lang`.
+        // С M21.6 текст отчёта — вывод `verify` на том же языке: отчёт и экран
+        // больше не расходятся ни словами, ни единицами.
         assert!(
-            texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
-            "отчёт рисуется как есть: {texts:?}"
+            texts.iter().any(|t| t.contains("verdict: the copies match")),
+            "отчёт рисуется на языке отчёта: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
+            "русский отчёт остался в английском окне: {texts:?}"
         );
     }
 
@@ -12113,6 +12147,7 @@ mod tests {
                 skipped_b: 0,
                 cancelled: false,
                 seconds: 1.0,
+                lang: i18n::Lang::Ru,
             },
         });
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -12267,6 +12302,8 @@ mod tests {
                 verify_manifest: manifest.to_string_lossy().into_owned(),
                 verify_interval_days: 30,
                 verify_last_at: (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339(),
+                // Отчёт и его слова проверяются по-русски: это второй язык проекта.
+                lang: i18n::Lang::Ru,
                 ..Default::default()
             };
             db::save_settings(&c, &s).unwrap();

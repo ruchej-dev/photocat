@@ -734,7 +734,7 @@ GPS/тегам/камере, запись порядка в БД.
 
 ---
 
-## M21 — language of the project and of the interface ◐ (mechanism and GUI screens done, CLI reports left)
+## M21 — language of the project and of the interface ◐ (mechanism, GUI screens and CLI reports done; documentation left)
 
 **Goal.** The repository speaks English (docs, commits) while the Russian documentation stays as the
 second variant; the interface language is chosen in the settings: English is the main language,
@@ -799,3 +799,15 @@ window; `i18n::position`/`i18n::seconds` build the counter and the interval per 
 `draw_viewer_image`/`paint_play_overlay` take `lang` — `cargo test` 198 tests include a headless
 English viewer frame (image and video), the two folder dialogs and all three storage confirmations;
 `check.sh` 44/0.
+
+M21.6: the CLI reports are translated (`index`, `stats`, `dupes`, `organize`, `export`, `verify`,
+`manifest`, `embed`, `tags`, `faces`, `ocr`, `search`, `clusters`, `models`, `settings`, `albums`,
+`doctor`, `--help`). Report structs carry a `lang` field set by the caller; the sentences are built
+with `i18n::fill(lang, template, values)` so the translation owns the word order; `db::human_in`
+gives `KiB`/`КиБ`. `dupes` keeps the reason and the advice as data (`Reason`, `AdvicePart`) and
+builds the words at display time, so a group found before a language change is not stale. `--help` is
+one translated block (`i18n::USAGE`); `tools::Tool::purpose`/`without`/`Tools::source` take `lang`.
+Runtime diagnostics from L1/L2 still speak Russian (recorded in `plan/I18N.md` as the tail).
+`cargo test` 205 tests (5 new: `fill`, placeholder parity, the source scan that proves every `t`/`fill`
+literal is in `PAIRS`, English CLI reports on both languages, English `--help`); `cargo clippy` clean;
+`check.sh` 52/0; on the corpus copy `dupes` stays 103 groups / 238 files / 214.1 MiB in 0.023 s.

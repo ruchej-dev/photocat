@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation) → next:M21.6 (CLI reports), then M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window now goes through `t()`, CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports) → next:M21.7 (`docs/`), then M21.8 (`plan/`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1351,3 +1351,53 @@ the real DB (30 MB, 2230 files, twice) — code 124, no panic.
 **Next.** M21.6: the CLI reports get a `lang` field set from `settings.lang` so `index`, `stats`,
 `dupes`, `organize`, `verify`, `embed`, `faces`, `ocr`, `doctor` and `settings` print English too —
 no global language variable. Then M21.7 (`docs/`), M21.8 (`plan/`), M21.9 (`.pi/`) and M15.6/M15.7.
+
+## M21.6 — the CLI reports in English (2026-11-24)
+
+The last surface of M21: after the window spoke English, `index`, `stats`, `dupes`, `organize`,
+`export`, `verify`, `manifest`, `embed`, `tags`, `faces`, `ocr`, `search`, `clusters`, `models`,
+`settings`, `albums`, `doctor` and `--help` still answered in Russian. Now they print the language of
+`settings.lang`, and the numbers stay numbers.
+
+**How the language travels.** Report structs gained a `lang` field (`index::Stats`, `ocr::Stats`,
+`faces::{Stats, ClusterStats, DownloadReport}`, `embed::{EmbedStats, RetagStats, DownloadReport}`,
+`verify::{Report, CheckReport, ManifestStats}`, `organize::ExportReport`). The caller sets it before
+printing: `main` from `language(&args)` (one `db::open` + `db::ensure_lang` per command), `app` from
+`self.settings.lang` when a background pass returns. `Display` impls build the sentence with
+`i18n::fill(lang, template, values)` — the translation owns the word order, the code only supplies
+pre-formatted numbers. Sizes go through `db::human_in`, so `ГиБ`/`GiB` follow the language.
+
+**Data versus words.** `dupes::Group` kept the reason and the advice as ready Russian strings, so a
+group found before a language change would have stayed Russian. `Reason` (`Exact`/`Similar`) and
+`Advice { same_content, parts: Vec<AdvicePart> }` now hold the facts, and `label(lang)` builds the
+words at display time; the CSV plan and the screen use the same function. `--help` is one translated
+block (`i18n::USAGE`), so the menu cannot drift between languages. `tools::Tool::purpose`/`without`
+and `Tools::source` take `lang` — the GUI and `doctor` now call one function instead of the GUI
+wrapping a Russian string in `t()`.
+
+**Honest tail.** Runtime diagnostics from L1/L2 (`anyhow::bail!` inside `db`, `derive`, `embed`,
+`faces`, `verify`, `organize`) still speak Russian: they are error text, not a report, and moving
+them would mean threading `lang` through every fallible helper. Recorded in `plan/I18N.md`.
+
+**Checks.** `cargo test` — 205 passed, 6 `#[ignore]` (was 198; new: `fill` substitutes values by
+order and keeps `{}` when a value is missing; every translation keeps the same number of `{}` as the
+original; a source scan proves every literal passed to `i18n::t`/`i18n::fill` in the reporting
+modules exists in `PAIRS`; English `index`/`ocr`/`faces`/`embed`/`organize`/`tools` reports;
+`dupes::Reason`/`Advice` on both languages; the three `verify` report bodies; the English `--help`
+without a single Cyrillic letter). The four screens' English tests that already existed now assert
+the English report body too, and the reminder test sets `settings.lang = Ru` because it checks the
+Russian report file. `cargo clippy --all-targets` clean; `check.sh` — 52 checks, 0 violations
+(`i18n` allowed for `tools` and the reporting L2 modules; the layer map in the script is the source
+of truth).
+
+**On the corpus** (copy of the real DB, 2230 files, release): `stats` prints 2230 files, 21.2 GiB,
+258 videos, 3:19:46 — the same numbers in both languages, only the labels and units change;
+`dupes --max-dist 6` — 103 groups, 238 files, 214.1 MiB, 0.023 s, the same groups as before the
+change; `doctor`, `models list`, `tags --list`, `albums list`, `ocr --dry-run` (384 of 1970),
+`faces --dry-run`, `organize` dry run (571 showcase folders), `export` dry run and
+`verify`/`manifest` on temporary folders all print English with correct exit codes (1 on a
+difference, as before). `timeout 6 ./target/release/photocat gui --db /tmp/m216.db` — exit code 124,
+no panic.
+
+**Next.** M21.7: translate `docs/ARCHITECTURE.md`, `docs/UI.md`, `docs/DECISIONS.md` and move the
+Russian originals to `*.ru.md`. Then M21.8 (`plan/`) and M21.9 (`.pi/`), then M15.6/M15.7.

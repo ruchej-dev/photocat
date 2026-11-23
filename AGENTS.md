@@ -62,7 +62,7 @@ source of truth (see `plan/I18N.md` for the order).
 
 | File | Layer | Responsible for | Must not know about |
 |---|---|---|---|
-| `src/i18n.rs` | L0 | UI language: `Lang`, `t(lang, text)`, the ru→en table | DB, UI, decoding |
+| `src/i18n.rs` | L0 | UI and CLI language: `Lang`, `t(lang, text)`, `fill(lang, template, values)`, the ru→en table | DB, UI, decoding |
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (date/GPS/camera), previews, date from the name | DB, UI, indexer |
 | `src/tools.rs` | L0 | paths to `ffmpeg`/`ffprobe`/`tesseract`/`curl`, `PATH` lookup, version probing | DB, UI, decoding |
 | `src/db.rs` | L1 | SQLite schema, inserts/queries, albums (tree and order), `Progress`, `human()` | egui, image decoding |
@@ -171,7 +171,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
 - **Communication with the owner is Russian.** The owner reads Russian; the repository speaks
   English.
 - **UI strings are translated, not duplicated.** A Russian source string goes through
-  `i18n::t(lang, "…")`; the English text is added to the `PAIRS` table in `src/i18n.rs`. A screen is
+  `i18n::t(lang, "…")`; the English text is added to the `PAIRS` table in `src/i18n.rs`. A CLI report
+  carries its language in a `lang` field and builds sentences with `i18n::fill` (M21.6). A screen is
   considered translated only when every label on it goes through `t()`. Untranslated screens keep
   showing Russian — that is a visible state, not an error, and `plan/I18N.md` tracks the coverage.
 - UI identifiers are English, UI labels are translated; numbers with units in the GUI go through

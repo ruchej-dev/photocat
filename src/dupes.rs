@@ -2,19 +2,83 @@
 //! совет «что оставить» и экспорт плана решения. Оригиналы не трогаем.
 
 use crate::db::{self, FileRow};
+use crate::i18n::{self, Lang};
 use crate::{flag_num, flag_str, has_flag};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Почему файлы попали в одну группу. Метка переводится на месте (M21.6):
+/// сам признак — данные, слова — отчёт.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Reason {
+    Exact,
+    Similar,
+}
+
+impl Reason {
+    pub fn label(self, lang: Lang) -> &'static str {
+        i18n::t(
+            lang,
+            match self {
+                Reason::Exact => "точная копия",
+                Reason::Similar => "похожий снимок",
+            },
+        )
+    }
+}
+
+/// Из чего сложился совет «что оставить»: числа и признаки без слов, чтобы отчёт
+/// и интерфейс переводились, а не хранили готовую русскую фразу (M21.6).
+#[derive(Clone, PartialEq, Debug)]
+pub enum AdvicePart {
+    SharperBy(f64),
+    Sharper,
+    MorePixels,
+    BiggerFile,
+}
+
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Advice {
+    /// Все файлы — копии одного содержимого: выбирать нечего.
+    pub same_content: bool,
+    pub parts: Vec<AdvicePart>,
+}
+
+impl Advice {
+    /// Совет словами на языке отчёта: части соединяются точкой-разделителем.
+    pub fn label(&self, lang: Lang) -> String {
+        if self.same_content {
+            return i18n::t(lang, "точные копии — разницы нет").to_string();
+        }
+        if self.parts.is_empty() {
+            return i18n::t(lang, "отличия небольшие — выбирайте глазами").to_string();
+        }
+        self.parts
+            .iter()
+            .map(|p| match p {
+                AdvicePart::SharperBy(pct) => i18n::fill(
+                    lang,
+                    "резче остальных на {}%",
+                    &[format!("{pct:.0}")],
+                ),
+                AdvicePart::Sharper => i18n::t(lang, "резче остальных").to_string(),
+                AdvicePart::MorePixels => i18n::t(lang, "больше по разрешению").to_string(),
+                AdvicePart::BiggerFile => i18n::t(lang, "крупнее файл").to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
 pub struct Group {
     pub members: Vec<usize>,
     pub waste: i64,
-    pub reason: &'static str,
+    pub reason: Reason,
     /// Индекс в `rows`: кадр, который советуем оставить.
     pub suggested: usize,
-    /// Почему именно он — словами, для интерфейса и отчёта.
-    pub advice: String,
+    /// Почему именно он — признаки, слова собираются на языке отчёта.
+    pub advice: Advice,
 }
 
 /// Что уже решено по найденным группам.
@@ -117,7 +181,11 @@ fn find_groups_with(rows: &[FileRow], max_dist: u32, index_from: usize) -> Vec<G
             Group {
                 waste: total - biggest,
                 members: v,
-                reason: if same_content { "точная копия" } else { "похожий снимок" },
+                reason: if same_content {
+                    Reason::Exact
+                } else {
+                    Reason::Similar
+                },
                 suggested,
                 advice,
             }
@@ -225,14 +293,17 @@ fn pick_best(rows: &[FileRow], members: &[usize]) -> usize {
         .unwrap_or(&members[0])
 }
 
-/// Совет словами: почему этот кадр лучше остальных.
-fn advice_of(rows: &[FileRow], members: &[usize], best: usize) -> String {
+/// Совет: почему этот кадр лучше остальных (без слов — слова собирает `Advice::label`).
+fn advice_of(rows: &[FileRow], members: &[usize], best: usize) -> Advice {
     let same_content = !rows[best].sha256.is_empty()
         && members.iter().all(|&i| rows[i].sha256 == rows[best].sha256);
     if same_content {
-        return "точные копии — разницы нет".into();
+        return Advice {
+            same_content: true,
+            parts: Vec::new(),
+        };
     }
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts: Vec<AdvicePart> = Vec::new();
     let best_sharp = sharpness_of(&rows[best]);
     let other_sharp = members
         .iter()
@@ -243,9 +314,9 @@ fn advice_of(rows: &[FileRow], members: &[usize], best: usize) -> String {
     if best_sharp > 0.0 && other_sharp > 0.0 {
         let pct = (best_sharp / other_sharp - 1.0) * 100.0;
         if pct >= 3.0 {
-            parts.push(format!("резче остальных на {pct:.0}%"));
+            parts.push(AdvicePart::SharperBy(pct));
         } else if pct > 0.0 {
-            parts.push("резче остальных".into());
+            parts.push(AdvicePart::Sharper);
         }
     }
     let best_px = pixels_of(&rows[best]);
@@ -254,19 +325,18 @@ fn advice_of(rows: &[FileRow], members: &[usize], best: usize) -> String {
         && best_px == max_px
         && members.iter().filter(|&&i| pixels_of(&rows[i]) == max_px).count() == 1
     {
-        parts.push("больше по разрешению".into());
+        parts.push(AdvicePart::MorePixels);
     }
     let max_size = members.iter().map(|&i| rows[i].size).max().unwrap_or(0);
     if max_size > 0
         && rows[best].size == max_size
         && members.iter().filter(|&&i| rows[i].size == max_size).count() == 1
     {
-        parts.push("крупнее файл".into());
+        parts.push(AdvicePart::BiggerFile);
     }
-    if parts.is_empty() {
-        "отличия небольшие — выбирайте глазами".into()
-    } else {
-        parts.join(" · ")
+    Advice {
+        same_content: false,
+        parts,
     }
 }
 
@@ -298,7 +368,7 @@ pub fn summary(rows: &[FileRow], groups: &[Group]) -> Summary {
 
 /// План решения без удаления: одна строка на каждый «лишний» файл.
 /// `wasted_bytes` — сколько освободится, если убрать все помеченные файлы группы.
-pub fn plan_csv(rows: &[FileRow], groups: &[Group]) -> String {
+pub fn plan_csv(rows: &[FileRow], groups: &[Group], lang: Lang) -> String {
     let mut s = String::from("group,keep_path,drop_path,reason,wasted_bytes\n");
     for (n, g) in groups.iter().enumerate() {
         let keep = keep_of(rows, g);
@@ -317,7 +387,7 @@ pub fn plan_csv(rows: &[FileRow], groups: &[Group]) -> String {
                 n + 1,
                 csv_escape(&rows[keep].path),
                 csv_escape(&rows[i].path),
-                csv_escape(g.reason),
+                csv_escape(g.reason.label(lang)),
                 wasted
             ));
         }
@@ -348,40 +418,51 @@ pub fn cli(args: &[String]) -> Result<()> {
     let quiet = has_flag(args, "--quiet");
 
     let conn = db::open(&db_path)?;
+    db::ensure_lang(&conn)?;
+    let lang = db::load_settings(&conn).lang;
     let rows = db::load_all(&conn)?;
     let groups = find_groups(&rows, max_dist);
 
     let waste: i64 = groups.iter().map(|g| g.waste).sum();
     let files: usize = groups.iter().map(|g| g.members.len()).sum();
     println!(
-        "групп: {}, файлов в них: {}, потенциально лишнего: {}",
-        groups.len(),
-        files,
-        db::human(waste)
+        "{}",
+        i18n::fill(
+            lang,
+            "групп: {}, файлов в них: {}, потенциально лишнего: {}",
+            &[
+                groups.len().to_string(),
+                files.to_string(),
+                db::human_in(lang, waste),
+            ]
+        )
     );
     if !quiet {
         let sum = summary(&rows, &groups);
         if sum.marked_drop > 0 {
             println!(
-                "помечено лишними: {}, освободится {}",
-                sum.marked_drop,
-                db::human(sum.freed)
+                "{}",
+                i18n::fill(
+                    lang,
+                    "помечено лишними: {}, освободится {}",
+                    &[sum.marked_drop.to_string(), db::human_in(lang, sum.freed)]
+                )
             );
         }
         for (n, g) in groups.iter().enumerate().take(200) {
-            println!(
-                "\n#{} [{}] файлов: {}, дублей на {} · совет: {}{}",
-                n + 1,
-                g.reason,
-                g.members.len(),
-                db::human(g.waste),
-                short_name(&rows[keep_of(&rows, g)].path),
-                if g.advice.is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {}", g.advice)
-                }
+            let header = i18n::fill(
+                lang,
+                "#{} [{}] файлов: {}, дублей на {} · совет: {} — {}",
+                &[
+                    (n + 1).to_string(),
+                    g.reason.label(lang).to_string(),
+                    g.members.len().to_string(),
+                    db::human_in(lang, g.waste),
+                    short_name(&rows[keep_of(&rows, g)].path).to_string(),
+                    g.advice.label(lang),
+                ],
             );
+            println!("\n{header}");
             let base = rows[g.members[0]].dhash.map(|v| v as u64);
             let keep = keep_of(&rows, g);
             for &i in &g.members {
@@ -392,13 +473,13 @@ pub fn cli(args: &[String]) -> Result<()> {
                 };
                 println!(
                     "   {:>10}  {}  Δ{:<2}  {:<7} {}",
-                    db::human(r.size),
+                    db::human_in(lang, r.size),
                     r.taken_at.clone().unwrap_or_else(|| "-".into()),
                     dist,
                     match r.decision.as_deref() {
-                        Some("keep") => "оставить",
-                        Some("drop") => "лишний",
-                        _ if i == keep => "оставить",
+                        Some("keep") => i18n::t(lang, "оставить"),
+                        Some("drop") => i18n::t(lang, "лишний"),
+                        _ if i == keep => i18n::t(lang, "оставить"),
                         _ => "",
                     },
                     r.path
@@ -406,7 +487,14 @@ pub fn cli(args: &[String]) -> Result<()> {
             }
         }
         if groups.len() > 200 {
-            println!("\n… и ещё {} групп (полный список: --csv)", groups.len() - 200);
+            println!(
+                "\n{}",
+                i18n::fill(
+                    lang,
+                    "… и ещё {} групп (полный список: --csv)",
+                    &[(groups.len() - 200).to_string()]
+                )
+            );
         }
     }
     if let Some(path) = csv {
@@ -423,7 +511,7 @@ pub fn cli(args: &[String]) -> Result<()> {
                 s.push_str(&format!(
                     "{},{},{},{},{},{},{},{}\n",
                     n + 1,
-                    g.reason,
+                    g.reason.label(lang),
                     d,
                     g.waste,
                     r.size,
@@ -434,11 +522,17 @@ pub fn cli(args: &[String]) -> Result<()> {
             }
         }
         std::fs::write(&path, s)?;
-        println!("полный список: {path}");
+        println!(
+            "{}",
+            i18n::fill(lang, "полный список: {}", std::slice::from_ref(&path))
+        );
     }
     if let Some(path) = plan {
-        std::fs::write(&path, plan_csv(&rows, &groups))?;
-        println!("план решения: {path}");
+        std::fs::write(&path, plan_csv(&rows, &groups, lang))?;
+        println!(
+            "{}",
+            i18n::fill(lang, "план решения: {}", std::slice::from_ref(&path))
+        );
     }
     Ok(())
 }
@@ -478,7 +572,7 @@ mod tests {
             waste: 0,
             advice: advice_of(rows, &members, suggested),
             members,
-            reason: "похожий снимок",
+            reason: Reason::Similar,
             suggested,
         }
     }
@@ -492,7 +586,8 @@ mod tests {
         ];
         let g = one_group(&rows);
         assert_eq!(rows[g.suggested].path, "/b.jpg");
-        assert!(g.advice.contains("резче остальных на 150%"), "{}", g.advice);
+        let advice = g.advice.label(Lang::Ru);
+        assert!(advice.contains("резче остальных на 150%"), "{advice}");
     }
 
     #[test]
@@ -502,7 +597,8 @@ mod tests {
             row("/b.jpg", "same", 100, 10.0, 100),
         ];
         let g = one_group(&rows);
-        assert_eq!(g.advice, "точные копии — разницы нет");
+        assert!(g.advice.same_content);
+        assert_eq!(g.advice.label(Lang::Ru), "точные копии — разницы нет");
     }
 
     /// Нормализованное разбиение на группы: сравнение «тот же набор групп».
@@ -638,7 +734,7 @@ mod tests {
         rows[0].decision = Some("keep".into());
         rows[1].decision = Some("drop".into());
         rows[2].decision = Some("drop".into());
-        let plan = plan_csv(&rows, &[g]);
+        let plan = plan_csv(&rows, &[g], Lang::Ru);
         let lines: Vec<&str> = plan.lines().collect();
         assert_eq!(lines[0], "group,keep_path,drop_path,reason,wasted_bytes");
         assert_eq!(lines.len(), 3);

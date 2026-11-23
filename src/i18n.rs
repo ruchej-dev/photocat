@@ -102,6 +102,29 @@ pub fn t(lang: Lang, ru: &'static str) -> &'static str {
     }
 }
 
+/// Подставить значения в переведённый шаблон: `{}` заменяются по порядку, остальной
+/// текст остаётся как есть. Отчёты CLI (M21.6) держат всю фразу в таблице, а числа
+/// подставляют сюда — тогда порядок слов задаёт перевод, а не `format!` в коде.
+/// Лишние значения игнорируются, недостающие оставляют `{}` на месте: отчёт не
+/// исчезает из-за опечатки в переводе.
+pub fn fill(lang: Lang, ru: &'static str, values: &[String]) -> String {
+    let tpl = t(lang, ru);
+    let mut out = String::with_capacity(tpl.len() + 32);
+    let mut rest = tpl;
+    let mut used = 0usize;
+    while let Some(i) = rest.find("{}") {
+        out.push_str(&rest[..i]);
+        match values.get(used) {
+            Some(v) => out.push_str(v),
+            None => out.push_str("{}"),
+        }
+        used += 1;
+        rest = &rest[i + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Счётчик с правильным числом: «3 файла» / «3 files», «1 файл» / «1 file».
 /// Русские формы — [единственное, 2–4, 5 и больше]; в английском хватает двух.
 pub fn count(
@@ -222,12 +245,103 @@ pub fn seconds(lang: Lang, n: u64) -> String {
     }
 }
 
+/// Текст `--help` на двух языках: пара живёт здесь, чтобы меню не разъехалось
+/// с таблицей, а английский вариант не существовал отдельно от русского (M21.6).
+pub const USAGE: (&str, &str) = (
+    r#"photocat — каталогизатор медиаархива
+
+подкоманды:
+  index <каталог> [--jobs N] [--db PATH]   проиндексировать каталог
+  stats [--db PATH]                        статистика по индексу
+  dupes [--max-dist N] [--csv FILE] [--plan FILE]
+                                            найти дубли и похожие снимки, выгрузить решения
+  organize --out DIR [--by day|month|event] [--name ШАБЛОН] [--exclude-dup] [--apply]
+                                            план (и применение) витрины: по дням, месяцам или
+                                            событиям; имена из {date} {time} {camera} {tag}
+  verify <a> <b> [--jobs N] [--all]        сверка двух копий: размер → sha256, отчёт
+  verify --manifest FILE <каталог>         проверить каталог по слепку sha256
+  manifest [DIR] [--out FILE] [--jobs N]  слепок каталога в формате sha256sum
+  embed [--jobs N] [--batch N] [--refresh] [--retag]  CLIP-эмбеддинги и теги (модель локальная);
+                                            --refresh пересчитывает векторы, --retag — только теги
+  tags [--list] [--add МЕТКА --prompt ТЕКСТ] [--enable ID] [--disable ID] [--rm ID]
+       [--export FILE] [--import FILE] [--reset]
+                                            словарь тегов модели: метки, промпты, порядок
+  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
+                                            лица: детекция, эмбеддинги, группы
+  faces download --yes | label --id N --name ИМЯ | split --id N
+                                            веса лиц, подпись группы, разъединить лицо
+  ocr [--jobs N] [--all] [--dry-run] [--file PATH]
+                                            текст с документов и скриншотов (tesseract)
+  search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
+  clusters [--k N] [--out FILE]             кластеры CLIP → отчёт с примерами
+  albums list [--tree] | new --name ИМЯ [--parent ID] [--note ТЕКСТ]
+         | rename --id N --name ИМЯ | move --id N --parent ID [--position K]
+         | add|remove --id N PATH... | delete --id N [--yes] | show --id N [--tree]
+                                            альбомы: дерево и порядок файлов; только строки БД
+  export --album N --out DIR [--name ШАБЛОН] [--apply]
+                                            выгрузить альбом копиями файлов;
+                                            структура и порядок как в альбоме, {n}_{orig}
+  models [list|check|download --id ID --yes]
+                                            каталог моделей, проверка и загрузка весов
+  settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L] [--lang en|ru]
+           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH] [--curl PATH]
+                                            показать или изменить настройки
+  doctor                                   что есть на машине: программы, языки OCR, модель
+  gui                                       графический интерфейс (по умолчанию)
+
+по умолчанию: GUI"#,
+    r#"photocat — media archive cataloguer
+
+subcommands:
+  index <folder> [--jobs N] [--db PATH]    index a folder
+  stats [--db PATH]                        index statistics
+  dupes [--max-dist N] [--csv FILE] [--plan FILE]
+                                            find duplicates and similar shots, export the decisions
+  organize --out DIR [--by day|month|event] [--name TEMPLATE] [--exclude-dup] [--apply]
+                                            plan (and apply) the showcase: by day, month or
+                                            event; names from {date} {time} {camera} {tag}
+  verify <a> <b> [--jobs N] [--all]        compare two copies: size → sha256, report
+  verify --manifest FILE <folder>          check a folder against a sha256 manifest
+  manifest [DIR] [--out FILE] [--jobs N]  snapshot a folder in sha256sum format
+  embed [--jobs N] [--batch N] [--refresh] [--retag]  CLIP embeddings and tags (local model);
+                                            --refresh recomputes vectors, --retag — tags only
+  tags [--list] [--add LABEL --prompt TEXT] [--enable ID] [--disable ID] [--rm ID]
+       [--export FILE] [--import FILE] [--reset]
+                                            the model's tag dictionary: labels, prompts, order
+  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
+                                            people: detection, embeddings, groups
+  faces download --yes | label --id N --name NAME | split --id N
+                                            face weights, name a group, split a face out
+  ocr [--jobs N] [--all] [--dry-run] [--file PATH]
+                                            text from documents and screenshots (tesseract)
+  search <query> [--top N] [--text]        semantic search or search in the text on photos
+  clusters [--k N] [--out FILE]             CLIP clusters → report with examples
+  albums list [--tree] | new --name NAME [--parent ID] [--note TEXT]
+         | rename --id N --name NAME | move --id N --parent ID [--position K]
+         | add|remove --id N PATH... | delete --id N [--yes] | show --id N [--tree]
+                                            albums: the tree and the file order; DB rows only
+  export --album N --out DIR [--name TEMPLATE] [--apply]
+                                            export an album as file copies; the structure and
+                                            order follow the album, {n}_{orig}
+  models [list|check|download --id ID --yes]
+                                            the model catalogue, checking and downloading weights
+  settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L] [--lang en|ru]
+           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH] [--curl PATH]
+                                            show or change the settings
+  doctor                                   what the machine has: programs, OCR languages, model
+  gui                                       the graphical interface (default)
+
+default: GUI"#,
+);
+
 /// Все переведённые строки: русский оригинал → английский текст.
 ///
 /// Ключ — ровно та строка, что стоит в коде. Одна и та же русская строка переводится
 /// один раз: `t("Настройки")` в навигации, заголовке диалога и подсказке даёт одно слово.
 /// Пополняется экран за экраном (см. `plan/I18N.md`).
 const PAIRS: &[(&str, &str)] = &[
+    // --- CLI: справка ---------------------------------------------------------
+    USAGE,
     // --- остов приложения: навигация, верхняя панель, статус -------------------
     ("Все файлы", "All files"),
     ("Альбомы", "Albums"),
@@ -1072,6 +1186,197 @@ const PAIRS: &[(&str, &str)] = &[
     ("индекс сброшен; проиндексируйте каталог", "index reset; index a folder now"),
     ("кэш очищен", "cache cleared"),
     ("очистка не удалась", "cleaning failed"),
+    // --- CLI: отчёты и сообщения команд (M21.6) -------------------------------
+    ("остановлено: ", "stopped: "),
+    ("проиндексировано {}/{} файлов ({}), без изменений {}, ошибок {}, за {} с", "indexed {}/{} files ({}), unchanged {}, errors {}, {} s"),
+    ("индексация: {}/{} файлов, ошибок {}", "indexing: {}/{} files, {} errors"),
+    ("нужен каталог: photocat index <каталог>", "a folder is needed: photocat index <folder>"),
+    ("тип", "kind"),
+    ("файлов", "files"),
+    ("объём", "size"),
+    ("всего: {} файлов, {}", "total: {} files, {}"),
+    ("без даты съёмки: {}", "without a capture date: {}"),
+    ("без перцептивного хеша: {}", "without a perceptual hash: {}"),
+    ("уникальных sha256: {}  (точных копий: {})", "unique sha256: {}  (exact copies: {})"),
+    ("уникальных dhash: {}", "unique dhash: {}"),
+    ("видео с длительностью: {}, суммарно {}", "videos with a duration: {}, {} in total"),
+    ("файлов с распознанным текстом: {}, знаков: {}", "files with recognised text: {}, characters: {}"),
+    ("точная копия", "exact copy"),
+    ("похожий снимок", "similar shot"),
+    ("точные копии — разницы нет", "exact copies — no difference"),
+    ("отличия небольшие — выбирайте глазами", "the differences are small — choose by eye"),
+    ("резче остальных на {}%", "sharper than the rest by {}%"),
+    ("резче остальных", "sharper than the rest"),
+    ("больше по разрешению", "more pixels"),
+    ("крупнее файл", "larger file"),
+    ("групп: {}, файлов в них: {}, потенциально лишнего: {}", "groups: {}, files in them: {}, potentially spare: {}"),
+    ("помечено лишними: {}, освободится {}", "marked spare: {}, would free {}"),
+    ("#{} [{}] файлов: {}, дублей на {} · совет: {} — {}", "#{} [{}] files: {}, duplicates worth {} · advice: {} — {}"),
+    ("… и ещё {} групп (полный список: --csv)", "… and {} more groups (full list: --csv)"),
+    ("полный список: {}", "full list: {}"),
+    ("план решения: {}", "decision plan: {}"),
+    ("кандидатов на текст нет: все снимки с камерой и без тега документа", "no text candidates: every photo has a camera and no document tag"),
+    ("распознано {} из {} файлов, знаков {}, ошибок {}, за {} с", "recognised {} of {} files, {} characters, {} errors, {} s"),
+    (" (пропущено {}, текст уже есть)", " ({} skipped, text already there)"),
+    ("кандидатов: {} из {} снимков; tesseract ({}): {}", "candidates: {} of {} photos; tesseract ({}): {}"),
+    ("не найден", "not found"),
+    ("OCR: {}/{} файлов, ошибок {} — {}", "OCR: {}/{} files, {} errors — {}"),
+    ("просканировано {} из {} снимков, лиц {}, кластеров {}, ошибок {}, за {} с", "scanned {} of {} photos, {} faces, {} clusters, {} errors, {} s"),
+    (" (пропущено {}, уже просканировано)", " ({} skipped, already scanned)"),
+    ("лиц {}, групп {}, из них закреплено вручную {}, за {} с", "{} faces, {} groups, {} pinned by hand, {} s"),
+    ("модель лиц скачана: файлов {}, {}", "face model downloaded: {} files, {}"),
+    ("нужны номер группы и имя: faces label --id N --name ИМЯ", "a group number and a name are needed: faces label --id N --name NAME"),
+    ("группа {}: «{}»", "group {}: “{}”"),
+    ("нужен номер лица: faces split --id N", "a face number is needed: faces split --id N"),
+    ("лицо {} отделено в группу {}", "face {} split into group {}"),
+    ("не скачана — «Настройки» или faces download --yes", "not downloaded — “Settings” or faces download --yes"),
+    ("снимков: {}, ещё без лиц: {}; модель лиц: {}", "photos: {}, still without faces: {}; face model: {}"),
+    ("групп лиц нет: запустите photocat faces", "no face groups yet: run photocat faces"),
+    ("(без имени)", "(no name)"),
+    ("лиц {}, фото {}", "{} faces, {} photos"),
+    ("лица: {}/{} снимков, ошибок {} — {}", "people: {}/{} photos, {} errors — {}"),
+    ("CLIP ({}): {}посчитано {}/{}, пропущено {}, ошибок {}, за {} с, модель {}", "CLIP ({}): {}computed {}/{}, skipped {}, errors {}, {} s, model {}"),
+    ("теги ({}): пересчитано {}/{}, за {} с", "tags ({}): recomputed {}/{}, {} s"),
+    ("модель {}: файлов {}, {}", "model {}: {} files, {}"),
+    (" (не подошли: {})", " (did not fit: {})"),
+    ("загрузка модели CLIP…", "loading the CLIP model…"),
+    ("CLIP: {}/{} файлов, ошибок {} — {}", "CLIP: {}/{} files, {} errors — {}"),
+    ("кластеров: {} на {} фото, за {} с → {}", "clusters: {} over {} photos, {} s → {}"),
+    ("# Кластеры CLIP (M3)\n\n", "# CLIP clusters (M3)\n\n"),
+    ("Модель `{}`, файлов с эмбеддингами: {}, кластеров: {}, k={}.", "Model `{}`, files with embeddings: {}, clusters: {}, k={}."),
+    ("Отчёт для просмотра владельцем: 12 примеров на кластер.\n", "A report for the owner: 12 examples per cluster.\n"),
+    ("## Кластер {} — {} фото", "## Cluster {} — {} photos"),
+    ("… и ещё {}", "… and {} more"),
+    ("сверка", "comparing"),
+    ("проверка", "checking"),
+    ("слепок", "manifest"),
+    ("{}/{} файлов, ошибок {} — {}", "{}/{} files, {} errors — {}"),
+    ("сверка: {}", "comparison: {}"),
+    ("     с: {}", "     with: {}"),
+    ("файлов: A {}, B {}; совпало по содержимому {}; sha256 проверено {} файлов ({})", "files: A {}, B {}; identical content {}; sha256 checked {} files ({})"),
+    ("размер отличается: {}", "size differs: {}"),
+    ("размер отличается", "size differs"),
+    ("содержимое отличается: {}", "content differs: {}"),
+    ("содержимое отличается", "content differs"),
+    ("только в A: {}", "only in A: {}"),
+    ("только в A", "only in A"),
+    ("только в B: {}", "only in B: {}"),
+    ("только в B", "only in B"),
+    ("ошибок обхода: {}", "scan errors: {}"),
+    ("ошибок чтения: {}", "read errors: {}"),
+    ("ошибки чтения", "read errors"),
+    ("не проверено из-за отмены: {}", "not checked because of the stop: {}"),
+    ("пропущено (симлинки/особые): A {}, B {}", "skipped (symlinks/special): A {}, B {}"),
+    ("пропущено (симлинки/особые): {}", "skipped (symlinks/special): {}"),
+    ("вердикт: {} (за {} с)", "verdict: {} ({} s)"),
+    ("найдены расхождения", "differences found"),
+    ("каталог расходится со слепком", "the folder does not match the manifest"),
+    ("проверка слепка: {}", "manifest check: {}"),
+    ("           каталог: {}", "            folder: {}"),
+    ("совпало: {}, изменено: {}, нет в каталоге: {}, нет в слепке: {}", "matched: {}, changed: {}, missing from the folder: {}, missing from the manifest: {}"),
+    ("нет в каталоге", "missing from the folder"),
+    ("нет в слепке", "missing from the manifest"),
+    ("изменено", "changed"),
+    ("  … ещё {} (показать все)", "  … {} more (show all)"),
+    ("слепок {}: {} файлов ({}), пропущено {}, ошибок {}, не проверено {}, за {} с", "manifest {}: {} files ({}), skipped {}, errors {}, not checked {}, {} s"),
+    ("отменено: ", "cancelled: "),
+    ("не записан: ", "not written: "),
+    ("нужен каталог: photocat verify --manifest FILE DIR", "a folder is needed: photocat verify --manifest FILE DIR"),
+    ("нужны два каталога: photocat verify A B [--jobs N] [--all]", "two folders are needed: photocat verify A B [--jobs N] [--all]"),
+    ("по дням", "by day"),
+    ("по месяцам", "by month"),
+    ("по событиям (день + место)", "by event (day + place)"),
+    ("витрина: {} → {}", "showcase: {} → {}"),
+    ("файлов с датой: {}, без даты (не попадут в план): {}, помечено лишними и не включено: {}", "files with a date: {}, without a date (not in the plan): {}, marked spare and left out: {}"),
+    ("каталогов витрины: {}", "showcase folders: {}"),
+    ("примеры:", "examples:"),
+    ("это план (dry-run). Добавьте --apply, чтобы создать ссылки/копии в {}", "this is a plan (dry-run). Add --apply to create links/copies in {}"),
+    ("создано: {}, ошибок: {}", "created: {}, errors: {}"),
+    ("нужен каталог назначения: organize --out DIR [--apply] [--by day|month|event]", "a destination folder is needed: organize --out DIR [--apply] [--by day|month|event]"),
+    ("--by: ожидается day, month или event, получено «{}»", "--by: expected day, month or event, got “{}”"),
+    ("выгрузка альбома: {} → {}", "album export: {} → {}"),
+    ("каталогов {} · файлов {} · {}; в корзине и не выгружаются: {}; имён с коллизией: {}; слишком длинных путей: {}", "folders {} · files {} · {}; in the trash and not exported: {}; names with a collision: {}; paths too long: {}"),
+    ("; пустых каталогов: {}", "; empty folders: {}"),
+    ("; такие файлы пропущены", "; those files are skipped"),
+    ("это план (dry-run). Добавьте --apply, чтобы скопировать файлы (не ссылки).", "this is a plan (dry-run). Add --apply to copy the files (not links)."),
+    ("выгрузка: {}/{} файлов, ошибок {}", "export: {}/{} files, {} errors"),
+    ("выгружено {} файлов · {}; пропущено уже выгруженных {} (порядок в цели устарел {}); переименовано из-за коллизии {}; каталогов создано {}; ошибок {}", "exported {} files · {}; {} already exported skipped ({} stale order in the target); {} renamed because of a collision; {} folders created; {} errors"),
+    ("; остановлено", "; stopped"),
+    ("нужен номер альбома: export --album N --out DIR [--name ШАБЛОН] [--apply]", "an album number is needed: export --album N --out DIR [--name TEMPLATE] [--apply]"),
+    ("нужен каталог назначения: export --album N --out DIR [--apply]", "a destination folder is needed: export --album N --out DIR [--apply]"),
+    ("папка моделей: {}", "model folder: {}"),
+    ("лимит: {} МиБ", "limit: {} MiB"),
+    ("модель в порядке: {}", "the model is in order: {}"),
+    ("неизвестная подкоманда models: {} (models list|check|download)", "unknown models subcommand: {} (models list|check|download)"),
+    ("нет такой модели: {} (см. models list)", "no such model: {} (see models list)"),
+    ("нет такого языка интерфейса: {} (en, ru)", "no such interface language: {} (en, ru)"),
+    ("не сохранён: {}", "not saved: {}"),
+    ("модель: {}", "model: {}"),
+    ("потоков: {}", "threads: {}"),
+    ("порог дублей: {}", "duplicate threshold: {}"),
+    ("тег: уверенный ≥ {}, отрыв {}", "tag: confident ≥ {}, margin {}"),
+    ("фильтр по тегу: порог {}% (процентиль)", "tag filter: threshold {}% (percentile)"),
+    ("языки OCR: {}", "OCR languages: {}"),
+    ("язык интерфейса: {}", "interface language: {}"),
+    ("порог лиц: {}", "face threshold: {}"),
+    ("внешние программы (пусто в настройках — ищутся в PATH; без программы отключается только её работа):", "external programs (empty in the settings — looked up in PATH; without a program only its own work is off):"),
+    ("не работает: {}", "does not work: {}"),
+    ("не найдена: {} ({})", "not found: {} ({})"),
+    ("зачем: {}; без неё: {}", "why: {}; without it: {}"),
+    ("языки OCR: {} — на месте", "OCR languages: {} — present"),
+    ("языки OCR: {} — нет {}; установите языковые пакеты tesseract для них", "OCR languages: {} — missing {}; install the tesseract language packs for them"),
+    ("  доступны: {}", "  available: {}"),
+    ("языки OCR: не проверить — tesseract не найден", "OCR languages: cannot check — tesseract not found"),
+    ("модель CLIP: {} · {} · {}", "CLIP model: {} · {} · {}"),
+    ("не скачана — смысловой поиск и теги недоступны", "not downloaded — semantic search and tags are unavailable"),
+    ("модель лиц: {} · {} · {}", "face model: {} · {} · {}"),
+    ("лица: {} на {} снимках, групп {}, ещё без лиц {} из {}", "people: {} on {} photos, {} groups, {} of {} still without faces"),
+    ("БД: {} · {} · файлов {}, с текстом {} (знаков {})", "DB: {} · {} · {} files, {} with text ({} characters)"),
+    ("неизвестная подкоманда: {}", "unknown subcommand: {}"),
+    ("альбомов нет — создайте: photocat albums new --name \"Дача 2024\"", "no albums yet — create one: photocat albums new --name \"Summer 2024\""),
+    (" · в корзине {}", " · {} in the trash"),
+    ("файлов {} · подальбомов {} · {}{}", "{} files · {} subalbums · {}{}"),
+    ("нужно имя: photocat albums new --name \"Дача 2024\" [--parent ID]", "a name is needed: photocat albums new --name \"Summer 2024\" [--parent ID]"),
+    ("альбом создан: {} (id {})", "album created: {} (id {})"),
+    ("нужно имя: photocat albums rename --id N --name ИМЯ", "a name is needed: photocat albums rename --id N --name NAME"),
+    ("альбом переименован: {}", "album renamed: {}"),
+    ("нужен родитель: photocat albums move --id N --parent ID [--position K]", "a parent is needed: photocat albums move --id N --parent ID [--position K]"),
+    ("альбом перемещён: {}", "album moved: {}"),
+    ("нужны пути: photocat albums {} --id N PATH...", "paths are needed: photocat albums {} --id N PATH..."),
+    ("альбом «{}»: добавлено {}, уже было {}, файлов {}", "album “{}”: {} added, {} already there, {} files"),
+    ("альбом «{}»: убрано {}, осталось {}", "album “{}”: {} removed, {} left"),
+    ("будет удалено: {} — альбомов {}, строк файлов {}; файлы на диске останутся. Повторите с --yes.", "will be deleted: {} — {} albums, {} file rows; the files stay on disk. Repeat with --yes."),
+    ("удалено альбомов {}, строк файлов {}; файлы на диске не тронуты", "deleted {} albums, {} file rows; the files on disk are untouched"),
+    ("  подальбом {} · файлов {} · {}", "  subalbum {} · {} files · {}"),
+    ("подальбом {} · файлов {} · {}", "subalbum {} · {} files · {}"),
+    ("  [в корзине приложения]", "  [in the app trash]"),
+    ("неизвестная команда albums: {} (list [--tree] | new | rename | move | add | remove | delete | show)", "unknown albums command: {} (list [--tree] | new | rename | move | add | remove | delete | show)"),
+    ("нужен номер альбома: --id N", "an album number is needed: --id N"),
+    ("словарь модели {} — {} тегов", "model dictionary {} — {} tags"),
+    ("ок", "on"),
+    ("выкл", "off"),
+    (", порог {}%", ", threshold {}%"),
+    ("файлов {} · промптов {}", "{} files · {} prompts"),
+    ("--add: нужна непустая метка", "--add: an empty label is not allowed"),
+    ("тег «{}» уже есть в словаре", "the tag “{}” is already in the dictionary"),
+    ("--add: нужен хотя бы один --prompt «фотография …»", "--add: at least one --prompt “a photo of …” is needed"),
+    ("тег «{}» добавлен (id {}) — пересчитайте веса: photocat embed --retag", "tag “{}” added (id {}) — recompute the weights: photocat embed --retag"),
+    ("тег «{}» {}", "tag “{}” {}"),
+    ("включён", "on"),
+    ("выключен", "off"),
+    ("тег «{}» убран из словаря — веса исчезнут после photocat embed --retag", "tag “{}” removed from the dictionary — the weights go away after photocat embed --retag"),
+    ("словарь выгружен: {} ({} тегов)", "dictionary exported: {} ({} tags)"),
+    ("словарь загружен: {} тегов — пересчитайте веса: photocat embed --retag", "dictionary loaded: {} tags — recompute the weights: photocat embed --retag"),
+    ("словарь возвращён к стандартному ({} тегов) — photocat embed --retag", "dictionary restored to the default ({} tags) — photocat embed --retag"),
+    ("нужен запрос: photocat search \"торт\"", "a query is needed: photocat search \"cake\""),
+    ("текст на фото, запрос «{}»: файлов {} за {} мс", "text on photos, query “{}”: {} files in {} ms"),
+    ("запрос «{}»: результатов {} за {} мс", "query “{}”: {} results in {} ms"),
+    ("повтор {}: {} мс", "repeat {}: {} ms"),
+    ("в среднем: {} мс", "on average: {} ms"),
+    // --- CLI: описания моделей в каталоге (M21.6) ------------------------------
+    ("русский поиск и теги, лучшее качество", "Russian search and tags, the best quality"),
+    ("меньше по размеру, запросы только по-английски", "smaller, English queries only"),
+    ("768 признаков, архитектура SigLIP; запросы по-английски", "768 features, SigLIP architecture; English queries"),
 ];
 
 #[cfg(test)]
@@ -1170,5 +1475,104 @@ mod tests {
                 "ключ без кириллицы: {ru}"
             );
         }
+    }
+
+    /// `fill` подставляет значения по порядку и не теряет текст, если значений
+    /// меньше, чем заполнителей: отчёт остаётся читаемым, а не пустым.
+    #[test]
+    fn fill_подставляет_значения_по_порядку() {
+        let values = ["2".to_string(), "3".to_string()];
+        assert_eq!(
+            fill(Lang::Ru, "проиндексировано {}/{} файлов", &values),
+            "проиндексировано 2/3 файлов"
+        );
+        // Перевод задаёт порядок слов, а не код.
+        assert_eq!(
+            fill(Lang::En, "всего: {} файлов, {}", &values),
+            "total: 2 files, 3"
+        );
+        assert_eq!(fill(Lang::Ru, "без значений {}", &[]), "без значений {}");
+        assert_eq!(
+            fill(Lang::Ru, "лишние значения {}", &["1".to_string(), "2".to_string()]),
+            "лишние значения 1"
+        );
+    }
+
+    /// Заполнители в переводе должны совпадать с оригиналом по числу: иначе
+    /// английский отчёт потеряет число или оставит `{}` на месте.
+    #[test]
+    fn в_переводах_столько_же_заполнителей() {
+        for (ru, en) in PAIRS {
+            let ru_n = ru.matches("{}").count();
+            let en_n = en.matches("{}").count();
+            assert_eq!(ru_n, en_n, "разное число `{{}}` в переводе: «{ru}» → «{en}»");
+        }
+    }
+
+    /// Каждая строка, которую код передаёт в `t()` или `fill()`, есть в таблице:
+    /// забытая пара иначе молча показала бы русский текст в английском отчёте.
+    /// Проверяются модули, которые печатают отчёты CLI (M21.6).
+    #[test]
+    fn каждая_строка_отчётов_есть_в_таблице() {
+        let sources = [
+            ("main.rs", include_str!("main.rs")),
+            ("db.rs", include_str!("db.rs")),
+            ("index.rs", include_str!("index.rs")),
+            ("dupes.rs", include_str!("dupes.rs")),
+            ("organize.rs", include_str!("organize.rs")),
+            ("verify.rs", include_str!("verify.rs")),
+            ("embed.rs", include_str!("embed.rs")),
+            ("ocr.rs", include_str!("ocr.rs")),
+            ("faces.rs", include_str!("faces.rs")),
+            ("tools.rs", include_str!("tools.rs")),
+        ];
+        let mut missing = Vec::new();
+        for (name, src) in sources {
+            for key in literal_keys(src) {
+                // Строки без кириллицы — не текст, а шаблон из одних чисел.
+                if !key.chars().any(|c| c.is_alphabetic() && !c.is_ascii()) {
+                    continue;
+                }
+                if !PAIRS.iter().any(|(ru, _)| *ru == key) {
+                    missing.push(format!("{name}: «{key}»"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "нет перевода: {}", missing.join(", "));
+    }
+
+    /// Строковые литералы, переданные в `i18n::t(` / `i18n::fill(` вторым аргументом.
+    fn literal_keys(src: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for marker in ["i18n::t(", "i18n::fill("] {
+            let mut rest = src;
+            while let Some(i) = rest.find(marker) {
+                rest = &rest[i + marker.len()..];
+                let Some(comma) = rest.find(',') else { continue };
+                let tail = &rest[comma + 1..];
+                let Some(q) = tail.find('"') else { continue };
+                if tail.find(')').is_some_and(|p| p < q) {
+                    continue;
+                }
+                let mut value = String::new();
+                let mut chars = tail[q + 1..].chars();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '\\' => match chars.next() {
+                            Some('n') => value.push('\n'),
+                            Some('t') => value.push('\t'),
+                            Some('"') => value.push('"'),
+                            Some('\\') => value.push('\\'),
+                            Some(other) => value.push(other),
+                            None => break,
+                        },
+                        '"' => break,
+                        other => value.push(other),
+                    }
+                }
+                out.push(value);
+            }
+        }
+        out
     }
 }

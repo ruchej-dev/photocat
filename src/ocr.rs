@@ -4,6 +4,7 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::i18n::{self, Lang};
 use crate::tools::Tool;
 use anyhow::Result;
 use rayon::prelude::*;
@@ -25,25 +26,45 @@ pub struct Stats {
     pub seconds: f64,
     /// Проход прерван владельцем: остальные файлы остались на следующий раз.
     pub cancelled: bool,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.candidates == 0 {
-            return f.write_str("кандидатов на текст нет: все снимки с камерой и без тега документа");
+            return f.write_str(i18n::t(
+                self.lang,
+                "кандидатов на текст нет: все снимки с камерой и без тега документа",
+            ));
         }
-        write!(
-            f,
-            "{}распознано {} из {} файлов, знаков {}, ошибок {}, за {:.1} с",
-            if self.cancelled { "остановлено: " } else { "" },
-            self.done,
-            self.candidates,
-            self.chars,
-            self.errors,
-            self.seconds
-        )?;
+        let prefix = i18n::t(
+            self.lang,
+            if self.cancelled {
+                "остановлено: "
+            } else {
+                ""
+            },
+        );
+        let body = i18n::fill(
+            self.lang,
+            "распознано {} из {} файлов, знаков {}, ошибок {}, за {} с",
+            &[
+                self.done.to_string(),
+                self.candidates.to_string(),
+                self.chars.to_string(),
+                self.errors.to_string(),
+                format!("{:.1}", self.seconds),
+            ],
+        );
+        write!(f, "{prefix}{body}")?;
         if self.skipped > 0 {
-            write!(f, " (пропущено {}, текст уже есть)", self.skipped)?;
+            let note = i18n::fill(
+                self.lang,
+                " (пропущено {}, текст уже есть)",
+                &[self.skipped.to_string()],
+            );
+            write!(f, "{note}")?;
         }
         Ok(())
     }
@@ -189,6 +210,7 @@ fn run_selected(
             chars: 0,
             seconds: t0.elapsed().as_secs_f64(),
             cancelled: true,
+            lang: Lang::default(),
         });
     }
 
@@ -196,7 +218,7 @@ fn run_selected(
         anyhow::bail!(
             "tesseract не запускается ({}) — установите tesseract и языковые пакеты ({lang}) \
              или укажите путь в настройках; остальной функционал работает без него",
-            tools.source(Tool::Tesseract)
+            tools.source(Tool::Tesseract, settings.lang)
         );
     }
 
@@ -265,6 +287,7 @@ fn run_selected(
         chars,
         seconds: t0.elapsed().as_secs_f64(),
         cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
+        lang: Lang::default(),
     })
 }
 

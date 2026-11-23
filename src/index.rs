@@ -2,6 +2,7 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::i18n::{self, Lang};
 use crate::tools;
 use anyhow::Result;
 use rayon::prelude::*;
@@ -19,21 +20,33 @@ pub struct Stats {
     pub seconds: f64,
     /// Прогон прерван владельцем: остальные файлы не обработаны.
     pub cancelled: bool,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}проиндексировано {}/{} файлов ({}), без изменений {}, ошибок {}, за {:.1} с",
-            if self.cancelled { "остановлено: " } else { "" },
-            self.indexed,
-            self.total,
-            db::human(self.bytes),
-            self.skipped,
-            self.errors,
-            self.seconds
-        )
+        let prefix = i18n::t(
+            self.lang,
+            if self.cancelled {
+                "остановлено: "
+            } else {
+                ""
+            },
+        );
+        let body = i18n::fill(
+            self.lang,
+            "проиндексировано {}/{} файлов ({}), без изменений {}, ошибок {}, за {} с",
+            &[
+                self.indexed.to_string(),
+                self.total.to_string(),
+                db::human_in(self.lang, self.bytes),
+                self.skipped.to_string(),
+                self.errors.to_string(),
+                format!("{:.1}", self.seconds),
+            ],
+        );
+        write!(f, "{prefix}{body}")
     }
 }
 
@@ -176,6 +189,7 @@ pub fn run(
         bytes: bytes.load(std::sync::atomic::Ordering::Relaxed),
         seconds: t0.elapsed().as_secs_f64(),
         cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
+        lang: Lang::default(),
     })
 }
 

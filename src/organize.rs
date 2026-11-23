@@ -4,6 +4,7 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::i18n::{self, Lang};
 use crate::{flag_str, has_flag};
 use anyhow::{Context, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -36,12 +37,15 @@ impl Layout {
         }
     }
 
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Day => "по дням",
-            Self::Month => "по месяцам",
-            Self::Event => "по событиям (день + место)",
-        }
+    pub fn title(self, lang: Lang) -> &'static str {
+        i18n::t(
+            lang,
+            match self {
+                Self::Day => "по дням",
+                Self::Month => "по месяцам",
+                Self::Event => "по событиям (день + место)",
+            },
+        )
     }
 }
 
@@ -459,24 +463,30 @@ impl ExportPlan {
         self.items.len()
     }
 
-    /// Строка сводки для GUI и CLI; числа с единицами — через `db::human`.
-    pub fn summary(&self) -> String {
-        let mut s = format!(
-            "каталогов {} · файлов {} · {}; в корзине и не выгружаются: {}; \
-             имён с коллизией: {}; слишком длинных путей: {}",
-            self.dirs.len(),
-            self.items.len(),
-            db::human(self.bytes),
-            self.trashed,
-            self.renamed,
-            self.too_long
+    /// Строка сводки для GUI и CLI; числа с единицами — через `db::human_in`.
+    pub fn summary(&self, lang: Lang) -> String {
+        let mut s = i18n::fill(
+            lang,
+            "каталогов {} · файлов {} · {}; в корзине и не выгружаются: {}; имён с коллизией: {}; слишком длинных путей: {}",
+            &[
+                self.dirs.len().to_string(),
+                self.items.len().to_string(),
+                db::human_in(lang, self.bytes),
+                self.trashed.to_string(),
+                self.renamed.to_string(),
+                self.too_long.to_string(),
+            ],
         );
         let empty = self.dirs.iter().filter(|d| d.files == 0).count();
         if empty > 0 {
-            s.push_str(&format!("; пустых каталогов: {empty}"));
+            s.push_str(&i18n::fill(
+                lang,
+                "; пустых каталогов: {}",
+                &[empty.to_string()],
+            ));
         }
         if self.too_long > 0 {
-            s.push_str("; такие файлы пропущены");
+            s.push_str(i18n::t(lang, "; такие файлы пропущены"));
         }
         s
     }
@@ -540,26 +550,31 @@ pub struct ExportReport {
     /// Что именно создано — для отчёта и теста «отмена в середине».
     pub created: Vec<PathBuf>,
     pub errors: Vec<String>,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl fmt::Display for ExportReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "выгружено {} файлов · {}; пропущено уже выгруженных {} (порядок в цели \
-             устарел {}); переименовано из-за коллизии {}; каталогов создано {}; ошибок {}",
-            self.copied,
-            db::human(self.bytes as i64),
-            self.skipped,
-            self.stale,
-            self.renamed,
-            self.dirs_created,
-            self.failed
-        )?;
-        if self.cancelled {
-            write!(f, "; остановлено")?;
-        }
-        Ok(())
+        let text = i18n::fill(
+            self.lang,
+            "выгружено {} файлов · {}; пропущено уже выгруженных {} (порядок в цели устарел {}); переименовано из-за коллизии {}; каталогов создано {}; ошибок {}",
+            &[
+                self.copied.to_string(),
+                db::human_in(self.lang, self.bytes as i64),
+                self.skipped.to_string(),
+                self.stale.to_string(),
+                self.renamed.to_string(),
+                self.dirs_created.to_string(),
+                self.failed.to_string(),
+            ],
+        );
+        let tail = if self.cancelled {
+            i18n::t(self.lang, "; остановлено")
+        } else {
+            ""
+        };
+        write!(f, "{text}{tail}")
     }
 }
 
@@ -1205,17 +1220,33 @@ fn save_export_cache(cache_dir: &Path, key: &str, cache: &ExportCache) {
 /// Без `--apply` — только план-дерево; на диске не создаётся ничего.
 pub fn export_cli(args: &[String]) -> Result<()> {
     let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
+    let conn = db::open(&db_path)?;
+    db::ensure_lang(&conn)?;
+    let settings = db::load_settings(&conn);
+    let lang = settings.lang;
     let album = match flag_str(args, "--album").and_then(|v| v.parse::<i64>().ok()) {
         Some(id) if id > 0 => id,
         _ => {
-            eprintln!("нужен номер альбома: export --album N --out DIR [--name ШАБЛОН] [--apply]");
+            eprintln!(
+                "{}",
+                i18n::t(
+                    lang,
+                    "нужен номер альбома: export --album N --out DIR [--name ШАБЛОН] [--apply]"
+                )
+            );
             std::process::exit(2);
         }
     };
     let out = match flag_str(args, "--out") {
         Some(o) => PathBuf::from(o),
         None => {
-            eprintln!("нужен каталог назначения: export --album N --out DIR [--apply]");
+            eprintln!(
+                "{}",
+                i18n::t(
+                    lang,
+                    "нужен каталог назначения: export --album N --out DIR [--apply]"
+                )
+            );
             std::process::exit(2);
         }
     };
@@ -1224,8 +1255,6 @@ pub fn export_cli(args: &[String]) -> Result<()> {
         eprintln!("{e}");
         std::process::exit(2);
     }
-    let conn = db::open(&db_path)?;
-    let settings = db::load_settings(&conn);
     if let Err(e) = check_out_dir(&out, &settings.roots) {
         eprintln!("{e}");
         std::process::exit(2);
@@ -1254,12 +1283,25 @@ pub fn export_cli(args: &[String]) -> Result<()> {
             std::process::exit(2);
         }
     };
-    let root_name = plan.root.display();
-    println!("выгрузка альбома: {} → {}", root_name, plan.out.join(&plan.root).display());
-    println!("{}", plan.summary());
+    let root_name = plan.root.display().to_string();
+    println!(
+        "{}",
+        i18n::fill(
+            lang,
+            "выгрузка альбома: {} → {}",
+            &[root_name, plan.out.join(&plan.root).display().to_string()]
+        )
+    );
+    println!("{}", plan.summary(lang));
     print!("{}", plan.outline(usize::MAX));
     if !has_flag(args, "--apply") {
-        println!("\nэто план (dry-run). Добавьте --apply, чтобы скопировать файлы (не ссылки).");
+        println!(
+            "\n{}",
+            i18n::t(
+                lang,
+                "это план (dry-run). Добавьте --apply, чтобы скопировать файлы (не ссылки)."
+            )
+        );
         return Ok(());
     }
     let progress = std::sync::Arc::new(Progress::default());
@@ -1269,7 +1311,12 @@ pub fn export_cli(args: &[String]) -> Result<()> {
         loop {
             let (d, t, e) = (show.done(), show.total(), show.errors());
             if t > 0 {
-                eprint!("\rвыгрузка: {d}/{t}, ошибок {e}");
+                let line = i18n::fill(
+                    lang,
+                    "выгрузка: {}/{} файлов, ошибок {}",
+                    &[d.to_string(), t.to_string(), e.to_string()],
+                );
+                eprint!("\r{line}");
             } else {
                 eprint!("\r{}", show.msg());
             }
@@ -1280,7 +1327,8 @@ pub fn export_cli(args: &[String]) -> Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
     });
-    let report = apply_export(&plan, Some(&progress));
+    let mut report = apply_export(&plan, Some(&progress));
+    report.lang = lang;
     println!("{report}");
     for line in &report.errors {
         println!("  {line}");
@@ -1293,10 +1341,20 @@ pub fn export_cli(args: &[String]) -> Result<()> {
 
 pub fn cli(args: &[String]) -> Result<()> {
     let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
+    let conn = db::open(&db_path)?;
+    db::ensure_lang(&conn)?;
+    let settings = db::load_settings(&conn);
+    let lang = settings.lang;
     let out = match flag_str(args, "--out") {
         Some(o) => PathBuf::from(o),
         None => {
-            eprintln!("нужен каталог назначения: organize --out DIR [--apply] [--by day|month|event]");
+            eprintln!(
+                "{}",
+                i18n::t(
+                    lang,
+                    "нужен каталог назначения: organize --out DIR [--apply] [--by day|month|event]"
+                )
+            );
             std::process::exit(2);
         }
     };
@@ -1312,7 +1370,14 @@ pub fn cli(args: &[String]) -> Result<()> {
         Some(v) => match Layout::parse(&v) {
             Some(l) => l,
             None => {
-                eprintln!("--by: ожидается day, month или event, получено «{v}»");
+                eprintln!(
+                    "{}",
+                    i18n::fill(
+                        lang,
+                        "--by: ожидается day, month или event, получено «{}»",
+                        &[v]
+                    )
+                );
                 std::process::exit(2);
             }
         },
@@ -1330,9 +1395,7 @@ pub fn cli(args: &[String]) -> Result<()> {
     }
     let apply_it = has_flag(args, "--apply");
 
-    let conn = db::open(&db_path)?;
     let rows = db::load_all(&conn)?;
-    let settings = db::load_settings(&conn);
     let tags = if name.as_deref().is_some_and(|t| t.contains("{tag}")) {
         db::load_visible_tags(&conn)?
     } else {
@@ -1360,30 +1423,61 @@ pub fn cli(args: &[String]) -> Result<()> {
             .unwrap_or_default();
         *by_top.entry(top).or_insert(0) += 1;
     }
-    println!("витрина: {} → {}", layout.title(), out.display());
     println!(
-        "файлов с датой: {}, без даты (не попадут в план): {}, помечено лишними и не включено: {}",
-        plan.items.len(),
-        plan.no_date,
-        plan.excluded
+        "{}",
+        i18n::fill(
+            lang,
+            "витрина: {} → {}",
+            &[layout.title(lang).to_string(), out.display().to_string()]
+        )
     );
-    println!("каталогов витрины: {}", plan.dirs);
+    println!(
+        "{}",
+        i18n::fill(
+            lang,
+            "файлов с датой: {}, без даты (не попадут в план): {}, помечено лишними и не включено: {}",
+            &[
+                plan.items.len().to_string(),
+                plan.no_date.to_string(),
+                plan.excluded.to_string(),
+            ]
+        )
+    );
+    println!(
+        "{}",
+        i18n::fill(
+            lang,
+            "каталогов витрины: {}",
+            &[plan.dirs.to_string()]
+        )
+    );
     for (top, n) in &by_top {
         println!("  {top}: {n}");
     }
-    println!("\nпримеры:");
+    println!("\n{}", i18n::t(lang, "примеры:"));
     for it in plan.items.iter().take(5) {
         println!("  {}  →  {}", it.src.display(), it.dst.display());
     }
     if !apply_it {
         println!(
-            "\nэто план (dry-run). Добавьте --apply, чтобы создать ссылки/копии в {}",
-            out.display()
+            "\n{}",
+            i18n::fill(
+                lang,
+                "это план (dry-run). Добавьте --apply, чтобы создать ссылки/копии в {}",
+                &[out.display().to_string()]
+            )
         );
         return Ok(());
     }
     let (ok, fail) = apply(&plan.items, mode)?;
-    println!("создано: {ok}, ошибок: {fail}");
+    println!(
+        "{}",
+        i18n::fill(
+            lang,
+            "создано: {}, ошибок: {}",
+            &[ok.to_string(), fail.to_string()]
+        )
+    );
     Ok(())
 }
 
@@ -1637,7 +1731,7 @@ mod tests {
         assert!(plan.items.iter().any(|i| i.rel.ends_with("01_IMG_2.jpg")));
         assert!(plan.items.iter().any(|i| i.rel.ends_with("02_IMG_3.jpg")));
         assert!(plan.items.iter().any(|i| i.rel.ends_with("Дача_2024/01_IMG_1.jpg")));
-        assert!(plan.summary().contains("файлов 3"));
+        assert!(plan.summary(Lang::Ru).contains("файлов 3"));
     }
 
     #[test]

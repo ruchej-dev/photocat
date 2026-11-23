@@ -6,6 +6,7 @@
 use crate::db::{self, FaceRow, Progress};
 use crate::derive;
 use crate::embed::{self, ModelFile};
+use crate::i18n::{self, Lang};
 use anyhow::{Context, Result, bail};
 use image::{DynamicImage, RgbImage};
 use ort::environment::Environment;
@@ -96,16 +97,21 @@ pub fn check_model(settings: &db::Settings) -> Result<()> {
 #[derive(Debug, Clone)]
 pub struct DownloadReport {
     pub files: usize,
+    /// Язык отчёта (M21.6): английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for DownloadReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
+        let text = i18n::fill(
+            self.lang,
             "модель лиц скачана: файлов {}, {}",
-            self.files,
-            db::human(FILES.iter().map(|x| x.bytes as i64).sum())
-        )
+            &[
+                self.files.to_string(),
+                db::human_in(self.lang, FILES.iter().map(|x| x.bytes as i64).sum()),
+            ],
+        );
+        f.write_str(&text)
     }
 }
 
@@ -133,7 +139,10 @@ pub fn download_model(
         &FILES,
         progress,
     )?;
-    Ok(DownloadReport { files })
+    Ok(DownloadReport {
+        files,
+        lang: settings.lang,
+    })
 }
 
 fn oe<R>(e: ort::Error<R>) -> anyhow::Error {
@@ -502,23 +511,40 @@ pub struct Stats {
     pub errors: usize,
     pub seconds: f64,
     pub cancelled: bool,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}просканировано {} из {} снимков, лиц {}, кластеров {}, ошибок {}, за {:.1} с",
-            if self.cancelled { "остановлено: " } else { "" },
-            self.done,
-            self.images,
-            self.faces,
-            self.clusters,
-            self.errors,
-            self.seconds
-        )?;
+        let prefix = i18n::t(
+            self.lang,
+            if self.cancelled {
+                "остановлено: "
+            } else {
+                ""
+            },
+        );
+        let body = i18n::fill(
+            self.lang,
+            "просканировано {} из {} снимков, лиц {}, кластеров {}, ошибок {}, за {} с",
+            &[
+                self.done.to_string(),
+                self.images.to_string(),
+                self.faces.to_string(),
+                self.clusters.to_string(),
+                self.errors.to_string(),
+                format!("{:.1}", self.seconds),
+            ],
+        );
+        write!(f, "{prefix}{body}")?;
         if self.skipped > 0 {
-            write!(f, " (пропущено {}, уже просканировано)", self.skipped)?;
+            let note = i18n::fill(
+                self.lang,
+                " (пропущено {}, уже просканировано)",
+                &[self.skipped.to_string()],
+            );
+            write!(f, "{note}")?;
         }
         Ok(())
     }
@@ -556,6 +582,7 @@ pub fn run(
             errors: 0,
             seconds: t0.elapsed().as_secs_f64(),
             cancelled: true,
+            lang: settings.lang,
         });
     }
     if todo.is_empty() {
@@ -569,6 +596,7 @@ pub fn run(
             errors: 0,
             seconds: t0.elapsed().as_secs_f64(),
             cancelled: false,
+            lang: settings.lang,
         });
     }
 
@@ -648,6 +676,7 @@ pub fn run(
         errors: errors.load(Ordering::Relaxed),
         seconds: t0.elapsed().as_secs_f64(),
         cancelled,
+        lang: settings.lang,
     })
 }
 
@@ -697,15 +726,23 @@ pub struct ClusterStats {
     pub clusters: usize,
     pub fixed: usize,
     pub seconds: f64,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for ClusterStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "лиц {}, групп {}, из них закреплено вручную {}, за {:.1} с",
-            self.faces, self.clusters, self.fixed, self.seconds
-        )
+        let text = i18n::fill(
+            self.lang,
+            "лиц {}, групп {}, из них закреплено вручную {}, за {} с",
+            &[
+                self.faces.to_string(),
+                self.clusters.to_string(),
+                self.fixed.to_string(),
+                format!("{:.1}", self.seconds),
+            ],
+        );
+        f.write_str(&text)
     }
 }
 
@@ -713,9 +750,16 @@ impl std::fmt::Display for ClusterStats {
 pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
     let t0 = std::time::Instant::now();
     let mut conn = db::open(db_path)?;
+    let lang = db::load_settings(&conn).lang;
     let faces = db::load_faces(&conn)?;
     if faces.is_empty() {
-        return Ok(ClusterStats { faces: 0, clusters: 0, fixed: 0, seconds: 0.0 });
+        return Ok(ClusterStats {
+            faces: 0,
+            clusters: 0,
+            fixed: 0,
+            seconds: 0.0,
+            lang,
+        });
     }
     let clusters = db::load_face_clusters(&conn)?;
     let mut fixed: HashSet<i64> = HashSet::new();
@@ -756,6 +800,7 @@ pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
         clusters: total,
         fixed: fixed.len(),
         seconds: t0.elapsed().as_secs_f64(),
+        lang,
     })
 }
 

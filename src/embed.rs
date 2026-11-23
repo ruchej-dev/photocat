@@ -5,6 +5,7 @@
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
+use crate::i18n::{self, Lang};
 use crate::tools::{self, Tool};
 use anyhow::{Context, Result, bail};
 use ort::environment::Environment;
@@ -1080,22 +1081,35 @@ pub struct EmbedStats {
     pub model_bytes: i64,
     /// Прогон прерван владельцем: остальные файлы остались на следующий раз.
     pub cancelled: bool,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for EmbedStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "CLIP ({}): {}посчитано {}/{}, пропущено {}, ошибок {}, за {:.1} с, модель {}",
-            self.model,
-            if self.cancelled { "остановлено: " } else { "" },
-            self.computed,
-            self.total,
-            self.skipped,
-            self.errors,
-            self.seconds,
-            db::human(self.model_bytes)
-        )
+        let prefix = i18n::t(
+            self.lang,
+            if self.cancelled {
+                "остановлено: "
+            } else {
+                ""
+            },
+        );
+        let text = i18n::fill(
+            self.lang,
+            "CLIP ({}): {}посчитано {}/{}, пропущено {}, ошибок {}, за {} с, модель {}",
+            &[
+                self.model.to_string(),
+                prefix.to_string(),
+                self.computed.to_string(),
+                self.total.to_string(),
+                self.skipped.to_string(),
+                self.errors.to_string(),
+                format!("{:.1}", self.seconds),
+                db::human_in(self.lang, self.model_bytes),
+            ],
+        );
+        f.write_str(&text)
     }
 }
 
@@ -1146,6 +1160,7 @@ pub fn embed_missing(
             seconds: t0.elapsed().as_secs_f64(),
             model_bytes: model_bytes_in(&settings.models_dir, entry),
             cancelled: false,
+            lang: settings.lang,
         });
     }
     let mut model = Model::load(&settings, threads)?;
@@ -1227,6 +1242,7 @@ pub fn embed_missing(
         seconds: t0.elapsed().as_secs_f64(),
         model_bytes: model_bytes_in(&settings.models_dir, entry),
         cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
+        lang: settings.lang,
     })
 }
 
@@ -1236,15 +1252,23 @@ pub struct RetagStats {
     pub total: usize,
     pub tagged: usize,
     pub seconds: f64,
+    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for RetagStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "теги ({}): пересчитано {}/{}, за {:.1} с",
-            self.model, self.tagged, self.total, self.seconds
-        )
+        let text = i18n::fill(
+            self.lang,
+            "теги ({}): пересчитано {}/{}, за {} с",
+            &[
+                self.model.to_string(),
+                self.tagged.to_string(),
+                self.total.to_string(),
+                format!("{:.1}", self.seconds),
+            ],
+        );
+        f.write_str(&text)
     }
 }
 
@@ -1293,6 +1317,7 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
         total: rows.len(),
         tagged,
         seconds: t0.elapsed().as_secs_f64(),
+        lang: settings.lang,
     })
 }
 
@@ -1421,16 +1446,34 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
     buckets.retain(|b| !b.is_empty());
     buckets.sort_by_key(|b| std::cmp::Reverse(b.len()));
 
-    let mut md = String::from("# Кластеры CLIP (M3)\n\n");
+    let lang = settings.lang;
+    let mut md = String::from(i18n::t(lang, "# Кластеры CLIP (M3)\n\n"));
     md.push_str(&format!(
-        "Модель `{}`, файлов с эмбеддингами: {}, кластеров: {}, k={k}.\n\n",
-        entry.id,
-        xs.len(),
-        buckets.len()
+        "{}\n\n",
+        i18n::fill(
+            lang,
+            "Модель `{}`, файлов с эмбеддингами: {}, кластеров: {}, k={}.",
+            &[
+                entry.id.to_string(),
+                xs.len().to_string(),
+                buckets.len().to_string(),
+                k.to_string(),
+            ],
+        )
     ));
-    md.push_str("Отчёт для просмотра владельцем: 12 примеров на кластер.\n");
+    md.push_str(i18n::t(
+        lang,
+        "Отчёт для просмотра владельцем: 12 примеров на кластер.\n",
+    ));
     for (n, b) in buckets.iter().enumerate() {
-        md.push_str(&format!("\n## Кластер {} — {} фото\n\n", n + 1, b.len()));
+        md.push_str(&format!(
+            "\n{}\n\n",
+            i18n::fill(
+                lang,
+                "## Кластер {} — {} фото",
+                &[(n + 1).to_string(), b.len().to_string()],
+            )
+        ));
         for &i in b.iter().take(12) {
             let id = vectors[i].0;
             if let Some(r) = by_id.get(&id) {
@@ -1438,7 +1481,10 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
             }
         }
         if b.len() > 12 {
-            md.push_str(&format!("- … и ещё {}\n", b.len() - 12));
+            md.push_str(&format!(
+                "- {}\n",
+                i18n::fill(lang, "… и ещё {}", &[(b.len() - 12).to_string()])
+            ));
         }
     }
     if let Some(dir) = out.parent() {
@@ -1459,21 +1505,29 @@ pub struct DownloadReport {
     pub bytes: u64,
     pub files: usize,
     pub fallbacks: Vec<String>,
+    /// Язык отчёта (M21.6): английский по умолчанию.
+    pub lang: Lang,
 }
 
 impl std::fmt::Display for DownloadReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
+        let mut text = i18n::fill(
+            self.lang,
             "модель {}: файлов {}, {}",
-            self.model,
-            self.files,
-            db::human(self.bytes as i64)
-        )?;
+            &[
+                self.model.to_string(),
+                self.files.to_string(),
+                db::human_in(self.lang, self.bytes as i64),
+            ],
+        );
         if !self.fallbacks.is_empty() {
-            write!(f, " (не подошли: {})", self.fallbacks.join("; "))?;
+            text.push_str(&i18n::fill(
+                self.lang,
+                " (не подошли: {})",
+                &[self.fallbacks.join("; ")],
+            ));
         }
-        Ok(())
+        f.write_str(&text)
     }
 }
 
@@ -1518,6 +1572,7 @@ pub fn download_model(
                     bytes: e.bytes(),
                     files,
                     fallbacks: failed,
+                    lang: settings.lang,
                 });
             }
             Err(err) => failed.push(format!("{} — {err}", e.title)),
@@ -1564,7 +1619,7 @@ pub(crate) fn download_files(
             if let Some(p) = &progress {
                 p.set_msg(format!("модель {title}: {}", f.name));
             }
-            fetch_with_fallback(&settings.tools, f.url, &path)?;
+            fetch_with_fallback(&settings.tools, settings.lang, f.url, &path)?;
             let got = derive::sha256_file(&path)
                 .with_context(|| format!("не прочитать {}", path.display()))?;
             if got != f.sha256 {
@@ -1588,14 +1643,14 @@ pub(crate) fn download_files(
 }
 
 /// Основной адрес и зеркало: если HuggingFace недоступен, пробуем hf-mirror.
-fn fetch_with_fallback(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()> {
+fn fetch_with_fallback(tools: &tools::Tools, lang: Lang, url: &str, dst: &Path) -> Result<()> {
     let mirror = url.replace("https://huggingface.co/", "https://hf-mirror.com/");
     let mut last = String::new();
     for u in [url, mirror.as_str()] {
         if u.is_empty() {
             continue;
         }
-        match curl_get(tools, u, dst) {
+        match curl_get(tools, lang, u, dst) {
             Ok(()) => return Ok(()),
             Err(e) => last = format!("{u}: {e}"),
         }
@@ -1603,7 +1658,7 @@ fn fetch_with_fallback(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()
     bail!("{last}");
 }
 
-fn curl_get(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()> {
+fn curl_get(tools: &tools::Tools, lang: Lang, url: &str, dst: &Path) -> Result<()> {
     let mut cmd = tools.command(Tool::Curl);
     cmd.args([
         "-fL",
@@ -1622,7 +1677,7 @@ fn curl_get(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()> {
     let out = cmd.output().with_context(|| {
         format!(
             "не запустить curl ({}: {}): скачивание моделей требует curl",
-            tools.source(Tool::Curl),
+            tools.source(Tool::Curl, lang),
             tools.program(Tool::Curl)
         )
     })?;
