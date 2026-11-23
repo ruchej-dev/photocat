@@ -641,8 +641,12 @@ pub fn analyze_image(
 /// контекст (белые полки без верха и низа CLIP читает как лист бумаги). Весь кадр
 /// сохраняет пропорции, поэтому векторы усредняются в `embed`: модель видит и
 /// деталь, и обстановку. Превью декодируется один раз на оба кадра.
-/// Раскладка — CHW с нормализацией CLIP.
-pub fn clip_inputs(thumb: &Path, size: u32) -> Result<(Vec<f32>, Vec<f32>)> {
+/// Раскладка — CHW с нормализацией модели.
+pub fn clip_inputs(
+    thumb: &Path,
+    size: u32,
+    norm: &ImageNorm,
+) -> Result<(Vec<f32>, Vec<f32>)> {
     let img = image::ImageReader::open(thumb)?
         .with_guessed_format()?
         .decode()
@@ -652,19 +656,62 @@ pub fn clip_inputs(thumb: &Path, size: u32) -> Result<(Vec<f32>, Vec<f32>)> {
     let side = w.min(h).max(1);
     let (x0, y0) = ((w - side) / 2, (h - side) / 2);
     let crop = image::imageops::crop_imm(&img, x0, y0, side, side).to_image();
-    let center = image::imageops::resize(
-        &crop,
-        size,
-        size,
-        image::imageops::FilterType::Triangle,
-    );
-    Ok((to_chw(&center, size), to_chw(&letterbox(&img, size), size)))
+    let filter = norm.filter();
+    let center = image::imageops::resize(&crop, size, size, filter);
+    Ok((
+        to_chw(&center, size, norm),
+        to_chw(&letterbox_with(&img, size, filter), size, norm),
+    ))
 }
 
-/// CLIP-нормализация и раскладка RGB → CHW.
-fn to_chw(img: &image::RgbImage, size: u32) -> Vec<f32> {
-    const MEAN: [f32; 3] = [0.481_454_7, 0.457_827_5, 0.408_210_7];
-    const STD: [f32; 3] = [0.268_629_5, 0.261_302_6, 0.275_777_1];
+/// Вход SigLIP: весь кадр растягивается в квадрат `size` (у SigLIP нет центр-кропа).
+/// Полей не добавляем: processor_config.json описывает обычный resize 224×224.
+pub fn squash_input(thumb: &Path, size: u32, norm: &ImageNorm) -> Result<Vec<f32>> {
+    let img = image::ImageReader::open(thumb)?
+        .with_guessed_format()?
+        .decode()
+        .with_context(|| format!("декодирование превью {}", thumb.display()))?
+        .to_rgb8();
+    let scaled = image::imageops::resize(&img, size, size, norm.filter());
+    Ok(to_chw(&scaled, size, norm))
+}
+
+/// Параметры предобработки кадра: у CLIP и SigLIP разные средние/дисперсии и фильтр.
+#[derive(Clone, Copy, Debug)]
+pub struct ImageNorm {
+    pub mean: [f32; 3],
+    pub std: [f32; 3],
+    /// SigLIP обучен на bicubic-ресайзе; CLIP-путь оставлен билинейным, чтобы
+    /// уже посчитанные векторы не пришлось пересчитывать.
+    pub cubic: bool,
+}
+
+impl ImageNorm {
+    fn filter(self) -> image::imageops::FilterType {
+        if self.cubic {
+            image::imageops::FilterType::CatmullRom
+        } else {
+            image::imageops::FilterType::Triangle
+        }
+    }
+}
+
+/// Нормализация CLIP ViT-B/32 (и её мультиязычной текстовой башни).
+pub const CLIP_NORM: ImageNorm = ImageNorm {
+    mean: [0.481_454_7, 0.457_827_5, 0.408_210_7],
+    std: [0.268_629_5, 0.261_302_6, 0.275_777_1],
+    cubic: false,
+};
+
+/// Нормализация SigLIP: mean/std 0.5 по processor_config.json.
+pub const SIGLIP_NORM: ImageNorm = ImageNorm {
+    mean: [0.5, 0.5, 0.5],
+    std: [0.5, 0.5, 0.5],
+    cubic: true,
+};
+
+/// Нормализация модели и раскладка RGB → CHW.
+fn to_chw(img: &image::RgbImage, size: u32, norm: &ImageNorm) -> Vec<f32> {
     let plane = (size * size) as usize;
     let mut out = vec![0f32; plane * 3];
     for y in 0..size {
@@ -672,7 +719,7 @@ fn to_chw(img: &image::RgbImage, size: u32) -> Vec<f32> {
             let px = img.get_pixel(x, y);
             let i = (y * size + x) as usize;
             for c in 0..3 {
-                out[c * plane + i] = (px[c] as f32 / 255.0 - MEAN[c]) / STD[c];
+                out[c * plane + i] = (px[c] as f32 / 255.0 - norm.mean[c]) / norm.std[c];
             }
         }
     }
@@ -682,16 +729,19 @@ fn to_chw(img: &image::RgbImage, size: u32) -> Vec<f32> {
 /// Вписать кадр в квадрат `size`, сохранив пропорции; поля — средний цвет кадра.
 /// Средний цвет не вносит в картинку чёрную рамку, которой в архиве нет.
 fn letterbox(img: &image::RgbImage, size: u32) -> image::RgbImage {
+    letterbox_with(img, size, image::imageops::FilterType::Triangle)
+}
+
+fn letterbox_with(
+    img: &image::RgbImage,
+    size: u32,
+    filter: image::imageops::FilterType,
+) -> image::RgbImage {
     let (w, h) = img.dimensions();
     let scale = (size as f32 / w.max(1) as f32).min(size as f32 / h.max(1) as f32);
     let nw = ((w as f32 * scale).round() as u32).clamp(1, size);
     let nh = ((h as f32 * scale).round() as u32).clamp(1, size);
-    let small = image::imageops::resize(
-        img,
-        nw,
-        nh,
-        image::imageops::FilterType::Triangle,
-    );
+    let small = image::imageops::resize(img, nw, nh, filter);
     let mut canvas = image::RgbImage::from_pixel(size, size, average_color(img));
     image::imageops::overlay(
         &mut canvas,
@@ -812,7 +862,7 @@ mod tests {
         image::RgbImage::from_pixel(160, 320, image::Rgb([120, 130, 140]))
             .save(&path)
             .unwrap();
-        let (center, whole) = clip_inputs(&path, 224).unwrap();
+        let (center, whole) = clip_inputs(&path, 224, &CLIP_NORM).unwrap();
         let plane = (224 * 224) as usize;
         assert_eq!(center.len(), plane * 3);
         assert_eq!(whole.len(), plane * 3);

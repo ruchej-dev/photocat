@@ -96,7 +96,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
 /// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
 /// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -137,9 +137,10 @@ fn init(c: &Connection) -> Result<()> {
             tag     TEXT NOT NULL,
             score   REAL,
             source  TEXT,
-            PRIMARY KEY(file_id, tag)
+            PRIMARY KEY(file_id, tag, source)
          );
          CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);
+         CREATE INDEX IF NOT EXISTS idx_tag_source ON tags(source, file_id);
          CREATE TABLE IF NOT EXISTS tag_hidden(
             file_id INTEGER NOT NULL,
             tag     TEXT NOT NULL,
@@ -217,7 +218,8 @@ fn init(c: &Connection) -> Result<()> {
          WHEN old.sha256 IS NOT new.sha256
          BEGIN
             DELETE FROM embeddings WHERE file_id = new.id;
-            DELETE FROM tags WHERE file_id = new.id AND source = 'clip';
+            DELETE FROM tags WHERE file_id = new.id
+               AND (source = 'clip' OR source LIKE 'clip:%');
          END;
          CREATE TABLE IF NOT EXISTS faces(
             id         INTEGER PRIMARY KEY,
@@ -281,6 +283,41 @@ fn init(c: &Connection) -> Result<()> {
     ensure_column(c, "files", "decision", "TEXT")?;
     ensure_column(c, "files", "duration_s", "REAL")?;
     ensure_column(c, "files", "trashed_at", "INTEGER")?;
+    // Схема 7: теги разных моделей не смешиваются — ключ (file_id, tag, source).
+    // Старая таблица перестраивается на месте, данные сохраняются; триггер сброса
+    // тегов при смене sha256 пересоздаётся, иначе он ссылался бы на старую таблицу
+    // и удалял только legacy-источник `clip`.
+    if version < 7 {
+        c.execute_batch(
+            "BEGIN;
+             DROP TRIGGER IF EXISTS invalidate_clip_after_sha_change;
+             ALTER TABLE tags RENAME TO tags_v6;
+             CREATE TABLE tags(
+                file_id INTEGER NOT NULL,
+                tag     TEXT NOT NULL,
+                score   REAL,
+                source  TEXT,
+                PRIMARY KEY(file_id, tag, source)
+             );
+             INSERT INTO tags(file_id,tag,score,source)
+                SELECT file_id,tag,score,COALESCE(source,'') FROM tags_v6;
+             DROP TABLE tags_v6;
+             CREATE INDEX IF NOT EXISTS idx_tag ON tags(tag);
+             CREATE INDEX IF NOT EXISTS idx_tag_source ON tags(source, file_id);
+             COMMIT;",
+        )?;
+    }
+    c.execute_batch(
+        "DROP TRIGGER IF EXISTS invalidate_clip_after_sha_change;
+         CREATE TRIGGER invalidate_clip_after_sha_change
+         AFTER UPDATE OF sha256 ON files
+         WHEN old.sha256 IS NOT new.sha256
+         BEGIN
+            DELETE FROM embeddings WHERE file_id = new.id;
+            DELETE FROM tags WHERE file_id = new.id
+               AND (source = 'clip' OR source LIKE 'clip:%');
+         END;",
+    )?;
     // Теги старых версий были без модели в источнике; переводим на id текущей модели.
     c.execute(
         "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
@@ -2307,6 +2344,48 @@ mod tests {
         assert_eq!(loaded[0].duration_s, None);
     }
 
+    /// Схема 7: теги разных моделей живут рядом, а смена sha256 снимает все CLIP-теги.
+    #[test]
+    fn миграция_7_не_смешивает_теги_моделей() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE files(
+                id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
+                mtime INTEGER, sha256 TEXT, kind TEXT NOT NULL, width INTEGER, height INTEGER,
+                taken_at TEXT, taken_src TEXT, lat REAL, lon REAL, camera TEXT, dhash INTEGER,
+                thumb TEXT, indexed_at INTEGER NOT NULL);
+             CREATE TABLE tags(
+                file_id INTEGER NOT NULL, tag TEXT NOT NULL, score REAL, source TEXT,
+                PRIMARY KEY(file_id, tag));
+             CREATE TRIGGER invalidate_clip_after_sha_change
+             AFTER UPDATE OF sha256 ON files WHEN old.sha256 IS NOT new.sha256
+             BEGIN
+                DELETE FROM embeddings WHERE file_id = new.id;
+                DELETE FROM tags WHERE file_id = new.id AND source = 'clip';
+             END;
+             INSERT INTO files(id,path,size,sha256,kind,indexed_at)
+                VALUES(1,'/a.jpg',10,'aa','image',0);
+             INSERT INTO tags(file_id,tag,score,source) VALUES
+                (1,'пляж',0.30,'clip:m1');
+             PRAGMA user_version=6;",
+        )
+        .unwrap();
+        init(&c).unwrap();
+        let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 7);
+        assert_eq!(load_tags(&c, "clip:m1").unwrap()[&1][0].0, "пляж");
+        assert!(load_tags(&c, "clip:m2").unwrap().is_empty());
+        // Теперь ключ допускает обе модели у одного файла — раньше это был конфликт.
+        replace_tags(&c, 1, "clip:m1", &[("пляж".into(), 0.35)]).unwrap();
+        replace_tags(&c, 1, "clip:m2", &[("пляж".into(), 0.45)]).unwrap();
+        assert_eq!(load_tags(&c, "clip:m1").unwrap()[&1].len(), 1);
+        assert_eq!(load_tags(&c, "clip:m2").unwrap()[&1].len(), 1);
+        // Смена содержимого снимает теги всех моделей, а не только legacy `clip`.
+        c.execute("UPDATE files SET sha256='bb' WHERE id=1", []).unwrap();
+        assert!(load_tags(&c, "clip:m1").unwrap().is_empty());
+        assert!(load_tags(&c, "clip:m2").unwrap().is_empty());
+    }
+
     #[test]
     fn hidden_tag_disappears_from_filter() {
         let c = Connection::open_in_memory().unwrap();
@@ -2931,7 +3010,7 @@ mod tests {
         .unwrap();
         init(&c).unwrap();
         let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         assert_eq!(load_all(&c).unwrap().len(), 1);
         let album = create_album(&c, 0, "Старое", "").unwrap();
         add_to_album(&c, album, &[id_of(&c, "/old.jpg")]).unwrap();

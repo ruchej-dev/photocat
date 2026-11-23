@@ -15,10 +15,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tokenizers::Tokenizer;
 
-pub const DIM: usize = 512;
-pub const IMAGE_SIDE: u32 = 224;
-/// Максимальная длина текста (sentence_bert_config.json: 128).
-pub const MAX_TOKENS: usize = 128;
 /// Пороги по умолчанию (их же хранят настройки; калибровано на корпусе).
 #[allow(dead_code)]
 pub const TAG_SHOW: f32 = 0.22;
@@ -133,8 +129,10 @@ pub const DEFAULT_TAGS: [TagDefault; 14] = [
 pub enum TextKind {
     /// Multilingual DistilBERT + Dense 768→512 (русский поиск).
     Projected,
-    /// CLIP text tower, выход `text_embeds` 512, без проекции (английский).
+    /// CLIP text tower, выход `text_embeds`, без проекции (английский).
     Direct,
+    /// SigLIP text tower: только `input_ids`, выход `pooler_output` 768.
+    Pooler,
 }
 
 pub struct ModelFile {
@@ -151,7 +149,25 @@ pub struct ModelEntry {
     pub dir: &'static str,
     pub title: &'static str,
     pub note: &'static str,
+    /// Лицензия весов — чтобы владелец видел её до скачивания.
+    pub license: &'static str,
     pub kind: TextKind,
+    /// Размерность эмбеддинга этой модели (512, 768, …), а не глобальная константа.
+    pub dim: usize,
+    /// Сторона квадрата на входе зрительной башни.
+    pub image_side: u32,
+    /// Максимум токенов текста (у SigLIP — 64).
+    pub max_tokens: usize,
+    /// Токен добивки; пусто — 0. У SigLIP это `</s>` (id 1): pooler берёт последний
+    /// токен, поэтому короткий текст паддится тем же EOS, а не нулём.
+    pub pad_token: &'static str,
+    /// Нормализация кадра: у CLIP и SigLIP разные mean/std и фильтр.
+    pub norm: derive::ImageNorm,
+    /// Сколько кадров видит модель на снимок: CLIP — центр-кроп и весь кадр,
+    /// SigLIP — один кадр, растянутый в квадрат (как в его processor).
+    pub frames: usize,
+    /// Имя выхода зрительной башни в ONNX.
+    pub vision_output: &'static str,
     pub files: &'static [ModelFile],
 }
 
@@ -162,6 +178,14 @@ impl ModelEntry {
     /// Влезает ли модель в лимит настроек (МиБ).
     pub fn fits(&self, max_mb: u64) -> bool {
         self.bytes() <= max_mb.saturating_mul(1024 * 1024)
+    }
+    /// Имя выхода текстовой башни в ONNX; у Projected это ещё не эмбеддинг.
+    pub fn text_output(&self) -> &'static str {
+        match self.kind {
+            TextKind::Projected => "last_hidden_state",
+            TextKind::Direct => "text_embeds",
+            TextKind::Pooler => "pooler_output",
+        }
     }
 }
 
@@ -212,13 +236,42 @@ const ENGLISH_FILES: [ModelFile; 3] = [
     },
 ];
 
-static CATALOG: [ModelEntry; 2] = [
+const SIGLIP_FILES: [ModelFile; 3] = [
+    ModelFile {
+        name: "vision.onnx",
+        url: "https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/main/onnx/vision_model_quantized.onnx",
+        sha256: "ef14a954f3d57e1806666432bd9785004c1dc27100aa260eee0cb0f10a5de058",
+        bytes: 99_499_129,
+    },
+    ModelFile {
+        name: "text.onnx",
+        url: "https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/main/onnx/text_model_quantized.onnx",
+        sha256: "ad0329b1f35acc66d8953ff2559ce358da8eb0a7011794cf951523d63a4dbce2",
+        bytes: 111_475_220,
+    },
+    ModelFile {
+        name: "tokenizer.json",
+        url: "https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/main/tokenizer.json",
+        sha256: "4a17c975210be5ab4c36b47d8dae4eefb866dbfb1e676e394aad85dc30a3ae08",
+        bytes: 2_398_744,
+    },
+];
+
+static CATALOG: [ModelEntry; 3] = [
     ModelEntry {
         id: DEFAULT_MODEL,
         dir: "clip-vit-b32",
         title: "CLIP ViT-B/32, мультиязычная",
         note: "русский поиск и теги, лучшее качество",
+        license: "MIT + Apache-2.0",
         kind: TextKind::Projected,
+        dim: 512,
+        image_side: 224,
+        max_tokens: 128,
+        pad_token: "",
+        norm: derive::CLIP_NORM,
+        frames: 2,
+        vision_output: "image_embeds",
         files: &MULTILINGUAL_FILES,
     },
     ModelEntry {
@@ -226,8 +279,32 @@ static CATALOG: [ModelEntry; 2] = [
         dir: "clip-vit-b32-en",
         title: "CLIP ViT-B/32, английская",
         note: "меньше по размеру, запросы только по-английски",
+        license: "MIT",
         kind: TextKind::Direct,
+        dim: 512,
+        image_side: 224,
+        max_tokens: 128,
+        pad_token: "",
+        norm: derive::CLIP_NORM,
+        frames: 2,
+        vision_output: "image_embeds",
         files: &ENGLISH_FILES,
+    },
+    ModelEntry {
+        id: "siglip-base-224-en",
+        dir: "siglip-base-224-en",
+        title: "SigLIP base 224, английская",
+        note: "768 признаков, архитектура SigLIP; запросы по-английски",
+        license: "Apache-2.0",
+        kind: TextKind::Pooler,
+        dim: 768,
+        image_side: 224,
+        max_tokens: 64,
+        pad_token: "</s>",
+        norm: derive::SIGLIP_NORM,
+        frames: 1,
+        vision_output: "pooler_output",
+        files: &SIGLIP_FILES,
     },
 ];
 
@@ -264,7 +341,7 @@ pub fn default_defs(model: &str, kind: TextKind) -> Vec<db::TagDef> {
             label: d.label.to_string(),
             prompts: match kind {
                 TextKind::Projected => d.prompts_ru,
-                TextKind::Direct => d.prompts_en,
+                TextKind::Direct | TextKind::Pooler => d.prompts_en,
             }
             .iter()
             .map(|p| p.to_string())
@@ -528,8 +605,18 @@ impl Model {
             .map_err(oe)?;
         let tokenizer = Tokenizer::from_file(f("tokenizer.json"))
             .map_err(|e| anyhow::anyhow!("не загрузить токенизатор: {e}"))?;
+        // Размерность — свойство модели, а не глобальная константа. Где ONNX-метаданные
+        // фиксированы, сверяем их сразу при загрузке; где динамические — на первом прогоне.
+        if let Some(dim) = output_dim(&vision, entry.vision_output, "зрительная")? {
+            ensure_dim("зрительная", dim, entry.dim)?;
+        }
+        if entry.kind != TextKind::Projected
+            && let Some(dim) = output_dim(&text, entry.text_output(), "текстовая")?
+        {
+            ensure_dim("текстовая", dim, entry.dim)?;
+        }
         let dense = if entry.kind == TextKind::Projected {
-            read_dense(&f("text_dense.safetensors"))?
+            read_dense(&f("text_dense.safetensors"), entry.dim)?
         } else {
             Vec::new()
         };
@@ -580,15 +667,30 @@ impl Model {
                 .encode(*t, true)
                 .map_err(|e| anyhow::anyhow!("токенизация «{t}»: {e}"))?;
             let mut ids: Vec<i64> = enc.get_ids().iter().map(|&v| v as i64).collect();
-            ids.truncate(MAX_TOKENS);
+            ids.truncate(self.entry.max_tokens);
             if ids.is_empty() {
                 ids.push(0);
             }
             max_len = max_len.max(ids.len());
             rows.push(ids);
         }
+        // SigLIP обучался на фиксированных 64 токенах с pad=EOS: короткий текст
+        // без добивки до 64 даёт пулеру не тот последний токен.
+        let max_len = if self.entry.kind == TextKind::Pooler {
+            self.entry.max_tokens
+        } else {
+            max_len
+        };
         let batch = rows.len();
-        let mut ids = vec![0i64; batch * max_len];
+        let pad = if self.entry.pad_token.is_empty() {
+            0
+        } else {
+            self.tokenizer
+                .token_to_id(self.entry.pad_token)
+                .map(|v| v as i64)
+                .unwrap_or(0)
+        };
+        let mut ids = vec![pad; batch * max_len];
         let mut mask = vec![0i64; batch * max_len];
         for (b, row) in rows.iter().enumerate() {
             for (i, &id) in row.iter().enumerate() {
@@ -606,18 +708,17 @@ impl Model {
         }
         let (ids, mask, batch, max_len) = self.tokenize(texts)?;
         let mut out = Vec::with_capacity(batch);
-        if self.entry.kind == TextKind::Direct {
+        if self.entry.kind != TextKind::Projected {
             let outputs = self.text.run(ort::inputs![
                 "input_ids" => Tensor::from_array((vec![batch as i64, max_len as i64], ids)).map_err(oe)?,
             ]).map_err(oe)?;
-            let (shape, data) = outputs["text_embeds"]
+            let name = self.entry.text_output();
+            let (shape, data) = outputs[name]
                 .try_extract_tensor::<f32>()
                 .map_err(oe)?;
             let dim = *shape.last().unwrap_or(&0) as usize;
-            if dim != DIM {
-                bail!("текстовая модель вернула {dim} признаков, ожидалось {DIM}");
-            }
-            for row in data.chunks(DIM) {
+            ensure_dim("текстовая", dim, self.entry.dim)?;
+            for row in data.chunks(dim) {
                 let mut v = row.to_vec();
                 normalize(&mut v);
                 out.push(v);
@@ -633,10 +734,12 @@ impl Model {
         ]).map_err(oe)?;
         let (shape, data) = outputs["last_hidden_state"].try_extract_tensor::<f32>().map_err(oe)?;
         let hidden = *shape.last().unwrap_or(&0) as usize;
-        if hidden == 0 || hidden != self.dense.len() / DIM {
+        let want_hidden = self.dense.len() / self.entry.dim;
+        if hidden == 0 || hidden != want_hidden {
             bail!(
-                "текстовая модель вернула {hidden} признаков, ожидалось {}",
-                self.dense.len() / DIM
+                "текстовая модель вернула {hidden} признаков, ожидалось {want_hidden}; \
+                 проекция не совпадает с вектором {}",
+                self.entry.dim
             );
         }
         for b in 0..batch {
@@ -657,7 +760,7 @@ impl Model {
                     *v /= n;
                 }
             }
-            let mut y = vec![0f32; DIM];
+            let mut y = vec![0f32; self.entry.dim];
             for (o, out) in y.iter_mut().enumerate() {
                 let w = &self.dense[o * hidden..(o + 1) * hidden];
                 *out = w.iter().zip(&pooled).map(|(a, b)| a * b).sum();
@@ -676,15 +779,25 @@ impl Model {
         if thumbs.is_empty() {
             return Ok(Vec::new());
         }
-        let plane = (IMAGE_SIDE * IMAGE_SIDE) as usize;
-        let mut data = Vec::with_capacity(thumbs.len() * 2 * plane * 3);
+        let side = self.entry.image_side;
+        let frames = self.entry.frames.max(1);
+        let plane = (side * side) as usize;
+        let mut data = Vec::with_capacity(thumbs.len() * frames * plane * 3);
         for p in thumbs {
-            let (center, whole) = derive::clip_inputs(p, IMAGE_SIDE)?;
-            data.extend_from_slice(&center);
-            data.extend_from_slice(&whole);
+            if frames == 2 {
+                let (center, whole) = derive::clip_inputs(p, side, &self.entry.norm)?;
+                data.extend_from_slice(&center);
+                data.extend_from_slice(&whole);
+            } else {
+                data.extend_from_slice(&derive::squash_input(p, side, &self.entry.norm)?);
+            }
         }
-        let values = self.run_vision(data, thumbs.len() * 2)?;
-        let out = average_pairs(&values, thumbs.len(), DIM);
+        let values = self.run_vision(data, thumbs.len() * frames)?;
+        let out = if frames == 2 {
+            average_pairs(&values, thumbs.len(), self.entry.dim)
+        } else {
+            values.chunks(self.entry.dim).map(<[f32]>::to_vec).collect()
+        };
         if out.len() != thumbs.len() {
             bail!("зрительная модель вернула {} векторов на {} картинок", out.len(), thumbs.len());
         }
@@ -694,23 +807,23 @@ impl Model {
     /// Прогнать зрительную модель по готовым CHW-входам; векторы нормализованы.
     /// `n` — число кадров, для которых подготовлены данные (не снимков).
     fn run_vision(&mut self, data: Vec<f32>, n: usize) -> Result<Vec<f32>> {
+        let side = self.entry.image_side;
         let outputs = self.vision.run(ort::inputs![
             "pixel_values" => Tensor::from_array((
-                vec![n as i64, 3, IMAGE_SIDE as i64, IMAGE_SIDE as i64],
+                vec![n as i64, 3, side as i64, side as i64],
                 data
             )).map_err(oe)?
         ]).map_err(oe)?;
-        let (shape, values) = outputs["image_embeds"].try_extract_tensor::<f32>().map_err(oe)?;
+        let name = self.entry.vision_output;
+        let (shape, values) = outputs[name].try_extract_tensor::<f32>().map_err(oe)?;
         let dim = *shape.last().unwrap_or(&0) as usize;
-        if dim != DIM {
-            bail!("зрительная модель вернула {dim} признаков, ожидалось {DIM}");
-        }
-        let count = values.len() / DIM;
+        ensure_dim("зрительная", dim, self.entry.dim)?;
+        let count = values.len() / dim;
         if count != n {
             bail!("зрительная модель вернула {count} векторов на {n} кадров");
         }
         let mut out = values.to_vec();
-        for chunk in out.chunks_mut(DIM) {
+        for chunk in out.chunks_mut(dim) {
             normalize(chunk);
         }
         Ok(out)
@@ -839,6 +952,31 @@ pub fn confident_tag(scores: &[(String, f32)]) -> Option<(&str, f32)> {
     confident_tag_with(scores, TAG_SHOW, TAG_MARGIN)
 }
 
+/// Проверка размерности с текстом, где видно и полученное, и ожидаемое число.
+fn ensure_dim(what: &str, got: usize, want: usize) -> Result<()> {
+    if got == want {
+        return Ok(());
+    }
+    bail!(
+        "{what} модель вернула {got} признаков, а в каталоге у неё {want}; \
+         модель и векторы не смешиваются — выберите ту же модель или пересчитайте теги"
+    )
+}
+
+/// Последняя размерность выхода ONNX, если она зафиксирована в метаданных.
+fn output_dim(session: &Session, name: &str, what: &str) -> Result<Option<usize>> {
+    let Some(outlet) = session.outputs().iter().find(|o| o.name() == name) else {
+        bail!("в {what} модели нет выхода «{name}»; каталог моделей не совпадает с файлами");
+    };
+    if let ort::value::ValueType::Tensor { shape, .. } = outlet.dtype()
+        && let Some(&last) = shape.last()
+        && last > 0
+    {
+        return Ok(Some(last as usize));
+    }
+    Ok(None)
+}
+
 fn oe<R>(e: ort::Error<R>) -> anyhow::Error {
     anyhow::anyhow!("ONNX Runtime: {e}")
 }
@@ -855,7 +993,7 @@ pub(crate) fn shared_environment() -> Result<Environment> {
     Ok(env)
 }
 
-fn read_dense(path: &Path) -> Result<Vec<f32>> {
+fn read_dense(path: &Path, dim: usize) -> Result<Vec<f32>> {
     let bytes = std::fs::read(path).with_context(|| format!("не прочитать {}", path.display()))?;
     if bytes.len() < 8 {
         bail!("плотный слой повреждён: {}", path.display());
@@ -877,8 +1015,8 @@ fn read_dense(path: &Path) -> Result<Vec<f32>> {
         .iter()
         .map(|b| f32::from_le_bytes(*b))
         .collect();
-    if w.len() != DIM * 768 {
-        bail!("проекция текста {} чисел, ожидалось {}", w.len(), DIM * 768);
+    if dim == 0 || !w.len().is_multiple_of(dim) {
+        bail!("проекция текста {} чисел не делится на размерность {dim}", w.len());
     }
     Ok(w)
 }
@@ -1506,8 +1644,11 @@ mod tests {
     fn дефолтный_словарь_общий_и_на_языке_модели() {
         let ru = default_defs("m", TextKind::Projected);
         let en = default_defs("m", TextKind::Direct);
+        let sig = default_defs("m", TextKind::Pooler);
         assert_eq!(ru.len(), DEFAULT_TAGS.len());
         assert_eq!(ru.len(), en.len());
+        assert_eq!(ru.len(), sig.len());
+        assert!(sig[0].prompts[0].starts_with("a photo"));
         assert_eq!(ru[0].label, "пляж");
         assert!(ru[0].prompts[0].starts_with("фотография"));
         assert!(en[0].prompts[0].starts_with("a photo"));
@@ -1717,20 +1858,23 @@ mod tests {
         let conn = db::open(&db_path).unwrap();
         let settings = db::load_settings(&conn);
         let mut m = Model::load(&settings, 4).unwrap();
-        let (center, whole) = derive::clip_inputs(&path, IMAGE_SIDE).unwrap();
+        let dim = m.entry.dim;
+        let side = m.entry.image_side;
+        let norm = m.entry.norm;
+        let (center, whole) = derive::clip_inputs(&path, side, &norm).unwrap();
         let mut data = center;
         data.extend_from_slice(&whole);
         let values = m.run_vision(data, 2).unwrap();
         let shots = [
-            ("центр-кроп", &values[..DIM]),
-            ("весь кадр", &values[DIM..DIM * 2]),
+            ("центр-кроп", &values[..dim]),
+            ("весь кадр", &values[dim..dim * 2]),
         ];
         for (name, v) in shots {
             let tags = m.tag_scores(v);
             println!("{name}: {}", tags.iter().take(4)
                 .map(|(t, s)| format!("{t} {s:.3}")).collect::<Vec<_>>().join(" / "));
         }
-        let avg = average_pairs(&values, 1, DIM);
+        let avg = average_pairs(&values, 1, dim);
         let tags = m.tag_scores(&avg[0]);
         println!("ансамбль: {}", tags.iter().take(4)
             .map(|(t, s)| format!("{t} {s:.3}")).collect::<Vec<_>>().join(" / "));
@@ -1746,9 +1890,10 @@ mod tests {
         let r = rows.iter().find(|r| r.thumb.is_some()).expect("нет фото с превью");
         let mut m = Model::load(&settings, 4).unwrap();
         let thumb = db::cache_dir().join("thumbs").join(r.thumb.as_ref().unwrap());
+        let dim = m.entry.dim;
         let v = m.embed_thumbs(&[thumb]).unwrap();
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].len(), DIM);
+        assert_eq!(v[0].len(), dim);
         assert!((v[0].iter().map(|x| x * x).sum::<f32>() - 1.0).abs() < 1e-3);
         let tags = m.tag_scores(&v[0]);
         println!("{}, теги: {:?}", r.path, tags);
@@ -1758,6 +1903,103 @@ mod tests {
             cosine(&v[0], &t[0]),
             cosine(&v[0], &t[1])
         );
+    }
+
+    /// M12: SigLIP — другая архитектура и 768 признаков. Проверяет реальные веса
+    /// и превью: `PHOTOCAT_SIGLIP_MODELS` (папка моделей) и `PHOTOCAT_SIGLIP_THUMB`.
+    #[test]
+    #[ignore = "нужны веса SigLIP и превью: PHOTOCAT_SIGLIP_MODELS, PHOTOCAT_SIGLIP_THUMB"]
+    fn siglip_даёт_768_признаков() {
+        let (Some(dir), Some(thumb)) = (
+            std::env::var_os("PHOTOCAT_SIGLIP_MODELS").map(PathBuf::from),
+            std::env::var_os("PHOTOCAT_SIGLIP_THUMB").map(PathBuf::from),
+        ) else {
+            return;
+        };
+        let settings = db::Settings {
+            models_dir: dir,
+            model_id: "siglip-base-224-en".into(),
+            ..Default::default()
+        };
+        let mut m = Model::load(&settings, 4).unwrap();
+        assert_eq!(m.entry.dim, 768);
+        let v = m.embed_thumbs(&[thumb]).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].len(), 768);
+        assert!((v[0].iter().map(|x| x * x).sum::<f32>() - 1.0).abs() < 1e-3);
+        let t = m
+            .encode_texts(&["a photo of a cat", "a photo of a document"])
+            .unwrap();
+        assert_eq!(t[0].len(), 768);
+        let defs = default_defs(m.entry.id, m.entry.kind);
+        m.set_tag_defs(&defs).unwrap();
+        assert_eq!(m.tag_count(), 14);
+        let tags = m.tag_scores(&v[0]);
+        println!(
+            "siglip: вектор 768, косинус cat {:.3}, document {:.3}; теги: {}",
+            cosine(&v[0], &t[0]),
+            cosine(&v[0], &t[1]),
+            tags.iter()
+                .take(4)
+                .map(|(t, s)| format!("{t} {s:.3}"))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        );
+    }
+
+    /// M12: каталог — данные. id и каталог уникальны, все поля заполнены,
+    /// sha256 настоящие, а размерность не спрятана в глобальной константе.
+    #[test]
+    fn каталог_моделей_описан_данными() {
+        let mut ids = HashSet::new();
+        let mut dirs = HashSet::new();
+        let mut dims = HashSet::new();
+        for e in catalog() {
+            assert!(ids.insert(e.id), "повтор id {}", e.id);
+            assert!(dirs.insert(e.dir), "повтор каталога {}", e.dir);
+            dims.insert(e.dim);
+            assert!(e.dim > 0);
+            assert!(e.image_side >= 224);
+            assert!(e.max_tokens > 0);
+            assert!(!e.title.is_empty() && !e.note.is_empty());
+            assert!(!e.license.is_empty(), "у {} нет лицензии", e.id);
+            assert!(e.bytes() > 0 && !e.files.is_empty());
+            assert!(e.files.iter().any(|f| f.name == "tokenizer.json"));
+            for f in e.files {
+                assert_eq!(f.sha256.len(), 64, "{}: sha256 не 64 знака", f.name);
+                assert!(f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+                assert!(f.bytes > 0);
+            }
+        }
+        assert!(dims.len() >= 2, "нужны модели разной размерности, а не одна: {dims:?}");
+        assert!(catalog().iter().any(|e| e.id == "siglip-base-224-en" && e.dim == 768));
+        // Новая модель влезает в лимит по умолчанию и не влезает в прежний 160 МиБ.
+        let sig = entry("siglip-base-224-en").unwrap();
+        assert!(sig.fits(250));
+        assert!(!sig.fits(160));
+        // Пустой запрос — первая модель; неизвестный id — None, без паники.
+        assert_eq!(entry("").unwrap().id, DEFAULT_MODEL);
+        assert!(entry("no-such-model").is_none());
+    }
+
+    /// M12: размер приходит из модели, а ошибка называет оба числа и подсказывает,
+    /// что векторы разных моделей не смешиваются.
+    #[test]
+    fn ошибка_размерности_называет_числа() {
+        assert!(ensure_dim("текстовая", 768, 768).is_ok());
+        let e = ensure_dim("текстовая", 512, 768).unwrap_err().to_string();
+        assert!(e.contains("512") && e.contains("768"), "нет чисел: {e}");
+        assert!(e.contains("не смешиваются"), "нет подсказки: {e}");
+    }
+
+    /// M12: скачивание без согласия не начинается, даже если модель в каталоге.
+    #[test]
+    fn скачивание_без_согласия_отклоняется() {
+        let settings = db::Settings::default();
+        let res = download_model(&settings, "siglip-base-224-en", false, None);
+        assert!(res.is_err(), "без согласия скачивания нет");
+        let e = res.err().unwrap().to_string();
+        assert!(e.contains("согласия"), "{e}");
     }
 
 }

@@ -3107,8 +3107,9 @@ impl App {
         egui::ComboBox::from_id_salt("model_pick")
             .width(380.0)
             .selected_text(format!(
-                "{} — {}",
+                "{} — {} призн. · {}",
                 current.title,
+                current.dim,
                 db::human(current.bytes() as i64)
             ))
             .show_ui(ui, |ui| {
@@ -3116,7 +3117,14 @@ impl App {
                     ui.selectable_value(
                         &mut chosen,
                         e.id,
-                        format!("{} — {} · {}", e.title, db::human(e.bytes() as i64), e.note),
+                        format!(
+                            "{} — {} призн. · {} · {} · {}",
+                            e.title,
+                            e.dim,
+                            db::human(e.bytes() as i64),
+                            e.license,
+                            e.note
+                        ),
                     );
                 }
             });
@@ -3226,9 +3234,11 @@ impl App {
             };
             ui.label(
                 egui::RichText::new(format!(
-                    "{} — {} · {}",
+                    "{} — {} призн. · {} · {} · {}",
                     e.title,
+                    e.dim,
                     db::human(e.bytes() as i64),
+                    e.license,
                     state
                 ))
                 .size(12.0),

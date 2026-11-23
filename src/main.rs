@@ -402,12 +402,21 @@ fn main() -> Result<()> {
                     let active = embed::active_entry(&settings);
                     for e in embed::catalog() {
                         let present = embed::model_present_in(&settings.models_dir, e);
+                        let fits = e.fits(settings.max_model_mb);
                         println!(
-                            "{} {:<10} {} · {} · {}",
+                            "{} {:<22} {} призн. · {} · {} · {} · {}",
                             if std::ptr::eq(e, active) { "*" } else { " " },
                             e.id,
+                            e.dim,
                             db::human(e.bytes() as i64),
-                            if present { "на месте" } else { "не скачана" },
+                            e.license,
+                            if present {
+                                "на месте"
+                            } else if fits {
+                                "не скачана"
+                            } else {
+                                "сверх лимита"
+                            },
                             e.note
                         );
                     }
