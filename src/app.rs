@@ -13,7 +13,7 @@ use crate::storage;
 use crate::tools::{self, Tool};
 use anyhow::Result;
 use chrono::Datelike;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -36,6 +36,34 @@ enum View {
     Calendar,
     Faces,
     Trash,
+}
+
+/// Формат в сетке: всё, только снимки, только видео (M16). Одно понятие «фильтр»
+/// живёт в секции «Фильтр» левой панели и повторяется чипом над сеткой.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KindFilter {
+    All,
+    Images,
+    Videos,
+}
+
+impl KindFilter {
+    fn label(self) -> &'static str {
+        match self {
+            KindFilter::All => "Все",
+            KindFilter::Images => "Фото",
+            KindFilter::Videos => "Видео",
+        }
+    }
+
+    /// Подпись чипа над сеткой; `None` — фильтра нет.
+    fn chip(self) -> Option<&'static str> {
+        match self {
+            KindFilter::All => None,
+            KindFilter::Images => Some("только фото"),
+            KindFilter::Videos => Some("только видео"),
+        }
+    }
 }
 
 /// Что именно очищаем в «Хранилище»: кэш превью, кропы лиц или строки индекса.
@@ -129,6 +157,10 @@ const ACCENT: egui::Color32 = egui::Color32::from_rgb(90, 170, 255);
 const DIM: egui::Color32 = egui::Color32::from_gray(150);
 /// Метрики раскладки: менять только вместе с docs/UI.md.
 const LEFT_W: f32 = 260.0;
+/// Шаг сетки плиток: в PhotoPrism снимки стоят вплотную, у нас 2 px из шкалы 4 px.
+const TILE_GAP: f32 = 2.0;
+/// Высота пункта навигации и высота строки фильтров.
+const NAV_H: f32 = 28.0;
 const RIGHT_W: f32 = 280.0;
 /// Ниже этой ширины окна сведения уходят в левую панель: сетке нужны 4 колонки.
 const DETAILS_MIN_W: f32 = 1200.0;
@@ -154,6 +186,30 @@ fn primary_button(text: &str) -> egui::Button<'static> {
         .fill(egui::Color32::from_rgba_unmultiplied(90, 170, 255, 32))
 }
 
+/// Один стиль на всё GUI (docs/UI.md §Вёрстка): плотный ритм, скругление 4 px, без теней.
+/// Палитра остаётся из `visuals()`; акцент — единственный собственный цвет.
+fn style(ctx: &egui::Context) {
+    ctx.all_styles_mut(|s| {
+        s.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        s.spacing.button_padding = egui::vec2(10.0, 4.0);
+        s.spacing.interact_size = egui::vec2(32.0, 26.0);
+        s.spacing.menu_margin = egui::Margin::same(6);
+        s.spacing.indent = 16.0;
+        s.spacing.slider_width = 120.0;
+        s.visuals.selection.bg_fill = selected_fill();
+        s.visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+        s.visuals.window_corner_radius = egui::CornerRadius::same(4);
+        s.visuals.menu_corner_radius = egui::CornerRadius::same(4);
+        s.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(4);
+        s.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+        s.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+        s.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+        s.visuals.widgets.open.corner_radius = egui::CornerRadius::same(4);
+        s.visuals.window_shadow = egui::Shadow::NONE;
+        s.visuals.popup_shadow = egui::Shadow::NONE;
+    });
+}
+
 /// Заголовок секции в панели: 11 px, второстепенный цвет, без капса.
 fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(8.0);
@@ -171,18 +227,33 @@ fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
     });
 }
 
-/// Строка карточки: подпись 11 px сверху, значение 12 px снизу.
+/// Строка карточки: подпись 11 px в колонке 72 px, значение 12 px справа с переносом.
+/// PhotoPrism-инспектор живёт такими парами, а не столбиком «подпись над значением».
 fn meta_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.label(egui::RichText::new(label).size(11.0).color(DIM));
-    ui.label(egui::RichText::new(value).size(12.0));
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(72.0, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.label(egui::RichText::new(label).size(11.0).color(DIM));
+            },
+        );
+        ui.add(egui::Label::new(egui::RichText::new(value).size(12.0)).wrap());
+    });
     ui.add_space(4.0);
 }
 
-/// Пункт навигации: вся ширина панели, подсветка выбора, слово вместо иконки.
-fn nav_item(ui: &mut egui::Ui, current: &mut View, view: View, text: &str) {
+/// Пункт навигации: вся ширина панели, подсветка выбора, слово слева, число справа.
+fn nav_item(
+    ui: &mut egui::Ui,
+    current: &mut View,
+    view: View,
+    text: &str,
+    count: Option<String>,
+) {
     let selected = *current == view;
     let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_H), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let fill = if selected {
             selected_fill()
@@ -191,7 +262,7 @@ fn nav_item(ui: &mut egui::Ui, current: &mut View, view: View, text: &str) {
         } else {
             egui::Color32::TRANSPARENT
         };
-        ui.painter().rect_filled(rect, 3.0, fill);
+        ui.painter().rect_filled(rect, 4.0, fill);
         let color = if selected {
             ACCENT
         } else if resp.hovered() {
@@ -206,6 +277,15 @@ fn nav_item(ui: &mut egui::Ui, current: &mut View, view: View, text: &str) {
             egui::FontId::proportional(14.0),
             color,
         );
+        if let Some(count) = count {
+            ui.painter().text(
+                rect.right_center() + egui::vec2(-8.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                count,
+                egui::FontId::proportional(11.0),
+                if selected { ACCENT } else { DIM },
+            );
+        }
     }
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -213,6 +293,13 @@ fn nav_item(ui: &mut egui::Ui, current: &mut View, view: View, text: &str) {
     if resp.clicked() {
         *current = view;
     }
+}
+
+/// Заголовок группы навигации: 11 px приглушённым, без рамки (M16).
+fn nav_section(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(text).size(11.0).color(DIM));
+    ui.add_space(2.0);
 }
 
 /// Пункт левого списка в диалоге «Настройки»: та же геометрия, что у навигации.
@@ -255,15 +342,125 @@ fn file_name(path: &str) -> String {
         .to_string()
 }
 
-/// Блок с рамкой: секция контекста в левой панели, тег или текст в карточке.
+/// Плоская секция панели: без рамки `Frame::group`, содержимое на всю ширину.
+/// Рамка в рамке спорит с фото за внимание (M16, docs/UI.md §Вёрстка).
 fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let w = ui.available_width();
-    egui::Frame::group(ui.style())
-        .inner_margin(8.0)
-        .show(ui, |ui| {
-            ui.set_width((w - 16.0).max(80.0));
-            add(ui);
+    ui.scope(|ui| {
+        ui.set_width(w);
+        add(ui);
+    });
+    ui.add_space(8.0);
+}
+
+/// Чип активного фильтра: слово с «×»; клик снимает только этот фильтр (M16).
+fn filter_chip(ui: &mut egui::Ui, text: &str) -> bool {
+    ui.add(
+        egui::Button::new(egui::RichText::new(format!("{text} ×")).size(12.0)).small(),
+    )
+    .on_hover_text("снять фильтр")
+    .clicked()
+}
+
+/// Снимок активных фильтров для строки чипов.
+struct Chips {
+    query: String,
+    tag: Option<String>,
+    kind: KindFilter,
+    hits: Option<usize>,
+}
+
+/// Какие фильтры просят снять кликом по чипу.
+#[derive(Default, Clone, Copy)]
+struct FilterClear {
+    query: bool,
+    tag: bool,
+    kind: bool,
+    hits: bool,
+}
+
+/// Короткая подпись для чипа: длинный путь не распирает строку фильтров.
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        format!("{}…", text.chars().take(max).collect::<String>())
+    }
+}
+
+/// Строка чипов над сеткой: видно, что включено, «×» снимает именно это, справа — итог.
+/// Строка живёт всегда (при пустом фильтре — «фильтров нет»), поэтому заголовок вида не прыгает.
+fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) -> FilterClear {
+    let mut clear = FilterClear::default();
+    let mut any = false;
+    ui.horizontal(|ui| {
+        if !chips.query.is_empty() {
+            any = true;
+            if filter_chip(ui, &format!("путь/дата: {}", shorten(&chips.query, 24))) {
+                clear.query = true;
+            }
+        }
+        if let Some(tag) = &chips.tag {
+            any = true;
+            if filter_chip(ui, &format!("тег: {}", shorten(tag, 24))) {
+                clear.tag = true;
+            }
+        }
+        if let Some(label) = chips.kind.chip() {
+            any = true;
+            if filter_chip(ui, label) {
+                clear.kind = true;
+            }
+        }
+        if let Some(n) = chips.hits {
+            any = true;
+            if filter_chip(ui, &format!("поиск: {n} файлов")) {
+                clear.hits = true;
+            }
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(if any {
+                    format!("найдено {} из {}", found.0, found.1)
+                } else {
+                    "фильтров нет".to_string()
+                })
+                .size(11.0)
+                .color(DIM),
+            );
         });
+    });
+    clear
+}
+
+/// Заголовок группы сетки: месяц 14 px, число файлов и объём 11 px (как в PhotoPrism).
+/// Месяц без даты — отдельная последняя группа, а не мусорный ключ в начале списка.
+fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64) {
+    let title = if key == "без даты" {
+        "Без даты".to_string()
+    } else {
+        match (key.get(0..4), key.get(5..7)) {
+            (Some(y), Some(m)) => match (y.parse::<i32>(), m.parse::<usize>()) {
+                (Ok(y), Ok(m)) if (1..=12).contains(&m) => {
+                    format!("{} {y}", MONTHS[m - 1])
+                }
+                _ => key.to_string(),
+            },
+            _ => key.to_string(),
+        }
+    };
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(title).size(14.0));
+        ui.label(
+            egui::RichText::new(format!(
+                "· файлов {files} · {}",
+                db::human(bytes)
+            ))
+            .size(11.0)
+            .color(DIM),
+        );
+    });
+    ui.add_space(4.0);
 }
 
 /// Строка прогресса фонового прохода: `done/total`, «Стоп» рядом.
@@ -302,11 +499,13 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
         "photocat",
         opts,
         Box::new(move |cc| {
-            // Плавная прокрутка: колесо не «шагает» на строку, а догоняет позицию.
+            // Один стиль на всё GUI (docs/UI.md §Вёрстка) и плавная прокрутка:
+            // колесо не «шагает» на строку, а догоняет позицию.
             cc.egui_ctx.all_styles_mut(|s| {
                 s.scroll_animation.points_per_second = 1400.0;
                 s.scroll_animation.duration = egui::Rangef::new(0.08, 0.24);
             });
+            style(&cc.egui_ctx);
             Ok(Box::new(App::new(db_path.clone())))
         }),
     )
@@ -327,7 +526,7 @@ struct App {
     max_dist: u32,
     path_input: String,
     query: String,
-    only_images: bool,
+    kind_filter: KindFilter,
     progress: Option<Arc<Progress>>,
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
     /// Теги CLIP: file_id → [(тег, вес)] по убыванию.
@@ -469,7 +668,7 @@ impl App {
             max_dist: 6,
             path_input: String::new(),
             query: String::new(),
-            only_images: false,
+            kind_filter: KindFilter::All,
             progress: None,
             rx: None,
             tags: HashMap::new(),
@@ -1667,7 +1866,7 @@ impl App {
 
     fn reset_filters(&mut self) {
         self.query.clear();
-        self.only_images = false;
+        self.kind_filter = KindFilter::All;
         self.tag_filter = None;
         self.semantic_hits = None;
         self.ocr_snippets.clear();
@@ -1678,8 +1877,8 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Каталог:").size(12.0).color(DIM));
-            let w = (ui.available_width() - 300.0).clamp(240.0, 520.0);
+            ui.label(egui::RichText::new("Каталог").size(11.0).color(DIM));
+            let w = (ui.available_width() - 470.0).clamp(240.0, 520.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.path_input)
                     .hint_text("путь к каталогу; несколько — кнопкой «Каталоги»")
@@ -1719,6 +1918,7 @@ impl App {
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
+            // Режим поиска — сегментированный переключатель перед полем (PhotoPrism).
             let mut text_mode = self.search_ocr;
             if ui
                 .selectable_label(!text_mode, egui::RichText::new("Смысловой").size(12.0))
@@ -1852,6 +2052,17 @@ impl App {
         });
     }
 
+    /// Снимок фильтров для строки чипов: чипы рисуются без доступа к `self`, потому что
+    /// в этот момент сетка уже держит `&mut self.textures`. Снятие применяется после кадра.
+    fn chips_snapshot(&self) -> Chips {
+        Chips {
+            query: self.query.trim().to_string(),
+            tag: self.tag_filter.clone(),
+            kind: self.kind_filter,
+            hits: self.semantic_hits.as_ref().map(|h| h.len()),
+        }
+    }
+
     /// Левая панель: карта приложения. Навигация и фильтр закреплены, контекст вида — в прокрутке.
     fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool) {
         ui.add_space(6.0);
@@ -1859,21 +2070,44 @@ impl App {
         ui.label(egui::RichText::new("семейный архив").size(11.0).color(DIM));
         ui.add_space(8.0);
         ui.separator();
-        ui.add_space(2.0);
-        ui.label(egui::RichText::new("БИБЛИОТЕКА").size(11.0).color(DIM));
-        nav_item(ui, &mut self.view, View::Grid, "Все файлы");
-        nav_item(ui, &mut self.view, View::Dupes, "Дубли и серии");
-        nav_item(ui, &mut self.view, View::Calendar, "Календарь");
-        nav_item(ui, &mut self.view, View::Faces, "Лица");
+
+        // Карта приложения — две группы с числами справа (PhotoPrism: Library / Tools).
+        // Число объясняет цену пункта до клика: 103 группы, 617 лиц, 3 в корзине.
+        nav_section(ui, "БИБЛИОТЕКА");
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Grid,
+            "Все файлы",
+            Some(self.items.len().to_string()),
+        );
+        nav_item(ui, &mut self.view, View::Calendar, "Календарь", None);
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Faces,
+            "Лица",
+            Some(self.face_clusters.len().to_string()),
+        );
+        nav_section(ui, "ИНСТРУМЕНТЫ");
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Dupes,
+            "Дубли и серии",
+            Some(self.groups.len().to_string()),
+        );
         nav_item(
             ui,
             &mut self.view,
             View::Trash,
-            &format!("Корзина · {}", self.trash_items.len()),
+            "Корзина",
+            Some(self.trash_items.len().to_string()),
         );
+
         ui.add_space(8.0);
         ui.separator();
-        ui.add_space(2.0);
+        nav_section(ui, "ФИЛЬТР");
         ui.label(
             egui::RichText::new("Поиск по пути или дате")
                 .size(11.0)
@@ -1884,24 +2118,22 @@ impl App {
                 .hint_text("2024-05, отпуск")
                 .desired_width(f32::INFINITY),
         );
-        ui.add_space(2.0);
-        ui.checkbox(&mut self.only_images, "только изображения");
         ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(format!("Размер плиток: {:.0} px", self.tile_size))
-                .size(11.0)
-                .color(DIM),
-        );
-        let size = ui.add(
-            egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
-                .step_by(10.0)
-                .show_value(false),
-        );
-        if size.drag_stopped() || size.lost_focus() {
-            self.settings.tile_size = self.tile_size;
-            self.save_settings();
-        }
-        ui.add_space(2.0);
+        // Формат — один выбор вместо галочки: все, фото или видео (PhotoPrism: Images/Video).
+        ui.horizontal(|ui| {
+            for kind in [KindFilter::All, KindFilter::Images, KindFilter::Videos] {
+                if ui
+                    .selectable_label(
+                        self.kind_filter == kind,
+                        egui::RichText::new(kind.label()).size(12.0),
+                    )
+                    .clicked()
+                {
+                    self.kind_filter = kind;
+                }
+            }
+        });
+        ui.add_space(4.0);
 
         // На широком окне сводка прижата к низу панели. На узком — карточка и сводка
         // идут в общей прокрутке: иначе карточке остаётся полоска в 40 px.
@@ -2428,11 +2660,7 @@ impl App {
     fn details_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Сведения о файле")
-                    .size(12.0)
-                    .color(DIM),
-            );
+            ui.label(egui::RichText::new("Сведения о файле").size(14.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .small_button("Скрыть")
@@ -2480,7 +2708,7 @@ impl App {
         let h = (w * 0.75).min(210.0);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
         ui.painter()
-            .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
         let ctx = ui.ctx().clone();
         let mut cells = Cells {
             textures: &mut self.textures,
@@ -2510,6 +2738,10 @@ impl App {
             );
         }
         ui.add_space(8.0);
+        // Имя файла — главное, путь — подпись под ним (PhotoPrism-инспектор).
+        ui.label(egui::RichText::new(file_name(&f.path)).size(14.0));
+        ui.label(egui::RichText::new(&f.path).size(11.0).color(DIM));
+        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             if ui
                 .button("Открыть полный экран")
@@ -2535,8 +2767,8 @@ impl App {
                 }
             }
         });
+        ui.add_space(4.0);
 
-        meta_row(ui, "Путь", &f.path);
         let date = format!(
             "{} ({})",
             f.taken_at
@@ -3613,7 +3845,11 @@ impl App {
             .items
             .iter()
             .enumerate()
-            .filter(|(_, r)| !self.only_images || r.kind == "image")
+            .filter(|(_, r)| match self.kind_filter {
+                KindFilter::All => true,
+                KindFilter::Images => r.kind == "image",
+                KindFilter::Videos => r.kind == "video",
+            })
             .filter(|(_, r)| {
                 q.is_empty()
                     || r.path.to_lowercase().contains(&q)
@@ -4639,8 +4875,18 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
     let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
     if ui.is_rect_visible(rect) {
         ui.painter()
-            .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
         let drawn = paint_thumb(ui, ctx, cs, f, img_rect);
+        // Отклик на наведение: тонкая обводка и курсор — плитка читается как цель (M16).
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            ui.painter().rect_stroke(
+                img_rect,
+                4.0,
+                egui::Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
         if !drawn {
             let txt = match f.kind.as_str() {
                 "video" => match f.duration_s {
@@ -4693,7 +4939,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         match f.decision.as_deref() {
             Some("drop") => {
                 ui.painter()
-                    .rect_filled(img_rect, 3.0, egui::Color32::from_black_alpha(150));
+                    .rect_filled(img_rect, 4.0, egui::Color32::from_black_alpha(150));
                 ui.painter().text(
                     img_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -4705,7 +4951,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             Some("keep") => {
                 ui.painter().rect_stroke(
                     img_rect,
-                    3.0,
+                    4.0,
                     egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
                     egui::StrokeKind::Inside,
                 );
@@ -4733,7 +4979,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         }
         if cs.trash_mode {
             ui.painter()
-                .rect_filled(img_rect, 3.0, egui::Color32::from_black_alpha(90));
+                .rect_filled(img_rect, 4.0, egui::Color32::from_black_alpha(90));
             ui.painter().text(
                 egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
                 egui::Align2::LEFT_TOP,
@@ -4757,7 +5003,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
     if cs.selected == Some(f.id) {
         ui.painter().rect_stroke(
             rect,
-            3.0,
+            4.0,
             egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
             egui::StrokeKind::Inside,
         );
@@ -5019,6 +5265,8 @@ impl eframe::App for App {
         self.poll_video(ctx);
 
         let visible = self.filtered();
+        // Снимок фильтров снимается до того, как сетка заберёт `&mut self.textures`.
+        let chips = self.chips_snapshot();
         let tag_filter_now = self.tag_filter.clone();
         let tag_filter_raw = tag_filter_now
             .as_deref()
@@ -5068,6 +5316,8 @@ impl eframe::App for App {
         let mut face_save_label: Option<String> = None;
         let mut face_assign: Option<String> = None;
         let mut reset = false;
+        let mut tile_save = false;
+        let mut clear_chips = FilterClear::default();
         let view = self.view;
         let mut cal_year = self.cal_year;
         let mut cal_month = self.cal_month;
@@ -5079,34 +5329,34 @@ impl eframe::App for App {
             View::Grid => (
                 "Все файлы".to_string(),
                 if visible.len() == items.len() {
-                    format!("· файлов {}", items.len())
+                    format!("файлов {}", items.len())
                 } else {
-                    format!("· файлов {} из {}", visible.len(), items.len())
+                    format!("файлов {} из {}", visible.len(), items.len())
                 },
             ),
             View::Dupes => {
                 let waste: i64 = groups.iter().map(|g| g.waste).sum();
                 (
                     "Дубли и серии".to_string(),
-                    format!("· групп {}, зря {}", groups.len(), db::human(waste)),
+                    format!("групп {}, зря {}", groups.len(), db::human(waste)),
                 )
             }
             View::Calendar => (
                 "Календарь".to_string(),
                 format!(
-                    "· {} {}",
+                    "{} {}",
                     MONTHS[(cal_month.clamp(1, 12) - 1) as usize],
                     cal_year
                 ),
             ),
             View::Faces => (
                 "Лица".to_string(),
-                format!("· лиц {} на {} снимках", face_total, face_photos),
+                format!("лиц {} на {} снимках", face_total, face_photos),
             ),
             View::Trash => (
                 "Корзина".to_string(),
                 format!(
-                    "· файлов {}, {}",
+                    "файлов {}, {}",
                     self.trash_items.len(),
                     db::human(self.trash_items.iter().map(|r| r.size).sum())
                 ),
@@ -5114,12 +5364,33 @@ impl eframe::App for App {
         };
 
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(title).size(14.0));
+                ui.label(egui::RichText::new(title).size(18.0));
                 ui.label(egui::RichText::new(count).size(12.0).color(DIM));
+                // PhotoPrism: размер плиток живёт в панели содержимого, а не в левой панели.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let size = ui.add(
+                        egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
+                            .step_by(10.0)
+                            .show_value(false),
+                    );
+                    if size.drag_stopped() || size.lost_focus() {
+                        tile_save = true;
+                    }
+                    ui.label(
+                        egui::RichText::new(format!("Плитки {:.0}", self.tile_size))
+                            .size(11.0)
+                            .color(DIM),
+                    )
+                    .on_hover_text("размер плиток, 100–260 px");
+                });
             });
             ui.add_space(4.0);
+            if matches!(view, View::Grid | View::Calendar) {
+                clear_chips = draw_filter_chips(ui, &chips, (visible.len(), items.len()));
+            }
+            ui.add_space(2.0);
             ui.separator();
             match view {
             View::Grid => {
@@ -5150,11 +5421,38 @@ impl eframe::App for App {
                     .id_salt("grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for &i in &visible {
-                                draw_cell(ui, ctx, &mut cells, &items[i]);
-                            }
-                        });
+                        // Моменты: месяцы от свежих к старым, внутри месяца — тоже свежие сверху.
+                        // Порядок живёт в отрисовке: `filtered()` отдаёт индексы, данные не меняются.
+                        let mut by_month: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+                        for &i in &visible {
+                            let key = items[i]
+                                .taken_at
+                                .as_deref()
+                                .map(|d| d.chars().take(7).collect::<String>())
+                                .filter(|k| k.len() == 7)
+                                .unwrap_or_else(|| "без даты".into());
+                            by_month.entry(key).or_default().push(i);
+                        }
+                        let undated = by_month.remove("без даты");
+                        let mut ordered: Vec<(String, Vec<usize>)> =
+                            by_month.into_iter().rev().collect();
+                        if let Some(v) = undated {
+                            ordered.push(("без даты".into(), v));
+                        }
+                        for (key, mut ids) in ordered {
+                            ids.reverse();
+                            let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
+                            month_header(ui, &key, ids.len(), bytes);
+                            ui.scope(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+                                ui.horizontal_wrapped(|ui| {
+                                    for &i in &ids {
+                                        draw_cell(ui, ctx, &mut cells, &items[i]);
+                                    }
+                                });
+                            });
+                            ui.add_space(16.0);
+                        }
                     });
             }
             View::Dupes => {
@@ -6058,6 +6356,25 @@ impl eframe::App for App {
         // Освобождаем заимствования self.textures/missing до open_viewer/reload.
         #[allow(clippy::drop_non_drop)]
         drop(cells);
+        // Размер плиток пишется в настройки после отпускания ползунка, а не каждый кадр.
+        if tile_save {
+            self.settings.tile_size = self.tile_size;
+            self.save_settings();
+        }
+        // Чип снимает ровно свой фильтр; сетка пересчитается следующим кадром.
+        if clear_chips.query {
+            self.query.clear();
+        }
+        if clear_chips.tag {
+            self.tag_filter = None;
+        }
+        if clear_chips.kind {
+            self.kind_filter = KindFilter::All;
+        }
+        if clear_chips.hits {
+            self.semantic_hits = None;
+            self.ocr_snippets.clear();
+        }
         if let Some(id) = cell_open {
             self.open_viewer(id);
         } else if let Some(id) = cell_click {
@@ -6281,6 +6598,27 @@ mod tests {
             ..Default::default()
         };
         let out = ctx.run_ui(raw, |ui| app.details_panel(ui));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// Один кадр всего окна без окна: проверяет группы по месяцам и их порядок.
+    /// `eframe::Frame::_new_kittest` — штатный тестовый кадр eframe, окно не открывается.
+    fn window_frame(app: &mut App, ctx: &egui::Context) -> Vec<String> {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1240.0, 840.0),
+            )),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
         let mut texts = Vec::new();
         for c in &out.shapes {
             collect_text(&c.shape, &mut texts);
@@ -6573,5 +6911,36 @@ mod tests {
         assert_eq!(CalScale::Month.deeper(), Some(CalScale::Week));
         assert_eq!(CalScale::Week.deeper(), Some(CalScale::Day));
         assert_eq!(CalScale::Day.deeper(), None);
+    }
+
+    /// Сетка — «моменты»: свежий месяц первым, внутри месяца свежие сверху,
+    /// файлы без даты — последней группой (M16, ADR 0033).
+    #[test]
+    fn сетка_группирует_по_месяцам_от_свежих() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-ui.db"));
+        let mut may_old = file_row(1, "image", "may-old.jpg");
+        may_old.taken_at = Some("2024-05-01T08:00".into());
+        let mut may_new = file_row(2, "image", "may-new.jpg");
+        may_new.taken_at = Some("2024-05-09T10:00".into());
+        let mut april = file_row(3, "image", "april.jpg");
+        april.taken_at = Some("2024-04-30T09:00".into());
+        let mut undated = file_row(4, "image", "undated.jpg");
+        undated.taken_at = None;
+        app.items = vec![may_old, may_new, april, undated];
+
+        let texts = window_frame(&mut app, &egui::Context::default());
+        let pos = |needle: &str| {
+            texts
+                .iter()
+                .position(|t| t == needle)
+                .unwrap_or_else(|| panic!("нет заголовка «{needle}»: {texts:?}"))
+        };
+        let (may, april_pos, no_date) = (pos("май 2024"), pos("апрель 2024"), pos("Без даты"));
+        assert!(may < april_pos, "май свежее апреля: {texts:?}");
+        assert!(april_pos < no_date, "«Без даты» — последняя группа: {texts:?}");
+        // Внутри месяца подписи плиток идут от свежих к старым.
+        let may_new = texts.iter().position(|t| t == "2024-05-09 10:00").unwrap();
+        let may_old = texts.iter().position(|t| t == "2024-05-01 08:00").unwrap();
+        assert!(may_new < may_old, "внутри месяца свежие сверху: {texts:?}");
     }
 }
