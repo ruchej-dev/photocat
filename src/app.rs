@@ -663,6 +663,20 @@ impl App {
                 }
                 self.groups.clear();
                 self.init_calendar();
+                // 100% ползунка = самый сильный вес в индексе. Старый порог выше него
+                // на шкалу не встаёт: ставим 100%, чтобы теги снова находились.
+                if let Some(max) = self.max_tag_score()
+                    && self.settings.tag_show > max
+                {
+                    let old = self.settings.tag_show;
+                    self.settings.tag_show = max;
+                    if let Ok(c) = db::open(&self.db_path) {
+                        let _ = db::save_settings(&c, &self.settings);
+                    }
+                    self.status.push_str(&format!(
+                        "; порог тегов {old:.2} выше самого сильного веса {max:.2} — поставил 100%"
+                    ));
+                }
             }
             Err(e) => self.status = format!("ошибка чтения индекса: {e}"),
         }
@@ -1390,9 +1404,35 @@ impl App {
                 .color(DIM),
         );
         ui.add_space(2.0);
-        let r = ui.add(egui::Slider::new(&mut self.settings.tag_show, 0.10..=0.50));
-        if r.drag_stopped() || r.lost_focus() {
-            self.save_settings();
+        // Ползунок для человека — 0–100%, модель получает косинус 0..1.
+        self.tag_show_slider(ui);
+        let hits = self
+            .tags
+            .values()
+            .filter(|t| t.iter().any(|(_, s)| *s >= self.settings.tag_show))
+            .count();
+        let max = self.max_tag_score();
+        ui.label(
+            egui::RichText::new(match max {
+                Some(max) => format!(
+                    "выше порога: файлов {hits} из {} с тегами; 100% = {max:.2}, самый сильный вес в индексе",
+                    self.tags.len()
+                ),
+                None => "теги ещё не посчитаны".into(),
+            })
+            .size(11.0)
+            .color(DIM),
+        );
+        if let Some(max) = max
+            && self.settings.tag_show > max
+        {
+            ui.label(
+                egui::RichText::new(format!(
+                    "порог выше самого сильного веса ({max:.2}) — это 100%; выше быть не может"
+                ))
+                .size(11.0)
+                .color(DIM),
+            );
         }
         ui.add_space(12.0);
         ui.label(
@@ -2208,6 +2248,8 @@ impl App {
                     self.user_tags.values().flatten().cloned().collect();
                 own_tags.sort();
                 own_tags.dedup();
+                // Число справа от тега — сколько снимков с ним при текущем пороге.
+                let counts = self.tag_counts();
                 egui::ComboBox::from_id_salt("tag_filter")
                     .width(ui.available_width())
                     .selected_text(
@@ -2223,12 +2265,12 @@ impl App {
                         {
                             ui.close();
                         }
-                        for label in embed::TAG_LABELS {
+                        for (label, n) in embed::TAG_LABELS.iter().zip(&counts) {
                             if ui
                                 .selectable_value(
                                     &mut self.tag_filter,
                                     Some(label.to_string()),
-                                    label,
+                                    format!("{label} · {n}"),
                                 )
                                 .clicked()
                             {
@@ -2236,11 +2278,16 @@ impl App {
                             }
                         }
                         for label in &own_tags {
+                            let n = self
+                                .user_tags
+                                .values()
+                                .filter(|tags| tags.iter().any(|t| t == label))
+                                .count();
                             if ui
                                 .selectable_value(
                                     &mut self.tag_filter,
                                     Some(label.clone()),
-                                    format!("свой: {label}"),
+                                    format!("свой: {label} · {n}"),
                                 )
                                 .clicked()
                             {
@@ -2248,6 +2295,22 @@ impl App {
                             }
                         }
                     });
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("Порог тега")
+                        .size(11.0)
+                        .color(DIM),
+                );
+                self.tag_show_slider(ui);
+                if !self.tags.is_empty() && counts.iter().all(|n| *n == 0) {
+                    ui.label(
+                        egui::RichText::new(
+                            "ни один тег не проходит порог — опустите ползунок",
+                        )
+                        .size(11.0)
+                        .color(DIM),
+                    );
+                }
                 if let Some(hits) = &self.semantic_hits {
                     ui.label(
                         egui::RichText::new(format!("поиск: {} файлов", hits.len()))
@@ -3559,6 +3622,60 @@ impl App {
         out
     }
 
+    /// Ползунок порога тега: человек видит 0–100%, модель получает косинус.
+    /// 100% — самый сильный вес в индексе, поэтому на 100% хотя бы один тег остаётся.
+    fn tag_show_slider(&mut self, ui: &mut egui::Ui) {
+        let Some(max) = self.max_tag_score() else {
+            ui.label(
+                egui::RichText::new("теги ещё не посчитаны — нажмите «Посчитать теги»")
+                    .size(11.0)
+                    .color(DIM),
+            );
+            return;
+        };
+        let mut pct = tag_show_percent(self.settings.tag_show, max);
+        let r = ui
+            .add(
+                egui::Slider::new(&mut pct, 0..=100)
+                    .custom_formatter(|v, _| format!("{v:.0}%")),
+            )
+            .on_hover_text(format!(
+                "0% — без порога, 100% — самый сильный вес в индексе ({max:.2}); \
+                 выше него ставить нечего, поэтому на 100% что-то остаётся"
+            ));
+        if r.changed() {
+            self.settings.tag_show = tag_show_from_percent(pct, max);
+        }
+        if r.drag_stopped() || r.lost_focus() {
+            self.save_settings();
+        }
+    }
+
+    /// Самый сильный CLIP-вес в индексе: выше него ни один тег не пройдёт.
+    fn max_tag_score(&self) -> Option<f32> {
+        self.tags
+            .values()
+            .filter_map(|t| embed::max_score(t))
+            .reduce(f32::max)
+    }
+
+    /// Снимков на каждый тег из `TAG_LABELS` при текущем пороге: число рядом с тегом
+    /// честно говорит «ноль» до нажатия, а не после.
+    fn tag_counts(&self) -> Vec<usize> {
+        let mut counts = vec![0usize; embed::TAG_LABELS.len()];
+        for scores in self.tags.values() {
+            for (tag, score) in scores {
+                if *score < self.settings.tag_show {
+                    continue;
+                }
+                if let Some(i) = embed::TAG_LABELS.iter().position(|l| *l == tag.as_str()) {
+                    counts[i] += 1;
+                }
+            }
+        }
+        counts
+    }
+
     fn start_embed(&mut self) {
         if self.embed_rx.is_some() {
             return;
@@ -3961,6 +4078,19 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
             ui.label(&f.path);
         });
     }
+}
+
+/// Проценты для человека: 0–100% от самого сильного веса в индексе.
+fn tag_show_percent(show: f32, max: f32) -> i32 {
+    if max <= 0.0 {
+        return 0;
+    }
+    (show / max * 100.0).round().clamp(0.0, 100.0) as i32
+}
+
+/// Обратно: процент с ползунка → косинус, который принимает модель.
+fn tag_show_from_percent(pct: i32, max: f32) -> f32 {
+    (pct as f32 / 100.0 * max).clamp(0.0, max)
 }
 
 /// Короткая подпись версии: первая строка и первые три слова («ffmpeg version 9.0.2»).
@@ -4804,6 +4934,11 @@ impl eframe::App for App {
         self.poll_video(ctx);
 
         let visible = self.filtered();
+        let tag_filter_now = self.tag_filter.clone();
+        let tag_show_raw = self.settings.tag_show;
+        let tag_show_pct = self
+            .max_tag_score()
+            .map_or(0, |m| tag_show_percent(tag_show_raw, m));
         let items = std::mem::take(&mut self.items);
         let mut cells = Cells {
             textures: &mut self.textures,
@@ -4913,7 +5048,13 @@ impl eframe::App for App {
                 }
                 if visible.is_empty() {
                     ui.add_space(12.0);
-                    ui.label("ничего не найдено");
+                    match &tag_filter_now {
+                        Some(tag) => ui.label(format!(
+                            "нет снимков с тегом «{tag}» выше порога {tag_show_pct}% ({tag_show_raw:.2}) — \
+                             опустите ползунок порога в левой панели"
+                        )),
+                        None => ui.label("ничего не найдено"),
+                    };
                     if ui.button("Сбросить фильтр").clicked() {
                         reset = true;
                     }
@@ -5957,7 +6098,8 @@ impl eframe::App for App {
 mod tests {
     use super::{
         App, CalScale, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
-        nearest_file_month, parse_date, shift_month, shift_to_file_month,
+        nearest_file_month, parse_date, shift_month, shift_to_file_month, tag_show_from_percent,
+        tag_show_percent,
     };
     use std::collections::BTreeSet;
 
@@ -6243,4 +6385,15 @@ mod tests {
         assert_eq!(CalScale::Day.deeper(), None);
     }
 
+    #[test]
+    fn процент_порога_переводится_в_косинус_и_обратно() {
+        let max = 0.316;
+        assert_eq!(tag_show_percent(0.22, max), 70);
+        assert!((tag_show_from_percent(70, max) - 0.2212).abs() < 1e-4);
+        assert_eq!(tag_show_percent(0.0, max), 0);
+        assert_eq!(tag_show_percent(max, max), 100);
+        assert!((tag_show_from_percent(100, max) - max).abs() < 1e-6);
+        assert!((tag_show_from_percent(0, max) - 0.0).abs() < 1e-6);
+        assert!((tag_show_from_percent(150, max) - max).abs() < 1e-6);
+    }
 }

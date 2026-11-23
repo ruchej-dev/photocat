@@ -463,6 +463,11 @@ pub fn tag_above(scores: &[(String, f32)], want: &str, show: f32) -> bool {
         .any(|(tag, score)| tag == want && *score >= show)
 }
 
+/// Самый сильный вес среди тегов одного файла; `None`, если тегов нет.
+pub fn max_score(scores: &[(String, f32)]) -> Option<f32> {
+    scores.iter().map(|(_, s)| *s).reduce(f32::max)
+}
+
 /// Уверенный тег с настраиваемыми порогами.
 pub fn confident_tag_with(
     scores: &[(String, f32)],
