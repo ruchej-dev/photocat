@@ -46,12 +46,26 @@ enum StorageAction {
     Index,
 }
 
-/// Градация календаря: год, месяц, неделя (docs/UI.md).
-#[derive(Clone, Copy, PartialEq)]
+/// Градация календаря: год, месяц, неделя и день. Двойной клик проваливает
+/// на слой ниже, вкладки слева от заголовка возвращают наверх (docs/UI.md).
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum CalScale {
     Year,
     Month,
     Week,
+    Day,
+}
+
+impl CalScale {
+    /// Слой ниже по двойному клику: год → месяц → неделя → день; ниже дня нет.
+    fn deeper(self) -> Option<CalScale> {
+        match self {
+            CalScale::Year => Some(CalScale::Month),
+            CalScale::Month => Some(CalScale::Week),
+            CalScale::Week => Some(CalScale::Day),
+            CalScale::Day => None,
+        }
+    }
 }
 
 /// Текстуры для полного экрана: текущий кадр, миниатюра и предыдущий резкий кадр.
@@ -61,6 +75,8 @@ struct ViewerTextures<'a> {
     stale: Option<&'a egui::TextureHandle>,
     /// Кадр встроенного плеера: пока он есть, он важнее статичного снимка.
     video: Option<&'a egui::TextureHandle>,
+    /// Видео на паузе: кадр есть, но по центру нужна кнопка ▶.
+    paused: bool,
 }
 
 /// Полноэкранный просмотр: один снимок поверх всей сетки, со слайд-шоу и текстом.
@@ -404,6 +420,8 @@ struct App {
     video_tex_at: Option<std::time::Instant>,
     /// Сообщение «декодер не успевает» показывается один раз на файл.
     video_lag_shown: bool,
+    /// Видео доиграло: полноэкранный просмотр переходит к следующему файлу.
+    video_ended: bool,
     video_id: Option<i64>,
     /// Календарь: градация и понедельник выбранной недели.
     cal_scale: CalScale,
@@ -512,6 +530,7 @@ impl App {
             video_tex_at: None,
             video_id: None,
             video_lag_shown: false,
+            video_ended: false,
             cal_scale: CalScale::Month,
             cal_week: chrono::Local::now().date_naive(),
             face_picked: HashSet::new(),
@@ -2862,6 +2881,7 @@ impl App {
 
     fn stop_video(&mut self) {
         self.video_lag_shown = false;
+        self.video_ended = false;
         self.video_tex_at = None;
         if let Some(mut p) = self.video.take() {
             p.stop();
@@ -2918,9 +2938,14 @@ impl App {
         }
         if p.is_finished() {
             self.status = "видео доиграло".into();
+            // Доигравший файл сам уступает место следующему (см. `viewer_modal`).
+            self.video_ended = self.viewer.is_some();
             self.video = None;
             self.video_id = None;
             self.video_tex = None;
+            if self.video_ended {
+                ctx.request_repaint();
+            }
             return;
         }
         if p.is_playing() {
@@ -2984,6 +3009,7 @@ impl App {
 
     fn open_viewer(&mut self, file_id: i64) {
         self.stop_video();
+        self.video_ended = false;
         let mut ids = self.viewer_ids();
         if !ids.contains(&file_id) {
             ids.push(file_id);
@@ -3002,6 +3028,19 @@ impl App {
         self.viewer_tex = None;
     }
 
+    /// Смена файла в полноэкранном просмотре.
+    ///
+    /// Видео обязательно останавливается: иначе кадр старого видео остаётся на
+    /// экране поверх нового снимка, и листание выглядит как «ничего не показывает».
+    fn viewer_step(&mut self, v: &mut Viewer, step: i32) {
+        if step == 0 || v.ids.len() <= 1 {
+            return;
+        }
+        self.stop_video();
+        v.idx = (v.idx as i64 + step as i64).rem_euclid(v.ids.len() as i64) as usize;
+        v.last_advance = std::time::Instant::now();
+    }
+
     fn viewer_modal(&mut self, ctx: &egui::Context) {
         let Some(mut v) = self.viewer.take() else {
             return;
@@ -3010,6 +3049,9 @@ impl App {
             return;
         }
         v.idx = v.idx.min(v.ids.len() - 1);
+        // Видео доиграло — показываем следующий файл сами: иначе показ стоит на
+        // последнем кадре, и кажется, что листание не работает.
+        let ended = std::mem::take(&mut self.video_ended);
         let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let mut step = 0i32;
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
@@ -3018,28 +3060,31 @@ impl App {
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
             step = -1;
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
-            v.slideshow = !v.slideshow;
-            v.last_advance = std::time::Instant::now();
+        // Нажатая в тот же кадр стрелка главнее: за один кадр — один шаг.
+        if step == 0 && ended && v.idx + 1 < v.ids.len() {
+            step = 1;
         }
+        self.viewer_step(&mut v, step);
         if v.slideshow
             && v.last_advance.elapsed() >= std::time::Duration::from_secs(v.interval_s)
         {
             let next = v.ids[(v.idx + 1) % v.ids.len()];
-            let ready = self.photo_cache.contains_key(&next)
+            // Видео ждать не нужно: показывается кадр-обложка, полного декода нет.
+            let is_video = self
+                .items
+                .iter()
+                .chain(self.trash_items.iter())
+                .find(|r| r.id == next)
+                .is_some_and(|r| r.kind == "video");
+            let ready = is_video
+                || self.photo_cache.contains_key(&next)
                 || self.viewer_tex.as_ref().is_some_and(|(t, _)| *t == next);
             if ready {
-                step = 1;
-                v.last_advance = std::time::Instant::now();
+                self.viewer_step(&mut v, 1);
             } else {
                 // Не показываем мыло: ждём готовый следующий кадр.
                 self.request_photo(next, true);
             }
-        }
-        if step != 0 && v.ids.len() > 1 {
-            v.idx = (v.idx as i64 + step as i64).rem_euclid(v.ids.len() as i64) as usize;
-            v.last_advance = std::time::Instant::now();
-            self.stop_video();
         }
         let id = v.ids[v.idx];
         let Some(f) = self
@@ -3049,6 +3094,7 @@ impl App {
             .find(|r| r.id == id)
             .cloned()
         else {
+            self.status = "файл не найден в индексе — просмотр закрыт".into();
             return;
         };
         self.request_around(&v.ids, v.idx);
@@ -3093,18 +3139,36 @@ impl App {
         let mut toggle_video = false;
         let mut seek_video: Option<f64> = None;
         let mut volume_video: Option<f32> = None;
+        let mut step_click = 0i32;
         let video_active =
             self.video_id == Some(id) && (self.video.is_some() || self.video_child.is_some());
+        // Пробел — то же, что ▶: у видео пуск/пауза, у снимка слайд-шоу.
+        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+            if f.kind == "video" {
+                if video_active && self.video.is_some() {
+                    toggle_video = true;
+                } else if !video_active {
+                    start_video = true;
+                }
+            } else {
+                v.slideshow = !v.slideshow;
+                v.last_advance = std::time::Instant::now();
+            }
+        }
         if v.slideshow || video_active {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
+        // Кадр плеера принадлежит конкретному файлу: без проверки старое видео
+        // рисуется поверх нового снимка и смена файла не видна.
+        let video_frame = self.video_tex.as_ref().filter(|_| self.video_id == Some(id));
+        let paused = video_active && self.video.as_ref().is_some_and(|p| !p.is_playing());
         let current_full = self.viewer_tex.as_ref().filter(|(t, _)| *t == id);
+        // У видео нет «полного кадра»: там кадр-обложка, а не загрузка.
         let stale = self
             .viewer_tex
             .as_ref()
-            .filter(|(t, _)| *t != id)
+            .filter(|(t, _)| *t != id && f.kind != "video")
             .map(|(_, t)| t);
-        let mut new_idx = v.idx;
         let mut new_zoom = v.zoom;
         let mut new_text = v.show_text;
         let mut new_slideshow = v.slideshow;
@@ -3137,37 +3201,125 @@ impl App {
                 });
             });
             ui.add_space(4.0);
+            // Панель воспроизведения: листание, пуск/пауза, перемотка, звук.
             ui.horizontal_wrapped(|ui| {
-                if ui.button("←").on_hover_text("предыдущий").clicked() {
-                    new_idx = (v.idx + v.ids.len() - 1) % v.ids.len();
+                if icon_button(ui, Icon::Prev, 32.0, "предыдущий файл — ←").clicked() {
+                    step_click = -1;
                 }
-                if ui.button("→").on_hover_text("следующий").clicked() {
-                    new_idx = (v.idx + 1) % v.ids.len();
-                }
-                if ui
-                    .selectable_label(
-                        v.slideshow,
-                        if v.slideshow {
-                            "Стоп слайд-шоу"
+                let playing = video_active && self.video.as_ref().is_some_and(|p| p.is_playing());
+                if f.kind == "video" {
+                    if video_active && self.video.is_none() {
+                        ui.label(
+                            egui::RichText::new("ffplay отдельным окном")
+                                .size(11.0)
+                                .color(DIM),
+                        );
+                    } else if icon_button(
+                        ui,
+                        if playing { Icon::Pause } else { Icon::Play },
+                        32.0,
+                        if video_active {
+                            "пауза и продолжение — пробел"
                         } else {
-                            "Слайд-шоу"
+                            "смотреть видео — пробел"
                         },
                     )
-                    .on_hover_text("пробел — пуск/стоп; листает текущий список")
                     .clicked()
+                    {
+                        if video_active {
+                            toggle_video = true;
+                        } else {
+                            start_video = true;
+                        }
+                    }
+                } else if icon_button(
+                    ui,
+                    if v.slideshow { Icon::Pause } else { Icon::Play },
+                    32.0,
+                    "слайд-шоу — пробел",
+                )
+                .clicked()
                 {
                     new_slideshow = !v.slideshow;
                 }
-                ui.label(egui::RichText::new("интервал:").size(11.0).color(DIM));
-                for secs in [3u64, 5, 10] {
+                if icon_button(ui, Icon::Next, 32.0, "следующий файл — →").clicked() {
+                    step_click = 1;
+                }
+                if f.kind == "video" {
+                    if video_active && let Some(p) = self.video.as_ref() {
+                        let dur = p.duration_s().max(0.001);
+                        let mut pos = p.position_s().min(dur);
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} / {}",
+                                db::duration(pos),
+                                db::duration(dur)
+                            ))
+                            .size(11.0)
+                            .color(DIM),
+                        );
+                        let w = (ui.available_width() - 220.0).max(160.0);
+                        let resp = ui.add_sized(
+                            [w, 18.0],
+                            egui::Slider::new(&mut pos, 0.0..=dur)
+                                .show_value(false)
+                                .trailing_fill(true),
+                        );
+                        if resp.dragged() || resp.clicked() {
+                            seek_video = Some(pos);
+                        }
+                        icon_mark(ui, Icon::Volume, 18.0);
+                        let mut vol = p.volume();
+                        if ui
+                            .add_sized(
+                                [90.0, 18.0],
+                                egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false),
+                            )
+                            .changed()
+                        {
+                            volume_video = Some(vol);
+                        }
+                        if !p.has_audio() {
+                            ui.label(
+                                egui::RichText::new("нет устройства").size(11.0).color(DIM),
+                            );
+                        }
+                    }
+                    if video_active
+                        && ui
+                            .selectable_label(true, "Стоп видео")
+                            .on_hover_text("остановить и вернуться к кадру")
+                            .clicked()
+                    {
+                        stop_video = true;
+                    }
+                } else {
                     if ui
-                        .selectable_label(v.interval_s == secs, format!("{secs} с"))
+                        .selectable_label(
+                            v.slideshow,
+                            if v.slideshow {
+                                "Стоп слайд-шоу"
+                            } else {
+                                "Слайд-шоу"
+                            },
+                        )
+                        .on_hover_text("пробел — пуск/стоп; листает текущий список")
                         .clicked()
                     {
-                        new_interval = secs;
+                        new_slideshow = !v.slideshow;
+                    }
+                    ui.label(egui::RichText::new("интервал:").size(11.0).color(DIM));
+                    for secs in [3u64, 5, 10] {
+                        if ui
+                            .selectable_label(v.interval_s == secs, format!("{secs} с"))
+                            .clicked()
+                        {
+                            new_interval = secs;
+                        }
                     }
                 }
-                ui.separator();
+            });
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("−").on_hover_text("уменьшить").clicked() {
                     new_zoom = (v.zoom - 0.25).max(0.5);
                 }
@@ -3188,88 +3340,32 @@ impl App {
                 {
                     new_text = !v.show_text;
                 }
-                if f.kind == "video" {
-                    if video_active {
-                        let playing = self.video.as_ref().is_some_and(|p| p.is_playing());
-                        if ui
-                            .button(if playing { "Пауза" } else { "Играть" })
-                            .on_hover_text("пробел — пауза и продолжение")
-                            .clicked()
-                        {
-                            toggle_video = true;
-                        }
-                        if ui
-                            .selectable_label(true, "Стоп видео")
-                            .on_hover_text("остановить и вернуться к кадру")
-                            .clicked()
-                        {
-                            stop_video = true;
-                        }
-                    } else if ui
-                        .button("Смотреть видео")
-                        .on_hover_text("в окне приложения, со звуком")
-                        .clicked()
-                    {
-                        start_video = true;
-                    }
-                }
                 if f.kind != "video" && ui.button("В системном просмотрщике").clicked() {
                     open_video = true;
                 }
             });
-            if f.kind == "video"
-                && video_active
-                && let Some(p) = self.video.as_ref()
-            {
-                    let dur = p.duration_s().max(0.001);
-                    let mut pos = p.position_s().min(dur);
-                    ui.horizontal(|ui| {
-                        let t0 = db::duration(pos);
-                        let t1 = db::duration(dur);
-                        ui.label(egui::RichText::new(format!("{t0} / {t1}")).size(11.0).color(DIM));
-                        let w = (ui.available_width() - 190.0).max(160.0);
-                        let resp = ui.add_sized(
-                            [w, 18.0],
-                            egui::Slider::new(&mut pos, 0.0..=dur)
-                                .show_value(false)
-                                .trailing_fill(true),
-                        );
-                        if resp.dragged() || resp.clicked() {
-                            seek_video = Some(pos);
-                        }
-                        ui.label(egui::RichText::new("звук").size(11.0).color(DIM));
-                        let mut vol = p.volume();
-                        if ui
-                            .add_sized([90.0, 18.0], egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
-                            .changed()
-                        {
-                            volume_video = Some(vol);
-                        }
-                        if !p.has_audio() {
-                            ui.label(egui::RichText::new("нет устройства").size(11.0).color(DIM));
-                        }
-                    });
-            }
             ui.separator();
             let avail = ui.available_size();
             let content_h = (avail.y - 8.0).max(120.0);
+            let mut image_resp = None;
             if v.show_text {
                 ui.horizontal(|ui| {
                     let img_w = (avail.x * 0.62).max(160.0);
                     ui.allocate_ui(egui::vec2(img_w, content_h), |ui| {
-                        draw_viewer_image(
+                        image_resp = Some(draw_viewer_image(
                             ui,
                             ViewerTextures {
                                 full: current_full,
                                 preview,
                                 stale,
-                                video: self.video_tex.as_ref(),
+                                video: video_frame,
+                                paused,
                             },
                             &f,
                             v.zoom,
                             img_w,
                             content_h,
-                        );
+                        ));
                     });
                     ui.separator();
                     egui::ScrollArea::vertical()
@@ -3292,27 +3388,38 @@ impl App {
                         });
                 });
             } else {
-                draw_viewer_image(
+                image_resp = Some(draw_viewer_image(
                     ui,
                     ViewerTextures {
                         full: current_full,
                         preview,
                         stale,
-                        video: self.video_tex.as_ref(),
+                        video: video_frame,
+                        paused,
                     },
                     &f,
                     v.zoom,
                     avail.x,
                     content_h,
-                );
+                ));
+            }
+            // Клик по кадру видео — как большая кнопка ▶: пуск или пауза.
+            if f.kind == "video" && image_resp.is_some_and(|r| r.clicked()) {
+                if video_active {
+                    toggle_video = true;
+                } else {
+                    start_video = true;
+                }
             }
         });
         if resp.backdrop_response.clicked() {
             close = true;
         }
-        v.idx = new_idx;
         v.zoom = new_zoom;
         v.show_text = new_text;
+        if v.slideshow != new_slideshow {
+            v.last_advance = std::time::Instant::now();
+        }
         v.slideshow = new_slideshow;
         v.interval_s = new_interval;
         if open_video {
@@ -3337,6 +3444,11 @@ impl App {
         }
         if start_video {
             self.start_video_playback(&f);
+        }
+        // Кнопки ←/→ листают после отрисовки: кадр нового файла — следующим кадром.
+        if step_click != 0 {
+            self.viewer_step(&mut v, step_click);
+            ctx.request_repaint();
         }
         if close {
             self.stop_video();
@@ -4067,8 +4179,148 @@ fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     job
 }
 
+/// Значок панели воспроизведения. Фигуры рисует painter, а не шрифт: эмодзи в
+/// интерфейсе запрещены, а «▶» и «‖» в разных шрифтах разной ширины и высоты.
+#[derive(Clone, Copy)]
+enum Icon {
+    Prev,
+    Next,
+    Play,
+    Pause,
+    Volume,
+}
+
+/// Кнопка-иконка панели воспроизведения: 32 px, подсказка обязательна.
+fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    let resp = resp
+        .on_hover_text(hint)
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let visuals = ui.style().interact(&resp);
+    ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
+    paint_icon(ui.painter(), rect.center(), size * 0.30, icon, visuals.fg_stroke.color);
+    resp
+}
+
+/// Значок без действия — подпись рядом с ползунком (звук).
+fn icon_mark(ui: &mut egui::Ui, icon: Icon, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    paint_icon(
+        ui.painter(),
+        rect.center(),
+        size * 0.30,
+        icon,
+        ui.visuals().text_color(),
+    );
+}
+
+/// Геометрия значка: `s` — половина высоты фигуры, `c` — её центр.
+fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui::Color32) {
+    match icon {
+        Icon::Play => {
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(c.x - s * 0.7, c.y - s),
+                    egui::pos2(c.x - s * 0.7, c.y + s),
+                    egui::pos2(c.x + s, c.y),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+        }
+        Icon::Pause => {
+            let w = s * 0.44;
+            for dx in [-s * 0.42, s * 0.42] {
+                p.rect_filled(
+                    egui::Rect::from_center_size(
+                        egui::pos2(c.x + dx, c.y),
+                        egui::vec2(w, s * 2.0),
+                    ),
+                    1.0,
+                    color,
+                );
+            }
+        }
+        Icon::Prev | Icon::Next => {
+            let dir = if matches!(icon, Icon::Next) { 1.0 } else { -1.0 };
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(c.x - dir * s * 0.9, c.y - s),
+                    egui::pos2(c.x - dir * s * 0.9, c.y + s),
+                    egui::pos2(c.x + dir * s * 0.4, c.y),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+            p.rect_filled(
+                egui::Rect::from_center_size(
+                    egui::pos2(c.x + dir * s * 0.95, c.y),
+                    egui::vec2(s * 0.36, s * 2.0),
+                ),
+                1.0,
+                color,
+            );
+        }
+        Icon::Volume => {
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(c.x - s, c.y - s * 0.35),
+                    egui::pos2(c.x - s * 0.5, c.y - s * 0.35),
+                    egui::pos2(c.x - s * 0.05, c.y - s),
+                    egui::pos2(c.x - s * 0.05, c.y + s),
+                    egui::pos2(c.x - s * 0.5, c.y + s * 0.35),
+                    egui::pos2(c.x - s, c.y + s * 0.35),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+            p.add(egui::Shape::line(
+                vec![
+                    egui::pos2(c.x + s * 0.2, c.y - s * 0.5),
+                    egui::pos2(c.x + s * 0.6, c.y),
+                    egui::pos2(c.x + s * 0.2, c.y + s * 0.5),
+                ],
+                egui::Stroke::new(1.5, color),
+            ));
+        }
+    }
+}
+
+/// Большая кнопка воспроизведения по центру кадра видео: до запуска видно, что
+/// это видео, а не снимок, и один клик запускает его.
+fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect) {
+    let center = area.center();
+    let p = ui.painter();
+    let plate = egui::Rect::from_center_size(center, egui::vec2(76.0, 76.0));
+    p.rect_filled(plate, 4.0, egui::Color32::from_black_alpha(150));
+    p.rect_stroke(
+        plate,
+        4.0,
+        egui::Stroke::new(2.0, egui::Color32::from_gray(235)),
+        egui::StrokeKind::Inside,
+    );
+    paint_icon(
+        p,
+        center + egui::vec2(2.0, 0.0),
+        20.0,
+        Icon::Play,
+        egui::Color32::from_gray(235),
+    );
+    // Подпись на подложке: поверх светлого кадра текст иначе не читается.
+    let galley = p.layout_no_wrap(
+        "видео · нажмите ▶, чтобы смотреть".into(),
+        egui::FontId::proportional(12.0),
+        egui::Color32::from_gray(235),
+    );
+    let pos = egui::pos2(area.left() + 8.0, area.bottom() - 8.0 - galley.size().y);
+    let bg = egui::Rect::from_min_size(pos, galley.size()).expand2(egui::vec2(4.0, 2.0));
+    p.rect_filled(bg, 4.0, egui::Color32::from_black_alpha(130));
+    p.galley(pos, galley, egui::Color32::from_gray(235));
+}
+
 /// Один способ нарисовать кадр в полноэкранном просмотре: 100% = вписать,
 /// больше — увеличить и обрезать по области (прокрутка колесом не листает файл).
+/// Возвращает отклик области кадра: клик по видео — пуск или пауза.
 fn draw_viewer_image(
     ui: &mut egui::Ui,
     tex: ViewerTextures<'_>,
@@ -4076,8 +4328,13 @@ fn draw_viewer_image(
     zoom: f32,
     w: f32,
     h: f32,
-) {
-    let (area, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+) -> egui::Response {
+    let (area, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+    let resp = if f.kind == "video" {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    };
     ui.painter()
         .rect_filled(area, 4.0, ui.visuals().extreme_bg_color);
     if let Some(t) = tex.video {
@@ -4089,7 +4346,10 @@ fn draw_viewer_image(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
-        return;
+        if tex.paused {
+            paint_play_overlay(ui, area);
+        }
+        return resp;
     }
     if let Some((tid, t)) = tex.full
         && *tid == f.id
@@ -4133,26 +4393,29 @@ fn draw_viewer_image(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::from_gray(230),
         );
-        ui.painter().text(
-            egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
-            egui::Align2::LEFT_BOTTOM,
-            "полный кадр загружается…",
-            egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(235),
-        );
-    } else {
+        // У видео «полного кадра» не бывает: это кадр-обложка, ждать нечего.
+        if f.kind != "video" {
+            ui.painter().text(
+                egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
+                egui::Align2::LEFT_BOTTOM,
+                "полный кадр загружается…",
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_gray(235),
+            );
+        }
+    } else if f.kind != "video" {
         ui.painter().text(
             area.center(),
             egui::Align2::CENTER_CENTER,
-            if f.kind == "video" {
-                "кадр-обложка не создана — нажмите «Смотреть видео» или проиндексируйте каталог"
-            } else {
-                "полный кадр загружается…"
-            },
+            "полный кадр загружается…",
             egui::FontId::proportional(14.0),
             DIM,
         );
     }
+    if f.kind == "video" {
+        paint_play_overlay(ui, area);
+    }
+    resp
 }
 
 fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow) {
@@ -4728,17 +4991,43 @@ impl eframe::App for App {
                             .map(|d| d.chars().take(7).collect())
                             .collect();
 
-                        // Градация: год → месяц → неделя. Один клик по месяцу/дню меняет масштаб.
+                        // Слои календаря: год → месяц → неделя → день. Вкладки возвращают наверх,
+                        // двойной клик по ячейке проваливает на слой ниже.
                         ui.horizontal(|ui| {
                             for (scale, label) in [
                                 (CalScale::Year, "Год"),
                                 (CalScale::Month, "Месяц"),
                                 (CalScale::Week, "Неделя"),
+                                (CalScale::Day, "День"),
                             ] {
                                 if ui
                                     .selectable_label(cal_scale == scale, label)
                                     .clicked()
                                 {
+                                    // Выбранный день — точка опоры: месяц и неделя
+                                    // открываются там, где он лежит.
+                                    if let Some(d) = cal_day.as_deref().and_then(parse_date) {
+                                        cal_year = d.year();
+                                        cal_month = d.month();
+                                        cal_week = monday_of(d);
+                                    }
+                                    // В «День» без выбранного дня показываем сегодняшний,
+                                    // если он в открытом месяце, иначе первое число.
+                                    if scale == CalScale::Day && cal_day.is_none() {
+                                        let today = chrono::Local::now().date_naive();
+                                        let d = if today.year() == cal_year
+                                            && today.month() == cal_month
+                                        {
+                                            today
+                                        } else {
+                                            chrono::NaiveDate::from_ymd_opt(
+                                                cal_year, cal_month, 1,
+                                            )
+                                            .unwrap_or(today)
+                                        };
+                                        cal_day = Some(d.format("%Y-%m-%d").to_string());
+                                        cal_week = monday_of(d);
+                                    }
                                     cal_scale = scale;
                                 }
                             }
@@ -4747,7 +5036,12 @@ impl eframe::App for App {
                                 cal_year = today.year();
                                 cal_month = today.month();
                                 cal_week = monday_of(today);
-                                cal_day = None;
+                                // На слое «День» сегодня — выбор, а не сброс.
+                                cal_day = if cal_scale == CalScale::Day {
+                                    Some(today.format("%Y-%m-%d").to_string())
+                                } else {
+                                    None
+                                };
                                 if cal_scale == CalScale::Year {
                                     cal_scale = CalScale::Month;
                                 }
@@ -4756,30 +5050,28 @@ impl eframe::App for App {
 
                         let mut nav = 0i32;
                         ui.horizontal(|ui| {
-                            let prev_label = if cal_scale == CalScale::Year {
-                                "предыдущий год"
-                            } else if cal_scale == CalScale::Week {
-                                "предыдущая неделя"
-                            } else {
-                                "предыдущий месяц с файлами"
+                            let prev_label = match cal_scale {
+                                CalScale::Year => "предыдущий год",
+                                CalScale::Month => "предыдущий месяц с файлами",
+                                CalScale::Week => "предыдущая неделя",
+                                CalScale::Day => "предыдущий день",
                             };
-                            let next_label = if cal_scale == CalScale::Year {
-                                "следующий год"
-                            } else if cal_scale == CalScale::Week {
-                                "следующая неделя"
-                            } else {
-                                "следующий месяц с файлами"
+                            let next_label = match cal_scale {
+                                CalScale::Year => "следующий год",
+                                CalScale::Month => "следующий месяц с файлами",
+                                CalScale::Week => "следующая неделя",
+                                CalScale::Day => "следующий день",
                             };
                             let prev_enabled = match cal_scale {
                                 CalScale::Year => cal_year > 1900,
-                                CalScale::Week => true,
+                                CalScale::Week | CalScale::Day => true,
                                 CalScale::Month => {
                                     shift_to_file_month(&months, cal_year, cal_month, -1).is_some()
                                 }
                             };
                             let next_enabled = match cal_scale {
                                 CalScale::Year => cal_year < 2199,
-                                CalScale::Week => true,
+                                CalScale::Week | CalScale::Day => true,
                                 CalScale::Month => {
                                     shift_to_file_month(&months, cal_year, cal_month, 1).is_some()
                                 }
@@ -4806,6 +5098,18 @@ impl eframe::App for App {
                                         end.format("%d.%m.%Y")
                                     )
                                 }
+                                CalScale::Day => cal_day
+                                    .as_deref()
+                                    .and_then(parse_date)
+                                    .map(|d| {
+                                        format!(
+                                            "{}, {}",
+                                            WEEKDAYS
+                                                [d.weekday().num_days_from_monday() as usize],
+                                            d.format("%d.%m.%Y")
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "день не выбран".into()),
                             };
                             ui.heading(title);
                             if ui
@@ -4840,6 +5144,17 @@ impl eframe::App for App {
                                     cal_month = cal_week.month();
                                     cal_day = None;
                                 }
+                                CalScale::Day => {
+                                    let d = cal_day
+                                        .as_deref()
+                                        .and_then(parse_date)
+                                        .unwrap_or_else(|| chrono::Local::now().date_naive());
+                                    let d = d + chrono::Duration::days(nav as i64);
+                                    cal_day = Some(d.format("%Y-%m-%d").to_string());
+                                    cal_week = monday_of(d);
+                                    cal_year = d.year();
+                                    cal_month = d.month();
+                                }
                             }
                         }
 
@@ -4860,11 +5175,22 @@ impl eframe::App for App {
                                                 egui::vec2(cell_w, 92.0),
                                                 egui::Sense::click(),
                                             );
+                                            let resp = resp
+                                                .on_hover_text("двойной клик — открыть месяц");
                                             if ui.is_rect_visible(rect) {
+                                                let selected = cal_month == m;
+                                                let fill = if selected {
+                                                    ui.visuals()
+                                                        .selection
+                                                        .bg_fill
+                                                        .gamma_multiply(0.25)
+                                                } else {
+                                                    ui.visuals().faint_bg_color
+                                                };
                                                 ui.painter().rect_filled(
                                                     rect.shrink(1.0),
                                                     4.0,
-                                                    ui.visuals().faint_bg_color,
+                                                    fill,
                                                 );
                                                 ui.painter().text(
                                                     rect.left_top() + egui::vec2(8.0, 6.0),
@@ -4908,9 +5234,14 @@ impl eframe::App for App {
                                                     }
                                                 }
                                             }
-                                            if resp.clicked() {
+                                            if resp.double_clicked() {
                                                 cal_month = m;
-                                                cal_scale = CalScale::Month;
+                                                cal_day = None;
+                                                if let Some(next) = cal_scale.deeper() {
+                                                    cal_scale = next;
+                                                }
+                                            } else if resp.clicked() {
+                                                cal_month = m;
                                                 cal_day = None;
                                             }
                                         }
@@ -4997,6 +5328,8 @@ impl eframe::App for App {
                                                 egui::vec2(cell_w, cell_h),
                                                 egui::Sense::click(),
                                             );
+                                            let resp = resp
+                                                .on_hover_text("двойной клик — открыть неделю");
                                             if ui.is_rect_visible(rect) {
                                                 let selected = cal_day.as_deref()
                                                     == Some(date.as_str());
@@ -5074,7 +5407,17 @@ impl eframe::App for App {
                                                     }
                                                 }
                                             }
-                                            if resp.clicked() {
+                                            if resp.double_clicked() {
+                                                cal_day = Some(date.clone());
+                                                if let Some(d) = parse_date(&date) {
+                                                    cal_week = monday_of(d);
+                                                    cal_year = d.year();
+                                                    cal_month = d.month();
+                                                }
+                                                if let Some(next) = cal_scale.deeper() {
+                                                    cal_scale = next;
+                                                }
+                                            } else if resp.clicked() {
                                                 cal_day = Some(date.clone());
                                                 if let Some(d) = parse_date(&date) {
                                                     cal_week = monday_of(d);
@@ -5101,6 +5444,8 @@ impl eframe::App for App {
                                             egui::vec2(cell_w, cell_h),
                                             egui::Sense::click(),
                                         );
+                                        let resp = resp
+                                            .on_hover_text("двойной клик — открыть день");
                                         if ui.is_rect_visible(rect) {
                                             let selected = cal_day.as_deref()
                                                 == Some(key.as_str());
@@ -5185,7 +5530,15 @@ impl eframe::App for App {
                                                 }
                                             }
                                         }
-                                        if resp.clicked() {
+                                        if resp.double_clicked() {
+                                            cal_day = Some(key.clone());
+                                            cal_year = date.year();
+                                            cal_month = date.month();
+                                            cal_week = monday_of(date);
+                                            if let Some(next) = cal_scale.deeper() {
+                                                cal_scale = next;
+                                            }
+                                        } else if resp.clicked() {
                                             cal_day = Some(key.clone());
                                             cal_year = date.year();
                                             cal_month = date.month();
@@ -5193,30 +5546,62 @@ impl eframe::App for App {
                                     }
                                 });
                             }
-                        }
-                        ui.separator();
-                        if let Some(day) = &cal_day {
-                            match by_day.get(day) {
-                                Some(idxs) => {
-                                    let bytes: i64 =
-                                        idxs.iter().map(|&i| items[i].size).sum();
-                                    ui.heading(format!(
-                                        "{day} — {} файлов, {}",
-                                        idxs.len(),
-                                        db::human(bytes)
-                                    ));
-                                    ui.horizontal_wrapped(|ui| {
-                                        for &i in idxs {
-                                            draw_cell(ui, ctx, &mut cells, &items[i]);
-                                        }
-                                    });
-                                }
-                                None => {
-                                    ui.label("В этот день файлов нет.");
+                            CalScale::Day => {
+                                ui.add_space(4.0);
+                                let day = cal_day.clone().unwrap_or_else(|| {
+                                    chrono::Local::now()
+                                        .date_naive()
+                                        .format("%Y-%m-%d")
+                                        .to_string()
+                                });
+                                match by_day.get(&day) {
+                                    Some(idxs) if !idxs.is_empty() => {
+                                        let bytes: i64 =
+                                            idxs.iter().map(|&i| items[i].size).sum();
+                                        ui.heading(format!(
+                                            "{} файлов, {}",
+                                            idxs.len(),
+                                            db::human(bytes)
+                                        ));
+                                        ui.horizontal_wrapped(|ui| {
+                                            for &i in idxs {
+                                                draw_cell(ui, ctx, &mut cells, &items[i]);
+                                            }
+                                        });
+                                    }
+                                    _ => {
+                                        ui.label("В этот день файлов нет.");
+                                    }
                                 }
                             }
-                        } else {
-                            ui.label("Выберите день в календаре — ниже появятся снимки.");
+                        }
+                        if cal_scale != CalScale::Day {
+                            ui.separator();
+                            if let Some(day) = &cal_day {
+                                match by_day.get(day) {
+                                    Some(idxs) => {
+                                        let bytes: i64 =
+                                            idxs.iter().map(|&i| items[i].size).sum();
+                                        ui.heading(format!(
+                                            "{day} — {} файлов, {}",
+                                            idxs.len(),
+                                            db::human(bytes)
+                                        ));
+                                        ui.horizontal_wrapped(|ui| {
+                                            for &i in idxs {
+                                                draw_cell(ui, ctx, &mut cells, &items[i]);
+                                            }
+                                        });
+                                    }
+                                    None => {
+                                        ui.label("В этот день файлов нет.");
+                                    }
+                                }
+                            } else {
+                                ui.label(
+                                    "Выберите день в календаре — ниже появятся снимки.",
+                                );
+                            }
                         }
                         if let Some(idxs) = by_day.get("без даты") {
                             ui.separator();
@@ -5571,10 +5956,199 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        days_in_month, first_weekday_monday, fit_rect, monday_of, nearest_file_month, parse_date,
-        shift_month, shift_to_file_month,
+        App, CalScale, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
+        nearest_file_month, parse_date, shift_month, shift_to_file_month,
     };
     use std::collections::BTreeSet;
+
+    fn file_row(id: i64, kind: &str, name: &str) -> db::FileRow {
+        db::FileRow {
+            id,
+            path: format!("/tmp/{name}"),
+            size: 1,
+            mtime: 0,
+            sha256: String::new(),
+            kind: kind.into(),
+            width: 320,
+            height: 240,
+            taken_at: Some("2024-05-01T10:00".into()),
+            taken_src: "exif".into(),
+            lat: None,
+            lon: None,
+            camera: None,
+            dhash: None,
+            sharpness: None,
+            duration_s: (kind == "video").then_some(22.0),
+            thumb: None,
+            decision: None,
+            trashed_at: None,
+        }
+    }
+
+    /// Один кадр полноэкранного просмотра без окна: возвращает весь нарисованный текст.
+    /// Единственный способ проверить «листание показывает следующий файл» без GUI.
+    fn viewer_frame(
+        app: &mut App,
+        ctx: &egui::Context,
+        key: Option<egui::Key>,
+    ) -> Vec<String> {
+        fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                egui::Shape::Vec(v) => {
+                    for s in v {
+                        collect(s, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let raw = |key: Option<egui::Key>| {
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1240.0, 840.0),
+                )),
+                ..Default::default()
+            };
+            if let Some(key) = key {
+                raw.events.push(egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Default::default(),
+                });
+            }
+            raw
+        };
+        // Модальное окно (anchored area) на первом кадре ещё не знает своего размера
+        // и рисует только фон. Поэтому кадр прогоняется дважды: событие — в первый,
+        // готовые фигуры — из второго.
+        let first = ctx.run_ui(raw(key), |ui| {
+            let ctx = ui.ctx().clone();
+            app.viewer_modal(&ctx);
+        });
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(None), |ui| {
+            let ctx = ui.ctx().clone();
+            app.viewer_modal(&ctx);
+        });
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    fn viewer_with(ids: Vec<i64>, idx: usize) -> Viewer {
+        Viewer {
+            ids,
+            idx,
+            zoom: 1.0,
+            show_text: false,
+            slideshow: false,
+            interval_s: 3,
+            last_advance: std::time::Instant::now(),
+        }
+    }
+
+    /// Листание в полном экране обязано менять файл в ту же секунду, а видео —
+    /// останавливаться. Иначе кадр старого видео рисуется поверх нового файла.
+    #[test]
+    fn листание_идёт_по_кругу_и_сбрасывает_таймер_слайдшоу() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        let mut v = viewer_with(vec![7, 8, 9], 0);
+        app.viewer_step(&mut v, 1);
+        assert_eq!(v.idx, 1);
+        app.viewer_step(&mut v, 1);
+        assert_eq!(v.idx, 2);
+        app.viewer_step(&mut v, 1);
+        assert_eq!(v.idx, 0, "последний файл уступает первому, как в слайд-шоу");
+        app.viewer_step(&mut v, -1);
+        assert_eq!(v.idx, 2);
+        assert!(v.last_advance.elapsed() < std::time::Duration::from_millis(100));
+    }
+
+    /// Смена файла останавливает плеер: без этого `video_id` остаётся от старого
+    /// кадра, и `poll_video` продолжает рисовать его поверх нового снимка.
+    #[test]
+    fn смена_файла_останавливает_видео() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        app.video_id = Some(7);
+        let mut v = viewer_with(vec![7, 8], 0);
+        app.viewer_step(&mut v, 1);
+        assert_eq!(app.video_id, None);
+        assert_eq!(v.idx, 1);
+    }
+
+    /// Владелец: «листание вперёд-назад ничего не показывает». Видео должно
+    /// показываться кадром-обложкой с кнопкой ▶, а стрелка — открывать следующий файл.
+    #[test]
+    fn просмотр_видео_рисует_кнопку_и_листается_стрелкой() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        app.items = vec![
+            file_row(1, "image", "a.jpg"),
+            file_row(2, "video", "b.mp4"),
+            file_row(3, "image", "c.jpg"),
+        ];
+        app.open_viewer(2);
+        let ctx = egui::Context::default();
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts.iter().any(|t| t.contains("нажмите ▶")),
+            "на кадре видео должна быть большая кнопка ▶: {texts:?}"
+        );
+        let texts = viewer_frame(&mut app, &ctx, Some(egui::Key::ArrowRight));
+        assert_eq!(app.viewer.as_ref().expect("просмотр открыт").idx, 2);
+        assert!(
+            texts.iter().any(|t| t == "c.jpg"),
+            "в заголовке должен быть следующий файл: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("нажмите ▶")),
+            "на снимке нет кнопки ▶: {texts:?}"
+        );
+    }
+
+    /// Прошлый снимок держится на экране, пока грузится следующий кадр. У видео
+    /// «следующего кадра» нет — иначе после листания на видео оставался старый снимок,
+    /// а владелец видел «ничего не показывает».
+    #[test]
+    fn переход_на_видео_не_оставляет_прошлый_снимок() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        app.items = vec![file_row(1, "image", "a.jpg"), file_row(2, "video", "b.mp4")];
+        app.open_viewer(1);
+        let ctx = egui::Context::default();
+        let prev = ctx.load_texture(
+            "prev",
+            egui::ColorImage::from_rgba_unmultiplied([2, 2], &[200u8; 16]),
+            egui::TextureOptions::LINEAR,
+        );
+        app.viewer_tex = Some((1, prev));
+        let texts = viewer_frame(&mut app, &ctx, Some(egui::Key::ArrowRight));
+        assert!(
+            texts.iter().any(|t| t == "b.mp4"),
+            "должен открыться следующий файл: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("загрузка следующего кадра")),
+            "кадр прошлого снимка не должен оставаться на видео: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("нажмите ▶")),
+            "на видео должна быть кнопка ▶: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn листание_одного_файла_ничего_не_делает() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        let mut v = viewer_with(vec![7], 0);
+        app.viewer_step(&mut v, 1);
+        assert_eq!(v.idx, 0);
+    }
 
     fn bounds() -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(150.0, 150.0))
@@ -5660,4 +6234,13 @@ mod tests {
         assert_eq!(first_weekday_monday(2024, 1), 0); // 1 января 2024 — понедельник
         assert_eq!(first_weekday_monday(2024, 5), 2); // 1 мая 2024 — среда
     }
+
+    #[test]
+    fn календарь_проваливается_до_дня() {
+        assert_eq!(CalScale::Year.deeper(), Some(CalScale::Month));
+        assert_eq!(CalScale::Month.deeper(), Some(CalScale::Week));
+        assert_eq!(CalScale::Week.deeper(), Some(CalScale::Day));
+        assert_eq!(CalScale::Day.deeper(), None);
+    }
+
 }
