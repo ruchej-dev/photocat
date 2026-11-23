@@ -171,6 +171,19 @@ const EN_MONTHS: [&str; 12] = [
     "December",
 ];
 
+/// Короткое название дня недели (0 — понедельник): календарь берёт его здесь.
+/// Неделя начинается с понедельника и на обоих языках.
+pub fn weekday(lang: Lang, day: usize) -> &'static str {
+    let i = day.min(6);
+    match lang {
+        Lang::En => EN_WEEKDAYS[i],
+        Lang::Ru => RU_WEEKDAYS[i],
+    }
+}
+
+const RU_WEEKDAYS: [&str; 7] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const EN_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 /// «найдено 4 из 10» / «found 4 of 10».
 pub fn found(lang: Lang, shown: usize, total: usize) -> String {
     match lang {
@@ -406,6 +419,31 @@ const PAIRS: &[(&str, &str)] = &[
     ("решение не сохранено", "decision not saved"),
     ("лишний", "spare"),
     ("оставить", "keep"),
+    // --- календарь --------------------------------------------------------------
+    ("Год", "Year"),
+    ("Месяц", "Month"),
+    ("Неделя", "Week"),
+    ("День", "Day"),
+    ("Сегодня", "Today"),
+    ("предыдущий год", "previous year"),
+    ("следующий год", "next year"),
+    ("предыдущий месяц с файлами", "previous month with files"),
+    ("следующий месяц с файлами", "next month with files"),
+    ("предыдущая неделя", "previous week"),
+    ("следующая неделя", "next week"),
+    ("предыдущий день", "previous day"),
+    ("следующий день", "next day"),
+    ("день не выбран", "no day selected"),
+    ("двойной клик — открыть месяц", "double-click to open the month"),
+    ("двойной клик — открыть неделю", "double-click to open the week"),
+    ("двойной клик — открыть день", "double-click to open the day"),
+    ("В этом месяце файлов нет.", "No files in this month."),
+    ("В этот день файлов нет.", "No files on this day."),
+    ("Перейти к", "Go to"),
+    (
+        "Выберите день в календаре — ниже появятся снимки.",
+        "Pick a day in the calendar — its photos appear below.",
+    ),
     // --- диалог «Настройки» ----------------------------------------------------
     ("Модель ИИ", "AI model"),
     ("Индексация и дубли", "Indexing & duplicates"),
@@ -487,6 +525,16 @@ mod tests {
         assert_eq!(month_name(Lang::En, 12), "December");
         assert_eq!(month_name(Lang::Ru, 0), "январь");
         assert_eq!(month_name(Lang::Ru, 99), "декабрь");
+    }
+
+    #[test]
+    fn дни_недели_на_двух_языках() {
+        assert_eq!(weekday(Lang::En, 0), "Mon");
+        assert_eq!(weekday(Lang::En, 6), "Sun");
+        assert_eq!(weekday(Lang::Ru, 0), "Пн");
+        assert_eq!(weekday(Lang::Ru, 6), "Вс");
+        // Вне диапазона — воскресенье, а не паника.
+        assert_eq!(weekday(Lang::Ru, 9), "Вс");
     }
 
     #[test]

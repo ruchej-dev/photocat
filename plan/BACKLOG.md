@@ -775,3 +775,6 @@ tests include a headless English card frame; `check.sh` 44/0.
 M21.4a: the duplicates screen is translated (threshold, `Find groups`, summary, plan export/copy,
 group header, `decision`/`advice`, tile labels `spare`/`keep`) — `cargo test` 187 tests include a
 headless English duplicates frame; `check.sh` 44/0.
+M21.4b: the calendar is translated (scale tabs, `Today`, navigation hints, month summary, empty
+notes, day headings, `No date`); month and weekday names moved into `i18n` — `cargo test` 189 tests
+include a headless English calendar frame and a weekday test; `check.sh` 44/0.

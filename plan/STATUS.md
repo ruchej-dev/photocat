@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen) → next:M21.4b (calendar, then faces, trash, integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar) → next:M21.4c (faces, then trash, integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1152,3 +1152,26 @@ from the `dupes` module: they are data of the report and move with the CLI repor
 
 **Next.** M21.4b: the calendar (scale tabs, month and weekday names in `i18n`, day headers,
 navigation hints, the `no date` group).
+
+## M21.4b — the calendar in English (2026-11-24)
+
+The calendar was the second content screen: the scale tabs, the month grid and the day list spoke
+Russian under an English interface, and month and weekday names lived in `app` as a Russian table.
+
+**What moved.** The four scale tabs (`Year`, `Month`, `Week`, `Day`), `Today`, the
+previous/next hints per scale, the month summary (`3 files this month, 1 KiB`), the empty-month and
+empty-day notes, `Go to 2024-05`, the day headings and the `No date` collapsing group all go through
+`t()`; sizes go through `db::human_in`. Month names now come from `i18n::month_name` instead of the
+`MONTHS` table, and the new `i18n::weekday(lang, 0..6)` replaces the `WEEKDAYS` table for both the
+weekday header row and the day/week titles — Monday first on both languages. Both old constants are
+gone; a weekday index out of range gives Sunday instead of a panic. The `без даты` string stays in
+the day map as a key only: keys are data, labels go through `t()`.
+
+**Checks.** `cargo test` — 189 passed, 6 `#[ignore]` (new:
+`the_english_language_translates_the_calendar` — a headless calendar frame with `Year`, `Month`,
+`Week`, `Day`, `Today`, `May 2024`, `Mon`, `Sun`, `1 file this month`, and no `Год`/`Месяц`/`Пн`/
+`Сегодня` left; plus `weekdays_in_both_languages` for the table); `cargo clippy --all-targets` clean;
+`check.sh` — 44 checks, 0 violations.
+
+**Next.** M21.4c: the faces screen (threshold, scan/recluster, the group list, face tiles with
+`not him`/`pick`, the name and batch-assign fields).

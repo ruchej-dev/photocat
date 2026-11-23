@@ -7186,22 +7186,6 @@ fn paint_thumb(
     }
 }
 
-const MONTHS: [&str; 12] = [
-    "январь",
-    "февраль",
-    "март",
-    "апрель",
-    "май",
-    "июнь",
-    "июль",
-    "август",
-    "сентябрь",
-    "октябрь",
-    "ноябрь",
-    "декабрь",
-];
-const WEEKDAYS: [&str; 7] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-
 fn shift_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
     let m = month as i32 - 1 + delta;
     let y = year + m.div_euclid(12);
@@ -8741,7 +8725,7 @@ impl eframe::App for App {
                                 (CalScale::Day, "День"),
                             ] {
                                 if ui
-                                    .selectable_label(cal_scale == scale, label)
+                                    .selectable_label(cal_scale == scale, t(lang, label))
                                     .clicked()
                                 {
                                     // Выбранный день — точка опоры: месяц и неделя
@@ -8771,7 +8755,7 @@ impl eframe::App for App {
                                     cal_scale = scale;
                                 }
                             }
-                            if ui.button("Сегодня").clicked() {
+                            if ui.button(t(lang, "Сегодня")).clicked() {
                                 let today = chrono::Local::now().date_naive();
                                 cal_year = today.year();
                                 cal_month = today.month();
@@ -8818,7 +8802,7 @@ impl eframe::App for App {
                             };
                             if ui
                                 .add_enabled(prev_enabled, egui::Button::new("←"))
-                                .on_hover_text(prev_label)
+                                .on_hover_text(t(lang, prev_label))
                                 .clicked()
                             {
                                 nav = -1;
@@ -8827,7 +8811,7 @@ impl eframe::App for App {
                                 CalScale::Year => format!("{cal_year}"),
                                 CalScale::Month => format!(
                                     "{} {}",
-                                    MONTHS[(cal_month.clamp(1, 12) - 1) as usize],
+                                    i18n::month_name(lang, cal_month as usize),
                                     cal_year
                                 ),
                                 CalScale::Week => {
@@ -8844,17 +8828,19 @@ impl eframe::App for App {
                                     .map(|d| {
                                         format!(
                                             "{}, {}",
-                                            WEEKDAYS
-                                                [d.weekday().num_days_from_monday() as usize],
+                                            i18n::weekday(
+                                                lang,
+                                                d.weekday().num_days_from_monday() as usize
+                                            ),
                                             d.format("%d.%m.%Y")
                                         )
                                     })
-                                    .unwrap_or_else(|| "день не выбран".into()),
+                                    .unwrap_or_else(|| t(lang, "день не выбран").to_string()),
                             };
                             ui.heading(title);
                             if ui
                                 .add_enabled(next_enabled, egui::Button::new("→"))
-                                .on_hover_text(next_label)
+                                .on_hover_text(t(lang, next_label))
                                 .clicked()
                             {
                                 nav = 1;
@@ -8916,7 +8902,7 @@ impl eframe::App for App {
                                                 egui::Sense::click(),
                                             );
                                             let resp = resp
-                                                .on_hover_text("двойной клик — открыть месяц");
+                                                .on_hover_text(t(lang, "двойной клик — открыть месяц"));
                                             if ui.is_rect_visible(rect) {
                                                 let selected = cal_month == m;
                                                 let fill = if selected {
@@ -8935,7 +8921,7 @@ impl eframe::App for App {
                                                 ui.painter().text(
                                                     rect.left_top() + egui::vec2(8.0, 6.0),
                                                     egui::Align2::LEFT_TOP,
-                                                    MONTHS[(m - 1) as usize],
+                                                    i18n::month_name(lang, m as usize),
                                                     egui::FontId::proportional(13.0),
                                                     egui::Color32::from_gray(190),
                                                 );
@@ -9002,19 +8988,31 @@ impl eframe::App for App {
                                     .flat_map(|(_, v)| v.iter())
                                     .map(|&i| items[i].size)
                                     .sum();
-                                ui.label(format!(
-                                    "{month_n} файлов за месяц, {}",
-                                    db::human(month_bytes)
-                                ));
+                                ui.label(match lang {
+                                    i18n::Lang::En => format!(
+                                        "{} this month, {}",
+                                        files_n(month_n),
+                                        db::human_in(lang, month_bytes)
+                                    ),
+                                    i18n::Lang::Ru => format!(
+                                        "{month_n} файлов за месяц, {}",
+                                        db::human(month_bytes)
+                                    ),
+                                });
                                 if month_n == 0 {
                                     ui.add_space(12.0);
-                                    ui.label("В этом месяце файлов нет.");
+                                    ui.label(t(lang, "В этом месяце файлов нет."));
                                     if let Some(last) = months.iter().next_back()
                                         && let (Some(y), Some(m)) =
                                             (last.get(0..4), last.get(5..7))
                                         && let (Ok(y), Ok(m)) =
                                             (y.parse::<i32>(), m.parse::<u32>())
-                                        && ui.button(format!("Перейти к {last}")).clicked()
+                                        && ui
+                                            .button(format!(
+                                                "{} {last}",
+                                                t(lang, "Перейти к")
+                                            ))
+                                            .clicked()
                                     {
                                         cal_year = y;
                                         cal_month = m;
@@ -9027,12 +9025,15 @@ impl eframe::App for App {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
                                     let wd_w = (ui.available_width() - 6.0 * 4.0) / 7.0;
-                                    for wd in WEEKDAYS {
+                                    for wd in 0..7u32 {
                                         ui.allocate_ui(
                                             egui::vec2(wd_w, 18.0),
                                             |ui| {
                                                 ui.label(
-                                                    egui::RichText::new(wd)
+                                                    egui::RichText::new(i18n::weekday(
+                                                        lang,
+                                                        wd as usize,
+                                                    ))
                                                         .small()
                                                         .color(egui::Color32::from_gray(150)),
                                                 );
@@ -9069,7 +9070,7 @@ impl eframe::App for App {
                                                 egui::Sense::click(),
                                             );
                                             let resp = resp
-                                                .on_hover_text("двойной клик — открыть неделю");
+                                                .on_hover_text(t(lang, "двойной клик — открыть неделю"));
                                             if ui.is_rect_visible(rect) {
                                                 let selected = cal_day.as_deref()
                                                     == Some(date.as_str());
@@ -9185,7 +9186,7 @@ impl eframe::App for App {
                                             egui::Sense::click(),
                                         );
                                         let resp = resp
-                                            .on_hover_text("двойной клик — открыть день");
+                                            .on_hover_text(t(lang, "двойной клик — открыть день"));
                                         if ui.is_rect_visible(rect) {
                                             let selected = cal_day.as_deref()
                                                 == Some(key.as_str());
@@ -9218,7 +9219,7 @@ impl eframe::App for App {
                                                 egui::Align2::LEFT_TOP,
                                                 format!(
                                                     "{} {}",
-                                                    WEEKDAYS[d as usize],
+                                                    i18n::weekday(lang, d as usize),
                                                     date.format("%d.%m")
                                                 ),
                                                 egui::FontId::proportional(12.0),
@@ -9299,9 +9300,9 @@ impl eframe::App for App {
                                         let bytes: i64 =
                                             idxs.iter().map(|&i| items[i].size).sum();
                                         ui.heading(format!(
-                                            "{} файлов, {}",
-                                            idxs.len(),
-                                            db::human(bytes)
+                                            "{}, {}",
+                                            files_n(idxs.len()),
+                                            db::human_in(lang, bytes)
                                         ));
                                         ui.horizontal_wrapped(|ui| {
                                             for &i in idxs {
@@ -9310,7 +9311,7 @@ impl eframe::App for App {
                                         });
                                     }
                                     _ => {
-                                        ui.label("В этот день файлов нет.");
+                                        ui.label(t(lang, "В этот день файлов нет."));
                                     }
                                 }
                             }
@@ -9322,11 +9323,18 @@ impl eframe::App for App {
                                     Some(idxs) => {
                                         let bytes: i64 =
                                             idxs.iter().map(|&i| items[i].size).sum();
-                                        ui.heading(format!(
-                                            "{day} — {} файлов, {}",
-                                            idxs.len(),
-                                            db::human(bytes)
-                                        ));
+                                        ui.heading(match lang {
+                                            i18n::Lang::En => format!(
+                                                "{day} — {}, {}",
+                                                files_n(idxs.len()),
+                                                db::human_in(lang, bytes)
+                                            ),
+                                            i18n::Lang::Ru => format!(
+                                                "{day} — {} файлов, {}",
+                                                idxs.len(),
+                                                db::human(bytes)
+                                            ),
+                                        });
                                         ui.horizontal_wrapped(|ui| {
                                             for &i in idxs {
                                                 draw_cell(ui, ctx, &mut cells, &items[i]);
@@ -9334,21 +9342,24 @@ impl eframe::App for App {
                                         });
                                     }
                                     None => {
-                                        ui.label("В этот день файлов нет.");
+                                        ui.label(t(lang, "В этот день файлов нет."));
                                     }
                                 }
                             } else {
-                                ui.label(
+                                ui.label(t(
+                                    lang,
                                     "Выберите день в календаре — ниже появятся снимки.",
-                                );
+                                ));
                             }
                         }
                         if let Some(idxs) = by_day.get("без даты") {
                             ui.separator();
-                            egui::CollapsingHeader::new(format!(
-                                "Без даты — {} файлов",
-                                idxs.len()
-                            ))
+                            egui::CollapsingHeader::new(match lang {
+                                i18n::Lang::En => {
+                                    format!("{} — {}", t(lang, "Без даты"), files_n(idxs.len()))
+                                }
+                                i18n::Lang::Ru => format!("Без даты — {} файлов", idxs.len()),
+                            })
                             .id_salt("no-date")
                             .show(ui, |ui| {
                                 ui.horizontal_wrapped(|ui| {
@@ -10067,6 +10078,43 @@ mod tests {
             "Скопировать список",
             "оставить",
             "без даты",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
+    }
+
+    /// M21.4b: календарь переводится целиком — слои, месяцы, дни недели, навигация и
+    /// подписи пустых дней. Названия месяцев и дней недели живут в `i18n`, а не в `app`.
+    #[test]
+    fn английский_язык_переводит_календарь() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-calendar-i18n.db"));
+        app.items = vec![file_row(1, "image", "may.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Calendar;
+        app.cal_year = 2024;
+        app.cal_month = 5;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        for needle in ["Year", "Month", "Week", "Day", "Today", "May 2024"] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет «{needle}»: {texts:?}"
+            );
+        }
+        for needle in ["Mon", "Sun"] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет дня недели «{needle}»: {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|t| t.contains("1 file this month")),
+            "итог месяца не переведён: {texts:?}"
+        );
+        for ru in [
+            "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
