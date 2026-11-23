@@ -1,6 +1,9 @@
 # STATUS
 
-STATE: done:M12 (каталог моделей CLIP, SigLIP 768) → next:M15.6 (мультиязычная модель и калибровка), затем M15.7 (проверка на двух каталогах). Переименование оригиналов отклонено владельцем — §1 AGENTS.md не меняется
+> From M21 on this file is written in English. Entries above are Russian history, kept as is;
+> the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
+
+STATE: done:M21 (language policy, Apache-2.0 license, UI language switch) → next:M15.6 (multilingual model and calibration), then M15.7 (check on two folders); translations continue per `plan/I18N.md`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1035,3 +1038,35 @@ JSON, засев один раз без перезаписи правок, ун�
 `timeout 6 gui --db /tmp/m155-a-final.db` — код 124, падений нет. Размеченной выборки ≥ 100
 снимков по-прежнему нет: точность top-1/top-3 на ней — M15.7; здесь мерили устойчивость top-1
 и поведение на слабой разметке (есть распознанный текст / фото с камерой без текста).
+
+## M21 — language policy, Apache-2.0 license, UI language switch (2026-11-24)
+
+The owner asked to take `LICENSE` and `NOTICE` from the sibling project, replace the name, keep the
+Russian documentation as the second variant, continue the project in English (docs, commits) and let
+the interface language be chosen in the settings. Communication with the owner stays Russian.
+
+**License.** `LICENSE` is the Apache License 2.0 text (the copyright holder line is kept),
+`NOTICE` names `photocat`; `Cargo.toml` declares `license = "Apache-2.0"`; `README.md` §License
+points at both files. A new dependency must be Apache-2.0-compatible (AGENTS.md §1).
+
+**Repository language.** `README.md` and `AGENTS.md` are English now; the Russian originals live next
+to them as `README.ru.md` and `AGENTS.ru.md`, both linked from the English files. ADR 0040 records the
+decision. The section "Continue in a new session" was removed from the README. The Russian
+`docs/*.md` and `plan/*.md` stay in place until their English translation lands (`plan/I18N.md`,
+M21.7–M21.9); this file switches to English from this entry on.
+
+**Interface.** New L0 module `src/i18n.rs`: `Lang` (`En` default, `Ru`), a Russian→English table and
+`t(lang, "…")`. The language is `settings.lang` (`en`/`ru`), chosen in the new first tab of the
+settings dialog "Interface" and saved immediately; `photocat settings --lang en|ru` does the same
+from the CLI and `settings` prints it. The shell is translated: navigation, top bar, search mode,
+progress rows, the archive-check banner and the whole settings dialog — 55 labels. Untranslated
+screens fall back to Russian by design (`plan/I18N.md`).
+
+**Checks.** `cargo test` — 182 passed, 6 `#[ignore]` (new: the English shell renders `All files`,
+`Settings`, `LIBRARY`, `FILTER` headlessly; `settings.lang = ru` survives a reopen; the pair table
+rejects empty, duplicate and non-Cyrillic keys); `cargo clippy --all-targets` clean;
+`check.sh` — 44 checks, 0 violations (i18n registered as L0, allowed for `db`, `app`, `main`);
+`timeout 6 ./target/release/photocat gui --db /tmp/photocat-m21.db` — exit code 124, no panic.
+
+**Next.** `plan/I18N.md` lists the screens and documents in order; content panes (grid, card,
+calendar, faces, trash, integrity, viewer) are M21.2–M21.5.

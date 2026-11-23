@@ -731,3 +731,37 @@ GPS/тегам/камере, запись порядка в БД.
 `organize` получил `derive` (только `sha256_file`). На корпусе: 500 файлов / 2.4 ГиБ — 2045 мс и
 повтор 20 мс с 0 новых; 2230 файлов / 21.2 ГиБ — 110 мс и повтор 45 мс; 16 новых тестов,
 `cargo test` — 155 (151 прошло, 4 `#[ignore]`), `clippy` и `check.sh` — чисто. ADR 0035.
+
+---
+
+## M21 — language of the project and of the interface ◐ (mechanism done, screens in progress)
+
+**Goal.** The repository speaks English (docs, commits) while the Russian documentation stays as the
+second variant; the interface language is chosen in the settings: English is the main language,
+Russian the second. Details and the screen-by-screen order — `plan/I18N.md`.
+
+**Acceptance criteria.**
+1. `LICENSE` (Apache-2.0) and `NOTICE` (photocat) in the repository root; `Cargo.toml` declares the
+   license; the README has a license section that points at both files.
+2. `README.md` and `AGENTS.md` are English; `README.ru.md` and `AGENTS.ru.md` keep the Russian text
+   and both directions are linked; no Russian documentation is deleted.
+3. "Settings → Interface" offers English and Russian; the choice is `settings.lang` in the DB, saved
+   on the spot and restored on the next start; `photocat settings --lang en|ru` does the same.
+4. `src/i18n.rs` (L0) holds `Lang`, the Russian→English table and `t(lang, "…")`; an untranslated
+   string is shown in Russian, never as a key and never empty.
+5. A translated screen is fully translated: a headless frame test finds the English labels and no
+   Russian ones for the labels covered by that commit.
+6. `plan/I18N.md` keeps the coverage table up to date; ADR 0040 explains the lookup-table choice.
+7. `cargo clippy --all-targets`, `cargo test`, `check.sh` clean; the GUI smoke test (`timeout 6`) has
+   no panic.
+
+**Files.** `src/i18n.rs`, `src/app.rs`, `src/db.rs`, `src/main.rs`, `Cargo.toml`, `LICENSE`,
+`NOTICE`, `README.md`, `README.ru.md`, `AGENTS.md`, `AGENTS.ru.md`, `docs/`, `plan/`, `.pi/`.
+
+**Do not.** Add a translation framework or a second source of UI strings; translate identifiers or
+DB enums; ship a half-translated screen and call it done; drop the Russian variant.
+
+**Done (M21.1).** Apache-2.0 license and notice; bilingual README/AGENTS; `src/i18n.rs` with the
+`Lang` type and the pair table; `settings.lang` + "Interface" settings tab + CLI flag; translated
+shell (55 labels); ADR 0040; `plan/I18N.md`; tests for translation, persistence and table sanity.
+`cargo test` — 182 passed, 6 `#[ignore]`; `clippy` clean; `check.sh` — 44/0.
