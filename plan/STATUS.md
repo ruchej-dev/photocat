@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar) → next:M21.4c (faces, then trash, integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces) → next:M21.4d (trash, then integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1175,3 +1175,31 @@ the day map as a key only: keys are data, labels go through `t()`.
 
 **Next.** M21.4c: the faces screen (threshold, scan/recluster, the group list, face tiles with
 `not him`/`pick`, the name and batch-assign fields).
+
+## M21.4c — the faces screen in English (2026-11-24)
+
+The faces view was the third screen. The panel, the group list and the face tiles now follow the
+interface language.
+
+**What moved.** The threshold line, the `face model not downloaded` note with `Face settings`, the
+counters (`2 people on 1 photo, 1 group`, `no faces yet: 2 of 3 photos`), `Resume`/`Find faces` with
+the remaining count, `Rebuild groups`, the group list (`All people · 2`, `no name · 1 photo`), the
+selected-group block (`Person's name:`, `Save the name`, the pinning note), the batch fields
+(`People picked: 0`, `name for the picked people`, `Name the picked people`, `Unpick`), the empty
+states and the tile labels (`not him`, `pick`, `no frame`, `no date`). `draw_face_cell` gained a
+`lang` argument — it is a free function and has no `Cells`-like struct; `draw_cell` already gets the
+language from the `Cells` field added in M21.4a. The scan, cluster, label, split and batch-assign
+statuses go through `t()`; the counters use `i18n::count`. Statuses printed from the module reports
+(`faces::Stats::to_string()`) stay Russian until M21.6, when the reports themselves take `lang`.
+A test helper `window_frame_at` was added: a taller headless frame, because the face-group list in
+the left panel is otherwise clipped out of the drawn text and cannot be asserted on.
+
+**Checks.** `cargo test` — 190 passed, 6 `#[ignore]` (new:
+`the_english_language_translates_the_faces_screen` — a headless faces frame with `People`,
+`Resume (2)`, `Rebuild groups`, `Groups`, `All people · 2`, `no name · 1 photo`, `Person's name:`,
+`Save the name`, `Name the picked people`, `Unpick`, `not him`, `pick`, `no frame`, `no date`, and no
+Russian face label left); `cargo clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.
+
+**Next.** M21.4d: the trash (screen, confirm dialog, restore and empty statuses), then the
+integrity screen. The left panel blocks (summary, model and tag filter, stats) and the settings
+dialog panes are recorded as M21.4f: they still speak Russian and are visible on every screen.

@@ -4609,11 +4609,17 @@ impl App {
 
     /// Контекст вида «Лица»: порог, проход по снимкам, пересборка групп и их список.
     fn faces_controls(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         block(ui, |ui| {
-            ui.label(egui::RichText::new("Лица").size(11.0).color(DIM));
+            ui.label(
+                egui::RichText::new(t(lang, "Лица"))
+                    .size(11.0)
+                    .color(DIM),
+            );
             ui.add_space(4.0);
             ui.label(egui::RichText::new(format!(
-                "Порог склейки: {:.2}",
+                "{} {:.2}",
+                t(lang, "Порог склейки:"),
                 self.settings.face_threshold
             )));
             let r = ui.add(
@@ -4625,70 +4631,85 @@ impl App {
             let model = faces::model_present(&self.settings);
             if !model {
                 ui.label(
-                    egui::RichText::new("модель лиц не скачана")
+                    egui::RichText::new(t(lang, "модель лиц не скачана"))
                         .size(11.0)
                         .color(DIM),
                 );
-                if ui.button("Настройки лиц").clicked() {
+                if ui.button(t(lang, "Настройки лиц")).clicked() {
                     self.settings_open = true;
                     self.settings_tab = SettingsTab::Faces;
                 }
             }
-            ui.label(
-                egui::RichText::new(format!(
+            let people = i18n::count(lang, self.face_faces as usize, ["лицо", "лица", "лиц"], "person", "people");
+            let photos = i18n::count(lang, self.face_photos as usize, ["снимок", "снимка", "снимков"], "photo", "photos");
+            let groups = i18n::count(lang, self.face_clusters.len(), ["группа", "группы", "групп"], "group", "groups");
+            let found = match lang {
+                i18n::Lang::En => format!("{people} on {photos}, {groups}"),
+                i18n::Lang::Ru => format!(
                     "лиц: {} на {} снимках, групп: {}",
                     self.face_faces,
                     self.face_photos,
                     self.face_clusters.len()
-                ))
-                .size(11.0)
-                .color(DIM),
-            );
-            ui.label(
-                egui::RichText::new(format!(
-                    "ещё без лиц: {} из {} снимков",
-                    self.face_todo, self.face_images
-                ))
-                .size(11.0)
-                .color(DIM),
-            );
+                ),
+            };
+            ui.label(egui::RichText::new(found).size(11.0).color(DIM));
+            let todo = match lang {
+                i18n::Lang::En => format!(
+                    "no faces yet: {} of {}",
+                    self.face_todo,
+                    i18n::count(lang, self.face_images, ["снимок", "снимка", "снимков"], "photo", "photos")
+                ),
+                i18n::Lang::Ru => {
+                    format!("ещё без лиц: {} из {} снимков", self.face_todo, self.face_images)
+                }
+            };
+            ui.label(egui::RichText::new(todo).size(11.0).color(DIM));
             ui.add_space(4.0);
             if self.face_rx.is_some() {
-                ui.label("пересобираю группы…");
+                ui.label(t(lang, "пересобираю группы…"));
                 if let Some(p) = &self.face_progress
-                    && ui.button("Стоп").clicked()
+                    && ui.button(t(lang, "Стоп")).clicked()
                 {
                     p.cancel();
-                    self.status = "лица: останавливаю после текущих снимков…".into();
+                    self.status = t(lang, "лица: останавливаю после текущих снимков…").into();
                 }
             } else {
                 let scan_label = if self.face_todo < self.face_images {
-                    format!("Продолжить ({})", self.face_todo)
+                    format!("{} ({})", t(lang, "Продолжить"), self.face_todo)
                 } else {
-                    format!("Найти лица ({})", self.face_todo)
+                    format!("{} ({})", t(lang, "Найти лица"), self.face_todo)
                 };
                 if ui
                     .add_enabled(model && self.face_todo > 0, egui::Button::new(scan_label))
-                    .on_hover_text(
+                    .on_hover_text(t(
+                        lang,
                         "долгий проход: детекция и эмбеддинги локально, без сети; \
                          уже просканированные снимки пропускаются по sha256",
-                    )
+                    ))
                     .clicked()
                 {
                     self.start_faces();
                 }
                 if ui
-                    .add_enabled(self.face_faces > 0, egui::Button::new("Пересобрать группы"))
-                    .on_hover_text(
-                        "порог применяется к лицам; ручные подписи и разъединения сохраняются",
+                    .add_enabled(
+                        self.face_faces > 0,
+                        egui::Button::new(t(lang, "Пересобрать группы")),
                     )
+                    .on_hover_text(t(
+                        lang,
+                        "порог применяется к лицам; ручные подписи и разъединения сохраняются",
+                    ))
                     .clicked()
                 {
                     self.start_face_clusters();
                 }
             }
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("Группы").size(11.0).color(DIM));
+            ui.label(
+                egui::RichText::new(t(lang, "Группы"))
+                    .size(11.0)
+                    .color(DIM),
+            );
             let clusters = self.face_clusters.clone();
             egui::ScrollArea::vertical()
                 .id_salt("face-clusters")
@@ -4697,7 +4718,7 @@ impl App {
                     if ui
                         .selectable_label(
                             self.face_selected_cluster.is_none(),
-                            format!("Все лица · {}", self.face_faces),
+                            format!("{} · {}", t(lang, "Все лица"), self.face_faces),
                         )
                         .clicked()
                     {
@@ -4706,7 +4727,7 @@ impl App {
                     }
                     for c in clusters {
                         let label = if c.label.is_empty() {
-                            "без имени".to_string()
+                            t(lang, "без имени").to_string()
                         } else {
                             c.label.clone()
                         };
@@ -4714,7 +4735,7 @@ impl App {
                             let mut mark = self.face_picked_clusters.contains(&c.id);
                             if ui
                                 .checkbox(&mut mark, "")
-                                .on_hover_text("отметить группу для поиска «все вместе»")
+                                .on_hover_text(t(lang, "отметить группу для поиска «все вместе»"))
                                 .changed()
                             {
                                 if mark {
@@ -4723,11 +4744,12 @@ impl App {
                                     self.face_picked_clusters.remove(&c.id);
                                 }
                             }
+                            let line = format!(
+                                "{label} · {}",
+                                i18n::count(lang, c.photos as usize, ["фото", "фото", "фото"], "photo", "photos")
+                            );
                             if ui
-                                .selectable_label(
-                                    self.face_selected_cluster == Some(c.id),
-                                    format!("{label} · {} фото", c.photos),
-                                )
+                                .selectable_label(self.face_selected_cluster == Some(c.id), line)
                                 .clicked()
                             {
                                 self.face_selected_cluster = Some(c.id);
@@ -4754,12 +4776,15 @@ impl App {
                     .add_enabled(
                         n > 0,
                         egui::Button::new(if self.face_together {
-                            format!("Показать лица (вместе: {n})")
+                            format!("{} ({n})", t(lang, "Показать лица (вместе)"))
                         } else {
-                            format!("Фото, где все вместе ({n})")
+                            format!("{} ({n})", t(lang, "Фото, где все вместе"))
                         }),
                     )
-                    .on_hover_text("показать только снимки, где есть лица из всех отмеченных групп")
+                    .on_hover_text(t(
+                        lang,
+                        "показать только снимки, где есть лица из всех отмеченных групп",
+                    ))
                     .clicked()
                 {
                     self.face_together = !self.face_together;
@@ -6779,7 +6804,13 @@ impl App {
         self.face_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.face_rx = Some(rx);
-        self.status = format!("лица: моделей {}, порог {threshold:.2}…", faces::MODEL_ID);
+        let lang = self.settings.lang;
+        self.status = match lang {
+            i18n::Lang::En => {
+                format!("people: model {}, threshold {threshold:.2}…", faces::MODEL_ID)
+            }
+            i18n::Lang::Ru => format!("лица: моделей {}, порог {threshold:.2}…", faces::MODEL_ID),
+        };
         std::thread::spawn(move || {
             let jobs = std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -6798,7 +6829,7 @@ impl App {
         let threshold = self.settings.face_threshold;
         let (tx, rx) = mpsc::channel();
         self.face_rx = Some(rx);
-        self.status = "лица: пересобираю группы…".into();
+        self.status = t(self.settings.lang, "лица: пересобираю группы…").into();
         std::thread::spawn(move || {
             let r = faces::recluster(&db_path, threshold);
             let _ = tx.send(FaceReply::Cluster(r));
@@ -6814,7 +6845,11 @@ impl App {
         self.face_download_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.face_download_rx = Some(rx);
-        self.status = "скачивание модели лиц: только веса, без фотографий".into();
+        self.status = t(
+            self.settings.lang,
+            "скачивание модели лиц: только веса, без фотографий",
+        )
+        .into();
         std::thread::spawn(move || {
             let r = faces::download_model(&settings, true, Some(progress));
             let _ = tx.send(r);
@@ -6913,7 +6948,13 @@ struct FaceCells {
     tile: f32,
 }
 
-fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f: &db::FaceView) {
+fn draw_face_cell(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut FaceCells,
+    f: &db::FaceView,
+    lang: i18n::Lang,
+) {
     let w = cs.tile.clamp(100.0, 260.0);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, w + 26.0), egui::Sense::click());
     let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
@@ -6946,7 +6987,7 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
             ui.painter().text(
                 img_rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "нет кадра",
+                t(lang, "нет кадра"),
                 egui::FontId::proportional(12.0),
                 DIM,
             );
@@ -6955,7 +6996,7 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
             .taken_at
             .as_deref()
             .map(|d| d.chars().take(10).collect::<String>())
-            .unwrap_or_else(|| "без даты".into());
+            .unwrap_or_else(|| t(lang, "без даты").to_string());
         ui.painter().text(
             egui::pos2(rect.left() + 3.0, img_rect.bottom() + 3.0),
             egui::Align2::LEFT_TOP,
@@ -6976,8 +7017,8 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
             egui::vec2(58.0, 20.0),
         );
         if ui
-            .place(btn, egui::Button::new("не он").small())
-            .on_hover_text("отделить это лицо в новую группу")
+            .place(btn, egui::Button::new(t(lang, "не он")).small())
+            .on_hover_text(t(lang, "отделить это лицо в новую группу"))
             .clicked()
         {
             cs.split_clicked = Some(f.id);
@@ -6992,14 +7033,10 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
         if ui
             .place(
                 pick,
-                egui::Button::new(if is_picked {
-                    "выбрано"
-                } else {
-                    "выбрать"
-                })
-                .small(),
+                egui::Button::new(t(lang, if is_picked { "выбрано" } else { "выбрать" }))
+                    .small(),
             )
-            .on_hover_text("отметить это лицо для общего имени")
+            .on_hover_text(t(lang, "отметить это лицо для общего имени"))
             .clicked()
         {
             if is_picked {
@@ -7885,13 +7922,17 @@ impl eframe::App for App {
                             self.reload();
                             self.status = stats.to_string();
                         }
-                        FaceReply::Scan(Err(e)) => self.status = format!("лица не найдены: {e:#}"),
+                        FaceReply::Scan(Err(e)) => {
+                            let lang = self.settings.lang;
+                            self.status = format!("{}: {e:#}", t(lang, "лица не найдены"))
+                        }
                         FaceReply::Cluster(Ok(stats)) => {
                             self.reload();
                             self.status = stats.to_string();
                         }
                         FaceReply::Cluster(Err(e)) => {
-                            self.status = format!("группы не собраны: {e:#}")
+                            let lang = self.settings.lang;
+                            self.status = format!("{}: {e:#}", t(lang, "группы не собраны"))
                         }
                     }
                 }
@@ -7938,7 +7979,11 @@ impl eframe::App for App {
                             self.status = report.to_string();
                             self.reload();
                         }
-                        Err(e) => self.status = format!("модель лиц не скачана: {e:#}"),
+                        Err(e) => {
+                            let lang = self.settings.lang;
+                            self.status =
+                                format!("{}: {e:#}", t(lang, "модель лиц не скачана"))
+                        }
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9372,6 +9417,12 @@ impl eframe::App for App {
                     });
             }
             View::Faces => {
+                let faces_n = |n: usize| {
+                    i18n::count(lang, n, ["лицо", "лица", "лиц"], "person", "people")
+                };
+                let photos_n = |n: usize| {
+                    i18n::count(lang, n, ["фото", "фото", "фото"], "photo", "photos")
+                };
                 if face_together && face_picked_clusters.len() >= 2 {
                     let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
                     for f in &face_views {
@@ -9391,23 +9442,32 @@ impl eframe::App for App {
                         .filter(|c| face_picked_clusters.contains(&c.id))
                         .map(|c| {
                             if c.label.is_empty() {
-                                "без имени".to_string()
+                                t(lang, "без имени").to_string()
                             } else {
                                 c.label.clone()
                             }
                         })
                         .collect();
                     ui.horizontal(|ui| {
-                        ui.heading("Фото, где все вместе");
+                        ui.heading(t(lang, "Фото, где все вместе"));
                         ui.label(
                             egui::RichText::new(names.join(" + "))
                                 .size(12.0)
                                 .color(DIM),
                         );
                     });
-                    ui.label(format!("снимков: {}", ids.len()));
+                    let found = match lang {
+                        i18n::Lang::En => {
+                            format!("{}: {}", t(lang, "снимки"), files_n(ids.len()))
+                        }
+                        i18n::Lang::Ru => format!("снимков: {}", ids.len()),
+                    };
+                    ui.label(found);
                     if ids.is_empty() {
-                        ui.label("Нет снимков, где есть лица из всех отмеченных групп.");
+                        ui.label(t(
+                            lang,
+                            "Нет снимков, где есть лица из всех отмеченных групп.",
+                        ));
                     }
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
@@ -9428,32 +9488,34 @@ impl eframe::App for App {
                 if let Some(c) = &current {
                     ui.horizontal(|ui| {
                         ui.heading(if c.label.is_empty() {
-                            "без имени".to_string()
+                            t(lang, "без имени").to_string()
                         } else {
                             c.label.clone()
                         });
-                        ui.label(format!("лиц {} · фото {}", c.faces, c.photos));
+                        ui.label(format!("{} · {}", faces_n(c.faces as usize), photos_n(c.photos as usize)));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Имя человека:");
+                        ui.label(t(lang, "Имя человека:"));
                         ui.add(
                             egui::TextEdit::singleline(&mut face_label_input)
-                                .hint_text("например, Лиза")
+                                .hint_text(t(lang, "например, Лиза"))
                                 .desired_width(220.0),
                         );
-                        if ui.button("Сохранить имя").clicked() {
+                        if ui.button(t(lang, "Сохранить имя")).clicked() {
                             face_save_label = Some(face_label_input.trim().to_string());
                         }
                     });
-                    ui.label(
+                    ui.label(t(
+                        lang,
                         "Подпись закрепляет группу: пересборка по порогу её не перемешает. \
                          Ложную склейку разъединяет кнопка «не он» на плитке.",
-                    );
+                    ));
                 } else {
                     ui.label(
-                        egui::RichText::new(
+                        egui::RichText::new(t(
+                            lang,
                             "Выберите группу слева, чтобы дать ей имя, или разъединяйте плитки.",
-                        )
+                        ))
                         .size(12.0)
                         .color(DIM),
                     );
@@ -9465,26 +9527,34 @@ impl eframe::App for App {
                 // Пакетное назначение: отметить лица кнопкой «выбрать» и дать одно имя.
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("Выбрано лиц: {}", face_picked.len()));
+                    ui.label(format!(
+                        "{}: {}",
+                        t(lang, "Выбрано лиц"),
+                        face_picked.len()
+                    ));
                     ui.add(
                         egui::TextEdit::singleline(&mut face_group_input)
-                            .hint_text("имя для выбранных")
+                            .hint_text(t(lang, "имя для выбранных"))
                             .desired_width(220.0),
                     );
                     if ui
                         .add_enabled(
                             !face_picked.is_empty(),
-                            egui::Button::new("Назначить имя выбранным"),
+                            egui::Button::new(t(lang, "Назначить имя выбранным")),
                         )
-                        .on_hover_text(
+                        .on_hover_text(t(
+                            lang,
                             "отмеченные лица уедут в одну группу; пустое имя создаст группу без подписи",
-                        )
+                        ))
                         .clicked()
                     {
                         face_assign = Some(face_group_input.trim().to_string());
                     }
                     if ui
-                        .add_enabled(!face_picked.is_empty(), egui::Button::new("Снять выбор"))
+                        .add_enabled(
+                            !face_picked.is_empty(),
+                            egui::Button::new(t(lang, "Снять выбор")),
+                        )
                         .clicked()
                     {
                         face_picked.clear();
@@ -9493,16 +9563,19 @@ impl eframe::App for App {
                 });
                 if face_total == 0 {
                     ui.add_space(12.0);
-                    ui.label("Лиц пока нет: нажмите «Найти лица» слева (нужна модель лиц).");
+                    ui.label(t(
+                        lang,
+                        "Лиц пока нет: нажмите «Найти лица» слева (нужна модель лиц).",
+                    ));
                 } else if shown.is_empty() {
-                    ui.label("В этой группе нет лиц.");
+                    ui.label(t(lang, "В этой группе нет лиц."));
                 }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             for f in &shown {
-                                draw_face_cell(ui, ctx, &mut face_cells, f);
+                                draw_face_cell(ui, ctx, &mut face_cells, f, lang);
                             }
                         });
                     });
@@ -9705,26 +9778,32 @@ impl eframe::App for App {
         if let Some(label) = face_save_label
             && let Some(id) = face_selected
         {
+            let lang = self.settings.lang;
             match faces::label(&self.db_path, id, &label) {
                 Ok(()) => {
                     self.status = if label.is_empty() {
-                        "подпись группы убрана".into()
+                        t(lang, "подпись группы убрана").into()
                     } else {
-                        format!("группа подписана: «{label}»")
+                        match lang {
+                            i18n::Lang::En => format!("group named: “{label}”"),
+                            i18n::Lang::Ru => format!("группа подписана: «{label}»"),
+                        }
                     };
                     self.reload();
                 }
-                Err(e) => self.status = format!("подпись не сохранена: {e:#}"),
+                Err(e) => self.status = format!("{}: {e:#}", t(lang, "подпись не сохранена")),
             }
         }
         if let Some(face_id) = face_split {
+            let lang = self.settings.lang;
             match faces::split(&self.db_path, face_id) {
                 Ok(cid) => {
                     self.face_selected_cluster = Some(cid);
                     self.reload();
-                    self.status = "лицо отделено в новую группу; дайте ей имя".into();
+                    self.status =
+                        t(lang, "лицо отделено в новую группу; дайте ей имя").into();
                 }
-                Err(e) => self.status = format!("лицо не отделено: {e:#}"),
+                Err(e) => self.status = format!("{}: {e:#}", t(lang, "лицо не отделено")),
             }
         }
         if face_split.is_none()
@@ -9736,18 +9815,41 @@ impl eframe::App for App {
         if let Some(label) = face_assign {
             let ids: Vec<i64> = self.face_picked.iter().copied().collect();
             if !ids.is_empty() {
+                let lang = self.settings.lang;
                 match faces::group_picked(&self.db_path, &ids, &label) {
                     Ok(cid) => {
                         self.face_selected_cluster = Some(cid);
                         self.face_picked.clear();
                         self.reload();
+                        let people = i18n::count(
+                            lang,
+                            ids.len(),
+                            ["лицо", "лица", "лиц"],
+                            "person",
+                            "people",
+                        );
                         self.status = if label.trim().is_empty() {
-                            format!("{} лиц собраны в новую группу; дайте ей имя", ids.len())
+                            match lang {
+                                i18n::Lang::En => {
+                                    format!("{people} gathered into a new group; give it a name")
+                                }
+                                i18n::Lang::Ru => {
+                                    format!("{} лиц собраны в новую группу; дайте ей имя", ids.len())
+                                }
+                            }
                         } else {
-                            format!("{} лиц назначены группе «{}»", ids.len(), label.trim())
+                            match lang {
+                                i18n::Lang::En => {
+                                    let label = label.trim();
+                                    format!("{people} assigned to the group “{label}”")
+                                }
+                                i18n::Lang::Ru => {
+                                    format!("{} лиц назначены группе «{}»", ids.len(), label.trim())
+                                }
+                            }
                         };
                     }
-                    Err(e) => self.status = format!("лица не назначены: {e:#}"),
+                    Err(e) => self.status = format!("{}: {e:#}", t(lang, "лица не назначены")),
                 }
             }
         }
@@ -9885,12 +9987,20 @@ mod tests {
         ctx: &egui::Context,
         events: Vec<egui::Event>,
     ) -> Vec<String> {
+        window_frame_at(app, ctx, events, egui::vec2(1240.0, 840.0))
+    }
+
+    /// Кадр при заданном размере окна: высокое окно нужно, чтобы блоки левой панели
+    /// (список групп лиц) не были обрезаны и попали в нарисованный текст.
+    fn window_frame_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        size: egui::Vec2,
+    ) -> Vec<String> {
         super::style(ctx);
         let raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1240.0, 840.0),
-            )),
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             events,
             ..Default::default()
         };
@@ -10115,6 +10225,79 @@ mod tests {
         );
         for ru in [
             "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
+    }
+
+    /// M21.4c: экран «Лица» переводится целиком — панель порога, список групп, плитки
+    /// лиц и поля имени. Имена людей и пороги — данные и не переводятся.
+    #[test]
+    fn английский_язык_переводит_экран_лиц() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-faces-i18n.db"));
+        app.face_faces = 2;
+        app.face_photos = 1;
+        app.face_images = 3;
+        app.face_todo = 2;
+        app.face_clusters = vec![db::FaceCluster {
+            id: 7,
+            label: String::new(),
+            faces: 2,
+            photos: 1,
+        }];
+        app.face_views = vec![db::FaceView {
+            id: 1,
+            file_id: 1,
+            path: "/tmp/a.jpg".into(),
+            taken_at: None,
+            thumb: None,
+            score: 0.62,
+            cluster_id: Some(7),
+        }];
+        app.face_selected_cluster = Some(7);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Faces;
+        // Высокое окно: список групп в левой панели не должен обрезаться.
+        let texts = window_frame_at(
+            &mut app,
+            &egui::Context::default(),
+            Vec::new(),
+            egui::vec2(1240.0, 1400.0),
+        );
+        for needle in [
+            "People",
+            "Resume (2)",
+            "Rebuild groups",
+            "Groups",
+            "All people · 2",
+            "no name · 1 photo",
+            "Person's name:",
+            "Save the name",
+            "Name the picked people",
+            "Unpick",
+            "not him",
+            "pick",
+            "no frame",
+            "no date",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет «{needle}»: {texts:?}"
+            );
+        }
+        for ru in [
+            "Лица",
+            "Найти лица (2)",
+            "Продолжить (2)",
+            "Пересобрать группы",
+            "Группы",
+            "без имени",
+            "не он",
+            "выбрать",
+            "нет кадра",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
