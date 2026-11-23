@@ -147,38 +147,55 @@ fn union_similar_pairwise(rows: &[FileRow], hashed: &[usize], max_dist: u32, uf:
 /// почти все точки лежат на расстоянии ~32, и неравенство треугольника не отсекает
 /// ничего — на 50 тыс. это 17.2 с вместо долей секунды (ADR 0038).
 fn union_similar_indexed(rows: &[FileRow], hashed: &[usize], max_dist: u32, uf: &mut Uf) {
-    let mut buckets: Vec<HashMap<u8, Vec<usize>>> =
-        (0..INDEX_BLOCKS).map(|_| HashMap::new()).collect();
+    // Один запрос на уникальный dHash: одинаковые кадры (чёрные кадры видео,
+    // серии) не должны давать n² проверок сами с собой. Уникальным значениям
+    // даём плотные номера — дальше дедупликация кандидатов массивом меток.
+    let mut index: HashMap<u64, usize> = HashMap::new();
+    let mut values: Vec<u64> = Vec::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
     for &i in hashed {
         let value = rows[i].dhash.unwrap() as u64;
-        for (block, map) in buckets.iter_mut().enumerate() {
-            map.entry(chunk(value, block)).or_default().push(i);
+        let uid = *index.entry(value).or_insert_with(|| {
+            values.push(value);
+            groups.push(Vec::new());
+            values.len() - 1
+        });
+        groups[uid].push(i);
+    }
+    for ids in &groups {
+        for &i in &ids[1..] {
+            uf.union(ids[0], i);
         }
     }
-    // Метка вместо HashSet: кандидаты одного запроса не повторяются, память одна на всех.
-    let mut seen = vec![0u32; rows.len()];
+    let mut buckets: Vec<HashMap<u8, Vec<usize>>> =
+        (0..INDEX_BLOCKS).map(|_| HashMap::new()).collect();
+    for (uid, &value) in values.iter().enumerate() {
+        for (block, map) in buckets.iter_mut().enumerate() {
+            map.entry(chunk(value, block)).or_default().push(uid);
+        }
+    }
+    let mut seen = vec![0u32; values.len()];
     let mut stamp = 0u32;
     let mut candidates: Vec<usize> = Vec::new();
-    for &i in hashed {
-        let value = rows[i].dhash.unwrap() as u64;
+    for (uid, &value) in values.iter().enumerate() {
         stamp += 1;
         candidates.clear();
         for (block, map) in buckets.iter().enumerate() {
             let Some(list) = map.get(&chunk(value, block)) else {
                 continue;
             };
-            for &j in list {
-                if seen[j] != stamp {
-                    seen[j] = stamp;
-                    candidates.push(j);
+            for &other in list {
+                if seen[other] != stamp {
+                    seen[other] = stamp;
+                    candidates.push(other);
                 }
             }
         }
-        for &j in &candidates {
-            if j != i
-                && crate::derive::hamming(value, rows[j].dhash.unwrap() as u64) <= max_dist
-            {
-                uf.union(i, j);
+        for &other in &candidates {
+            if other != uid && crate::derive::hamming(value, values[other]) <= max_dist {
+                for &j in &groups[other] {
+                    uf.union(groups[uid][0], j);
+                }
             }
         }
     }
