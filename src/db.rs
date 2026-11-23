@@ -96,7 +96,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
 /// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
 /// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -157,6 +157,17 @@ fn init(c: &Connection) -> Result<()> {
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS tag_defs(
+            model     TEXT NOT NULL,
+            tag_id    TEXT NOT NULL,
+            label     TEXT NOT NULL,
+            prompts   TEXT NOT NULL,
+            enabled   INTEGER NOT NULL DEFAULT 1,
+            position  INTEGER NOT NULL DEFAULT 0,
+            min_pct   INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(model, tag_id)
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS tag_defs_label ON tag_defs(model, label);
          CREATE TABLE IF NOT EXISTS embeddings(
             file_id INTEGER NOT NULL,
             model   TEXT NOT NULL,
@@ -336,6 +347,25 @@ impl GridSort {
             _ => GridSort::DateDesc,
         }
     }
+}
+
+/// Тег в словаре: метка, промпты и порядок. Живёт в БД на каждую модель (M15.4),
+/// потому что метки — конфигурация владельца, а не константа в коде.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TagDef {
+    /// id модели (`embeddings.model`): у каждой модели свой словарь.
+    pub model: String,
+    /// Стабильный ключ строки: по нему тег переименовывают и удаляют.
+    pub id: String,
+    /// Подпись по-русски: она же ключ в `tags.tag`.
+    pub label: String,
+    /// 2–3 общих шаблона; пустой список — тег выключен по смыслу.
+    pub prompts: Vec<String>,
+    pub enabled: bool,
+    /// Порядок в фильтре и редакторе.
+    pub position: i64,
+    /// Минимальный процентиль показа тега (0 — сколько выбрано ползунком).
+    pub min_percentile: i32,
 }
 
 /// Настройки приложения. Хранятся в БД (рядом с индексом), а не в файле у архива.
@@ -1257,6 +1287,102 @@ pub fn ocr_summary(conn: &Connection) -> Result<(i64, i64)> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?)
+}
+
+/// Словарь тегов модели в порядке показа. Пусто — модель ещё не засеяна дефолтом.
+pub fn load_tag_defs(conn: &Connection, model: &str) -> Result<Vec<TagDef>> {
+    let mut st = conn.prepare(
+        "SELECT tag_id, label, prompts, enabled, position, min_pct
+         FROM tag_defs WHERE model=?1 ORDER BY position, label",
+    )?;
+    let rows = st.query_map([model], |r| {
+        Ok(TagDef {
+            model: model.to_string(),
+            id: r.get(0)?,
+            label: r.get(1)?,
+            prompts: r
+                .get::<_, String>(2)?
+                .lines()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect(),
+            enabled: r.get::<_, i64>(3)? != 0,
+            position: r.get(4)?,
+            min_percentile: r.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Записать тег словаря на место (по `model`+`id`), не трогая соседей.
+/// Метка уникальна внутри модели: иначе `tags` получит две строки с одним ключом.
+pub fn save_tag_def(conn: &Connection, d: &TagDef) -> Result<()> {
+    let taken: Option<String> = conn
+        .query_row(
+            "SELECT tag_id FROM tag_defs WHERE model=?1 AND label=?2 AND tag_id<>?3",
+            params![d.model, d.label, d.id],
+            |r| r.get(0),
+        )
+        .ok();
+    if let Some(other) = taken {
+        anyhow::bail!("метка «{}» уже занята тегом {other}", d.label);
+    }
+    let prompts = d
+        .prompts
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    conn.execute(
+        "INSERT INTO tag_defs(model,tag_id,label,prompts,enabled,position,min_pct)
+         VALUES(?1,?2,?3,?4,?5,?6,?7)
+         ON CONFLICT(model,tag_id) DO UPDATE SET
+            label=excluded.label, prompts=excluded.prompts, enabled=excluded.enabled,
+            position=excluded.position, min_pct=excluded.min_pct",
+        params![
+            d.model,
+            d.id,
+            d.label,
+            prompts,
+            d.enabled as i64,
+            d.position,
+            d.min_percentile.clamp(0, 100)
+        ],
+    )?;
+    Ok(())
+}
+
+/// Убрать тег из словаря. Строки `tags` с этой меткой удалит пересчёт тегов.
+pub fn delete_tag_def(conn: &Connection, model: &str, id: &str) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM tag_defs WHERE model=?1 AND tag_id=?2",
+        params![model, id],
+    )?)
+}
+
+/// Заменить словарь модели целиком (импорт JSON, «вернуть стандартные теги»).
+pub fn replace_tag_defs(conn: &Connection, model: &str, defs: &[TagDef]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM tag_defs WHERE model=?1", [model])?;
+    for d in defs {
+        save_tag_def(&tx, d)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Сколько файлов имеет каждый тег источника — для `tags --list` и пустого словаря.
+pub fn tag_file_counts(conn: &Connection, source: &str) -> Result<HashMap<String, usize>> {
+    let mut st = conn.prepare("SELECT tag, COUNT(*) FROM tags WHERE source=?1 GROUP BY tag")?;
+    let rows = st.query_map([source], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let (tag, n) = r?;
+        out.insert(tag, n as usize);
+    }
+    Ok(out)
 }
 
 /// Все видимые теги с весами: file_id → [(тег, вес)] по убыванию.
@@ -2560,6 +2686,51 @@ mod tests {
         let _ = &mut c;
     }
 
+    /// Словарь тегов: правка сохраняется на месте, метка уникальна, удаление чистит одну строку.
+    #[test]
+    fn словарь_тегов_хранится_в_бд_по_модели() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let mk = |id: &str, label: &str, pos: i64| TagDef {
+            model: "m1".into(),
+            id: id.into(),
+            label: label.into(),
+            prompts: vec!["фотография пляжа".into(), "море".into()],
+            enabled: true,
+            position: pos,
+            min_percentile: 0,
+        };
+        save_tag_def(&c, &mk("beach", "пляж", 0)).unwrap();
+        save_tag_def(&c, &mk("sea", "море", 1)).unwrap();
+        let defs = load_tag_defs(&c, "m1").unwrap();
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].label, "пляж");
+        assert_eq!(defs[0].prompts.len(), 2);
+        // Правка по id: метка и промпты меняются, строка не дублируется.
+        let mut d = defs[0].clone();
+        d.label = "пляж и берег".into();
+        d.prompts = vec!["фотография берега".into()];
+        d.enabled = false;
+        d.min_percentile = 30;
+        save_tag_def(&c, &d).unwrap();
+        let defs = load_tag_defs(&c, "m1").unwrap();
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].label, "пляж и берег");
+        assert!(!defs[0].enabled);
+        assert_eq!(defs[0].min_percentile, 30);
+        // Вторая модель — свой словарь, чужие метки не мешают.
+        let mut other = mk("beach", "пляж", 0);
+        other.model = "m2".into();
+        save_tag_def(&c, &other).unwrap();
+        assert_eq!(load_tag_defs(&c, "m2").unwrap().len(), 1);
+        // Метка уникальна внутри модели: иначе две строки `tags` с одним ключом.
+        let mut clash = mk("clash", "море", 2);
+        clash.model = "m1".into();
+        assert!(save_tag_def(&c, &clash).is_err());
+        assert_eq!(delete_tag_def(&c, "m1", "sea").unwrap(), 1);
+        assert_eq!(load_tag_defs(&c, "m1").unwrap().len(), 1);
+    }
+
     #[test]
     fn старая_база_получает_альбомы_и_не_теряет_файлы() {
         let c = Connection::open_in_memory().unwrap();
@@ -2575,7 +2746,7 @@ mod tests {
         .unwrap();
         init(&c).unwrap();
         let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         assert_eq!(load_all(&c).unwrap().len(), 1);
         let album = create_album(&c, 0, "Старое", "").unwrap();
         add_to_album(&c, album, &[id_of(&c, "/old.jpg")]).unwrap();

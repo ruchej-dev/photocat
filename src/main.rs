@@ -8,7 +8,8 @@
 //!                     [--exclude-dup] [--apply] [--copy|--symlink] [--rename]
 //!   photocat verify <a> <b> [--jobs N] [--all]  |  verify --manifest FILE <dir>
 //!   photocat manifest [каталог] [--out FILE] [--jobs N]
-//!   photocat embed [--jobs N] [--batch N] [--refresh]
+//!   photocat embed [--jobs N] [--batch N] [--refresh] [--retag]
+//!   photocat tags [--list] [--add МЕТКА] [--prompt ТЕКСТ] [--export FILE] [--import FILE]
 //!   photocat ocr [--jobs N] [--all]
 //!   photocat search <запрос> [--top N] [--text]
 //!   photocat clusters [--k N] [--out FILE]
@@ -51,8 +52,11 @@ fn usage() {
   verify <a> <b> [--jobs N] [--all]        сверка двух копий: размер → sha256, отчёт
   verify --manifest FILE <каталог>         проверить каталог по слепку sha256
   manifest [DIR] [--out FILE] [--jobs N]  слепок каталога в формате sha256sum
-  embed [--jobs N] [--batch N] [--refresh]  CLIP-эмбеддинги и теги (модель локальная);
-                                            --refresh пересчитывает векторы заново
+  embed [--jobs N] [--batch N] [--refresh] [--retag]  CLIP-эмбеддинги и теги (модель локальная);
+                                            --refresh пересчитывает векторы, --retag — только теги
+  tags [--list] [--add МЕТКА --prompt ТЕКСТ] [--enable ID] [--disable ID] [--rm ID]
+       [--export FILE] [--import FILE] [--reset]
+                                            словарь тегов модели: метки, промпты, порядок
   faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
                                             лица: детекция, эмбеддинги, группы
   faces download --yes | label --id N --name ИМЯ | split --id N
@@ -519,6 +523,7 @@ fn main() -> Result<()> {
         }
         "albums" => albums_cli(&args[1..]),
         "export" => organize::export_cli(&args[1..]),
+        "tags" => tags_cli(&args[1..]),
         "clusters" => {            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let k = flag_num(&args, "--k", 30);
             let out = flag_str(&args, "--out")
@@ -897,6 +902,156 @@ fn file_ids_for_paths(conn: &rusqlite::Connection, paths: &[String]) -> Result<V
         anyhow::bail!("нет в индексе: {}", missing.join(", "));
     }
     Ok(ids)
+}
+
+/// Словарь тегов: показать, добавить, включить/выключить, убрать, импорт/экспорт JSON.
+/// После правок веса тегов пересчитывает `embed --retag` (без повторного CLIP по фото).
+fn tags_cli(args: &[String]) -> Result<()> {
+    let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
+    let settings = {
+        let conn = db::open(&db_path)?;
+        db::load_settings(&conn)
+    };
+    let entry = embed::active_entry(&settings);
+    let mut defs = embed::ensure_tag_defs(&db_path, entry)?;
+    let source = embed::tag_source(entry);
+    let list = || -> Result<()> {
+        let conn = db::open(&db_path)?;
+        let counts = db::tag_file_counts(&conn, &source)?;
+        println!("словарь модели {} — {} тегов", entry.id, defs.len());
+        for d in &defs {
+            println!(
+                "  {:<10} {:<16} {}{} · файлов {} · промптов {}",
+                d.id,
+                d.label,
+                if d.enabled { "ок" } else { "выкл" },
+                if d.min_percentile > 0 {
+                    format!(", порог {}%", d.min_percentile)
+                } else {
+                    String::new()
+                },
+                counts.get(&d.label).copied().unwrap_or(0),
+                d.prompts.len()
+            );
+            for p in &d.prompts {
+                println!("             · {p}");
+            }
+        }
+        Ok(())
+    };
+
+    if let Some(label) = flag_str(args, "--add") {
+        let label = label.trim().to_string();
+        if label.is_empty() {
+            anyhow::bail!("--add: нужна непустая метка");
+        }
+        if defs.iter().any(|d| d.label == label) {
+            anyhow::bail!("тег «{label}» уже есть в словаре");
+        }
+        let mut prompts: Vec<String> = Vec::new();
+        let mut it = args.iter().peekable();
+        while let Some(a) = it.next() {
+            if a == "--prompt" {
+                if let Some(p) = it.next() {
+                    prompts.push(p.clone());
+                }
+            } else if let Some(rest) = a.strip_prefix("--prompt=") {
+                prompts.push(rest.to_string());
+            }
+        }
+        if prompts.is_empty() {
+            anyhow::bail!("--add: нужен хотя бы один --prompt «фотография …»");
+        }
+        let n = defs
+            .iter()
+            .filter_map(|d| d.id.strip_prefix("custom-")?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let d = db::TagDef {
+            model: entry.id.to_string(),
+            id: format!("custom-{n}"),
+            label,
+            prompts,
+            enabled: true,
+            position: defs.iter().map(|d| d.position).max().unwrap_or(0) + 1,
+            min_percentile: 0,
+        };
+        let conn = db::open(&db_path)?;
+        db::save_tag_def(&conn, &d)?;
+        defs.push(d.clone());
+        println!(
+            "тег «{}» добавлен (id {}) — пересчитайте веса: photocat embed --retag",
+            d.label, d.id
+        );
+        return Ok(());
+    }
+
+    if let Some(which) = flag_str(args, "--enable").or_else(|| flag_str(args, "--disable")) {
+        let enable = has_flag(args, "--enable");
+        let want = which.trim();
+        let conn = db::open(&db_path)?;
+        let d = defs
+            .iter_mut()
+            .find(|d| d.id == want || d.label == want)
+            .with_context(|| format!("нет тега «{want}»"))?;
+        d.enabled = enable;
+        db::save_tag_def(&conn, d)?;
+        println!(
+            "тег «{}» {}",
+            d.label,
+            if enable { "включён" } else { "выключен" }
+        );
+        return Ok(());
+    }
+
+    if let Some(which) = flag_str(args, "--rm") {
+        let want = which.trim();
+        let conn = db::open(&db_path)?;
+        let d = defs
+            .iter()
+            .find(|d| d.id == want || d.label == want)
+            .with_context(|| format!("нет тега «{want}»"))?;
+        db::delete_tag_def(&conn, entry.id, &d.id)?;
+        println!(
+            "тег «{}» убран из словаря — веса исчезнут после photocat embed --retag",
+            d.label
+        );
+        return Ok(());
+    }
+
+    if let Some(path) = flag_str(args, "--export") {
+        std::fs::write(&path, embed::tag_defs_to_json(&defs))
+            .with_context(|| format!("не записать {path}") )?;
+        println!("словарь выгружен: {path} ({} тегов)", defs.len());
+        return Ok(());
+    }
+
+    if let Some(path) = flag_str(args, "--import") {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("не прочитать {path}"))?;
+        let defs = embed::tag_defs_from_json(entry.id, &text)?;
+        let conn = db::open(&db_path)?;
+        db::replace_tag_defs(&conn, entry.id, &defs)?;
+        println!(
+            "словарь загружен: {} тегов — пересчитайте веса: photocat embed --retag",
+            defs.len()
+        );
+        return Ok(());
+    }
+
+    if has_flag(args, "--reset") {
+        let defs = embed::default_defs(entry.id, entry.kind);
+        let conn = db::open(&db_path)?;
+        db::replace_tag_defs(&conn, entry.id, &defs)?;
+        println!(
+            "словарь возвращён к стандартному ({} тегов) — photocat embed --retag",
+            defs.len()
+        );
+        return Ok(());
+    }
+
+    list()
 }
 
 /// Короткая подпись версии: «ffmpeg version 6.1.1» вместо строки с копирайтом.

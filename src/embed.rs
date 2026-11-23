@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::Tensor;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tokenizers::Tokenizer;
@@ -26,57 +26,106 @@ pub const TAG_SHOW: f32 = 0.22;
 #[allow(dead_code)]
 pub const TAG_MARGIN: f32 = 0.01;
 
-/// Русские подписи тегов. Промпты зависят от модели (русские или английские).
-/// Набор фиксирован: это подсказки, а не детектор; свободный запрос ищет любые слова.
-pub const TAG_LABELS: [&str; 14] = [
-    "пляж",
-    "документ",
-    "скриншот",
-    "еда",
-    "животные",
-    "дети",
-    "праздник",
-    "мебель",
-    "интерьер",
-    "одежда",
-    "природа",
-    "город",
-    "транспорт",
-    "растения",
-];
+/// Дефолтный тег: подпись и общие шаблоны промптов на двух языках.
+/// Метки и промпты живут в БД (`tag_defs`): дефолт только засевает пустой словарь.
+pub struct TagDefault {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub prompts_ru: &'static [&'static str],
+    pub prompts_en: &'static [&'static str],
+}
 
-const PROMPTS_RU: [&str; 14] = [
-    "фотография пляжа и моря",
-    "фотография документа, лист бумаги с текстом",
-    "снимок экрана, интерфейс программы",
-    "фотография еды, тарелка с едой",
-    "фотография животного, кошка или собака",
-    "фотография детей, ребёнок",
-    "праздник, торт со свечами, вечеринка",
-    "фотография мебели, шкаф, стол, диван",
-    "фотография комнаты, интерьер квартиры",
-    "фотография одежды, куртка, платье",
-    "фотография природы, лес, поле, небо",
-    "фотография улицы и домов, город",
-    "фотография транспорта, автомобиль, автобус",
-    "фотография растений, цветы и деревья",
-];
+/// Версия дефолтного набора: пишется в `settings.tag_defs_version`.
+/// Обновление дефолта не перезатирает правки владельца — только фиксирует, что засеяно.
+pub const DEFAULT_TAG_VERSION: i64 = 1;
 
-const PROMPTS_EN: [&str; 14] = [
-    "a photo of a beach and the sea",
-    "a photo of a document, a sheet of paper with text",
-    "a screenshot of a computer screen",
-    "a photo of food, a plate with food",
-    "a photo of an animal, a cat or a dog",
-    "a photo of children, a child",
-    "a party, a birthday cake with candles",
-    "a photo of furniture, a cupboard, table or sofa",
-    "a photo of a room interior",
-    "a photo of clothes, a jacket or a dress",
-    "a photo of nature, forest, field or sky",
-    "a photo of a city street and buildings",
-    "a photo of a vehicle, car or bus",
-    "a photo of plants, flowers and trees",
+/// 14 общих подсказок. Никаких слов из конкретного архива: набор обязан работать
+/// на любом каталоге (M15.4, plan/M15-tags.md §4).
+pub const DEFAULT_TAGS: [TagDefault; 14] = [
+    TagDefault {
+        id: "beach",
+        label: "пляж",
+        prompts_ru: &["фотография пляжа и моря"],
+        prompts_en: &["a photo of a beach and the sea"],
+    },
+    TagDefault {
+        id: "document",
+        label: "документ",
+        prompts_ru: &["фотография документа, лист бумаги с текстом"],
+        prompts_en: &["a photo of a document, a sheet of paper with text"],
+    },
+    TagDefault {
+        id: "screenshot",
+        label: "скриншот",
+        prompts_ru: &["снимок экрана, интерфейс программы"],
+        prompts_en: &["a screenshot of a computer screen"],
+    },
+    TagDefault {
+        id: "food",
+        label: "еда",
+        prompts_ru: &["фотография еды, тарелка с едой"],
+        prompts_en: &["a photo of food, a plate with food"],
+    },
+    TagDefault {
+        id: "animals",
+        label: "животные",
+        prompts_ru: &["фотография животного, кошка или собака"],
+        prompts_en: &["a photo of an animal, a cat or a dog"],
+    },
+    TagDefault {
+        id: "children",
+        label: "дети",
+        prompts_ru: &["фотография детей, ребёнок"],
+        prompts_en: &["a photo of children, a child"],
+    },
+    TagDefault {
+        id: "holiday",
+        label: "праздник",
+        prompts_ru: &["праздник, торт со свечами, вечеринка"],
+        prompts_en: &["a party, a birthday cake with candles"],
+    },
+    TagDefault {
+        id: "furniture",
+        label: "мебель",
+        prompts_ru: &["фотография мебели, шкаф, стол, диван"],
+        prompts_en: &["a photo of furniture, a cupboard, table or sofa"],
+    },
+    TagDefault {
+        id: "interior",
+        label: "интерьер",
+        prompts_ru: &["фотография комнаты, интерьер квартиры"],
+        prompts_en: &["a photo of a room interior"],
+    },
+    TagDefault {
+        id: "clothes",
+        label: "одежда",
+        prompts_ru: &["фотография одежды, куртка, платье"],
+        prompts_en: &["a photo of clothes, a jacket or a dress"],
+    },
+    TagDefault {
+        id: "nature",
+        label: "природа",
+        prompts_ru: &["фотография природы, лес, поле, небо"],
+        prompts_en: &["a photo of nature, forest, field or sky"],
+    },
+    TagDefault {
+        id: "city",
+        label: "город",
+        prompts_ru: &["фотография улицы и домов, город"],
+        prompts_en: &["a photo of a city street and buildings"],
+    },
+    TagDefault {
+        id: "transport",
+        label: "транспорт",
+        prompts_ru: &["фотография транспорта, автомобиль, автобус"],
+        prompts_en: &["a photo of a vehicle, car or bus"],
+    },
+    TagDefault {
+        id: "plants",
+        label: "растения",
+        prompts_ru: &["фотография растений, цветы и деревья"],
+        prompts_en: &["a photo of plants, flowers and trees"],
+    },
 ];
 
 /// Как текстовая башня отдаёт вектор: через проекцию 768→512 или сразу `text_embeds`.
@@ -104,7 +153,6 @@ pub struct ModelEntry {
     pub note: &'static str,
     pub kind: TextKind,
     pub files: &'static [ModelFile],
-    pub prompts: &'static [&'static str],
 }
 
 impl ModelEntry {
@@ -172,7 +220,6 @@ static CATALOG: [ModelEntry; 2] = [
         note: "русский поиск и теги, лучшее качество",
         kind: TextKind::Projected,
         files: &MULTILINGUAL_FILES,
-        prompts: &PROMPTS_RU,
     },
     ModelEntry {
         id: "clip-vit-b32-en",
@@ -181,7 +228,6 @@ static CATALOG: [ModelEntry; 2] = [
         note: "меньше по размеру, запросы только по-английски",
         kind: TextKind::Direct,
         files: &ENGLISH_FILES,
-        prompts: &PROMPTS_EN,
     },
 ];
 
@@ -205,6 +251,148 @@ pub fn active_entry(settings: &db::Settings) -> &'static ModelEntry {
 
 pub fn tag_source(e: &ModelEntry) -> String {
     format!("clip:{}", e.id)
+}
+
+/// Дефолтный словарь модели: подписи русские, промпты — на языке её текстовой башни.
+pub fn default_defs(model: &str, kind: TextKind) -> Vec<db::TagDef> {
+    DEFAULT_TAGS
+        .iter()
+        .enumerate()
+        .map(|(i, d)| db::TagDef {
+            model: model.to_string(),
+            id: d.id.to_string(),
+            label: d.label.to_string(),
+            prompts: match kind {
+                TextKind::Projected => d.prompts_ru,
+                TextKind::Direct => d.prompts_en,
+            }
+            .iter()
+            .map(|p| p.to_string())
+            .collect(),
+            enabled: true,
+            position: i as i64,
+            min_percentile: 0,
+        })
+        .collect()
+}
+
+/// Словарь модели из БД; пустой засевается дефолтом один раз.
+/// Правки владельца не перезатираются: дефолт добавляется только в пустую таблицу.
+pub fn ensure_tag_defs(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDef>> {
+    let conn = db::open(db_path)?;
+    let defs = db::load_tag_defs(&conn, e.id)?;
+    if !defs.is_empty() {
+        return Ok(defs);
+    }
+    let defs = default_defs(e.id, e.kind);
+    db::replace_tag_defs(&conn, e.id, &defs)?;
+    conn.execute(
+        "INSERT INTO settings(key,value) VALUES('tag_defs_version',?1)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [DEFAULT_TAG_VERSION.to_string()],
+    )?;
+    Ok(defs)
+}
+
+/// Словарь в JSON — для обмена между машинами и резервной копии. Без путей архива.
+pub fn tag_defs_to_json(defs: &[db::TagDef]) -> String {
+    let arr: Vec<serde_json::Value> = defs
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "id": d.id,
+                "label": d.label,
+                "prompts": d.prompts,
+                "enabled": d.enabled,
+                "position": d.position,
+                "min_percentile": d.min_percentile,
+            })
+        })
+        .collect();
+    serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into())
+}
+
+/// Разобрать словарь из JSON. Неизвестные поля игнорируются, модель берётся из аргумента.
+pub fn tag_defs_from_json(model: &str, text: &str) -> Result<Vec<db::TagDef>> {
+    let value: serde_json::Value = serde_json::from_str(text).context("разбор JSON словаря")?;
+    let arr = value
+        .as_array()
+        .context("ожидался массив тегов: [{id,label,prompts}]" )?;
+    let mut defs: Vec<db::TagDef> = Vec::with_capacity(arr.len());
+    let mut used: HashSet<String> = HashSet::new();
+    for (i, v) in arr.iter().enumerate() {
+        let label = v
+            .get("label")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .with_context(|| format!("тег #{i}: нет label"))?;
+        let base = v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| slug(label));
+        let mut id = base.clone();
+        let mut n = 2;
+        while !used.insert(id.clone()) {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        if defs.iter().any(|d: &db::TagDef| d.label == label) {
+            bail!("метка «{label}» встречается в файле дважды");
+        }
+        let prompts: Vec<String> = v
+            .get("prompts")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str())
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        defs.push(db::TagDef {
+            model: model.to_string(),
+            id,
+            label: label.to_string(),
+            prompts,
+            enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
+            position: v
+                .get("position")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(i as i64),
+            min_percentile: v
+                .get("min_percentile")
+                .and_then(|x| x.as_i64())
+                .unwrap_or(0)
+                .clamp(0, 100) as i32,
+        });
+    }
+    Ok(defs)
+}
+
+/// Ключ для тега, добавленного без явного id: латиница/цифры, остальное — дефис.
+/// Кириллическая метка даёт `tag`, поэтому `tag_defs_from_json` разводит повторы
+/// (`tag-2`), а GUI при создании своего тега ставит `custom-N`.
+pub fn slug(label: &str) -> String {
+    let mut out = String::new();
+    for c in label.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.extend(c.to_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() {
+        "tag".into()
+    } else {
+        out
+    }
 }
 
 pub fn model_dir(models_dir: &Path, e: &ModelEntry) -> PathBuf {
@@ -271,7 +459,8 @@ pub struct Model {
     text: Session,
     tokenizer: Tokenizer,
     dense: Vec<f32>,
-    tag_vectors: Vec<Vec<f32>>,
+    /// Метка → усреднённый вектор её промптов; только включённые теги.
+    tag_vectors: Vec<(String, Vec<f32>)>,
     pub entry: &'static ModelEntry,
 }
 
@@ -307,9 +496,36 @@ impl Model {
             tag_vectors: Vec::new(),
             entry,
         };
-        let tag_vectors = me.encode_texts(entry.prompts)?;
-        me.tag_vectors = tag_vectors;
+        me.tag_vectors = Vec::new();
         Ok(me)
+    }
+
+    /// Подготовить векторы промптов из словаря: 2–3 шаблона на метку усредняются.
+    /// Векторы фото не пересчитываются — правка словаря стоит один прогон текстовой башни.
+    pub fn set_tag_defs(&mut self, defs: &[db::TagDef]) -> Result<()> {
+        let mut out: Vec<(String, Vec<f32>)> = Vec::new();
+        for d in defs.iter().filter(|d| d.enabled) {
+            let prompts: Vec<&str> = d
+                .prompts
+                .iter()
+                .map(|p| p.trim())
+                .filter(|p| !p.is_empty())
+                .collect();
+            if prompts.is_empty() {
+                continue;
+            }
+            let vectors = self.encode_texts(&prompts)?;
+            let mut mean = vec![0f32; DIM];
+            for v in &vectors {
+                for (a, b) in mean.iter_mut().zip(v) {
+                    *a += *b;
+                }
+            }
+            normalize(&mut mean);
+            out.push((d.label.clone(), mean));
+        }
+        self.tag_vectors = out;
+        Ok(())
     }
 
     fn tokenize(&self, texts: &[&str]) -> Result<(Vec<i64>, Vec<i64>, usize, usize)> {
@@ -457,15 +673,20 @@ impl Model {
         Ok(out)
     }
 
-    /// Теги для одного вектора: все промпты с весом по убыванию.
+    /// Теги для одного вектора: все включённые теги словаря с весом по убыванию.
     pub fn tag_scores(&self, image: &[f32]) -> Vec<(String, f32)> {
-        let mut out: Vec<(String, f32)> = TAG_LABELS
+        let mut out: Vec<(String, f32)> = self
+            .tag_vectors
             .iter()
-            .zip(&self.tag_vectors)
-            .map(|(label, v)| ((*label).to_string(), cosine(image, v)))
+            .map(|(label, v)| (label.clone(), cosine(image, v)))
             .collect();
         out.sort_by(|a, b| b.1.total_cmp(&a.1));
         out
+    }
+
+    /// Сколько включённых тегов сейчас в словаре.
+    pub fn tag_count(&self) -> usize {
+        self.tag_vectors.len()
     }
 }
 
@@ -740,8 +961,11 @@ pub fn embed_missing(
         });
     }
     let mut model = Model::load(&settings, threads)?;
+    // Словарь тегов — из БД: правки владельца и дефолт засеяны до прогона.
+    let defs = ensure_tag_defs(db_path, entry)?;
+    model.set_tag_defs(&defs)?;
     if let Some(p) = &progress {
-        p.set_msg("CLIP: эмбеддинги…");
+        p.set_msg(format!("CLIP: эмбеддинги, тегов в словаре {}…", model.tag_count()));
     }
     let thumbs_dir = db::cache_dir().join("thumbs");
     let mut computed = 0usize;
@@ -859,7 +1083,9 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
         p.set_total(rows.len());
         p.set_msg("CLIP: пересчёт тегов без фото…");
     }
-    let model = Model::load(&settings, threads)?;
+    let mut model = Model::load(&settings, threads)?;
+    let defs = ensure_tag_defs(db_path, entry)?;
+    model.set_tag_defs(&defs)?;
     let mut tagged = 0usize;
     let tx = conn.unchecked_transaction()?;
     for (id, vec) in &rows {
@@ -1224,6 +1450,75 @@ fn curl_get(tools: &tools::Tools, url: &str, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Дефолт: русские подписи, промпты на языке модели; ни одного слова из конкретного архива.
+    #[test]
+    fn дефолтный_словарь_общий_и_на_языке_модели() {
+        let ru = default_defs("m", TextKind::Projected);
+        let en = default_defs("m", TextKind::Direct);
+        assert_eq!(ru.len(), DEFAULT_TAGS.len());
+        assert_eq!(ru.len(), en.len());
+        assert_eq!(ru[0].label, "пляж");
+        assert!(ru[0].prompts[0].starts_with("фотография"));
+        assert!(en[0].prompts[0].starts_with("a photo"));
+        for d in &ru {
+            assert!(!d.prompts.is_empty(), "у тега «{}» нет промптов", d.label);
+            for bad in ["шкаф-купе", "гардероб", "чертёж", "комод"] {
+                assert!(!d.prompts.iter().any(|p| p.contains(bad)), "в дефолте «{bad}»");
+            }
+        }
+        // Порядок сохраняется, id — стабильные ключи.
+        assert_eq!(ru[7].id, "furniture");
+        assert_eq!(ru[7].position, 7);
+    }
+
+    /// Словарь переживает экспорт/импорт без потерь; теги без id получают уникальные ключи.
+    #[test]
+    fn словарь_переживает_json_roundtrip() {
+        let defs = default_defs("m", TextKind::Projected);
+        let json = tag_defs_to_json(&defs);
+        let back = tag_defs_from_json("m", &json).unwrap();
+        assert_eq!(defs, back);
+        let mut edited = defs.clone();
+        edited[2].label = "экран".into();
+        edited[2].prompts = vec!["снимок экрана".into(), "интерфейс программы".into()];
+        edited[2].enabled = false;
+        edited[2].min_percentile = 40;
+        let back = tag_defs_from_json("m", &tag_defs_to_json(&[edited[2].clone()])).unwrap();
+        assert_eq!(back[0], edited[2]);
+        // Без id: ключи из метки, совпадающие ключи разводятся, а не затирают друг друга.
+        let back = tag_defs_from_json(
+            "m",
+            r#"[{"label":"Шкаф","prompts":["фотография шкафа"]},{"label":"Комод","prompts":[]}]"#,
+        )
+        .unwrap();
+        assert_eq!(back.len(), 2);
+        assert_ne!(back[0].id, back[1].id);
+        assert!(back.iter().all(|d| d.model == "m"));
+    }
+
+    /// Дефолт засевается один раз: правка владельца не перезатирается повторным запуском.
+    #[test]
+    fn словарь_засевается_один_раз_и_не_перезаписывает_правки() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-tagdefs-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let e = &catalog()[0];
+        let defs = ensure_tag_defs(&path, e).unwrap();
+        assert_eq!(defs.len(), DEFAULT_TAGS.len());
+        let mut d = defs[0].clone();
+        d.label = "пляж и море".into();
+        d.prompts = vec!["фотография пляжа".into()];
+        db::save_tag_def(&db::open(&path).unwrap(), &d).unwrap();
+        let again = ensure_tag_defs(&path, e).unwrap();
+        assert!(again.iter().any(|x| x.label == "пляж и море"));
+        assert_eq!(again.len(), DEFAULT_TAGS.len());
+    }
 
     #[test]
     fn cosine_of_normalized_vectors() {

@@ -72,6 +72,8 @@
 
 ## 4. Данные
 
+- `tags`: строки `(file_id, tag, score, source)`, где `source='clip:<model_id>'`; метки и промпты —
+  в `tag_defs` на модель (правит владелец). Смена `sha256` стирает CLIP-теги и вектор файла.
 - БД: `~/.cache/photocat/photocat.db` (SQLite, WAL). Пересоздаётся индексацией; в каталог архива
   не пишем никогда. `files.trashed_at` — корзина приложения (файл на диске цел), `user_tags` —
   свои теги владельца. Список каталогов хранится в `settings.roots` строкой; каталог убирается
@@ -112,6 +114,9 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat verify --manifest file.sha256 DIR  # проверить по слепку
 ./target/release/photocat embed                          # CLIP-эмбеддинги и теги (локально)
 ./target/release/photocat embed --refresh                # пересчитать векторы (после смены входа)
+./target/release/photocat embed --retag                  # только теги по сохранённым векторам
+./target/release/photocat tags [--list|--add МЕТКА --prompt ТЕКСТ|--enable ID|--disable ID|--rm ID]
+                                [--export FILE|--import FILE|--reset]  # словарь тегов модели
 ./target/release/photocat search "торт" --top 20         # смысловой поиск
 ./target/release/photocat faces                          # лица: детекция, эмбеддинги, группы
 ./target/release/photocat faces --dry-run                # сколько снимков ещё без лиц
@@ -195,8 +200,9 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # замер на ре�
 - Выгрузка альбома не переименовывает и не удаляет уже выгруженное: после переупорядочивания
   файл остаётся под старым номером, а повторная выгрузка говорит «порядок в цели устарел N»;
   лечится ручной выгрузкой в новый каталог.
-- Теги CLIP — 14 фиксированных подсказок (`мебель`, `интерьер`, `город` и т. д.). Свои теги
-  добавляются вручную в карточке; свободный поиск словами остаётся главным способом найти предмет.
+- Теги CLIP — подсказки из словаря: 14 общих меток по умолчанию, метки и промпты правятся
+  в «Настройках → Теги» (`tag_defs` в БД на модель), пересчёт — `embed --retag` без повторного
+  CLIP по фото. Свободный поиск словами остаётся главным способом найти предмет.
 
 ## 9. Скиллы репозитория
 

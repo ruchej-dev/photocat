@@ -918,6 +918,17 @@ struct App {
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
     /// Теги CLIP: file_id → [(тег, вес)] по убыванию.
     tags: HashMap<i64, Vec<(String, f32)>>,
+    /// Словарь тегов активной модели: метки, промпты, порядок (M15.4).
+    tag_defs: Vec<db::TagDef>,
+    /// Правка словаря ещё не пересчитана: кнопка «Пересчитать теги» подсвечена.
+    tag_dict_dirty: bool,
+    /// Новая метка и промпты в редакторе словаря.
+    tag_new_label: String,
+    tag_new_prompts: String,
+    /// Путь для экспорта/импорта словаря JSON; пусто — файл в кэше.
+    tag_json_path: String,
+    /// Пересчёт тегов по сохранённым векторам (без повторного CLIP по фото).
+    retag_rx: Option<mpsc::Receiver<Result<embed::RetagStats>>>,
     /// Распределение весов по каждому тегу (по убыванию) и по лучшему тегу файла:
     /// из него считается процентильный порог фильтра, без сортировки на каждый кадр.
     tag_dists: HashMap<String, Vec<f32>>,
@@ -1095,6 +1106,12 @@ impl App {
             progress: None,
             rx: None,
             tags: HashMap::new(),
+            tag_defs: Vec::new(),
+            tag_dict_dirty: false,
+            tag_new_label: String::new(),
+            tag_new_prompts: String::new(),
+            tag_json_path: String::new(),
+            retag_rx: None,
             tag_dists: HashMap::new(),
             top_scores: Vec::new(),
             user_tags: HashMap::new(),
@@ -1252,6 +1269,11 @@ impl App {
                     db::human(rows.iter().map(|r| r.size).sum())
                 );
                 self.settings = settings;
+                self.tag_defs = embed::ensure_tag_defs(
+                    &self.db_path,
+                    embed::active_entry(&self.settings),
+                )
+                .unwrap_or_default();
                 self.tools_input = self.settings.tools.clone();
                 // Проверяем tesseract и остальные программы по путям из настроек — один раз.
                 self.tesseract = self.settings.tools.probe(Tool::Tesseract);
@@ -2743,6 +2765,331 @@ impl App {
             .size(11.0)
             .color(DIM),
         );
+        self.settings_tag_dictionary(ui);
+    }
+
+    /// Редактор словаря (M15.4): метки и промпты хранятся в БД на каждую модель.
+    /// Правка не пересчитывает фото: векторы картинок не зависят от промптов.
+    fn settings_tag_dictionary(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(12.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Словарь тегов").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new(
+                "Метка и промпты живут в БД на каждую модель. Правка промптов не перечитывает \
+                 фото: векторы уже сохранены, пересчитываются только веса.",
+            )
+            .size(11.0)
+            .color(DIM),
+        );
+        if self.tag_defs.is_empty() {
+            ui.label(
+                egui::RichText::new("словарь ещё не засеян — он появится после первого «Посчитать теги»")
+                    .size(11.0)
+                    .color(DIM),
+            );
+        }
+        let mut edited: Option<db::TagDef> = None;
+        let mut removed: Option<String> = None;
+        for d in self.tag_defs.iter_mut() {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(&mut d.enabled, "")
+                    .on_hover_text("выключенный тег не считается и не показывается в фильтре")
+                    .changed()
+                {
+                    edited = Some(d.clone());
+                }
+                if ui
+                    .add(egui::TextEdit::singleline(&mut d.label).desired_width(130.0))
+                    .on_hover_text("метка по-русски: она видна в фильтре и в карточке")
+                    .changed()
+                {
+                    edited = Some(d.clone());
+                }
+                let mut pct = d.min_percentile;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut pct)
+                            .range(0..=100)
+                            .speed(1)
+                            .suffix("%"),
+                    )
+                    .on_hover_text("минимальный процентиль показа этого тега")
+                    .changed()
+                {
+                    d.min_percentile = pct;
+                    edited = Some(d.clone());
+                }
+                if ui.button("Убрать из словаря").clicked() {
+                    removed = Some(d.id.clone());
+                }
+            });
+            let mut text = d.prompts.join("\n");
+            if ui
+                .add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_rows(1)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("промпты: один на строку; 2–3 общих шаблона"),
+                )
+                .changed()
+            {
+                d.prompts = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                edited = Some(d.clone());
+            }
+        }
+        if let Some(d) = edited {
+            self.save_tag_def_row(&d);
+        }
+        if let Some(id) = removed {
+            self.delete_tag_def_row(&id);
+        }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tag_new_label)
+                    .desired_width(150.0)
+                    .hint_text("новая метка, например «Шкаф»"),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tag_new_prompts)
+                    .desired_width(260.0)
+                    .hint_text("промпт: «фотография шкафа»"),
+            );
+        });
+        let mut add = false;
+        let mut retag = false;
+        let mut export = false;
+        let mut import = false;
+        let mut reset = false;
+        ui.horizontal(|ui| {
+            add = ui
+                .add_enabled(
+                    !self.tag_new_label.trim().is_empty(),
+                    egui::Button::new("Добавить в словарь"),
+                )
+                .on_hover_text("затем «Пересчитать теги»: веса пересчитаются по сохранённым векторам")
+                .clicked();
+            let can = self.retag_rx.is_none() && embed::model_present(&self.settings);
+            let title = if self.tag_dict_dirty {
+                "Пересчитать теги •"
+            } else {
+                "Пересчитать теги"
+            };
+            retag = ui
+                .add_enabled(can, egui::Button::new(title))
+                .on_hover_text(
+                    "пересчитать веса тегов по уже сохранённым векторам, без повторного CLIP по фото",
+                )
+                .clicked();
+            export = ui
+                .button("Экспорт JSON")
+                .on_hover_text("словарь без путей и фото — можно перенести на другую машину")
+                .clicked();
+            import = ui
+                .button("Импорт JSON")
+                .on_hover_text("заменить словарь модели файлом; старые веса исчезнут после пересчёта")
+                .clicked();
+            reset = ui
+                .button("Вернуть стандартные")
+                .on_hover_text("14 общих тегов из кода; ваши правки будут заменены")
+                .clicked();
+        });
+        ui.add(
+            egui::TextEdit::singleline(&mut self.tag_json_path)
+                .desired_width(f32::INFINITY)
+                .hint_text("файл JSON для экспорта/импорта; пусто — <кэш>/photocat/tags.json"),
+        );
+        if self.tag_dict_dirty {
+            ui.label(
+                egui::RichText::new("словарь изменён — нажмите «Пересчитать теги»")
+                    .size(11.0)
+                    .color(ACCENT),
+            );
+        }
+        if add {
+            self.add_tag_def();
+        }
+        if retag {
+            self.start_retag();
+        }
+        if export {
+            self.export_tag_defs();
+        }
+        if import {
+            self.import_tag_defs();
+        }
+        if reset {
+            self.reset_tag_defs();
+        }
+    }
+
+    fn save_tag_def_row(&mut self, d: &db::TagDef) {
+        let r = db::open(&self.db_path).and_then(|c| db::save_tag_def(&c, d));
+        match r {
+            Ok(()) => {
+                self.tag_dict_dirty = true;
+                self.status = format!("словарь: «{}» сохранён", d.label);
+            }
+            Err(e) => {
+                // Метка могла столкнуться с занятой: показываем словарь из БД, а не свою копию.
+                if let Ok(c) = db::open(&self.db_path)
+                    && let Ok(defs) =
+                        db::load_tag_defs(&c, embed::active_entry(&self.settings).id)
+                {
+                    self.tag_defs = defs;
+                }
+                self.status = format!("словарь не сохранён: {e}");
+            }
+        }
+    }
+
+    fn add_tag_def(&mut self) {
+        let label = self.tag_new_label.trim().to_string();
+        if label.is_empty() {
+            return;
+        }
+        if self.tag_defs.iter().any(|d| d.label == label) {
+            self.status = format!("тег «{label}» уже есть в словаре");
+            return;
+        }
+        let n = self
+            .tag_defs
+            .iter()
+            .filter_map(|d| d.id.strip_prefix("custom-")?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let prompts: Vec<String> = self
+            .tag_new_prompts
+            .lines()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect();
+        let d = db::TagDef {
+            model: embed::active_entry(&self.settings).id.to_string(),
+            id: format!("custom-{n}"),
+            label,
+            prompts,
+            enabled: true,
+            position: self.tag_defs.iter().map(|d| d.position).max().unwrap_or(0) + 1,
+            min_percentile: 0,
+        };
+        let r = db::open(&self.db_path).and_then(|c| db::save_tag_def(&c, &d));
+        match r {
+            Ok(()) => {
+                self.tag_new_label.clear();
+                self.tag_new_prompts.clear();
+                self.tag_defs.push(d.clone());
+                self.tag_dict_dirty = true;
+                self.status = format!(
+                    "тег «{}» добавлен — нажмите «Пересчитать теги»",
+                    d.label
+                );
+            }
+            Err(e) => self.status = format!("тег не добавлен: {e}"),
+        }
+    }
+
+    fn delete_tag_def_row(&mut self, id: &str) {
+        let model = embed::active_entry(&self.settings).id.to_string();
+        let r = db::open(&self.db_path)
+            .and_then(|c| db::delete_tag_def(&c, &model, id));
+        match r {
+            Ok(_) => {
+                self.tag_defs.retain(|d| d.id != id);
+                self.tag_dict_dirty = true;
+                self.status =
+                    "тег убран из словаря — его веса исчезнут после «Пересчитать теги»".into();
+            }
+            Err(e) => self.status = format!("тег не убран: {e}"),
+        }
+    }
+
+    fn reset_tag_defs(&mut self) {
+        let entry = embed::active_entry(&self.settings);
+        let defs = embed::default_defs(entry.id, entry.kind);
+        let r = db::open(&self.db_path)
+            .and_then(|c| db::replace_tag_defs(&c, entry.id, &defs));
+        match r {
+            Ok(()) => {
+                self.tag_defs = defs;
+                self.tag_dict_dirty = true;
+                self.status =
+                    "словарь возвращён к стандартному — нажмите «Пересчитать теги»".into();
+            }
+            Err(e) => self.status = format!("словарь не сброшен: {e}"),
+        }
+    }
+
+    fn tag_json_file(&self) -> PathBuf {
+        let p = self.tag_json_path.trim();
+        if p.is_empty() {
+            db::cache_dir().join("tags.json")
+        } else {
+            PathBuf::from(p)
+        }
+    }
+
+    fn export_tag_defs(&mut self) {
+        let path = self.tag_json_file();
+        let json = embed::tag_defs_to_json(&self.tag_defs);
+        match std::fs::write(&path, json) {
+            Ok(()) => {
+                self.tag_json_path = path.to_string_lossy().to_string();
+                self.status = format!("словарь выгружен: {} ({} тегов)", path.display(), self.tag_defs.len());
+            }
+            Err(e) => self.status = format!("словарь не выгружен: {e}"),
+        }
+    }
+
+    fn import_tag_defs(&mut self) {
+        let path = self.tag_json_file();
+        let model = embed::active_entry(&self.settings).id.to_string();
+        let r = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("не прочитать {}: {e}", path.display()))
+            .and_then(|text| embed::tag_defs_from_json(&model, &text))
+            .and_then(|defs| {
+                db::open(&self.db_path).and_then(|c| db::replace_tag_defs(&c, &model, &defs))?;
+                Ok(defs)
+            });
+        match r {
+            Ok(defs) => {
+                self.tag_json_path = path.to_string_lossy().to_string();
+                self.tag_defs = defs;
+                self.tag_dict_dirty = true;
+                self.status = format!(
+                    "словарь загружен: {} тегов — нажмите «Пересчитать теги»",
+                    self.tag_defs.len()
+                );
+            }
+            Err(e) => self.status = format!("словарь не загружен: {e}"),
+        }
+    }
+
+    fn start_retag(&mut self) {
+        if self.retag_rx.is_some() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let progress = Arc::new(Progress::default());
+        self.embed_progress = Some(progress.clone());
+        let (tx, rx) = mpsc::channel();
+        self.retag_rx = Some(rx);
+        self.status = "CLIP: пересчёт тегов по сохранённым векторам…".into();
+        std::thread::spawn(move || {
+            let r = embed::retag(&db_path, 8, Some(progress));
+            let _ = tx.send(r);
+        });
     }
 
     fn settings_faces(&mut self, ui: &mut egui::Ui) {
@@ -3589,10 +3936,11 @@ impl App {
                 );
                 if ui
                     .add_enabled(self.embed_rx.is_none(), egui::Button::new("Посчитать теги"))
-                    .on_hover_text(
-                        "локально прогнать CLIP по превью: 14 приблизительных категорий; \
+                    .on_hover_text(format!(
+                        "локально прогнать CLIP по превью: {} приблизительных категорий; \
                          нужный предмет ищите смысловым поиском словами; ничего не отправляется",
-                    )
+                        self.tag_defs.iter().filter(|d| d.enabled).count().max(1)
+                    ))
                     .clicked()
                 {
                     self.start_embed();
@@ -3617,9 +3965,10 @@ impl App {
                         .color(DIM),
                 );
                 ui.label(
-                    egui::RichText::new(
-                        "свободный смысловой поиск понимает любые слова, не только 14 тегов",
-                    )
+                    egui::RichText::new(format!(
+                        "свободный смысловой поиск понимает любые слова, не только {} тегов",
+                        self.tag_defs.iter().filter(|d| d.enabled).count().max(1)
+                    ))
                     .size(11.0)
                     .color(DIM),
                 );
@@ -3629,6 +3978,7 @@ impl App {
                 own_tags.dedup();
                 // Число справа от тега — сколько снимков с ним при текущем пороге.
                 let counts = self.tag_counts();
+                let labels = self.tag_labels();
                 egui::ComboBox::from_id_salt("tag_filter")
                     .width(ui.available_width())
                     .selected_text(
@@ -3644,11 +3994,11 @@ impl App {
                         {
                             ui.close();
                         }
-                        for (label, n) in embed::TAG_LABELS.iter().zip(&counts) {
+                        for (label, n) in labels.iter().zip(&counts) {
                             if ui
                                 .selectable_value(
                                     &mut self.tag_filter,
-                                    Some(label.to_string()),
+                                    Some(label.clone()),
                                     format!("{label} · {n}"),
                                 )
                                 .clicked()
@@ -5342,13 +5692,20 @@ impl App {
 
     /// Сырой порог для тега при текущем процентиле. На маленьком каталоге
     /// процентиль шумный, поэтому там действует сырой порог уверенного тега.
+    /// Словарь может задать минимальный процентиль для отдельного тега (M15.4).
     fn tag_threshold(&self, tag: &str) -> f32 {
         if self.tags.len() < 100 {
             return self.settings.tag_show;
         }
+        let pct = self
+            .tag_defs
+            .iter()
+            .find(|d| d.label == tag)
+            .map(|d| self.settings.tag_show_pct.max(d.min_percentile))
+            .unwrap_or(self.settings.tag_show_pct);
         self.tag_dists
             .get(tag)
-            .and_then(|d| embed::percentile_threshold(d, self.settings.tag_show_pct))
+            .and_then(|d| embed::percentile_threshold(d, pct))
             .unwrap_or(self.settings.tag_show)
     }
 
@@ -5371,16 +5728,36 @@ impl App {
         score_percentile(d, score)
     }
 
-    /// Снимков на каждый тег из `TAG_LABELS` при его процентильном пороге: число рядом
+    /// Метки для фильтра: включённые теги словаря по порядку, затем старые метки,
+    /// которых в словаре уже нет, — чтобы посчитанные теги не пропадали.
+    fn tag_labels(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .tag_defs
+            .iter()
+            .filter(|d| d.enabled)
+            .map(|d| d.label.clone())
+            .collect();
+        for scores in self.tags.values() {
+            for (tag, _) in scores {
+                if !out.iter().any(|l| l == tag) {
+                    out.push(tag.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// Снимков на каждый тег из словаря при его процентильном пороге: число рядом
     /// с тегом честно говорит «ноль», а не удивляет после нажатия.
     fn tag_counts(&self) -> Vec<usize> {
-        let mut counts = vec![0usize; embed::TAG_LABELS.len()];
+        let labels = self.tag_labels();
+        let mut counts = vec![0usize; labels.len()];
         for scores in self.tags.values() {
             for (tag, score) in scores {
                 if *score < self.tag_threshold(tag) {
                     continue;
                 }
-                if let Some(i) = embed::TAG_LABELS.iter().position(|l| *l == tag.as_str()) {
+                if let Some(i) = labels.iter().position(|l| l == tag) {
                     counts[i] += 1;
                 }
             }
@@ -6520,6 +6897,30 @@ impl eframe::App for App {
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.embed_rx = None;
+                    self.embed_progress = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.retag_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.retag_rx = None;
+                    self.embed_progress = None;
+                    match res {
+                        Ok(stats) => {
+                            self.tag_dict_dirty = false;
+                            self.reload();
+                            self.status = stats.to_string();
+                        }
+                        Err(e) => self.status = format!("теги не пересчитаны: {e}"),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.retag_rx = None;
                     self.embed_progress = None;
                 }
             }
@@ -8731,11 +9132,64 @@ mod tests {
         assert!((app.tag_threshold("дети") - 1.0).abs() < 1e-6);
         app.settings.tag_show_pct = 0;
         assert!(app.tag_threshold("мебель").abs() < 1e-6);
-        assert_eq!(app.tag_counts()[7], 120, "«мебель» — седьмая в TAG_LABELS");
+        let i = app
+            .tag_labels()
+            .iter()
+            .position(|l| l == "мебель")
+            .expect("«мебель» есть в словаре по умолчанию");
+        assert_eq!(app.tag_counts()[i], 120);
         // Маленький каталог: процентиль шумный, действует сырой порог.
         app.tags.retain(|id, _| *id < 50);
         app.settings.tag_show = 0.22;
         assert!((app.tag_threshold("мебель") - 0.22).abs() < 1e-6);
+    }
+
+    /// Фильтр берёт метки из словаря, но не прячет уже посчитанные теги,
+    /// которых в словаре больше нет, и слушает минимальный процентиль тега.
+    #[test]
+    fn фильтр_берёт_метки_из_словаря_и_уважает_минимальный_процентиль() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-app-tags-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let mut app = App::new(path);
+        assert!(app.tag_labels().iter().any(|l| l == "пляж"), "дефолт засеян");
+        app.tag_defs.push(db::TagDef {
+            model: "m".into(),
+            id: "custom-1".into(),
+            label: "Шкаф".into(),
+            prompts: vec!["фотография шкафа".into()],
+            enabled: true,
+            position: 99,
+            min_percentile: 0,
+        });
+        assert!(app.tag_labels().iter().any(|l| l == "Шкаф"));
+        // Старая метка вне словаря не теряется: веса уже посчитаны.
+        app.tags.insert(1, vec![("старый".to_string(), 0.5)]);
+        assert!(app.tag_labels().iter().any(|l| l == "старый"));
+        // Выключенный тег исчезает из фильтра.
+        if let Some(d) = app.tag_defs.iter_mut().find(|d| d.id == "custom-1") {
+            d.enabled = false;
+        }
+        assert!(!app.tag_labels().iter().any(|l| l == "Шкаф"));
+        // Минимальный процентиль тега поднимает его порог поверх общего ползунка.
+        app.tags.clear();
+        for id in 0..120 {
+            app.tags.insert(id, vec![("пляж".to_string(), id as f32 / 120.0)]);
+        }
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        app.settings.tag_show_pct = 0;
+        if let Some(d) = app.tag_defs.iter_mut().find(|d| d.label == "пляж") {
+            d.min_percentile = 90;
+        }
+        let thr = app.tag_threshold("пляж");
+        assert!(thr > 0.8, "порог 90% должен быть высоким, получено {thr}");
+        app.tag_defs.retain(|d| d.label != "пляж");
+        assert!(app.tag_threshold("пляж").abs() < 1e-6, "без словаря — общий ползунок");
     }
 
     #[test]
