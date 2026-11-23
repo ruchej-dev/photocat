@@ -259,6 +259,61 @@ fn init(c: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Как сетка показывает файлы: группами по месяцам или одной непрерывной лентой (M17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GridLayout {
+    #[default]
+    Months,
+    Flat,
+}
+
+impl GridLayout {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GridLayout::Months => "months",
+            GridLayout::Flat => "flat",
+        }
+    }
+
+    /// Неизвестное значение из старой БД — значение по умолчанию, без падения.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "flat" => GridLayout::Flat,
+            _ => GridLayout::Months,
+        }
+    }
+}
+
+/// Порядок плиток (M17). «Порядок альбома» появится вместе с альбомами (M19).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GridSort {
+    #[default]
+    DateDesc,
+    DateAsc,
+    Name,
+    SizeDesc,
+}
+
+impl GridSort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GridSort::DateDesc => "date_desc",
+            GridSort::DateAsc => "date_asc",
+            GridSort::Name => "name",
+            GridSort::SizeDesc => "size_desc",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "date_asc" => GridSort::DateAsc,
+            "name" => GridSort::Name,
+            "size_desc" => GridSort::SizeDesc,
+            _ => GridSort::DateDesc,
+        }
+    }
+}
+
 /// Настройки приложения. Хранятся в БД (рядом с индексом), а не в файле у архива.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -287,6 +342,10 @@ pub struct Settings {
     pub face_threshold: f32,
     /// Размер плитки сетки, px (docs/UI.md).
     pub tile_size: f32,
+    /// Представление сетки: месяцы или плоская лента (M17).
+    pub grid_layout: GridLayout,
+    /// Порядок плиток: дата, имя или размер (M17).
+    pub grid_sort: GridSort,
     /// Каталоги, которые индексируются одной кнопкой; пусто — путь из верхней панели.
     pub roots: Vec<String>,
 }
@@ -309,6 +368,8 @@ impl Default for Settings {
             tools: crate::tools::Tools::default(),
             face_threshold: 0.45,
             tile_size: 150.0,
+            grid_layout: GridLayout::Months,
+            grid_sort: GridSort::DateDesc,
             roots: Vec::new(),
         }
     }
@@ -345,6 +406,8 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "tool_curl" => s.tools.curl = v,
             "face_threshold" => s.face_threshold = v.parse().unwrap_or(s.face_threshold),
             "tile_size" => s.tile_size = v.parse().unwrap_or(s.tile_size),
+            "grid_layout" => s.grid_layout = GridLayout::parse(&v),
+            "grid_sort" => s.grid_sort = GridSort::parse(&v),
             "roots" => {
                 s.roots = v
                     .lines()
@@ -379,6 +442,8 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("ocr_lang", s.ocr_lang.clone()),
         ("face_threshold", s.face_threshold.to_string()),
         ("tile_size", s.tile_size.to_string()),
+        ("grid_layout", s.grid_layout.as_str().to_string()),
+        ("grid_sort", s.grid_sort.as_str().to_string()),
         ("roots", s.roots.join("\n")),
     ];
     for tool in crate::tools::ALL {
@@ -1599,6 +1664,9 @@ mod tests {
             tag_show: 0.27,
             tag_margin: 0.02,
             tag_show_pct: 42,
+            tile_size: 210.0,
+            grid_layout: GridLayout::Flat,
+            grid_sort: GridSort::Name,
             ocr_lang: "rus".into(),
             tools: crate::tools::Tools {
                 ffmpeg: "/opt/ffmpeg".into(),
@@ -1614,11 +1682,31 @@ mod tests {
         assert_eq!(back.max_model_mb, 160);
         assert!((back.tag_show - 0.27).abs() < 1e-6);
         assert_eq!(back.tag_show_pct, 42);
+        assert!((back.tile_size - 210.0).abs() < 1e-6);
+        assert_eq!(back.grid_layout, GridLayout::Flat);
+        assert_eq!(back.grid_sort, GridSort::Name);
         assert!((back.tag_margin - 0.02).abs() < 1e-6);
         assert_eq!(back.ocr_lang, "rus");
         assert_eq!(back.tools.ffmpeg, "/opt/ffmpeg");
         assert_eq!(back.tools.tesseract, "/opt/tesseract");
         assert_eq!(back.tools.curl, "");
+    }
+
+    #[test]
+    fn неизвестное_представление_сетки_берёт_умолчание() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        save_settings(&c, &Settings::default()).unwrap();
+        c.execute(
+            "UPDATE settings SET value='wide' WHERE key='grid_layout'",
+            [],
+        )
+        .unwrap();
+        c.execute("UPDATE settings SET value='?' WHERE key='grid_sort'", [])
+            .unwrap();
+        let back = load_settings(&c);
+        assert_eq!(back.grid_layout, GridLayout::Months);
+        assert_eq!(back.grid_sort, GridSort::DateDesc);
     }
 
     #[test]

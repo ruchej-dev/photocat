@@ -13,7 +13,7 @@ use crate::storage;
 use crate::tools::{self, Tool};
 use anyhow::Result;
 use chrono::Datelike;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -164,6 +164,69 @@ const NAV_H: f32 = 28.0;
 const RIGHT_W: f32 = 280.0;
 /// Ниже этой ширины окна сведения уходят в левую панель: сетке нужны 4 колонки.
 const DETAILS_MIN_W: f32 = 1200.0;
+
+/// Варианты порядка плиток и их слова на экране (M17). «Порядок альбома» — M19.
+const GRID_SORTS: [(db::GridSort, &str); 4] = [
+    (db::GridSort::DateDesc, "Дата: новые сверху"),
+    (db::GridSort::DateAsc, "Дата: старые сверху"),
+    (db::GridSort::Name, "Имя"),
+    (db::GridSort::SizeDesc, "Размер: крупные сверху"),
+];
+
+fn sort_label(sort: db::GridSort) -> &'static str {
+    GRID_SORTS
+        .iter()
+        .find(|(value, _)| *value == sort)
+        .map(|(_, label)| *label)
+        .unwrap_or("Дата: новые сверху")
+}
+
+/// Сравнение дат: «без даты» — всегда в конце, в обе стороны (M17).
+fn cmp_date_none_last(a: Option<&str>, b: Option<&str>, desc: bool) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(x), Some(y)) => {
+            if desc {
+                y.cmp(x)
+            } else {
+                x.cmp(y)
+            }
+        }
+    }
+}
+
+/// Месяцы в порядке выбранной сортировки; «Без даты» — последней группой всегда (M17).
+/// Внутри группы порядок берётся из `ordered`, второго места сортировки нет.
+fn month_groups(
+    ordered: &[usize],
+    items: &[db::FileRow],
+    ascend: bool,
+) -> Vec<(String, Vec<usize>)> {
+    let mut by_month: std::collections::BTreeMap<String, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for &i in ordered {
+        let key = items[i]
+            .taken_at
+            .as_deref()
+            .map(|d| d.chars().take(7).collect::<String>())
+            .filter(|k| k.len() == 7)
+            .unwrap_or_else(|| "без даты".into());
+        by_month.entry(key).or_default().push(i);
+    }
+    let undated = by_month.remove("без даты");
+    let mut groups: Vec<(String, Vec<usize>)> = if ascend {
+        by_month.into_iter().collect()
+    } else {
+        by_month.into_iter().rev().collect()
+    };
+    if let Some(ids) = undated {
+        groups.push(("без даты".into(), ids));
+    }
+    groups
+}
 
 /// Фон выбранного пункта: акцент с прозрачностью, а не сплошная заливка.
 fn selected_fill() -> egui::Color32 {
@@ -414,7 +477,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
         }
         if let Some(n) = chips.hits {
             any = true;
-            if filter_chip(ui, &format!("поиск: {n} файлов")) {
+            if filter_chip(ui, &format!("по релевантности: {n} файлов")) {
                 clear.hits = true;
             }
         }
@@ -3299,7 +3362,10 @@ impl App {
             }
             View::Trash => self.trash_items.iter().map(|r| r.id).collect(),
             View::Calendar => {
-                let ids = self.filtered().into_iter().map(|i| self.items[i].id);
+                let ids = self
+                    .ordered(&self.filtered())
+                    .into_iter()
+                    .map(|i| self.items[i].id);
                 match &self.cal_day {
                     Some(day) => ids
                         .filter(|id| {
@@ -3314,7 +3380,7 @@ impl App {
                 }
             }
             _ => self
-                .filtered()
+                .ordered(&self.filtered())
                 .into_iter()
                 .map(|i| self.items[i].id)
                 .collect(),
@@ -3837,6 +3903,45 @@ impl App {
             let r = embed::download_model(&settings, &requested, true, Some(progress));
             let _ = tx.send(r);
         });
+    }
+
+    /// Единственное место, где считается порядок плиток (M17).
+    /// При смысловом поиске порядок задаёт поиск, иначе — `settings.grid_sort`.
+    /// Ключ тотальный и устойчивый: дата (или имя/размер), затем `id`, поэтому
+    /// одинаковые даты не переставляются между кадрами. Сетка, полный экран и
+    /// выделение (M18) берут порядок только отсюда.
+    fn ordered(&self, visible: &[usize]) -> Vec<usize> {
+        let mut out = visible.to_vec();
+        if self.semantic_hits.is_some() {
+            // `filtered()` уже отдал индексы по убыванию похожести.
+            return out;
+        }
+        let items = &self.items;
+        match self.settings.grid_sort {
+            db::GridSort::DateDesc => out.sort_by(|&a, &b| {
+                let (ra, rb) = (&items[a], &items[b]);
+                cmp_date_none_last(ra.taken_at.as_deref(), rb.taken_at.as_deref(), true)
+                    .then(ra.id.cmp(&rb.id))
+            }),
+            db::GridSort::DateAsc => out.sort_by(|&a, &b| {
+                let (ra, rb) = (&items[a], &items[b]);
+                cmp_date_none_last(ra.taken_at.as_deref(), rb.taken_at.as_deref(), false)
+                    .then(ra.id.cmp(&rb.id))
+            }),
+            db::GridSort::Name => out.sort_by(|&a, &b| {
+                let (ra, rb) = (&items[a], &items[b]);
+                file_name(&ra.path)
+                    .to_lowercase()
+                    .cmp(&file_name(&rb.path).to_lowercase())
+                    .then(ra.path.cmp(&rb.path))
+                    .then(ra.id.cmp(&rb.id))
+            }),
+            db::GridSort::SizeDesc => out.sort_by(|&a, &b| {
+                let (ra, rb) = (&items[a], &items[b]);
+                rb.size.cmp(&ra.size).then(ra.id.cmp(&rb.id))
+            }),
+        }
+        out
     }
 
     fn filtered(&self) -> Vec<usize> {
@@ -5265,6 +5370,9 @@ impl eframe::App for App {
         self.poll_video(ctx);
 
         let visible = self.filtered();
+        // Порядок плиток считается здесь и больше нигде (M17): сетка, полный экран
+        // и будущее выделение берут один и тот же список.
+        let ordered = self.ordered(&visible);
         // Снимок фильтров снимается до того, как сетка заберёт `&mut self.textures`.
         let chips = self.chips_snapshot();
         let tag_filter_now = self.tag_filter.clone();
@@ -5317,6 +5425,7 @@ impl eframe::App for App {
         let mut face_assign: Option<String> = None;
         let mut reset = false;
         let mut tile_save = false;
+        let mut view_save = false;
         let mut clear_chips = FilterClear::default();
         let view = self.view;
         let mut cal_year = self.cal_year;
@@ -5384,6 +5493,53 @@ impl eframe::App for App {
                             .color(DIM),
                     )
                     .on_hover_text("размер плиток, 100–260 px");
+                    if view == View::Grid {
+                        // M17: как смотреть (месяцы/подряд) и в каком порядке.
+                        // Пока идёт смысловой поиск, порядок задаёт поиск — переключатель погашен.
+                        let searching = self.semantic_hits.is_some();
+                        let mut sort = self.settings.grid_sort;
+                        let sort_resp = ui.add_enabled_ui(!searching, |ui| {
+                            ui.menu_button("Сортировка", |ui| {
+                                for (value, label) in GRID_SORTS {
+                                    ui.selectable_value(&mut sort, value, label);
+                                }
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "сейчас: {}",
+                                        sort_label(sort)
+                                    ))
+                                    .size(11.0)
+                                    .color(DIM),
+                                );
+                            })
+                        });
+                        sort_resp
+                            .inner
+                            .response
+                            .on_disabled_hover_text("порядок задаёт поиск")
+                            .on_hover_text("порядок плиток: дата, имя или размер");
+                        if sort != self.settings.grid_sort {
+                            self.settings.grid_sort = sort;
+                            view_save = true;
+                        }
+                        let mut layout = self.settings.grid_layout;
+                        for (value, label) in [
+                            (db::GridLayout::Flat, "Подряд"),
+                            (db::GridLayout::Months, "По месяцам"),
+                        ] {
+                            let r = ui.add_enabled_ui(!searching, |ui| {
+                                ui.selectable_label(layout == value, label)
+                            });
+                            if r.inner.clicked() {
+                                layout = value;
+                            }
+                            r.inner.on_disabled_hover_text("порядок задаёт поиск");
+                        }
+                        if layout != self.settings.grid_layout {
+                            self.settings.grid_layout = layout;
+                            view_save = true;
+                        }
+                    }
                 });
             });
             ui.add_space(4.0);
@@ -5421,26 +5577,26 @@ impl eframe::App for App {
                     .id_salt("grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        // Моменты: месяцы от свежих к старым, внутри месяца — тоже свежие сверху.
-                        // Порядок живёт в отрисовке: `filtered()` отдаёт индексы, данные не меняются.
-                        let mut by_month: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-                        for &i in &visible {
-                            let key = items[i]
-                                .taken_at
-                                .as_deref()
-                                .map(|d| d.chars().take(7).collect::<String>())
-                                .filter(|k| k.len() == 7)
-                                .unwrap_or_else(|| "без даты".into());
-                            by_month.entry(key).or_default().push(i);
+                        // Порядок пришёл из `App::ordered`; здесь только раскладка.
+                        // «Подряд» — одна непрерывная сетка без заголовков месяцев.
+                        // При смысловом поиске порядок задаёт поиск, поэтому список плоский.
+                        if self.semantic_hits.is_some()
+                            || self.settings.grid_layout == db::GridLayout::Flat
+                        {
+                            ui.scope(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+                                ui.horizontal_wrapped(|ui| {
+                                    for &i in &ordered {
+                                        draw_cell(ui, ctx, &mut cells, &items[i]);
+                                    }
+                                });
+                            });
+                            return;
                         }
-                        let undated = by_month.remove("без даты");
-                        let mut ordered: Vec<(String, Vec<usize>)> =
-                            by_month.into_iter().rev().collect();
-                        if let Some(v) = undated {
-                            ordered.push(("без даты".into(), v));
-                        }
-                        for (key, mut ids) in ordered {
-                            ids.reverse();
+                        // «По месяцам»: месяцы в порядке сортировки, «Без даты» — последней
+                        // группой в обе стороны; внутри месяца — порядок `ordered`.
+                        let ascend = self.settings.grid_sort == db::GridSort::DateAsc;
+                        for (key, ids) in month_groups(&ordered, &items, ascend) {
                             let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
                             month_header(ui, &key, ids.len(), bytes);
                             ui.scope(|ui| {
@@ -6361,6 +6517,9 @@ impl eframe::App for App {
             self.settings.tile_size = self.tile_size;
             self.save_settings();
         }
+        if view_save {
+            self.save_settings();
+        }
         // Чип снимает ровно свой фильтр; сетка пересчитается следующим кадром.
         if clear_chips.query {
             self.query.clear();
@@ -6501,7 +6660,8 @@ impl eframe::App for App {
 mod tests {
     use super::{
         App, CalScale, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
-        nearest_file_month, parse_date, score_percentile, shift_month, shift_to_file_month,
+        month_groups, nearest_file_month, parse_date, score_percentile, shift_month,
+        shift_to_file_month,
     };
     use crate::embed;
     use std::collections::BTreeSet;
@@ -6942,5 +7102,102 @@ mod tests {
         let may_new = texts.iter().position(|t| t == "2024-05-09 10:00").unwrap();
         let may_old = texts.iter().position(|t| t == "2024-05-01 08:00").unwrap();
         assert!(may_new < may_old, "внутри месяца свежие сверху: {texts:?}");
+    }
+
+    /// Файлы для M17: два майских, апрельский и снимок без даты.
+    fn m17_rows() -> Vec<db::FileRow> {
+        let mut may_old = file_row(1, "image", "may-old.jpg");
+        may_old.taken_at = Some("2024-05-01T08:00".into());
+        may_old.size = 10;
+        let mut may_new = file_row(2, "image", "may-new.jpg");
+        may_new.taken_at = Some("2024-05-09T10:00".into());
+        may_new.size = 30;
+        let mut april = file_row(3, "image", "april.jpg");
+        april.taken_at = Some("2024-04-30T09:00".into());
+        april.size = 20;
+        let mut undated = file_row(4, "image", "undated.jpg");
+        undated.taken_at = None;
+        undated.size = 40;
+        vec![may_old, may_new, april, undated]
+    }
+
+    fn m17_app() -> App {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-m17.db"));
+        app.items = m17_rows();
+        app
+    }
+
+    #[test]
+    fn порядок_по_дате_и_без_даты_в_конце_в_обе_стороны() {
+        let mut app = m17_app();
+        let visible: Vec<usize> = (0..app.items.len()).collect();
+        app.settings.grid_sort = db::GridSort::DateDesc;
+        assert_eq!(app.ordered(&visible), vec![1, 0, 2, 3], "новые сверху, без даты в конце");
+        app.settings.grid_sort = db::GridSort::DateAsc;
+        assert_eq!(app.ordered(&visible), vec![2, 0, 1, 3], "старые сверху, без даты всё равно в конце");
+    }
+
+    #[test]
+    fn месяцы_переворачиваются_а_без_даты_остаётся_последней() {
+        let mut app = m17_app();
+        let visible: Vec<usize> = (0..app.items.len()).collect();
+        app.settings.grid_sort = db::GridSort::DateDesc;
+        let desc = app.ordered(&visible);
+        let keys: Vec<String> = month_groups(&desc, &app.items, false)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(keys, ["2024-05", "2024-04", "без даты"]);
+        app.settings.grid_sort = db::GridSort::DateAsc;
+        let asc = app.ordered(&visible);
+        let keys: Vec<String> = month_groups(&asc, &app.items, true)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(keys, ["2024-04", "2024-05", "без даты"]);
+    }
+
+    #[test]
+    fn имя_и_размер_сортируются() {
+        let mut app = m17_app();
+        app.items[0].path = "/tmp/b.jpg".into();
+        app.items[1].path = "/tmp/A.jpg".into();
+        app.items[2].path = "/tmp/c.jpg".into();
+        let visible: Vec<usize> = (0..app.items.len()).collect();
+        app.settings.grid_sort = db::GridSort::Name;
+        // Имя без учёта регистра: A, b, c, undated.
+        assert_eq!(app.ordered(&visible), vec![1, 0, 2, 3]);
+        app.settings.grid_sort = db::GridSort::SizeDesc;
+        assert_eq!(
+            app.ordered(&visible),
+            vec![3, 1, 2, 0],
+            "крупные сверху: 40, 30, 20, 10"
+        );
+    }
+
+    #[test]
+    fn при_смысловом_поиске_порядок_задаёт_поиск() {
+        let mut app = m17_app();
+        app.settings.grid_sort = db::GridSort::SizeDesc;
+        app.semantic_hits = Some(vec![4, 1, 3]);
+        assert_eq!(app.ordered(&app.filtered()), vec![3, 0, 2]);
+        // Результаты поиска — плоский список по релевантности, без групп месяцев.
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            !texts.iter().any(|t| t == "май 2024"),
+            "при поиске месяцы не группируются: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn подряд_рисует_сетку_без_заголовков_месяцев() {
+        let mut app = m17_app();
+        app.settings.grid_layout = db::GridLayout::Flat;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            !texts.iter().any(|t| t == "май 2024"),
+            "в «Подряд» заголовков месяцев быть не должно: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t.contains("2024-05-09")), "{texts:?}");
     }
 }
