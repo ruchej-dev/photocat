@@ -672,6 +672,289 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("настройки сохранены", "settings saved"),
     ("настройки не сохранены", "settings not saved"),
+
+    // --- левая панель: модель, теги, текст, сводка (M21.4f) --------------------
+    ("Посчитать теги", "Compute tags"),
+    ("Настройки модели", "Model settings"),
+    ("с уверенным тегом:", "with a confident tag:"),
+    ("тег", "tag"),
+    ("свой", "mine"),
+    ("Порог фильтра", "Filter threshold"),
+    (
+        "ни один тег не проходит порог — опустите ползунок",
+        "no tag passes the threshold — lower the slider",
+    ),
+    ("поиск", "search"),
+    (
+        "tesseract не запускается — путь в «Настройках»",
+        "tesseract does not start — set its path in “Settings”",
+    ),
+    (
+        "OCR: останавливаю после текущих файлов…",
+        "OCR: stopping after the current files…",
+    ),
+    ("Распознать документы", "Recognize documents"),
+    (
+        "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
+         один снимок — кнопкой в карточке файла",
+        "a long pass: documents and screenshots without a camera and with a confident tag; \
+         a single photo — with the button in the file card",
+    ),
+    ("Сводка", "Summary"),
+    ("Файлов:", "Files:"),
+    ("Объём:", "Size:"),
+    ("Без даты:", "No date:"),
+    ("Без превью:", "No preview:"),
+    ("Видео без обложки:", "Videos without a cover:"),
+    (
+        "нажмите «Индексировать» — обложки создаст ffmpeg",
+        "press “Index” — ffmpeg will create the covers",
+    ),
+    (
+        "теги ещё не посчитаны — нажмите «Посчитать теги»",
+        "tags are not computed yet — press “Compute tags”",
+    ),
+    (
+        "100% — самый сильный снимок этого тега, 0% — все; 70% — верхние 30%",
+        "100% — the strongest photo of this tag, 0% — all; 70% — the top 30%",
+    ),
+
+    // --- настройки: модель (M21.4f) ---------------------------------------------
+    ("Модель", "Model"),
+    ("призн.", "dims"),
+    ("Состояние модели", "Model state"),
+    ("Скачана · проверена", "Downloaded · verified"),
+    ("Не скачана", "Not downloaded"),
+    ("Проверить модель", "Check the model"),
+    ("модель не готова", "the model is not ready"),
+    ("Папка моделей", "Model folder"),
+    ("путь, куда скачивать веса", "where to download the weights"),
+    ("Применить путь", "Apply the path"),
+    ("путь к моделям пуст", "the model path is empty"),
+    ("Лимит на скачивание", "Download limit"),
+    (
+        "Модель сверх лимита не скачивается. Если выбранная недоступна, \
+         загрузчик ищет совместимую в пределах лимита.",
+        "A model over the limit is not downloaded. If the chosen one is unavailable, \
+         the downloader looks for a compatible one within the limit.",
+    ),
+    ("на месте", "in place"),
+    ("не скачана", "not downloaded"),
+    ("сверх лимита", "over the limit"),
+    ("Согласие на сеть", "Network consent"),
+    (
+        "разрешаю скачать веса модели (фото, пути и запросы не отправляются)",
+        "I allow the model weights to be downloaded (photos, paths and queries are not sent)",
+    ),
+    (
+        "Сеть используется только при нажатии «Скачать модель». \
+         Пользовательские данные не отправляются.",
+        "The network is used only when “Download the model” is pressed. \
+         No user data is sent.",
+    ),
+    ("Скачать модель", "Download the model"),
+    (
+        "кнопка погашена: нужно согласие на сеть",
+        "the button is disabled: network consent is required",
+    ),
+    ("файлов:", "files:"),
+    (
+        "Теги и векторы привязаны к модели: после смены модели их нужно посчитать.",
+        "Tags and vectors belong to the model: after switching models they must be computed again.",
+    ),
+
+    // --- настройки: индексация и дубли (M21.4f) ---------------------------------
+    ("Потоков на индексацию", "Indexing threads"),
+    ("потоков", "threads"),
+    ("Порог дублей", "Duplicate threshold"),
+    ("бит из 64", "bits out of 64"),
+    (
+        "Больше бит — больше похожих снимков в группе. Точные копии \
+         находятся при любом пороге.",
+        "More bits — more similar photos in a group. Exact copies \
+         are found at any threshold.",
+    ),
+
+    // --- настройки: теги и словарь (M21.4f) -------------------------------------
+    ("Порог фильтра по тегу", "Tag filter threshold"),
+    ("теги ещё не посчитаны", "tags are not computed yet"),
+    ("Порог уверенного тега (косинус)", "Confident tag threshold (cosine)"),
+    (
+        "Это про карточку, OCR и {tag} в витрине, а не про фильтр: тег подсвечивается, \
+         только если он выше порога и отрывается от второго.",
+        "This is about the card, OCR and the {tag} in the showcase, not the filter: a tag is \
+         highlighted only when it is above the threshold and clearly ahead of the second one.",
+    ),
+    ("Отрыв от второго тега", "Margin over the second tag"),
+    (
+        "Ниже порог — больше тегов и больше ошибок. «Убрать» у тега в карточке \
+         скрывает его у одного фото и переживает пересчёт.",
+        "A lower threshold — more tags and more mistakes. “Remove” on a tag in the card \
+         hides it for one photo and survives a recompute.",
+    ),
+    ("Словарь тегов", "Tag dictionary"),
+    (
+        "Метка и промпты живут в БД на каждую модель. Правка промптов не перечитывает \
+         фото: векторы уже сохранены, пересчитываются только веса.",
+        "The label and the prompts live in the DB per model. Editing prompts does not re-read \
+         photos: the vectors are already stored, only the weights are recomputed.",
+    ),
+    (
+        "словарь ещё не засеян — он появится после первого «Посчитать теги»",
+        "the dictionary is not seeded yet — it appears after the first “Compute tags”",
+    ),
+    (
+        "выключенный тег не считается и не показывается в фильтре",
+        "a disabled tag is not computed and not shown in the filter",
+    ),
+    (
+        "метка по-русски: она видна в фильтре и в карточке",
+        "the label in Russian: it is shown in the filter and in the card",
+    ),
+    (
+        "минимальный процентиль показа этого тега",
+        "the minimum percentile for showing this tag",
+    ),
+    ("Убрать из словаря", "Remove from the dictionary"),
+    ("промпты: один на строку; 2–3 общих шаблона", "prompts: one per line; 2–3 general templates"),
+    ("новая метка, например «Шкаф»", "a new label, e.g. “Wardrobe”"),
+    ("промпт: «фотография шкафа»", "prompt: “a photo of a wardrobe”"),
+    ("Добавить в словарь", "Add to the dictionary"),
+    (
+        "затем «Пересчитать теги»: веса пересчитаются по сохранённым векторам",
+        "then “Recompute tags”: the weights are recomputed from the stored vectors",
+    ),
+    ("Пересчитать теги", "Recompute tags"),
+    (
+        "пересчитать веса тегов по уже сохранённым векторам, без повторного CLIP по фото",
+        "recompute the tag weights from the vectors already stored, without running CLIP over the photos again",
+    ),
+    ("Экспорт JSON", "Export JSON"),
+    (
+        "словарь без путей и фото — можно перенести на другую машину",
+        "the dictionary without paths or photos — it can be moved to another machine",
+    ),
+    ("Импорт JSON", "Import JSON"),
+    (
+        "заменить словарь модели файлом; старые веса исчезнут после пересчёта",
+        "replace the model dictionary with a file; the old weights disappear after a recompute",
+    ),
+    ("Вернуть стандартные", "Restore the defaults"),
+    (
+        "14 общих тегов из кода; ваши правки будут заменены",
+        "the 14 general tags from the code; your edits will be replaced",
+    ),
+    (
+        "файл JSON для экспорта/импорта; пусто — <кэш>/photocat/tags.json",
+        "the JSON file for export/import; empty — <cache>/photocat/tags.json",
+    ),
+    (
+        "словарь изменён — нажмите «Пересчитать теги»",
+        "the dictionary has changed — press “Recompute tags”",
+    ),
+    ("словарь не сохранён", "dictionary not saved"),
+    (
+        "тег убран из словаря — его веса исчезнут после «Пересчитать теги»",
+        "the tag is removed from the dictionary — its weights disappear after “Recompute tags”",
+    ),
+    (
+        "словарь возвращён к стандартному — нажмите «Пересчитать теги»",
+        "the dictionary is back to the default — press “Recompute tags”",
+    ),
+    ("словарь не сброшен", "dictionary not reset"),
+    ("словарь не выгружен", "dictionary not exported"),
+    ("не прочитать", "cannot read"),
+    ("словарь не загружен", "dictionary not loaded"),
+    (
+        "CLIP: пересчёт тегов по сохранённым векторам…",
+        "CLIP: recomputing tags from the stored vectors…",
+    ),
+
+    // --- настройки: лица (M21.4f) -----------------------------------------------
+    ("Порог склейки лиц (косинус)", "Face merge threshold (cosine)"),
+    (
+        "Выше порог — меньше ложных склеек, но один человек может разбиться \
+         на группы. Модели SCRFD и ArcFace — ONNX, локально.",
+        "A higher threshold — fewer false merges, but one person may split into groups. \
+         The SCRFD and ArcFace models are ONNX, local.",
+    ),
+    (
+        "разрешаю скачать веса лиц (фото не отправляются)",
+        "I allow the face weights to be downloaded (photos are not sent)",
+    ),
+    ("Скачать модель лиц", "Download the face model"),
+    ("Проверить модель лиц", "Check the face model"),
+    ("модель лиц проверена: sha256 совпал", "the face model is checked: sha256 matched"),
+    ("модель лиц не готова", "the face model is not ready"),
+    ("файлов лиц:", "face files:"),
+
+    // --- настройки: хранилище (M21.4f) ------------------------------------------
+    ("Индекс", "Index"),
+    ("БД", "DB"),
+    ("Кэш", "Cache"),
+    ("Модели", "Models"),
+    ("Посчитать занятое место", "Compute the used space"),
+    ("База данных:", "Database:"),
+    ("Превью:", "Previews:"),
+    ("Кропы лиц:", "Face crops:"),
+    ("Модели:", "Models:"),
+    ("Весь кэш:", "Whole cache:"),
+    ("Очистка кэша и индекса", "Cleaning the cache and the index"),
+    ("Очистить превью…", "Clear the previews…"),
+    (
+        "только <кэш>/photocat/thumbs; архив не трогается",
+        "only <cache>/photocat/thumbs; the archive is untouched",
+    ),
+    ("Очистить кропы лиц…", "Clear the face crops…"),
+    (
+        "кропы и строки лиц; после этого «Найти лица» пройдёт заново",
+        "the crops and the face rows; after that “Find faces” runs again",
+    ),
+    ("Сбросить индекс…", "Reset the index…"),
+    (
+        "строки БД: файлы, теги, OCR, векторы, лица; оригиналы целы",
+        "DB rows: files, tags, OCR, vectors, faces; the originals are intact",
+    ),
+    (
+        "В каталог архива photocat не пишет: только строки в БД и превью в кэше. \
+         Витрина по датам — отдельная команда с явным подтверждением.",
+        "photocat never writes into the archive folder: only DB rows and previews in the cache. \
+         The date showcase is a separate command with an explicit confirmation.",
+    ),
+
+    // --- настройки: внешние программы (M21.4f) ----------------------------------
+    (
+        "Пусто — программа ищется в PATH. Путь проверяется запуском при сохранении; \
+         без программы отключается только её работа.",
+        "Empty — the program is looked up in PATH. A path is checked by running it when saved; \
+         without the program only its part is disabled.",
+    ),
+    ("пусто — из PATH", "empty — from PATH"),
+    ("без неё", "without it"),
+    ("Проверить и сохранить программы", "Check and save the programs"),
+    ("не работает", "does not work"),
+    ("программы не сохранены", "programs not saved"),
+    ("программы: все берутся из PATH", "programs: all taken from PATH"),
+    ("программы сохранены и проверены", "programs saved and checked"),
+    ("задано в настройках", "set in the settings"),
+    ("из PATH", "from PATH"),
+    ("видео: кадр-обложка, dHash, превью", "video: cover frame, dHash, previews"),
+    ("видео: длительность и разрешение", "video: duration and resolution"),
+    ("OCR: текст с документов и скриншотов", "OCR: text from documents and screenshots"),
+    ("скачивание весов модели по согласию", "downloading model weights on consent"),
+    (
+        "видео в индексе без превью и dHash, ошибка в счётчике; фото не страдают",
+        "videos in the index without previews or dHash, an error in the counter; photos are unaffected",
+    ),
+    ("видео без длительности и разрешения", "videos without duration or resolution"),
+    (
+        "OCR выключен: кнопка погашена, поиск по тексту пуст",
+        "OCR is off: the button is disabled, text search stays empty",
+    ),
+    (
+        "веса модели придётся положить вручную (scripts/fetch-model.sh)",
+        "the model weights will have to be placed by hand (scripts/fetch-model.sh)",
+    ),
 ];
 
 #[cfg(test)]

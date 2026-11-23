@@ -3303,18 +3303,20 @@ impl App {
     }
 
     fn settings_model(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         let current = embed::active_entry(&self.settings);
         let current_id = current.id;
         let mut chosen = current_id;
-        ui.label(egui::RichText::new("Модель").size(12.0).color(DIM));
+        ui.label(egui::RichText::new(t(lang, "Модель")).size(12.0).color(DIM));
         ui.add_space(2.0);
         egui::ComboBox::from_id_salt("model_pick")
             .width(380.0)
             .selected_text(format!(
-                "{} — {} призн. · {}",
+                "{} — {} {} · {}",
                 current.title,
                 current.dim,
-                db::human(current.bytes() as i64)
+                t(lang, "призн."),
+                db::human_in(lang, current.bytes() as i64)
             ))
             .show_ui(ui, |ui| {
                 for e in embed::catalog() {
@@ -3322,10 +3324,11 @@ impl App {
                         &mut chosen,
                         e.id,
                         format!(
-                            "{} — {} призн. · {} · {} · {}",
+                            "{} — {} {} · {} · {} · {}",
                             e.title,
                             e.dim,
-                            db::human(e.bytes() as i64),
+                            t(lang, "призн."),
+                            db::human_in(lang, e.bytes() as i64),
                             e.license,
                             e.note
                         ),
@@ -3342,18 +3345,22 @@ impl App {
         ui.add_space(8.0);
 
         ui.label(
-            egui::RichText::new("Состояние модели")
+            egui::RichText::new(t(lang, "Состояние модели"))
                 .size(12.0)
                 .color(DIM),
         );
         ui.add_space(2.0);
         let state = if embed::model_present(&self.settings) {
             format!(
-                "Скачана · проверена · {}",
-                db::human(embed::model_bytes_in(&self.settings.models_dir, current))
+                "{} · {}",
+                t(lang, "Скачана · проверена"),
+                db::human_in(
+                    lang,
+                    embed::model_bytes_in(&self.settings.models_dir, current)
+                )
             )
         } else {
-            "Не скачана".to_string()
+            t(lang, "Не скачана").to_string()
         };
         ui.label(egui::RichText::new(state).size(12.0).color(
             if embed::model_present(&self.settings) {
@@ -3362,31 +3369,41 @@ impl App {
                 DIM
             },
         ));
-        if ui.button("Проверить модель").clicked() {
+        if ui.button(t(lang, "Проверить модель")).clicked() {
             match embed::check_model(&self.settings) {
                 Ok(()) => {
-                    self.status = format!(
-                        "модель {} проверена: sha256 совпал",
-                        embed::active_entry(&self.settings).title
-                    )
+                    self.status = match lang {
+                        i18n::Lang::En => format!(
+                            "model {} checked: sha256 matched",
+                            embed::active_entry(&self.settings).title
+                        ),
+                        i18n::Lang::Ru => format!(
+                            "модель {} проверена: sha256 совпал",
+                            embed::active_entry(&self.settings).title
+                        ),
+                    }
                 }
-                Err(e) => self.status = format!("модель не готова: {e:#}"),
+                Err(e) => self.status = format!("{}: {e:#}", t(lang, "модель не готова")),
             }
         }
         ui.add_space(12.0);
 
-        ui.label(egui::RichText::new("Папка моделей").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new(t(lang, "Папка моделей"))
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.models_dir_input)
-                    .hint_text("путь, куда скачивать веса")
+                    .hint_text(t(lang, "путь, куда скачивать веса"))
                     .desired_width(380.0),
             );
-            if ui.button("Применить путь").clicked() {
+            if ui.button(t(lang, "Применить путь")).clicked() {
                 let p = self.models_dir_input.trim();
                 if p.is_empty() {
-                    self.status = "путь к моделям пуст".into();
+                    self.status = t(lang, "путь к моделям пуст").into();
                 } else {
                     self.settings.models_dir = PathBuf::from(p);
                     self.save_settings();
@@ -3402,7 +3419,7 @@ impl App {
         ui.add_space(12.0);
 
         ui.label(
-            egui::RichText::new("Лимит на скачивание")
+            egui::RichText::new(t(lang, "Лимит на скачивание"))
                 .size(12.0)
                 .color(DIM),
         );
@@ -3410,7 +3427,10 @@ impl App {
         ui.horizontal(|ui| {
             let r = ui.add(
                 egui::Slider::new(&mut self.settings.max_model_mb, 50..=2000)
-                    .suffix(" МиБ")
+                    .suffix(match lang {
+                        i18n::Lang::En => " MiB",
+                        i18n::Lang::Ru => " МиБ",
+                    })
                     .step_by(10.0),
             );
             if r.drag_stopped() || r.lost_focus() {
@@ -3418,10 +3438,11 @@ impl App {
             }
         });
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Модель сверх лимита не скачивается. Если выбранная недоступна, \
                  загрузчик ищет совместимую в пределах лимита.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
@@ -3430,18 +3451,19 @@ impl App {
             let present = embed::model_present_in(&self.settings.models_dir, e);
             let fits = e.fits(self.settings.max_model_mb);
             let state = if present {
-                "на месте"
+                t(lang, "на месте")
             } else if fits {
-                "не скачана"
+                t(lang, "не скачана")
             } else {
-                "сверх лимита"
+                t(lang, "сверх лимита")
             };
             ui.label(
                 egui::RichText::new(format!(
-                    "{} — {} призн. · {} · {} · {}",
+                    "{} — {} {} · {} · {} · {}",
                     e.title,
                     e.dim,
-                    db::human(e.bytes() as i64),
+                    t(lang, "призн."),
+                    db::human_in(lang, e.bytes() as i64),
                     e.license,
                     state
                 ))
@@ -3451,20 +3473,24 @@ impl App {
         ui.add_space(12.0);
 
         ui.label(
-            egui::RichText::new("Согласие на сеть")
+            egui::RichText::new(t(lang, "Согласие на сеть"))
                 .size(12.0)
                 .color(DIM),
         );
         ui.add_space(2.0);
         ui.checkbox(
             &mut self.download_consent,
-            "разрешаю скачать веса модели (фото, пути и запросы не отправляются)",
+            t(
+                lang,
+                "разрешаю скачать веса модели (фото, пути и запросы не отправляются)",
+            ),
         );
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Сеть используется только при нажатии «Скачать модель». \
                  Пользовательские данные не отправляются.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
@@ -3474,7 +3500,7 @@ impl App {
             if ui
                 .add_enabled(
                     self.download_consent && !busy,
-                    primary_button("Скачать модель"),
+                    primary_button(t(lang, "Скачать модель")),
                 )
                 .clicked()
             {
@@ -3483,7 +3509,7 @@ impl App {
             if ui
                 .add_enabled(
                     self.embed_rx.is_none() && embed::model_present(&self.settings),
-                    egui::Button::new("Посчитать теги"),
+                    egui::Button::new(t(lang, "Посчитать теги")),
                 )
                 .clicked()
             {
@@ -3492,19 +3518,23 @@ impl App {
         });
         if !self.download_consent {
             ui.label(
-                egui::RichText::new("кнопка погашена: нужно согласие на сеть")
+                egui::RichText::new(t(lang, "кнопка погашена: нужно согласие на сеть"))
                     .size(11.0)
                     .color(DIM),
             );
         }
         if let Some(p) = &self.download_progress {
-            let (d, t) = (p.done(), p.total());
-            let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+            let (done, total) = (p.done(), p.total());
+            let frac = if total > 0 {
+                done as f32 / total as f32
+            } else {
+                0.0
+            };
             ui.add(
                 egui::ProgressBar::new(frac)
                     .desired_width(380.0)
-                    .text(if t > 0 {
-                        format!("файлов: {d}/{t}")
+                    .text(if total > 0 {
+                        format!("{}: {done}/{total}", t(lang, "файлов:"))
                     } else {
                         p.msg()
                     }),
@@ -3513,17 +3543,19 @@ impl App {
         }
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Теги и векторы привязаны к модели: после смены модели их нужно посчитать.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
     }
 
     fn settings_index(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.label(
-            egui::RichText::new("Потоков на индексацию")
+            egui::RichText::new(t(lang, "Потоков на индексацию"))
                 .size(12.0)
                 .color(DIM),
         );
@@ -3531,32 +3563,41 @@ impl App {
         let r = ui.add(
             egui::DragValue::new(&mut self.settings.index_jobs)
                 .range(1..=64)
-                .suffix(" потоков"),
+                .suffix(format!(" {}", t(lang, "потоков"))),
         );
         if r.drag_stopped() || r.lost_focus() {
             self.save_settings();
         }
         ui.add_space(12.0);
-        ui.label(egui::RichText::new("Порог дублей").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new(t(lang, "Порог дублей"))
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
-        let r = ui.add(egui::Slider::new(&mut self.settings.max_dist, 0..=16).text("бит из 64"));
+        let r = ui.add(
+            egui::Slider::new(&mut self.settings.max_dist, 0..=16)
+                .text(t(lang, "бит из 64")),
+        );
         if r.drag_stopped() || r.lost_focus() {
             self.max_dist = self.settings.max_dist;
             self.save_settings();
         }
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Больше бит — больше похожих снимков в группе. Точные копии \
                  находятся при любом пороге.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
     }
 
     fn settings_tags(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.label(
-            egui::RichText::new("Порог фильтра по тегу")
+            egui::RichText::new(t(lang, "Порог фильтра по тегу"))
                 .size(12.0)
                 .color(DIM),
         );
@@ -3571,21 +3612,26 @@ impl App {
                     .any(|(tag, score)| *score >= self.tag_threshold(tag))
             })
             .count();
-        ui.label(
-            egui::RichText::new(if self.tags.is_empty() {
-                "теги ещё не посчитаны".to_string()
-            } else {
-                format!(
-                    "выше порога: файлов {hits} из {} с тегами; процентиль считается отдельно по каждому тегу",
+        let above = if self.tags.is_empty() {
+            t(lang, "теги ещё не посчитаны").to_string()
+        } else {
+            match lang {
+                i18n::Lang::En => format!(
+                    "above the threshold: {hits} of {} files with tags; the percentile is \
+                     computed per tag",
                     self.tags.len()
-                )
-            })
-            .size(11.0)
-            .color(DIM),
-        );
+                ),
+                i18n::Lang::Ru => format!(
+                    "выше порога: файлов {hits} из {} с тегами; процентиль считается отдельно \
+                     по каждому тегу",
+                    self.tags.len()
+                ),
+            }
+        };
+        ui.label(egui::RichText::new(above).size(11.0).color(DIM));
         ui.add_space(12.0);
         ui.label(
-            egui::RichText::new("Порог уверенного тега (косинус)")
+            egui::RichText::new(t(lang, "Порог уверенного тега (косинус)"))
                 .size(12.0)
                 .color(DIM),
         );
@@ -3597,16 +3643,17 @@ impl App {
             self.save_settings();
         }
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Это про карточку, OCR и {tag} в витрине, а не про фильтр: тег подсвечивается, \
                  только если он выше порога и отрывается от второго.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
         ui.add_space(12.0);
         ui.label(
-            egui::RichText::new("Отрыв от второго тега")
+            egui::RichText::new(t(lang, "Отрыв от второго тега"))
                 .size(12.0)
                 .color(DIM),
         );
@@ -3617,10 +3664,11 @@ impl App {
         }
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Ниже порог — больше тегов и больше ошибок. «Убрать» у тега в карточке \
                  скрывает его у одного фото и переживает пересчёт.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
@@ -3630,23 +3678,32 @@ impl App {
     /// Редактор словаря (M15.4): метки и промпты хранятся в БД на каждую модель.
     /// Правка не пересчитывает фото: векторы картинок не зависят от промптов.
     fn settings_tag_dictionary(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.add_space(12.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("Словарь тегов").size(12.0).color(DIM));
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(lang, "Словарь тегов"))
+                .size(12.0)
+                .color(DIM),
+        );
+        ui.label(
+            egui::RichText::new(t(
+                lang,
                 "Метка и промпты живут в БД на каждую модель. Правка промптов не перечитывает \
                  фото: векторы уже сохранены, пересчитываются только веса.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
         if self.tag_defs.is_empty() {
             ui.label(
-                egui::RichText::new("словарь ещё не засеян — он появится после первого «Посчитать теги»")
-                    .size(11.0)
-                    .color(DIM),
+                egui::RichText::new(t(
+                    lang,
+                    "словарь ещё не засеян — он появится после первого «Посчитать теги»",
+                ))
+                .size(11.0)
+                .color(DIM),
             );
         }
         let mut edited: Option<db::TagDef> = None;
@@ -3656,14 +3713,20 @@ impl App {
             ui.horizontal(|ui| {
                 if ui
                     .checkbox(&mut d.enabled, "")
-                    .on_hover_text("выключенный тег не считается и не показывается в фильтре")
+                    .on_hover_text(t(
+                        lang,
+                        "выключенный тег не считается и не показывается в фильтре",
+                    ))
                     .changed()
                 {
                     edited = Some(d.clone());
                 }
                 if ui
                     .add(egui::TextEdit::singleline(&mut d.label).desired_width(130.0))
-                    .on_hover_text("метка по-русски: она видна в фильтре и в карточке")
+                    .on_hover_text(t(
+                        lang,
+                        "метка по-русски: она видна в фильтре и в карточке",
+                    ))
                     .changed()
                 {
                     edited = Some(d.clone());
@@ -3676,13 +3739,13 @@ impl App {
                             .speed(1)
                             .suffix("%"),
                     )
-                    .on_hover_text("минимальный процентиль показа этого тега")
+                    .on_hover_text(t(lang, "минимальный процентиль показа этого тега"))
                     .changed()
                 {
                     d.min_percentile = pct;
                     edited = Some(d.clone());
                 }
-                if ui.button("Убрать из словаря").clicked() {
+                if ui.button(t(lang, "Убрать из словаря")).clicked() {
                     removed = Some(d.id.clone());
                 }
             });
@@ -3692,7 +3755,10 @@ impl App {
                     egui::TextEdit::multiline(&mut text)
                         .desired_rows(1)
                         .desired_width(f32::INFINITY)
-                        .hint_text("промпты: один на строку; 2–3 общих шаблона"),
+                        .hint_text(t(
+                            lang,
+                            "промпты: один на строку; 2–3 общих шаблона",
+                        )),
                 )
                 .changed()
             {
@@ -3716,12 +3782,12 @@ impl App {
             ui.add(
                 egui::TextEdit::singleline(&mut self.tag_new_label)
                     .desired_width(150.0)
-                    .hint_text("новая метка, например «Шкаф»"),
+                    .hint_text(t(lang, "новая метка, например «Шкаф»")),
             );
             ui.add(
                 egui::TextEdit::singleline(&mut self.tag_new_prompts)
                     .desired_width(260.0)
-                    .hint_text("промпт: «фотография шкафа»"),
+                    .hint_text(t(lang, "промпт: «фотография шкафа»")),
             );
         });
         let mut add = false;
@@ -3733,43 +3799,59 @@ impl App {
             add = ui
                 .add_enabled(
                     !self.tag_new_label.trim().is_empty(),
-                    egui::Button::new("Добавить в словарь"),
+                    egui::Button::new(t(lang, "Добавить в словарь")),
                 )
-                .on_hover_text("затем «Пересчитать теги»: веса пересчитаются по сохранённым векторам")
+                .on_hover_text(t(
+                    lang,
+                    "затем «Пересчитать теги»: веса пересчитаются по сохранённым векторам",
+                ))
                 .clicked();
             let can = self.retag_rx.is_none() && embed::model_present(&self.settings);
             let title = if self.tag_dict_dirty {
-                "Пересчитать теги •"
+                format!("{} •", t(lang, "Пересчитать теги"))
             } else {
-                "Пересчитать теги"
+                t(lang, "Пересчитать теги").to_string()
             };
             retag = ui
                 .add_enabled(can, egui::Button::new(title))
-                .on_hover_text(
+                .on_hover_text(t(
+                    lang,
                     "пересчитать веса тегов по уже сохранённым векторам, без повторного CLIP по фото",
-                )
+                ))
                 .clicked();
             export = ui
-                .button("Экспорт JSON")
-                .on_hover_text("словарь без путей и фото — можно перенести на другую машину")
+                .button(t(lang, "Экспорт JSON"))
+                .on_hover_text(t(
+                    lang,
+                    "словарь без путей и фото — можно перенести на другую машину",
+                ))
                 .clicked();
             import = ui
-                .button("Импорт JSON")
-                .on_hover_text("заменить словарь модели файлом; старые веса исчезнут после пересчёта")
+                .button(t(lang, "Импорт JSON"))
+                .on_hover_text(t(
+                    lang,
+                    "заменить словарь модели файлом; старые веса исчезнут после пересчёта",
+                ))
                 .clicked();
             reset = ui
-                .button("Вернуть стандартные")
-                .on_hover_text("14 общих тегов из кода; ваши правки будут заменены")
+                .button(t(lang, "Вернуть стандартные"))
+                .on_hover_text(t(
+                    lang,
+                    "14 общих тегов из кода; ваши правки будут заменены",
+                ))
                 .clicked();
         });
         ui.add(
             egui::TextEdit::singleline(&mut self.tag_json_path)
                 .desired_width(f32::INFINITY)
-                .hint_text("файл JSON для экспорта/импорта; пусто — <кэш>/photocat/tags.json"),
+                .hint_text(t(
+                    lang,
+                    "файл JSON для экспорта/импорта; пусто — <кэш>/photocat/tags.json",
+                )),
         );
         if self.tag_dict_dirty {
             ui.label(
-                egui::RichText::new("словарь изменён — нажмите «Пересчитать теги»")
+                egui::RichText::new(t(lang, "словарь изменён — нажмите «Пересчитать теги»"))
                     .size(11.0)
                     .color(ACCENT),
             );
@@ -3792,11 +3874,15 @@ impl App {
     }
 
     fn save_tag_def_row(&mut self, d: &db::TagDef) {
+        let lang = self.settings.lang;
         let r = db::open(&self.db_path).and_then(|c| db::save_tag_def(&c, d));
         match r {
             Ok(()) => {
                 self.tag_dict_dirty = true;
-                self.status = format!("словарь: «{}» сохранён", d.label);
+                self.status = match lang {
+                    i18n::Lang::En => format!("dictionary: “{}” saved", d.label),
+                    i18n::Lang::Ru => format!("словарь: «{}» сохранён", d.label),
+                };
             }
             Err(e) => {
                 // Метка могла столкнуться с занятой: показываем словарь из БД, а не свою копию.
@@ -3812,12 +3898,16 @@ impl App {
     }
 
     fn add_tag_def(&mut self) {
+        let lang = self.settings.lang;
         let label = self.tag_new_label.trim().to_string();
         if label.is_empty() {
             return;
         }
         if self.tag_defs.iter().any(|d| d.label == label) {
-            self.status = format!("тег «{label}» уже есть в словаре");
+            self.status = match lang {
+                i18n::Lang::En => format!("the tag “{label}” is already in the dictionary"),
+                i18n::Lang::Ru => format!("тег «{label}» уже есть в словаре"),
+            };
             return;
         }
         let n = self
@@ -3850,16 +3940,23 @@ impl App {
                 self.tag_new_prompts.clear();
                 self.tag_defs.push(d.clone());
                 self.tag_dict_dirty = true;
-                self.status = format!(
-                    "тег «{}» добавлен — нажмите «Пересчитать теги»",
-                    d.label
-                );
+                self.status = match lang {
+                    i18n::Lang::En => format!(
+                        "tag “{}” added — press “Recompute tags”",
+                        d.label
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "тег «{}» добавлен — нажмите «Пересчитать теги»",
+                        d.label
+                    ),
+                };
             }
-            Err(e) => self.status = format!("тег не добавлен: {e}"),
+            Err(e) => self.status = format!("{}: {e}", t(lang, "тег не добавлен")),
         }
     }
 
     fn delete_tag_def_row(&mut self, id: &str) {
+        let lang = self.settings.lang;
         let model = embed::active_entry(&self.settings).id.to_string();
         let r = db::open(&self.db_path)
             .and_then(|c| db::delete_tag_def(&c, &model, id));
@@ -3867,14 +3964,18 @@ impl App {
             Ok(_) => {
                 self.tag_defs.retain(|d| d.id != id);
                 self.tag_dict_dirty = true;
-                self.status =
-                    "тег убран из словаря — его веса исчезнут после «Пересчитать теги»".into();
+                self.status = t(
+                    lang,
+                    "тег убран из словаря — его веса исчезнут после «Пересчитать теги»",
+                )
+                .into();
             }
-            Err(e) => self.status = format!("тег не убран: {e}"),
+            Err(e) => self.status = format!("{}: {e}", t(lang, "тег не убран")),
         }
     }
 
     fn reset_tag_defs(&mut self) {
+        let lang = self.settings.lang;
         let entry = embed::active_entry(&self.settings);
         let r = embed::reset_to_defaults(&self.db_path, entry).map(|defs| {
             self.tag_defs = defs;
@@ -3882,10 +3983,13 @@ impl App {
         match r {
             Ok(()) => {
                 self.tag_dict_dirty = true;
-                self.status =
-                    "словарь возвращён к стандартному — нажмите «Пересчитать теги»".into();
+                self.status = t(
+                    lang,
+                    "словарь возвращён к стандартному — нажмите «Пересчитать теги»",
+                )
+                .into();
             }
-            Err(e) => self.status = format!("словарь не сброшен: {e}"),
+            Err(e) => self.status = format!("{}: {e}", t(lang, "словарь не сброшен")),
         }
     }
 
@@ -3899,22 +4003,47 @@ impl App {
     }
 
     fn export_tag_defs(&mut self) {
+        let lang = self.settings.lang;
         let path = self.tag_json_file();
         let json = embed::tag_defs_to_json(&self.tag_defs);
         match std::fs::write(&path, json) {
             Ok(()) => {
                 self.tag_json_path = path.to_string_lossy().to_string();
-                self.status = format!("словарь выгружен: {} ({} тегов)", path.display(), self.tag_defs.len());
+                self.status = match lang {
+                    i18n::Lang::En => format!(
+                        "dictionary exported: {} ({})",
+                        path.display(),
+                        i18n::count(
+                            lang,
+                            self.tag_defs.len(),
+                            ["тег", "тега", "тегов"],
+                            "tag",
+                            "tags"
+                        )
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "словарь выгружен: {} ({} тегов)",
+                        path.display(),
+                        self.tag_defs.len()
+                    ),
+                };
             }
-            Err(e) => self.status = format!("словарь не выгружен: {e}"),
+            Err(e) => self.status = format!("{}: {e}", t(lang, "словарь не выгружен")),
         }
     }
 
     fn import_tag_defs(&mut self) {
+        let lang = self.settings.lang;
         let path = self.tag_json_file();
         let model = embed::active_entry(&self.settings).id.to_string();
         let r = std::fs::read_to_string(&path)
-            .map_err(|e| anyhow::anyhow!("не прочитать {}: {e}", path.display()))
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "{} {}: {e}",
+                    t(lang, "не прочитать"),
+                    path.display()
+                )
+            })
             .and_then(|text| embed::tag_defs_from_json(&model, &text))
             .and_then(|defs| {
                 embed::import_defs(&self.db_path, &model, &defs)?;
@@ -3925,12 +4054,24 @@ impl App {
                 self.tag_json_path = path.to_string_lossy().to_string();
                 self.tag_defs = defs;
                 self.tag_dict_dirty = true;
-                self.status = format!(
-                    "словарь загружен: {} тегов — нажмите «Пересчитать теги»",
-                    self.tag_defs.len()
-                );
+                self.status = match lang {
+                    i18n::Lang::En => format!(
+                        "dictionary loaded: {} — press “Recompute tags”",
+                        i18n::count(
+                            lang,
+                            self.tag_defs.len(),
+                            ["тег", "тега", "тегов"],
+                            "tag",
+                            "tags"
+                        )
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "словарь загружен: {} тегов — нажмите «Пересчитать теги»",
+                        self.tag_defs.len()
+                    ),
+                };
             }
-            Err(e) => self.status = format!("словарь не загружен: {e}"),
+            Err(e) => self.status = format!("{}: {e}", t(lang, "словарь не загружен")),
         }
     }
 
@@ -3938,12 +4079,13 @@ impl App {
         if self.retag_rx.is_some() {
             return;
         }
+        let lang = self.settings.lang;
         let db_path = self.db_path.clone();
         let progress = Arc::new(Progress::default());
         self.embed_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.retag_rx = Some(rx);
-        self.status = "CLIP: пересчёт тегов по сохранённым векторам…".into();
+        self.status = t(lang, "CLIP: пересчёт тегов по сохранённым векторам…").into();
         std::thread::spawn(move || {
             let r = embed::retag(&db_path, 8, Some(progress));
             let _ = tx.send(r);
@@ -3951,16 +4093,17 @@ impl App {
     }
 
     fn settings_faces(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         let present = faces::model_present(&self.settings);
         ui.label(
             egui::RichText::new(format!(
                 "{} · {} · {}",
                 faces::MODEL_ID,
-                db::human(faces::model_bytes(&self.settings)),
+                db::human_in(lang, faces::model_bytes(&self.settings)),
                 if present {
-                    "на месте"
+                    t(lang, "на месте")
                 } else {
-                    "не скачана"
+                    t(lang, "не скачана")
                 }
             ))
             .size(12.0)
@@ -3968,7 +4111,7 @@ impl App {
         );
         ui.add_space(12.0);
         ui.label(
-            egui::RichText::new("Порог склейки лиц (косинус)")
+            egui::RichText::new(t(lang, "Порог склейки лиц (косинус)"))
                 .size(12.0)
                 .color(DIM),
         );
@@ -3979,51 +4122,61 @@ impl App {
             self.save_settings();
         }
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Выше порог — меньше ложных склеек, но один человек может разбиться \
                  на группы. Модели SCRFD и ArcFace — ONNX, локально.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
         ui.add_space(12.0);
         ui.checkbox(
             &mut self.face_download_consent,
-            "разрешаю скачать веса лиц (фото не отправляются)",
+            t(lang, "разрешаю скачать веса лиц (фото не отправляются)"),
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(
                     self.face_download_consent && self.face_download_rx.is_none(),
-                    primary_button("Скачать модель лиц"),
+                    primary_button(t(lang, "Скачать модель лиц")),
                 )
                 .clicked()
             {
                 self.start_face_download();
             }
-            if ui.button("Проверить модель лиц").clicked() {
+            if ui.button(t(lang, "Проверить модель лиц")).clicked() {
                 match faces::check_model(&self.settings) {
-                    Ok(()) => self.status = "модель лиц проверена: sha256 совпал".into(),
-                    Err(e) => self.status = format!("модель лиц не готова: {e:#}"),
+                    Ok(()) => {
+                        self.status =
+                            t(lang, "модель лиц проверена: sha256 совпал").into()
+                    }
+                    Err(e) => {
+                        self.status = format!("{}: {e:#}", t(lang, "модель лиц не готова"))
+                    }
                 }
             }
         });
         if !self.face_download_consent {
             ui.label(
-                egui::RichText::new("кнопка погашена: нужно согласие на сеть")
+                egui::RichText::new(t(lang, "кнопка погашена: нужно согласие на сеть"))
                     .size(11.0)
                     .color(DIM),
             );
         }
         if let Some(p) = &self.face_download_progress {
-            let (d, t) = (p.done(), p.total());
-            let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
+            let (done, total) = (p.done(), p.total());
+            let frac = if total > 0 {
+                done as f32 / total as f32
+            } else {
+                0.0
+            };
             ui.add(
                 egui::ProgressBar::new(frac)
                     .desired_width(380.0)
-                    .text(if t > 0 {
-                        format!("файлов лиц: {d}/{t}")
+                    .text(if total > 0 {
+                        format!("{}: {done}/{total}", t(lang, "файлов лиц:"))
                     } else {
                         p.msg()
                     }),
@@ -4033,92 +4186,112 @@ impl App {
     }
 
     fn settings_storage(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         let n = self.items.len();
         let bytes: i64 = self.items.iter().map(|r| r.size).sum();
         let trashed = self.trash_items.len();
+        let index = match lang {
+            i18n::Lang::En => format!(
+                "{} · {} · {trashed} in the trash",
+                db::human_in(lang, bytes),
+                i18n::count(lang, n, ["файл", "файла", "файлов"], "file", "files")
+            ),
+            i18n::Lang::Ru => format!(
+                "файлов {n}, {} · в корзине {trashed}",
+                db::human_in(lang, bytes)
+            ),
+        };
+        meta_row(ui, t(lang, "Индекс"), &index);
+        meta_row(ui, t(lang, "БД"), &self.db_path.display().to_string());
+        meta_row(ui, t(lang, "Кэш"), &db::cache_dir().display().to_string());
         meta_row(
             ui,
-            "Индекс",
-            &format!("файлов {n}, {} · в корзине {trashed}", db::human(bytes)),
-        );
-        meta_row(ui, "БД", &self.db_path.display().to_string());
-        meta_row(ui, "Кэш", &db::cache_dir().display().to_string());
-        meta_row(
-            ui,
-            "Модели",
+            t(lang, "Модели"),
             &format!(
                 "{} · {}",
                 self.settings.models_dir.display(),
-                db::human(embed::model_bytes_in(
-                    &self.settings.models_dir,
-                    embed::active_entry(&self.settings)
-                ))
+                db::human_in(
+                    lang,
+                    embed::model_bytes_in(
+                        &self.settings.models_dir,
+                        embed::active_entry(&self.settings)
+                    )
+                )
             ),
         );
         meta_row(
             ui,
-            "Лица",
+            t(lang, "Лица"),
             &format!(
                 "{} · {}",
                 faces::MODEL_ID,
-                db::human(faces::model_bytes(&self.settings))
+                db::human_in(lang, faces::model_bytes(&self.settings))
             ),
         );
         ui.add_space(8.0);
-        if ui.button("Посчитать занятое место").clicked() {
+        if ui.button(t(lang, "Посчитать занятое место")).clicked() {
             self.storage_usage = Some(storage::usage(&self.db_path, &self.settings.models_dir));
         }
         if let Some(u) = &self.storage_usage {
-            stat_row(ui, "База данных:", &db::human(u.db_bytes as i64));
-            stat_row(ui, "Превью:", &db::human(u.thumbs_bytes as i64));
-            stat_row(ui, "Кропы лиц:", &db::human(u.faces_bytes as i64));
-            stat_row(ui, "Модели:", &db::human(u.models_bytes as i64));
-            stat_row(ui, "Весь кэш:", &db::human(u.total_bytes as i64));
+            stat_row(ui, t(lang, "База данных:"), &db::human_in(lang, u.db_bytes as i64));
+            stat_row(ui, t(lang, "Превью:"), &db::human_in(lang, u.thumbs_bytes as i64));
+            stat_row(ui, t(lang, "Кропы лиц:"), &db::human_in(lang, u.faces_bytes as i64));
+            stat_row(ui, t(lang, "Модели:"), &db::human_in(lang, u.models_bytes as i64));
+            stat_row(ui, t(lang, "Весь кэш:"), &db::human_in(lang, u.total_bytes as i64));
         }
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new("Очистка кэша и индекса")
+            egui::RichText::new(t(lang, "Очистка кэша и индекса"))
                 .size(11.0)
                 .color(DIM),
         );
         if ui
-            .button("Очистить превью…")
-            .on_hover_text("только <кэш>/photocat/thumbs; архив не трогается")
+            .button(t(lang, "Очистить превью…"))
+            .on_hover_text(t(lang, "только <кэш>/photocat/thumbs; архив не трогается"))
             .clicked()
         {
             self.storage_confirm = Some(StorageAction::Thumbs);
         }
         if ui
-            .button("Очистить кропы лиц…")
-            .on_hover_text("кропы и строки лиц; после этого «Найти лица» пройдёт заново")
+            .button(t(lang, "Очистить кропы лиц…"))
+            .on_hover_text(t(
+                lang,
+                "кропы и строки лиц; после этого «Найти лица» пройдёт заново",
+            ))
             .clicked()
         {
             self.storage_confirm = Some(StorageAction::Faces);
         }
         if ui
-            .button("Сбросить индекс…")
-            .on_hover_text("строки БД: файлы, теги, OCR, векторы, лица; оригиналы целы")
+            .button(t(lang, "Сбросить индекс…"))
+            .on_hover_text(t(
+                lang,
+                "строки БД: файлы, теги, OCR, векторы, лица; оригиналы целы",
+            ))
             .clicked()
         {
             self.storage_confirm = Some(StorageAction::Index);
         }
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "В каталог архива photocat не пишет: только строки в БД и превью в кэше. \
                  Витрина по датам — отдельная команда с явным подтверждением.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
     }
 
     fn settings_tools(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Пусто — программа ищется в PATH. Путь проверяется запуском при сохранении; \
                  без программы отключается только её работа.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
@@ -4129,7 +4302,7 @@ impl App {
             let input = self.tools_input.get_mut(tool);
             ui.add(
                 egui::TextEdit::singleline(input)
-                    .hint_text("пусто — из PATH")
+                    .hint_text(t(lang, "пусто — из PATH"))
                     .desired_width(380.0),
             );
             ui.label(
@@ -4138,14 +4311,18 @@ impl App {
                     .color(DIM),
             );
             ui.label(
-                egui::RichText::new(format!("без неё: {}", tool.without()))
-                    .size(11.0)
-                    .color(DIM),
+                egui::RichText::new(format!(
+                    "{}: {}",
+                    t(lang, "без неё"),
+                    t(lang, tool.without())
+                ))
+                .size(11.0)
+                .color(DIM),
             );
             ui.add_space(8.0);
         }
         if ui
-            .add(egui::Button::new("Проверить и сохранить программы"))
+            .add(egui::Button::new(t(lang, "Проверить и сохранить программы")))
             .clicked()
         {
             self.apply_tools();
@@ -4933,8 +5110,13 @@ impl App {
 
     /// Блок модели: состояние, «Посчитать теги», фильтр по тегу.
     fn model_block(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         block(ui, |ui| {
-            ui.label(egui::RichText::new("Модель ИИ").size(11.0).color(DIM));
+            ui.label(
+                egui::RichText::new(t(lang, "Модель ИИ"))
+                    .size(11.0)
+                    .color(DIM),
+            );
             ui.add_space(2.0);
             if embed::model_present(&self.settings) {
                 let entry = embed::active_entry(&self.settings);
@@ -4942,18 +5124,29 @@ impl App {
                     egui::RichText::new(format!(
                         "{} · {}",
                         entry.title,
-                        db::human(embed::model_bytes_in(&self.settings.models_dir, entry))
+                        db::human_in(lang, embed::model_bytes_in(&self.settings.models_dir, entry))
                     ))
                     .size(11.0)
                     .color(DIM),
                 );
+                let defs = self.tag_defs.iter().filter(|d| d.enabled).count().max(1);
+                let hint = match lang {
+                    i18n::Lang::En => format!(
+                        "run CLIP locally over the previews: {defs} approximate categories; \
+                         look for a specific thing with free-word semantic search; \
+                         nothing is sent anywhere"
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "локально прогнать CLIP по превью: {defs} приблизительных категорий; \
+                         нужный предмет ищите смысловым поиском словами; ничего не отправляется"
+                    ),
+                };
                 if ui
-                    .add_enabled(self.embed_rx.is_none(), egui::Button::new("Посчитать теги"))
-                    .on_hover_text(format!(
-                        "локально прогнать CLIP по превью: {} приблизительных категорий; \
-                         нужный предмет ищите смысловым поиском словами; ничего не отправляется",
-                        self.tag_defs.iter().filter(|d| d.enabled).count().max(1)
-                    ))
+                    .add_enabled(
+                        self.embed_rx.is_none(),
+                        egui::Button::new(t(lang, "Посчитать теги")),
+                    )
+                    .on_hover_text(hint)
                     .clicked()
                 {
                     self.start_embed();
@@ -4973,17 +5166,23 @@ impl App {
                     })
                     .count();
                 ui.label(
-                    egui::RichText::new(format!("с уверенным тегом: {tagged}"))
-                        .size(11.0)
-                        .color(DIM),
-                );
-                ui.label(
                     egui::RichText::new(format!(
-                        "свободный смысловой поиск понимает любые слова, не только {} тегов",
-                        self.tag_defs.iter().filter(|d| d.enabled).count().max(1)
+                        "{} {tagged}",
+                        t(lang, "с уверенным тегом:")
                     ))
                     .size(11.0)
                     .color(DIM),
+                );
+                let free = match lang {
+                    i18n::Lang::En => format!(
+                        "free-word semantic search understands any words, not only these {defs} tags"
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "свободный смысловой поиск понимает любые слова, не только {defs} тегов"
+                    ),
+                };
+                ui.label(
+                    egui::RichText::new(free).size(11.0).color(DIM),
                 );
                 let mut own_tags: Vec<String> =
                     self.user_tags.values().flatten().cloned().collect();
@@ -4997,12 +5196,12 @@ impl App {
                     .selected_text(
                         self.tag_filter
                             .clone()
-                            .map(|t| format!("тег: {t}"))
-                            .unwrap_or_else(|| "все теги".into()),
+                            .map(|tag| format!("{}: {tag}", t(lang, "тег")))
+                            .unwrap_or_else(|| t(lang, "все теги").into()),
                     )
                     .show_ui(ui, |ui| {
                         if ui
-                            .selectable_value(&mut self.tag_filter, None, "все теги")
+                            .selectable_value(&mut self.tag_filter, None, t(lang, "все теги"))
                             .clicked()
                         {
                             ui.close();
@@ -5029,7 +5228,7 @@ impl App {
                                 .selectable_value(
                                     &mut self.tag_filter,
                                     Some(label.clone()),
-                                    format!("свой: {label} · {n}"),
+                                    format!("{}: {label} · {n}", t(lang, "свой")),
                                 )
                                 .clicked()
                             {
@@ -5039,35 +5238,46 @@ impl App {
                     });
                 ui.add_space(4.0);
                 ui.label(
-                    egui::RichText::new("Порог фильтра")
+                    egui::RichText::new(t(lang, "Порог фильтра"))
                         .size(11.0)
                         .color(DIM),
                 );
                 self.tag_filter_slider(ui);
                 if !self.tags.is_empty() && counts.iter().all(|n| *n == 0) {
                     ui.label(
-                        egui::RichText::new(
+                        egui::RichText::new(t(
+                            lang,
                             "ни один тег не проходит порог — опустите ползунок",
-                        )
+                        ))
                         .size(11.0)
                         .color(DIM),
                     );
                 }
                 if let Some(hits) = &self.semantic_hits {
                     ui.label(
-                        egui::RichText::new(format!("поиск: {} файлов", hits.len()))
-                            .size(11.0)
-                            .color(DIM),
+                        egui::RichText::new(format!(
+                            "{}: {}",
+                            t(lang, "поиск"),
+                            i18n::count(
+                                lang,
+                                hits.len(),
+                                ["файл", "файла", "файлов"],
+                                "file",
+                                "files"
+                            )
+                        ))
+                        .size(11.0)
+                        .color(DIM),
                     );
                 }
             } else {
                 ui.label(
-                    egui::RichText::new("модель не скачана")
+                    egui::RichText::new(t(lang, "модель не скачана"))
                         .size(11.0)
                         .color(DIM),
                 );
             }
-            if ui.button("Настройки модели").clicked() {
+            if ui.button(t(lang, "Настройки модели")).clicked() {
                 self.settings_open = true;
                 self.settings_tab = SettingsTab::Model;
             }
@@ -5076,53 +5286,73 @@ impl App {
 
     /// Блок текста на фото: сколько уже распознано и сколько осталось.
     fn ocr_block(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         block(ui, |ui| {
-            ui.label(egui::RichText::new("Текст на фото").size(11.0).color(DIM));
-            ui.add_space(2.0);
-            if self.tesseract.is_none() {
-                ui.label(
-                    egui::RichText::new("tesseract не запускается — путь в «Настройках»")
-                        .size(11.0)
-                        .color(DIM),
-                );
-            }
-            let images = self.items.iter().filter(|r| r.kind == "image").count();
             ui.label(
-                egui::RichText::new(format!("с текстом: {} из {images} снимков", self.ocr_files))
+                egui::RichText::new(t(lang, "Текст на фото"))
                     .size(11.0)
                     .color(DIM),
             );
-            ui.label(
-                egui::RichText::new(format!(
+            ui.add_space(2.0);
+            if self.tesseract.is_none() {
+                ui.label(
+                    egui::RichText::new(t(
+                        lang,
+                        "tesseract не запускается — путь в «Настройках»",
+                    ))
+                    .size(11.0)
+                    .color(DIM),
+                );
+            }
+            let images = self.items.iter().filter(|r| r.kind == "image").count();
+            let with_text = match lang {
+                i18n::Lang::En => format!(
+                    "with text: {} of {images} {}",
+                    self.ocr_files,
+                    if images == 1 { "photo" } else { "photos" }
+                ),
+                i18n::Lang::Ru => format!("с текстом: {} из {images} снимков", self.ocr_files),
+            };
+            ui.label(egui::RichText::new(with_text).size(11.0).color(DIM));
+            let candidates = match lang {
+                i18n::Lang::En => format!(
+                    "candidates: {}, left: {}",
+                    self.ocr_candidates, self.ocr_remaining
+                ),
+                i18n::Lang::Ru => format!(
                     "кандидатов: {}, осталось {}",
                     self.ocr_candidates, self.ocr_remaining
-                ))
-                .size(11.0)
-                .color(DIM),
-            );
+                ),
+            };
+            ui.label(egui::RichText::new(candidates).size(11.0).color(DIM));
             ui.add_space(4.0);
             if self.ocr_rx.is_some() {
-                if ui.button("Стоп").clicked()
+                if ui.button(t(lang, "Стоп")).clicked()
                     && let Some(p) = &self.ocr_progress
                 {
                     p.cancel();
-                    self.status = "OCR: останавливаю после текущих файлов…".into();
+                    self.status = t(lang, "OCR: останавливаю после текущих файлов…").into();
                 }
             } else {
                 let label = if self.ocr_remaining < self.ocr_candidates {
-                    format!("Продолжить ({})", self.ocr_remaining)
+                    format!("{} ({})", t(lang, "Продолжить"), self.ocr_remaining)
                 } else {
-                    format!("Распознать документы ({})", self.ocr_candidates)
+                    format!(
+                        "{} ({})",
+                        t(lang, "Распознать документы"),
+                        self.ocr_candidates
+                    )
                 };
                 if ui
                     .add_enabled(
                         self.tesseract.is_some() && self.ocr_remaining > 0,
                         egui::Button::new(label),
                     )
-                    .on_hover_text(
+                    .on_hover_text(t(
+                        lang,
                         "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
                          один снимок — кнопкой в карточке файла",
-                    )
+                    ))
                     .clicked()
                 {
                     self.start_ocr(None);
@@ -5133,27 +5363,35 @@ impl App {
 
     /// Сводка внизу левой панели: только числа с подписями, без действий.
     fn stats_block(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Сводка").size(11.0).color(DIM));
+        let lang = self.settings.lang;
+        ui.label(
+            egui::RichText::new(t(lang, "Сводка"))
+                .size(11.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         let n = self.items.len();
         let bytes: i64 = self.items.iter().map(|r| r.size).sum();
         let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
         let no_thumb = self.items.iter().filter(|r| r.thumb.is_none()).count();
-        stat_row(ui, "Файлов:", &n.to_string());
-        stat_row(ui, "Объём:", &db::human(bytes));
-        stat_row(ui, "Без даты:", &no_date.to_string());
-        stat_row(ui, "Без превью:", &no_thumb.to_string());
+        stat_row(ui, t(lang, "Файлов:"), &n.to_string());
+        stat_row(ui, t(lang, "Объём:"), &db::human_in(lang, bytes));
+        stat_row(ui, t(lang, "Без даты:"), &no_date.to_string());
+        stat_row(ui, t(lang, "Без превью:"), &no_thumb.to_string());
         let no_cover = self
             .items
             .iter()
             .filter(|r| r.kind == "video" && r.thumb.is_none())
             .count();
         if no_cover > 0 {
-            stat_row(ui, "Видео без обложки:", &no_cover.to_string());
+            stat_row(ui, t(lang, "Видео без обложки:"), &no_cover.to_string());
             ui.label(
-                egui::RichText::new("нажмите «Индексировать» — обложки создаст ffmpeg")
-                    .size(11.0)
-                    .color(DIM),
+                egui::RichText::new(t(
+                    lang,
+                    "нажмите «Индексировать» — обложки создаст ffmpeg",
+                ))
+                .size(11.0)
+                .color(DIM),
             );
         }
         ui.add_space(4.0);
@@ -6365,19 +6603,32 @@ impl App {
 
     /// Один проход по программам: версия, найденный файл, источник. Запускать в reload/сохранении.
     fn refresh_tool_states(&mut self) {
+        let lang = self.settings.lang;
         self.tool_states = std::array::from_fn(|i| {
             let tool = tools::ALL[i];
             let where_ = match self.settings.tools.locate(tool) {
-                Some(p) => format!("{} ({})", p.display(), self.settings.tools.source(tool)),
+                Some(p) => format!(
+                    "{} ({})",
+                    p.display(),
+                    t(lang, self.settings.tools.source(tool))
+                ),
                 None => format!(
                     "{} ({})",
                     self.settings.tools.program(tool),
-                    self.settings.tools.source(tool)
+                    t(lang, self.settings.tools.source(tool))
                 ),
             };
             match self.settings.tools.version(tool) {
-                Ok(v) => format!("{} · {where_} · {}", short_version(&v), tool.purpose()),
-                Err(e) => format!("не работает: {e:#} · {where_} · {}", tool.purpose()),
+                Ok(v) => format!(
+                    "{} · {where_} · {}",
+                    short_version(&v),
+                    t(lang, tool.purpose())
+                ),
+                Err(e) => format!(
+                    "{}: {e:#} · {where_} · {}",
+                    t(lang, "не работает"),
+                    t(lang, tool.purpose())
+                ),
             }
         });
     }
@@ -6385,6 +6636,7 @@ impl App {
     /// Путь к программе сохраняется только после успешного запуска версии.
     /// Ошибка остаётся в статусе (внизу окна), а не уходит в консоль.
     fn apply_tools(&mut self) {
+        let lang = self.settings.lang;
         let mut problems = Vec::new();
         let mut checked = Vec::new();
         for tool in tools::ALL {
@@ -6397,7 +6649,11 @@ impl App {
             }
         }
         if !problems.is_empty() {
-            self.status = format!("программы не сохранены: {}", problems.join("; "));
+            self.status = format!(
+                "{}: {}",
+                t(lang, "программы не сохранены"),
+                problems.join("; ")
+            );
             return;
         }
         self.settings.tools = self.tools_input.clone();
@@ -6405,9 +6661,13 @@ impl App {
         self.tesseract = self.settings.tools.probe(Tool::Tesseract);
         self.refresh_tool_states();
         self.status = if checked.is_empty() {
-            "программы: все берутся из PATH".into()
+            t(lang, "программы: все берутся из PATH").into()
         } else {
-            format!("программы сохранены и проверены: {}", checked.join(", "))
+            format!(
+                "{}: {}",
+                t(lang, "программы сохранены и проверены"),
+                checked.join(", ")
+            )
         };
     }
 
@@ -6693,11 +6953,15 @@ impl App {
     /// Порог отбора в фильтре — процентиль по выбранному тегу (ADR 0032).
     /// 100% — самый сильный снимок этого тега, 0% — все, 70% — верхние 30%.
     fn tag_filter_slider(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         if self.tags.is_empty() {
             ui.label(
-                egui::RichText::new("теги ещё не посчитаны — нажмите «Посчитать теги»")
-                    .size(11.0)
-                    .color(DIM),
+                egui::RichText::new(t(
+                    lang,
+                    "теги ещё не посчитаны — нажмите «Посчитать теги»",
+                ))
+                .size(11.0)
+                .color(DIM),
             );
             return;
         }
@@ -6707,9 +6971,10 @@ impl App {
                 egui::Slider::new(&mut pct, 0..=100)
                     .custom_formatter(|v, _| format!("{v:.0}%")),
             )
-            .on_hover_text(
+            .on_hover_text(t(
+                lang,
                 "100% — самый сильный снимок этого тега, 0% — все; 70% — верхние 30%",
-            );
+            ));
         if r.changed() {
             self.settings.tag_show_pct = pct;
         }
@@ -6717,15 +6982,19 @@ impl App {
             self.save_settings();
         }
         if self.tags.len() < 100 {
-            ui.label(
-                egui::RichText::new(format!(
+            let few = match lang {
+                i18n::Lang::En => format!(
+                    "few tags ({} files) — the percentile is noisy, the raw threshold {:.2} is used",
+                    self.tags.len(),
+                    self.settings.tag_show
+                ),
+                i18n::Lang::Ru => format!(
                     "мало тегов ({} файлов) — процентиль шумный, берётся сырой порог {:.2}",
                     self.tags.len(),
                     self.settings.tag_show
-                ))
-                .size(11.0)
-                .color(DIM),
-            );
+                ),
+            };
+            ui.label(egui::RichText::new(few).size(11.0).color(DIM));
         }
     }
 
@@ -10025,9 +10294,9 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick, View,
-        Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of, month_groups,
-        nearest_file_month, parse_date, pick_kind, score_percentile, shift_month,
+        App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick,
+        SettingsTab, View, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
+        month_groups, nearest_file_month, parse_date, pick_kind, score_percentile, shift_month,
         shift_to_file_month,
     };
     use crate::embed;
@@ -10126,6 +10395,25 @@ mod tests {
             ..Default::default()
         };
         let out = ctx.run_ui(raw, |ui| app.details_panel(ui));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// Один кадр раздела диалога «Настройки» без окна: проверяет подписи раздела.
+    /// Модальное окно не рисуется: раздел — та же функция, что вызывается внутри него.
+    fn settings_frame(app: &mut App, ctx: &egui::Context, tab: SettingsTab) -> Vec<String> {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(560.0, 1400.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(raw, |ui| app.settings_section(ui, tab));
         let mut texts = Vec::new();
         for c in &out.shapes {
             collect_text(&c.shape, &mut texts);
@@ -10584,6 +10872,184 @@ mod tests {
             texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
             "отчёт рисуется как есть: {texts:?}"
         );
+    }
+
+    /// M21.4f: левая панель переведена целиком — блок модели, блок текста и сводка.
+    /// Названия моделей, теги и пути — данные и остаются как есть.
+    #[test]
+    fn английский_язык_переводит_левую_панель() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-left-i18n.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        // Пустой каталог моделей: блок говорит «не скачана» на обоих языках.
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
+        app.settings.lang = i18n::Lang::En;
+        // Два кадра: размер нижней панели сводки берётся из предыдущего кадра, поэтому
+        // на первом она обрезана, а проверяемые строки появляются на втором.
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 1100.0);
+        window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        for want in [
+            "AI model",
+            "model not downloaded",
+            "Model settings",
+            "Text on the photo",
+            "candidates: 0, left: 0",
+            "Summary",
+            "Files:",
+            "Size:",
+            "No date:",
+            "No preview:",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "нет «{want}»: {texts:?}"
+            );
+        }
+        for ru in [
+            "Модель ИИ",
+            "модель не скачана",
+            "Настройки модели",
+            "Текст на фото",
+            "Сводка",
+            "Файлов:",
+            "Объём:",
+            "Без даты:",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
+    }
+
+    /// M21.4f: разделы диалога «Настройки» переведены целиком: модель, индексация,
+    /// теги со словарём, лица, хранилище и внешние программы.
+    #[test]
+    fn английский_язык_переводит_разделы_настроек() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-settings-i18n.db"));
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
+        app.settings.lang = i18n::Lang::En;
+        app.refresh_tool_states();
+        let ctx = egui::Context::default();
+        let model = settings_frame(&mut app, &ctx, SettingsTab::Model);
+        for want in [
+            "Model",
+            "Model state",
+            "Not downloaded",
+            "Check the model",
+            "Model folder",
+            "Apply the path",
+            "Download limit",
+            "Network consent",
+            "Download the model",
+            "Compute tags",
+        ] {
+            assert!(
+                model.iter().any(|t| t == want),
+                "нет «{want}» в разделе модели: {model:?}"
+            );
+        }
+        assert!(
+            model.iter().any(|t| t.contains("dims")),
+            "единицы размерности не переведены: {model:?}"
+        );
+        let index = settings_frame(&mut app, &ctx, SettingsTab::Index);
+        for want in ["Indexing threads", "Duplicate threshold", "bits out of 64"] {
+            assert!(
+                index.iter().any(|t| t == want),
+                "нет «{want}» в разделе индексации: {index:?}"
+            );
+        }
+        // Пустой словарь: строка кнопок под 14 метками иначе уходит за высокий кадр.
+        app.tag_defs.clear();
+        let tags = settings_frame(&mut app, &ctx, SettingsTab::Tags);
+        for want in [
+            "Tag filter threshold",
+            "Confident tag threshold (cosine)",
+            "Margin over the second tag",
+            "Tag dictionary",
+            "the dictionary is not seeded yet — it appears after the first “Compute tags”",
+            "Recompute tags",
+            "Add to the dictionary",
+            "Export JSON",
+            "Import JSON",
+            "Restore the defaults",
+        ] {
+            assert!(
+                tags.iter().any(|t| t == want),
+                "нет «{want}» в разделе тегов: {tags:?}"
+            );
+        }
+        let faces = settings_frame(&mut app, &ctx, SettingsTab::Faces);
+        for want in [
+            "Face merge threshold (cosine)",
+            "Download the face model",
+            "Check the face model",
+        ] {
+            assert!(
+                faces.iter().any(|t| t == want),
+                "нет «{want}» в разделе лиц: {faces:?}"
+            );
+        }
+        assert!(
+            faces.iter().any(|t| t.contains("not downloaded")),
+            "состояние модели лиц не переведено: {faces:?}"
+        );
+        let storage = settings_frame(&mut app, &ctx, SettingsTab::Storage);
+        for want in [
+            "Index",
+            "DB",
+            "Cache",
+            "Models",
+            "People",
+            "Compute the used space",
+            "Cleaning the cache and the index",
+            "Clear the previews…",
+        ] {
+            assert!(
+                storage.iter().any(|t| t == want),
+                "нет «{want}» в разделе хранилища: {storage:?}"
+            );
+        }
+        let tools = settings_frame(&mut app, &ctx, SettingsTab::Tools);
+        assert!(
+            tools.iter().any(|t| t == "Check and save the programs"),
+            "нет кнопки сохранения программ: {tools:?}"
+        );
+        assert!(
+            tools.iter().any(|t| t.starts_with("without it: ")),
+            "подпись «без неё» не переведена: {tools:?}"
+        );
+        assert!(
+            tools
+                .iter()
+                .any(|t| t.contains("videos without duration or resolution")),
+            "описание ffprobe не переведено: {tools:?}"
+        );
+        for (name, texts) in [
+            ("model", &model),
+            ("index", &index),
+            ("tags", &tags),
+            ("faces", &faces),
+            ("storage", &storage),
+            ("tools", &tools),
+        ] {
+            for ru in [
+                "Модель",
+                "Состояние модели",
+                "Порог дублей",
+                "Словарь тегов",
+                "Хранилище",
+            ] {
+                assert!(
+                    !texts.iter().any(|t| t == ru),
+                    "русская подпись «{ru}» осталась в разделе {name}: {texts:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -11640,3 +12106,4 @@ mod tests {
         assert!(s.verify_last_ok);
     }
 }
+

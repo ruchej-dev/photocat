@@ -734,7 +734,7 @@ GPS/тегам/камере, запись порядка в БД.
 
 ---
 
-## M21 — language of the project and of the interface ◐ (mechanism done, screens in progress)
+## M21 — language of the project and of the interface ◐ (mechanism and GUI screens done, CLI reports left)
 
 **Goal.** The repository speaks English (docs, commits) while the Russian documentation stays as the
 second variant; the interface language is chosen in the settings: English is the main language,
@@ -788,3 +788,7 @@ M21.4e: the integrity screen is translated (fields, three buttons with hints, re
 copy buttons, plan errors); `title`/`verdict`/`status` take `lang`, the report body stays with the
 CLI reports (M21.6) — `cargo test` 192 tests include a headless English integrity frame; `check.sh`
 44/0. Four integrity tests that assert Russian set `settings.lang = Ru` themselves.
+M21.4f: the left panel (model block with the tag filter, the text block, the summary) and all six
+settings panes are translated; `tools::Tool::purpose`/`without`/`Tools::source` are wrapped in `t()`
+by the GUI and stay Russian for `doctor` until M21.6 — `cargo test` 194 tests include a headless
+English left-panel frame and six settings-pane frames; `check.sh` 44/0.

@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity) → next:M21.4f (left panel blocks, settings panes), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes) → next:M21.5 (viewer, player, folder picker, storage modal), then M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible screen of the shell now goes through `t()`, CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1259,3 +1259,44 @@ integrity tests that assert Russian set `settings.lang = Ru` themselves, as the 
 settings dialog panes (model, indexing, tags, faces, storage, tools) — they are still Russian and
 visible on every screen. After that M21.5 (viewer, player, folder picker, storage modal) and M21.6
 (CLI reports).
+
+## M21.4f — the left panel and the settings panes in English (2026-11-24)
+
+The last M21.4 block: the two places that stay on screen whatever view is open. The left panel sits
+next to every screen, and the settings dialog is one click from the top bar — leaving them Russian
+while the screens around them speak English would have made the whole effort pointless.
+
+**What moved.** The left panel: the model block (`AI model`, `Compute tags` with its hint, `with a
+confident tag: 12`, the free-word-search note, the tag filter with `tag: …` / `mine: …` / `all tags`,
+`Filter threshold`, the “no tag passes the threshold” note, `search: 3 files`), the text block
+(`Text on the photo`, `with text: 146 of 435 photos`, `candidates: 146, left: 289`,
+`Recognize documents (N)`, the tesseract-missing note and the long-pass hint) and the summary
+(`Summary`, `Files:`, `Size:`, `No date:`, `No preview:`, `Videos without a cover:`).
+The settings dialog: all six panes — model (state, `Check the model`, folder, download limit,
+`Network consent` and the download/`Compute tags` buttons, the progress line), indexing
+(`Indexing threads`, `Duplicate threshold`, `bits out of 64`), tags (both thresholds, the dictionary
+editor with `Remove from the dictionary`, `Add to the dictionary`, `Recompute tags`, export/import and
+`Restore the defaults`, plus every dictionary status), faces (threshold, consent, download/check,
+progress), storage (`Index`, `DB`, `Cache`, `Models`, `People`, `Compute the used space`, the three
+cleanup buttons and the “never writes into the archive” note) and external tools (the PATH note,
+`empty — from PATH`, `without it: …`, `Check and save the programs` plus the tool states).
+`tools::Tool::purpose`, `Tool::without` and `Tools::source` stay Russian in the module (they are also
+`doctor` output) — the GUI wraps them in `t()`; M21.6 will give the CLI the same language. Sizes in
+the touched panes go through `db::human_in`, so `KiB/MiB` follow the language. Labels with a number
+inside the sentence (`files: 3/9`, `with text: N of M photos`, the dictionary export/import statuses)
+are built per language, as M21.4c did; the tag labels, model titles, prompts and paths are data and
+stay as they are.
+
+**Checks.** `cargo test` — 194 passed, 6 `#[ignore]` (new:
+`английский_язык_переводит_левую_панель` — a headless window frame: `AI model`, `model not
+downloaded`, `Model settings`, `Text on the photo`, `candidates: 0, left: 0`, `Summary`, `Files:`,
+`Size:`, `No date:`, `No preview:`, and no Russian label left — it needs two frames, because the
+bottom summary panel takes its height from the previous frame; and
+`английский_язык_переводит_разделы_настроек` — six headless pane frames: model, indexing, tags with
+an empty dictionary, faces, storage and tools, including `dims`, `without it: …` and the translated
+ffprobe description; the Russian list checks all panes at once); `cargo clippy --all-targets` clean;
+`check.sh` — 44 checks, 0 violations; the release build and a 6 s `photocat gui` smoke test — no panic.
+
+**Next.** M21.5: the full screen viewer and built-in player controls, the folder picker (`roots_modal`,
+`picker_modal`) and the storage confirmation modal — the last Russian surfaces inside the window.
+After that M21.6 gives the CLI reports a `lang` field.
