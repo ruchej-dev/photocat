@@ -8,7 +8,7 @@
 //!                     [--exclude-dup] [--apply] [--copy|--symlink] [--rename]
 //!   photocat verify <a> <b> [--jobs N] [--all]  |  verify --manifest FILE <dir>
 //!   photocat manifest [каталог] [--out FILE] [--jobs N]
-//!   photocat embed [--jobs N] [--batch N]
+//!   photocat embed [--jobs N] [--batch N] [--refresh]
 //!   photocat ocr [--jobs N] [--all]
 //!   photocat search <запрос> [--top N] [--text]
 //!   photocat clusters [--k N] [--out FILE]
@@ -49,7 +49,8 @@ fn usage() {
   verify <a> <b> [--jobs N] [--all]        сверка двух копий: размер → sha256, отчёт
   verify --manifest FILE <каталог>         проверить каталог по слепку sha256
   manifest [DIR] [--out FILE] [--jobs N]  слепок каталога в формате sha256sum
-  embed [--jobs N] [--batch N]              CLIP-эмбеддинги и теги (модель локальная)
+  embed [--jobs N] [--batch N] [--refresh]  CLIP-эмбеддинги и теги (модель локальная);
+                                            --refresh пересчитывает векторы заново
   faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
                                             лица: детекция, эмбеддинги, группы
   faces download --yes | label --id N --name ИМЯ | split --id N
@@ -144,7 +145,8 @@ fn main() -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
-            let stats = embed::embed_missing(&db_path, jobs, batch, Some(progress))?;
+            let refresh = args.iter().any(|a| a == "--refresh");
+            let stats = embed::embed_missing(&db_path, jobs, batch, Some(progress), refresh)?;
             println!("{stats}");
             Ok(())
         }

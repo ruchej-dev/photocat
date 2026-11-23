@@ -704,6 +704,11 @@ pub fn load_embeddings(conn: &Connection, model: &str) -> Result<Vec<(i64, Vec<f
     Ok(out)
 }
 
+/// Удалить векторы модели: пересчёт с новым входом модели. Архив и превью не трогаются.
+pub fn clear_embeddings(conn: &Connection, model: &str) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM embeddings WHERE model=?1", params![model])?)
+}
+
 pub fn save_embedding(
     conn: &Connection,
     file_id: i64,

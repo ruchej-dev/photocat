@@ -35,7 +35,8 @@ cargo build --release      # первый раз ~3 минуты
 
 # 5. CLIP: смысловые теги и поиск (модель скачивается один раз, дальше всё локально)
 bash scripts/fetch-model.sh
-./target/release/photocat embed                        # 1971 фото ≈ 70 с на CPU
+./target/release/photocat embed                        # 2229 файлов ≈ 177 с на CPU (два кадра)
+./target/release/photocat embed --refresh              # пересчитать векторы после смены входа
 ./target/release/photocat search "торт" --top 20
 ./target/release/photocat clusters --k 30              # → plan/M3-clusters.md
 

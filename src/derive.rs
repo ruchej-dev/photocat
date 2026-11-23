@@ -635,10 +635,14 @@ pub fn analyze_image(
     Ok(ImageInfo { width: w, height: h, dhash, sharpness, thumb: rel })
 }
 
-/// Вход CLIP: квадрат по центру превью, 224×224, нормализация каналов, раскладка CHW.
-pub fn clip_input(thumb: &Path, size: u32) -> Result<Vec<f32>> {
-    const MEAN: [f32; 3] = [0.481_454_7, 0.457_827_5, 0.408_210_7];
-    const STD: [f32; 3] = [0.268_629_5, 0.261_302_6, 0.275_777_1];
+/// Вход CLIP: два кадра на снимок — центр-кроп и весь кадр с полями (letterbox).
+///
+/// Центр-кроп даёт крупный объект, но на вертикальных и широких кадрах отрезает
+/// контекст (белые полки без верха и низа CLIP читает как лист бумаги). Весь кадр
+/// сохраняет пропорции, поэтому векторы усредняются в `embed`: модель видит и
+/// деталь, и обстановку. Превью декодируется один раз на оба кадра.
+/// Раскладка — CHW с нормализацией CLIP.
+pub fn clip_inputs(thumb: &Path, size: u32) -> Result<(Vec<f32>, Vec<f32>)> {
     let img = image::ImageReader::open(thumb)?
         .with_guessed_format()?
         .decode()
@@ -648,24 +652,70 @@ pub fn clip_input(thumb: &Path, size: u32) -> Result<Vec<f32>> {
     let side = w.min(h).max(1);
     let (x0, y0) = ((w - side) / 2, (h - side) / 2);
     let crop = image::imageops::crop_imm(&img, x0, y0, side, side).to_image();
-    let small = image::imageops::resize(
+    let center = image::imageops::resize(
         &crop,
         size,
         size,
         image::imageops::FilterType::Triangle,
     );
+    Ok((to_chw(&center, size), to_chw(&letterbox(&img, size), size)))
+}
+
+/// CLIP-нормализация и раскладка RGB → CHW.
+fn to_chw(img: &image::RgbImage, size: u32) -> Vec<f32> {
+    const MEAN: [f32; 3] = [0.481_454_7, 0.457_827_5, 0.408_210_7];
+    const STD: [f32; 3] = [0.268_629_5, 0.261_302_6, 0.275_777_1];
     let plane = (size * size) as usize;
     let mut out = vec![0f32; plane * 3];
     for y in 0..size {
         for x in 0..size {
-            let px = small.get_pixel(x, y);
+            let px = img.get_pixel(x, y);
             let i = (y * size + x) as usize;
             for c in 0..3 {
                 out[c * plane + i] = (px[c] as f32 / 255.0 - MEAN[c]) / STD[c];
             }
         }
     }
-    Ok(out)
+    out
+}
+
+/// Вписать кадр в квадрат `size`, сохранив пропорции; поля — средний цвет кадра.
+/// Средний цвет не вносит в картинку чёрную рамку, которой в архиве нет.
+fn letterbox(img: &image::RgbImage, size: u32) -> image::RgbImage {
+    let (w, h) = img.dimensions();
+    let scale = (size as f32 / w.max(1) as f32).min(size as f32 / h.max(1) as f32);
+    let nw = ((w as f32 * scale).round() as u32).clamp(1, size);
+    let nh = ((h as f32 * scale).round() as u32).clamp(1, size);
+    let small = image::imageops::resize(
+        img,
+        nw,
+        nh,
+        image::imageops::FilterType::Triangle,
+    );
+    let mut canvas = image::RgbImage::from_pixel(size, size, average_color(img));
+    image::imageops::overlay(
+        &mut canvas,
+        &small,
+        ((size - nw) / 2) as i64,
+        ((size - nh) / 2) as i64,
+    );
+    canvas
+}
+
+/// Средний цвет кадра (по всем пикселям, без прозрачности).
+fn average_color(img: &image::RgbImage) -> image::Rgb<u8> {
+    let n = (img.width() as u64 * img.height() as u64).max(1);
+    let mut sum = [0u64; 3];
+    for px in img.pixels() {
+        for c in 0..3 {
+            sum[c] += px[c] as u64;
+        }
+    }
+    image::Rgb([
+        (sum[0] / n) as u8,
+        (sum[1] / n) as u8,
+        (sum[2] / n) as u8,
+    ])
 }
 
 #[cfg(test)]
@@ -733,5 +783,41 @@ mod tests {
     #[test]
     fn missing_resolution_is_an_error() {
         assert!(probe(r#"{"streams":[{}],"format":{}}"#).is_err());
+    }
+
+    #[test]
+    fn letterbox_сохраняет_пропорции_и_заливает_поля_средним_цветом() {
+        // Вертикальный кадр 100×200: в квадрат 20 он войдёт как 10×20 по центру.
+        let tall = image::RgbImage::from_pixel(100, 200, image::Rgb([255, 0, 0]));
+        let out = letterbox(&tall, 20);
+        assert_eq!(out.dimensions(), (20, 20));
+        assert_eq!(out.get_pixel(2, 10), &image::Rgb([255, 0, 0]));
+        assert_eq!(out.get_pixel(10, 10), &image::Rgb([255, 0, 0]));
+        // Поля слева и справа — средний цвет кадра, а не чёрная рамка.
+        assert_eq!(out.get_pixel(1, 10), &image::Rgb([255, 0, 0]));
+
+        // Широкий 200×100: 20×10 по центру, поля сверху и снизу.
+        let wide = image::RgbImage::from_pixel(200, 100, image::Rgb([0, 0, 255]));
+        let out = letterbox(&wide, 20);
+        assert_eq!(out.dimensions(), (20, 20));
+        assert_eq!(out.get_pixel(10, 2), &image::Rgb([0, 0, 255]));
+        assert_eq!(out.get_pixel(10, 17), &image::Rgb([0, 0, 255]));
+    }
+
+    #[test]
+    fn вход_clip_даёт_два_кадра_одного_размера() {
+        // Временный файл перезаписывается, но не удаляется: архив неприкосновенен,
+        // а удаление файлов в `src/` запрещено проверкой границ.
+        let path = std::env::temp_dir().join("photocat-clip-inputs.png");
+        image::RgbImage::from_pixel(160, 320, image::Rgb([120, 130, 140]))
+            .save(&path)
+            .unwrap();
+        let (center, whole) = clip_inputs(&path, 224).unwrap();
+        let plane = (224 * 224) as usize;
+        assert_eq!(center.len(), plane * 3);
+        assert_eq!(whole.len(), plane * 3);
+        // Центр-кроп вертикального кадра — это его середина, не растянутые поля.
+        assert!(center.iter().all(|v| v.is_finite()));
+        assert!(whole.iter().all(|v| v.is_finite()));
     }
 }

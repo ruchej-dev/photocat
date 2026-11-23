@@ -410,16 +410,31 @@ impl Model {
     }
 
     /// Эмбеддинги изображений по путям к превью 320 px. Векторы нормализованы.
+    ///
+    /// На каждый снимок модель видит два кадра — центр-кроп и весь кадр с полями;
+    /// векторы усредняются и снова нормализуются. Один вектор на снимок в БД.
     pub fn embed_thumbs(&mut self, thumbs: &[PathBuf]) -> Result<Vec<Vec<f32>>> {
         if thumbs.is_empty() {
             return Ok(Vec::new());
         }
         let plane = (IMAGE_SIDE * IMAGE_SIDE) as usize;
-        let mut data = Vec::with_capacity(thumbs.len() * plane * 3);
+        let mut data = Vec::with_capacity(thumbs.len() * 2 * plane * 3);
         for p in thumbs {
-            data.extend_from_slice(&derive::clip_input(p, IMAGE_SIDE)?);
+            let (center, whole) = derive::clip_inputs(p, IMAGE_SIDE)?;
+            data.extend_from_slice(&center);
+            data.extend_from_slice(&whole);
         }
-        let n = thumbs.len();
+        let values = self.run_vision(data, thumbs.len() * 2)?;
+        let out = average_pairs(&values, thumbs.len(), DIM);
+        if out.len() != thumbs.len() {
+            bail!("зрительная модель вернула {} векторов на {} картинок", out.len(), thumbs.len());
+        }
+        Ok(out)
+    }
+
+    /// Прогнать зрительную модель по готовым CHW-входам; векторы нормализованы.
+    /// `n` — число кадров, для которых подготовлены данные (не снимков).
+    fn run_vision(&mut self, data: Vec<f32>, n: usize) -> Result<Vec<f32>> {
         let outputs = self.vision.run(ort::inputs![
             "pixel_values" => Tensor::from_array((
                 vec![n as i64, 3, IMAGE_SIDE as i64, IMAGE_SIDE as i64],
@@ -431,14 +446,13 @@ impl Model {
         if dim != DIM {
             bail!("зрительная модель вернула {dim} признаков, ожидалось {DIM}");
         }
-        let mut out = Vec::with_capacity(n);
-        for chunk in values.chunks(DIM) {
-            let mut v = chunk.to_vec();
-            normalize(&mut v);
-            out.push(v);
+        let count = values.len() / DIM;
+        if count != n {
+            bail!("зрительная модель вернула {count} векторов на {n} кадров");
         }
-        if out.len() != n {
-            bail!("зрительная модель вернула {} векторов на {n} картинок", out.len());
+        let mut out = values.to_vec();
+        for chunk in out.chunks_mut(DIM) {
+            normalize(chunk);
         }
         Ok(out)
     }
@@ -466,6 +480,27 @@ pub fn tag_above(scores: &[(String, f32)], want: &str, show: f32) -> bool {
 /// Самый сильный вес среди тегов одного файла; `None`, если тегов нет.
 pub fn max_score(scores: &[(String, f32)]) -> Option<f32> {
     scores.iter().map(|(_, s)| *s).reduce(f32::max)
+}
+
+/// Усреднить векторы кадров одного снимка (по два на снимок) и нормализовать.
+/// Без нормализации среднее двух единичных векторов короче единицы, и косинус с промптами врёт.
+fn average_pairs(values: &[f32], images: usize, dim: usize) -> Vec<Vec<f32>> {
+    let mut out = Vec::with_capacity(images);
+    for i in 0..images {
+        let mut v = vec![0f32; dim];
+        for part in 0..2 {
+            let base = (i * 2 + part) * dim;
+            let Some(chunk) = values.get(base..base + dim) else {
+                break;
+            };
+            for (a, b) in v.iter_mut().zip(chunk) {
+                *a += *b;
+            }
+        }
+        normalize(&mut v);
+        out.push(v);
+    }
+    out
 }
 
 /// Уверенный тег с настраиваемыми порогами.
@@ -615,16 +650,25 @@ impl std::fmt::Display for EmbedStats {
 }
 
 /// Посчитать эмбеддинги и теги для изображений, у которых их ещё нет (ключ — sha256).
+/// `refresh` сбрасывает векторы активной модели: нужен после смены препроцессинга,
+/// иначе ключ sha256 честно скажет «уже посчитано».
 pub fn embed_missing(
     db_path: &Path,
     threads: usize,
     batch: usize,
     progress: Option<Arc<Progress>>,
+    refresh: bool,
 ) -> Result<EmbedStats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
     let settings = db::load_settings(&conn);
     let entry = active_entry(&settings);
+    if refresh {
+        let n = db::clear_embeddings(&conn, entry.id)?;
+        if let Some(p) = &progress {
+            p.set_msg(format!("CLIP: сброшено {n} старых векторов — считаю заново"));
+        }
+    }
     let rows = db::load_all(&conn)?;
     let done = db::embedding_shas(&conn, entry.id)?;
     let todo: Vec<&FileRow> = rows
@@ -758,7 +802,7 @@ pub fn embed_and_retag(
     batch: usize,
     progress: Option<Arc<Progress>>,
 ) -> Result<(EmbedStats, RetagStats)> {
-    let embed = embed_missing(db_path, threads, batch, progress)?;
+    let embed = embed_missing(db_path, threads, batch, progress, false)?;
     let tags = retag(db_path, threads, None)?;
     Ok((embed, tags))
 }
@@ -1172,6 +1216,18 @@ mod tests {
     }
 
     #[test]
+    fn два_кадра_усредняются_и_снова_нормируются() {
+        // Два единичных вектора под 90°: среднее должно стать 45°, длина 1.
+        let values = [1.0f32, 0.0, 0.0, 1.0];
+        let out = average_pairs(&values, 1, 2);
+        assert_eq!(out.len(), 1);
+        assert!((out[0][0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+        assert!((out[0][1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+        let norm: f32 = out[0].iter().map(|x| x * x).sum();
+        assert!((norm - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn фильтр_по_тегу_берёт_любой_вес_выше_порога() {
         let scores = vec![
             ("одежда".to_string(), 0.24),
@@ -1182,6 +1238,35 @@ mod tests {
         assert!(tag_above(&scores, "одежда", 0.22));
         assert!(!tag_above(&scores, "мебель", 0.22));
         assert!(!tag_above(&scores, "город", 0.22));
+    }
+
+    #[test]
+    #[ignore = "нужен PHOTOCAT_TAG_THUMB: путь к превью и веса модели"]
+    fn диагностика_кадров_и_ансамбля() {
+        let Some(path) = std::env::var_os("PHOTOCAT_TAG_THUMB").map(PathBuf::from) else {
+            return;
+        };
+        let db_path = db::resolve_db(None).unwrap();
+        let conn = db::open(&db_path).unwrap();
+        let settings = db::load_settings(&conn);
+        let mut m = Model::load(&settings, 4).unwrap();
+        let (center, whole) = derive::clip_inputs(&path, IMAGE_SIDE).unwrap();
+        let mut data = center;
+        data.extend_from_slice(&whole);
+        let values = m.run_vision(data, 2).unwrap();
+        let shots = [
+            ("центр-кроп", &values[..DIM]),
+            ("весь кадр", &values[DIM..DIM * 2]),
+        ];
+        for (name, v) in shots {
+            let tags = m.tag_scores(v);
+            println!("{name}: {}", tags.iter().take(4)
+                .map(|(t, s)| format!("{t} {s:.3}")).collect::<Vec<_>>().join(" / "));
+        }
+        let avg = average_pairs(&values, 1, DIM);
+        let tags = m.tag_scores(&avg[0]);
+        println!("ансамбль: {}", tags.iter().take(4)
+            .map(|(t, s)| format!("{t} {s:.3}")).collect::<Vec<_>>().join(" / "));
     }
 
     #[test]
