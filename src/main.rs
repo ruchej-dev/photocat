@@ -12,6 +12,7 @@
 //!   photocat ocr [--jobs N] [--all]
 //!   photocat search <запрос> [--top N] [--text]
 //!   photocat clusters [--k N] [--out FILE]
+//!   photocat albums list|new|rename|move|add|remove|delete|show
 //!   photocat            (без аргументов — GUI)
 
 mod app;
@@ -29,7 +30,7 @@ mod storage;
 mod tools;
 mod verify;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use db::Progress;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,6 +60,10 @@ fn usage() {
                                             текст с документов и скриншотов (tesseract)
   search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
   clusters [--k N] [--out FILE]             кластеры CLIP → отчёт с примерами
+  albums list [--tree] | new --name ИМЯ [--parent ID] [--note ТЕКСТ]
+         | rename --id N --name ИМЯ | move --id N --parent ID [--position K]
+         | add|remove --id N PATH... | delete --id N [--yes] | show --id N [--tree]
+                                            альбомы: дерево и порядок файлов; только строки БД
   models [list|check|download --id ID --yes]
                                             каталог моделей, проверка и загрузка весов
   settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L]
@@ -508,6 +513,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        "albums" => albums_cli(&args[1..]),
         "clusters" => {            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let k = flag_num(&args, "--k", 30);
             let out = flag_str(&args, "--out")
@@ -633,6 +639,259 @@ fn main() -> Result<()> {
             std::process::exit(2);
         }
     }
+}
+
+/// `photocat albums …` — альбомы как данные: дерево, порядок и строки в БД.
+/// Ни одна команда не открывает файл по пути и не пишет на диск: PATH — ключ
+/// `files.path`, а не файловая операция. Коды: 0 — сделано, 1 — ошибка данных,
+/// 2 — неверные аргументы или отказ без подтверждения.
+fn albums_cli(args: &[String]) -> Result<()> {
+    let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
+    let conn = db::open(&db_path)?;
+    let cmd = args.first().map(String::as_str).unwrap_or("list");
+    match cmd {
+        "list" => {
+            let tree = db::albums_tree(&conn)?;
+            if tree.is_empty() {
+                println!("альбомов нет — создайте: photocat albums new --name \"Дача 2024\"");
+                return Ok(());
+            }
+            let by_tree = has_flag(args, "--tree");
+            for node in &tree {
+                let path = db::album_path(&conn, node.id)?;
+                let indent = if by_tree {
+                    "  ".repeat(node.depth)
+                } else {
+                    String::new()
+                };
+                let trashed = if node.trashed > 0 {
+                    format!(" · в корзине {}", node.trashed)
+                } else {
+                    String::new()
+                };
+                println!(
+                    "{:>4}  {indent}{path}  · файлов {} · подальбомов {} · {}{}",
+                    node.id,
+                    node.files,
+                    node.subalbums,
+                    db::human(node.bytes),
+                    trashed
+                );
+            }
+            Ok(())
+        }
+        "new" => {
+            let name = match flag_str(args, "--name") {
+                Some(n) => n,
+                None => {
+                    eprintln!("нужно имя: photocat albums new --name \"Дача 2024\" [--parent ID]");
+                    std::process::exit(2);
+                }
+            };
+            let parent = flag_str(args, "--parent")
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+            let note = flag_str(args, "--note").unwrap_or_default();
+            let id = db::create_album(&conn, parent, &name, &note)?;
+            println!(
+                "альбом создан: {} (id {id})",
+                db::album_path(&conn, id)?
+            );
+            Ok(())
+        }
+        "rename" => {
+            let id = album_id_arg(args);
+            let name = match flag_str(args, "--name") {
+                Some(n) => n,
+                None => {
+                    eprintln!("нужно имя: photocat albums rename --id N --name ИМЯ");
+                    std::process::exit(2);
+                }
+            };
+            db::rename_album(&conn, id, &name)?;
+            println!("альбом переименован: {}", db::album_path(&conn, id)?);
+            Ok(())
+        }
+        "move" => {
+            let id = album_id_arg(args);
+            let Some(parent) = flag_str(args, "--parent").and_then(|v| v.parse::<i64>().ok()) else {
+                eprintln!("нужен родитель: photocat albums move --id N --parent ID [--position K]");
+                std::process::exit(2);
+            };
+            let position = flag_str(args, "--position").and_then(|v| v.parse::<i64>().ok());
+            db::move_album(&conn, id, parent, position)?;
+            println!("альбом перемещён: {}", db::album_path(&conn, id)?);
+            Ok(())
+        }
+        "add" | "remove" => {
+            let id = album_id_arg(args);
+            let paths = positional_paths(args, &["--id", "--db"]);
+            if paths.is_empty() {
+                eprintln!("нужны пути: photocat albums {cmd} --id N PATH...");
+                std::process::exit(2);
+            }
+            let file_ids = file_ids_for_paths(&conn, &paths)?;
+            let path = db::album_path(&conn, id)?;
+            if cmd == "add" {
+                let (added, already) = db::add_to_album(&conn, id, &file_ids)?;
+                println!(
+                    "альбом «{path}»: добавлено {added}, уже было {already}, файлов {}",
+                    db::album_items(&conn, id)?.len()
+                );
+            } else {
+                let removed = db::remove_from_album(&conn, id, &file_ids)?;
+                println!(
+                    "альбом «{path}»: убрано {removed}, осталось {}",
+                    db::album_items(&conn, id)?.len()
+                );
+            }
+            Ok(())
+        }
+        "delete" => {
+            let id = album_id_arg(args);
+            let tree = db::albums_tree(&conn)?;
+            let node = tree
+                .iter()
+                .find(|n| n.id == id)
+                .with_context(|| format!("альбома {id} нет"))?;
+            let mut subtree = vec![node.clone()];
+            let mut seen = vec![id];
+            loop {
+                let mut grown = false;
+                for candidate in &tree {
+                    if seen.contains(&candidate.parent_id) && !seen.contains(&candidate.id) {
+                        seen.push(candidate.id);
+                        subtree.push(candidate.clone());
+                        grown = true;
+                    }
+                }
+                if !grown {
+                    break;
+                }
+            }
+            let rows: i64 = subtree.iter().map(|n| n.files).sum();
+            if !has_flag(args, "--yes") {
+                let names: Vec<&str> = subtree.iter().map(|n| n.name.as_str()).collect();
+                eprintln!(
+                    "будет удалено: {} — альбомов {}, строк файлов {}; файлы на диске останутся.                      Повторите с --yes.",
+                    names.join(", "),
+                    subtree.len(),
+                    rows
+                );
+                std::process::exit(2);
+            }
+            let albums = db::delete_album(&conn, id)?;
+            println!(
+                "удалено альбомов {albums}, строк файлов {rows}; файлы на диске не тронуты"
+            );
+            Ok(())
+        }
+        "show" => {
+            let id = album_id_arg(args);
+            let path = db::album_path(&conn, id)?;
+            let tree = db::albums_tree(&conn)?;
+            let node = tree
+                .iter()
+                .find(|n| n.id == id)
+                .with_context(|| format!("альбома {id} нет"))?;
+            println!(
+                "{} (id {id}) · файлов {} · подальбомов {} · {}{}",
+                path,
+                node.files,
+                node.subalbums,
+                db::human(node.bytes),
+                if node.note.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {}", node.note.trim())
+                }
+            );
+            if has_flag(args, "--tree") {
+                for child in tree.iter().filter(|n| n.parent_id == id) {
+                    println!(
+                        "  подальбом {} · файлов {} · {}",
+                        child.name,
+                        child.files,
+                        db::human(child.bytes)
+                    );
+                }
+            }
+            for (position, row) in db::album_items(&conn, id)?.iter().enumerate() {
+                let mark = if row.trashed_at.is_some() {
+                    "  [в корзине приложения]"
+                } else {
+                    ""
+                };
+                println!("{:>4}  {}{mark}", position + 1, row.path);
+            }
+            Ok(())
+        }
+        other => {
+            eprintln!(
+                "неизвестная команда albums: {other}\n\
+                 list [--tree] | new | rename | move | add | remove | delete | show"
+            );
+            std::process::exit(2);
+        }
+    }
+}
+
+fn album_id_arg(args: &[String]) -> i64 {
+    match flag_str(args, "--id").and_then(|v| v.parse::<i64>().ok()) {
+        Some(id) => id,
+        None => {
+            eprintln!("нужен номер альбома: --id N");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// Позиционные пути команды: всё, что не флаг и не значение известного флага.
+fn positional_paths(args: &[String], flags: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = args.iter().skip(1);
+    while let Some(arg) = it.next() {
+        if arg.starts_with("--") {
+            let name = arg.split('=').next().unwrap_or(arg);
+            if flags.contains(&name) && !arg.contains('=') {
+                it.next();
+            }
+            continue;
+        }
+        out.push(arg.clone());
+    }
+    out
+}
+
+/// Путь → id файла в индексе. Файл не открывается; если точного пути нет,
+/// пробуем канонический вид (симлинк, `.`/`..`), но не содержимое.
+fn file_ids_for_paths(conn: &rusqlite::Connection, paths: &[String]) -> Result<Vec<i64>> {
+    let mut ids = Vec::new();
+    let mut missing = Vec::new();
+    for path in paths {
+        let mut found: Option<i64> = conn
+            .query_row("SELECT id FROM files WHERE path=?1", [path], |r| r.get(0))
+            .ok();
+        if found.is_none()
+            && let Ok(canonical) = std::fs::canonicalize(path)
+        {
+            found = conn
+                .query_row(
+                    "SELECT id FROM files WHERE path=?1",
+                    [canonical.to_string_lossy().to_string()],
+                    |r| r.get(0),
+                )
+                .ok();
+        }
+        match found {
+            Some(id) => ids.push(id),
+            None => missing.push(path.clone()),
+        }
+    }
+    if !missing.is_empty() {
+        anyhow::bail!("нет в индексе: {}", missing.join(", "));
+    }
+    Ok(ids)
 }
 
 /// Короткая подпись версии: «ffmpeg version 6.1.1» вместо строки с копирайтом.

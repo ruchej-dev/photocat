@@ -96,7 +96,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
 /// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
 /// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -243,7 +243,27 @@ fn init(c: &Connection) -> Result<()> {
          BEGIN
             DELETE FROM faces WHERE file_id = new.id;
             DELETE FROM face_scans WHERE file_id = new.id;
-         END;",
+         END;
+         CREATE TABLE IF NOT EXISTS albums(
+            id         INTEGER PRIMARY KEY,
+            parent_id  INTEGER NOT NULL DEFAULT 0,
+            position   INTEGER NOT NULL DEFAULT 0,
+            name       TEXT NOT NULL,
+            name_key   TEXT NOT NULL,
+            note       TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS albums_sibling_name ON albums(parent_id, name_key);
+         CREATE INDEX IF NOT EXISTS albums_tree ON albums(parent_id, position);
+         CREATE TABLE IF NOT EXISTS album_files(
+            album_id INTEGER NOT NULL,
+            file_id  INTEGER NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY(album_id, file_id)
+         );
+         CREATE INDEX IF NOT EXISTS album_files_file ON album_files(file_id);",
     )?;
     // Схема старых БД дополняется на месте: данные не теряются при обновлении.
     ensure_column(c, "files", "sharpness", "REAL")?;
@@ -284,7 +304,8 @@ impl GridLayout {
     }
 }
 
-/// Порядок плиток (M17). «Порядок альбома» появится вместе с альбомами (M19).
+/// Порядок плиток (M17). «Порядок альбома» (M19) действует только внутри
+/// выбранного альбома; вне его читается как «дата: новые сверху».
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GridSort {
     #[default]
@@ -292,6 +313,7 @@ pub enum GridSort {
     DateAsc,
     Name,
     SizeDesc,
+    Album,
 }
 
 impl GridSort {
@@ -301,6 +323,7 @@ impl GridSort {
             GridSort::DateAsc => "date_asc",
             GridSort::Name => "name",
             GridSort::SizeDesc => "size_desc",
+            GridSort::Album => "album",
         }
     }
 
@@ -309,6 +332,7 @@ impl GridSort {
             "date_asc" => GridSort::DateAsc,
             "name" => GridSort::Name,
             "size_desc" => GridSort::SizeDesc,
+            "album" => GridSort::Album,
             _ => GridSort::DateDesc,
         }
     }
@@ -640,37 +664,41 @@ pub fn load_trashed(conn: &Connection) -> Result<Vec<FileRow>> {
     load_where(conn, "trashed_at IS NOT NULL")
 }
 
+const FILE_COLUMNS: &str = "id,path,size,sha256,kind,COALESCE(width,0),COALESCE(height,0),
+                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,duration_s,thumb,decision,trashed_at,
+                COALESCE(mtime,0)";
+
+fn file_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<FileRow> {
+    Ok(FileRow {
+        id: r.get(0)?,
+        path: r.get(1)?,
+        size: r.get(2)?,
+        mtime: r.get(18)?,
+        sha256: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        kind: r.get(4)?,
+        width: r.get(5)?,
+        height: r.get(6)?,
+        taken_at: r.get(7)?,
+        taken_src: r.get(8)?,
+        lat: r.get(9)?,
+        lon: r.get(10)?,
+        camera: r.get(11)?,
+        dhash: r.get(12)?,
+        sharpness: r.get(13)?,
+        duration_s: r.get(14)?,
+        thumb: r.get(15)?,
+        decision: r.get(16)?,
+        trashed_at: r.get(17)?,
+    })
+}
+
 fn load_where(conn: &Connection, filter: &str) -> Result<Vec<FileRow>> {
     let sql = format!(
-        "SELECT id,path,size,sha256,kind,COALESCE(width,0),COALESCE(height,0),
-                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,duration_s,thumb,decision,trashed_at,
-                COALESCE(mtime,0)
-         FROM files WHERE {filter} ORDER BY COALESCE(taken_at,'9999') , path"
+        "SELECT {FILE_COLUMNS} FROM files WHERE {filter}
+         ORDER BY COALESCE(taken_at,'9999') , path"
     );
     let mut st = conn.prepare(&sql)?;
-    let rows = st.query_map([], |r| {
-        Ok(FileRow {
-            id: r.get(0)?,
-            path: r.get(1)?,
-            size: r.get(2)?,
-            mtime: r.get(18)?,
-            sha256: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            kind: r.get(4)?,
-            width: r.get(5)?,
-            height: r.get(6)?,
-            taken_at: r.get(7)?,
-            taken_src: r.get(8)?,
-            lat: r.get(9)?,
-            lon: r.get(10)?,
-            camera: r.get(11)?,
-            dhash: r.get(12)?,
-            sharpness: r.get(13)?,
-            duration_s: r.get(14)?,
-            thumb: r.get(15)?,
-            decision: r.get(16)?,
-            trashed_at: r.get(17)?,
-        })
-    })?;
+    let rows = st.query_map([], file_from_row)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
@@ -741,7 +769,22 @@ fn delete_file_rows(conn: &Connection, ids: &[i64]) -> Result<()> {
 }
 
 fn delete_file_rows_tx(tx: &Connection, ids: &[i64]) -> Result<()> {
+    // Альбомы хранят только id файлов: строку убираем вместе с файлом, иначе
+    // осталась бы «висячая» ссылка, а порядок альбома — с дыркой.
+    let mut albums: Vec<i64> = Vec::new();
     for id in ids {
+        let file_albums: Vec<i64> = {
+            let mut st =
+                tx.prepare("SELECT DISTINCT album_id FROM album_files WHERE file_id=?1")?;
+            let rows = st.query_map([id], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for album in file_albums {
+            if !albums.contains(&album) {
+                albums.push(album);
+            }
+        }
+        tx.execute("DELETE FROM album_files WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM ocr WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM embeddings WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM tags WHERE file_id=?1", params![id])?;
@@ -750,6 +793,9 @@ fn delete_file_rows_tx(tx: &Connection, ids: &[i64]) -> Result<()> {
         tx.execute("DELETE FROM faces WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM face_scans WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM files WHERE id=?1", params![id])?;
+    }
+    for album in albums {
+        resequence_album_files(tx, album)?;
     }
     delete_empty_face_clusters(tx)?;
     Ok(())
@@ -1307,6 +1353,481 @@ pub fn duration(secs: f64) -> String {
     }
 }
 
+/// Узел дерева альбомов (M19). Альбом — только строки в БД: ни один файл на диске
+/// не создаётся, не меняется и не перемещается.
+#[derive(Debug, Clone)]
+pub struct AlbumNode {
+    pub id: i64,
+    /// 0 — корень дерева.
+    pub parent_id: i64,
+    pub position: i64,
+    pub name: String,
+    pub note: String,
+    /// Глубина в дереве: 0 у корня. Нужна интерфейсу для отступа.
+    pub depth: usize,
+    /// Сколько файлов в альбоме (включая попавшие в корзину приложения).
+    pub files: i64,
+    /// Сколько из них в корзине приложения: в сетке они скрыты.
+    pub trashed: i64,
+    pub subalbums: i64,
+    pub bytes: i64,
+    /// Превью первого неудалённого файла по порядку; `None` — пустой альбом.
+    pub cover: Option<String>,
+}
+
+fn album_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("имя альбома пустое");
+    }
+    if name.chars().count() > 80 {
+        anyhow::bail!("имя альбома длиннее 80 символов");
+    }
+    if name.chars().any(char::is_control) {
+        anyhow::bail!("в имени альбома есть управляющий символ");
+    }
+    Ok(name.to_string())
+}
+
+fn album_exists(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn
+        .query_row("SELECT 1 FROM albums WHERE id=?1", [id], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
+fn sibling_name_free(conn: &Connection, parent: i64, name_key: &str, except: i64) -> Result<()> {
+    let taken: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM albums WHERE parent_id=?1 AND name_key=?2 AND id<>?3",
+            params![parent, name_key, except],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = taken {
+        anyhow::bail!("альбом с таким именем уже есть среди соседей (id {id})");
+    }
+    Ok(())
+}
+
+fn resequence_albums(conn: &Connection, parent: i64) -> Result<()> {
+    let ids: Vec<i64> = {
+        let mut st =
+            conn.prepare("SELECT id FROM albums WHERE parent_id=?1 ORDER BY position, id")?;
+        let rows = st.query_map([parent], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (position, id) in ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE albums SET position=?1 WHERE id=?2",
+            params![position as i64, id],
+        )?;
+    }
+    Ok(())
+}
+
+fn resequence_album_files(conn: &Connection, album_id: i64) -> Result<()> {
+    let ids: Vec<i64> = {
+        let mut st = conn.prepare(
+            "SELECT file_id FROM album_files WHERE album_id=?1 ORDER BY position, file_id",
+        )?;
+        let rows = st.query_map([album_id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (position, file_id) in ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE album_files SET position=?1 WHERE album_id=?2 AND file_id=?3",
+            params![position as i64, album_id, file_id],
+        )?;
+    }
+    Ok(())
+}
+
+fn album_rows(conn: &Connection) -> Result<HashMap<i64, (i64, String)>> {
+    let mut st = conn.prepare("SELECT id, parent_id, name FROM albums")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?)))?;
+    let mut map = HashMap::new();
+    for row in rows {
+        let (id, parent, name) = row?;
+        map.insert(id, (parent, name));
+    }
+    Ok(map)
+}
+
+fn path_in(map: &HashMap<i64, (i64, String)>, id: i64) -> String {
+    let mut names = Vec::new();
+    let mut at = id;
+    for _ in 0..256 {
+        let Some((parent, name)) = map.get(&at) else {
+            break;
+        };
+        names.push(name.clone());
+        if *parent == 0 {
+            break;
+        }
+        at = *parent;
+    }
+    names.reverse();
+    names.join(" / ")
+}
+
+/// Путь альбома в дереве: «Дача 2024 / Май».
+pub fn album_path(conn: &Connection, id: i64) -> Result<String> {
+    let map = album_rows(conn)?;
+    if !map.contains_key(&id) {
+        anyhow::bail!("альбома {id} нет");
+    }
+    Ok(path_in(&map, id))
+}
+
+/// Создать альбом в конце списка соседей. `parent_id = 0` — корень дерева.
+pub fn create_album(conn: &Connection, parent_id: i64, name: &str, note: &str) -> Result<i64> {
+    let name = album_name(name)?;
+    let tx = conn.unchecked_transaction()?;
+    if parent_id != 0 && !album_exists(&tx, parent_id)? {
+        anyhow::bail!("родительского альбома {parent_id} нет");
+    }
+    let key = name.to_lowercase();
+    sibling_name_free(&tx, parent_id, &key, 0)?;
+    let position: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(position),-1)+1 FROM albums WHERE parent_id=?1",
+        [parent_id],
+        |r| r.get(0),
+    )?;
+    let stamp = now().to_string();
+    tx.execute(
+        "INSERT INTO albums(parent_id,position,name,name_key,note,created_at,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?6)",
+        params![parent_id, position, name, key, note.trim(), stamp],
+    )?;
+    let id = tx.last_insert_rowid();
+    tx.commit()?;
+    Ok(id)
+}
+
+/// Переименовать альбом. Имя уникально среди соседей без учёта регистра.
+pub fn rename_album(conn: &Connection, id: i64, name: &str) -> Result<()> {
+    let name = album_name(name)?;
+    let tx = conn.unchecked_transaction()?;
+    let parent: i64 = tx
+        .query_row("SELECT parent_id FROM albums WHERE id=?1", [id], |r| r.get(0))
+        .optional()?
+        .context("альбома нет")?;
+    let key = name.to_lowercase();
+    sibling_name_free(&tx, parent, &key, id)?;
+    tx.execute(
+        "UPDATE albums SET name=?1, name_key=?2, updated_at=?3 WHERE id=?4",
+        params![name, key, now().to_string(), id],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Переместить альбом к другому родителю. `position = None` — в конец.
+/// Новый родитель не может быть самим альбомом или его потомком.
+pub fn move_album(
+    conn: &Connection,
+    id: i64,
+    new_parent: i64,
+    position: Option<i64>,
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let (old_parent, name_key): (i64, String) = tx
+        .query_row(
+            "SELECT parent_id, name_key FROM albums WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .context("альбома нет")?;
+    if new_parent == id {
+        anyhow::bail!("альбом нельзя переместить в самого себя");
+    }
+    if new_parent != 0 && !album_exists(&tx, new_parent)? {
+        anyhow::bail!("родительского альбома {new_parent} нет");
+    }
+    // Цикл: идём вверх от нового родителя; если дошли до id — отказ.
+    let mut at = new_parent;
+    for _ in 0..1000 {
+        if at == 0 {
+            break;
+        }
+        let parent: Option<i64> = tx
+            .query_row("SELECT parent_id FROM albums WHERE id=?1", [at], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let Some(parent) = parent else {
+            break;
+        };
+        if parent == id {
+            anyhow::bail!("нельзя переместить альбом внутрь его подальбома");
+        }
+        at = parent;
+    }
+    sibling_name_free(&tx, new_parent, &name_key, id)?;
+    let mut siblings: Vec<i64> = {
+        let mut st = tx.prepare(
+            "SELECT id FROM albums WHERE parent_id=?1 AND id<>?2 ORDER BY position, id",
+        )?;
+        let rows = st.query_map(params![new_parent, id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let at = position
+        .unwrap_or(siblings.len() as i64)
+        .clamp(0, siblings.len() as i64) as usize;
+    siblings.insert(at, id);
+    tx.execute(
+        "UPDATE albums SET parent_id=?1, updated_at=?2 WHERE id=?3",
+        params![new_parent, now().to_string(), id],
+    )?;
+    for (p, sibling) in siblings.iter().enumerate() {
+        tx.execute(
+            "UPDATE albums SET position=?1 WHERE id=?2",
+            params![p as i64, sibling],
+        )?;
+    }
+    if old_parent != new_parent {
+        resequence_albums(&tx, old_parent)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Удалить альбом со всем поддеревом. Только строки: файлы на диске целы.
+pub fn delete_album(conn: &Connection, id: i64) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let parent: i64 = tx
+        .query_row("SELECT parent_id FROM albums WHERE id=?1", [id], |r| r.get(0))
+        .optional()?
+        .context("альбома нет")?;
+    let ids: Vec<i64> = {
+        let mut st = tx.prepare(
+            "WITH RECURSIVE sub(id) AS (
+                SELECT id FROM albums WHERE id=?1
+                UNION ALL
+                SELECT a.id FROM albums a JOIN sub ON a.parent_id=sub.id
+             ) SELECT id FROM sub",
+        )?;
+        let rows = st.query_map([id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for album in &ids {
+        tx.execute("DELETE FROM album_files WHERE album_id=?1", [album])?;
+        tx.execute("DELETE FROM albums WHERE id=?1", [album])?;
+    }
+    resequence_albums(&tx, parent)?;
+    tx.commit()?;
+    Ok(ids.len())
+}
+
+/// Добавить файлы в конец альбома. Повтор не плодит строки: возвращает
+/// `(добавлено, уже было)`. Файлов, которых нет в индексе, не бывает.
+pub fn add_to_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> Result<(usize, usize)> {
+    let tx = conn.unchecked_transaction()?;
+    if !album_exists(&tx, album_id)? {
+        anyhow::bail!("альбома {album_id} нет");
+    }
+    let mut position: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(position),-1)+1 FROM album_files WHERE album_id=?1",
+        [album_id],
+        |r| r.get(0),
+    )?;
+    let mut added = 0usize;
+    let mut already = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    for &file_id in file_ids {
+        if !seen.insert(file_id) {
+            continue;
+        }
+        let in_index: bool = tx
+            .query_row("SELECT 1 FROM files WHERE id=?1", [file_id], |_| Ok(()))
+            .optional()?
+            .is_some();
+        if !in_index {
+            continue;
+        }
+        let exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM album_files WHERE album_id=?1 AND file_id=?2",
+                params![album_id, file_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if exists {
+            already += 1;
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO album_files(album_id,file_id,position,added_at) VALUES(?1,?2,?3,?4)",
+            params![album_id, file_id, position, now().to_string()],
+        )?;
+        position += 1;
+        added += 1;
+    }
+    tx.commit()?;
+    Ok((added, already))
+}
+
+/// Убрать файлы из альбома и сжать порядок. Возвращает число удалённых строк.
+pub fn remove_from_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut removed = 0usize;
+    for &file_id in file_ids {
+        removed += tx.execute(
+            "DELETE FROM album_files WHERE album_id=?1 AND file_id=?2",
+            params![album_id, file_id],
+        )?;
+    }
+    if removed > 0 {
+        resequence_album_files(&tx, album_id)?;
+    }
+    tx.commit()?;
+    Ok(removed)
+}
+
+/// «Выше/Ниже» внутри альбома: `delta` — −1 или +1. Порядок снова плотный 0..n−1.
+pub fn move_in_album(
+    conn: &Connection,
+    album_id: i64,
+    file_id: i64,
+    delta: i64,
+) -> Result<bool> {
+    let tx = conn.unchecked_transaction()?;
+    let mut ids: Vec<i64> = {
+        let mut st = tx.prepare(
+            "SELECT file_id FROM album_files WHERE album_id=?1 ORDER BY position, file_id",
+        )?;
+        let rows = st.query_map([album_id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let Some(at) = ids.iter().position(|&id| id == file_id) else {
+        return Ok(false);
+    };
+    let to = (at as i64 + delta).clamp(0, ids.len() as i64 - 1) as usize;
+    if at == to {
+        return Ok(false);
+    }
+    let moved = ids.remove(at);
+    ids.insert(to, moved);
+    for (position, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE album_files SET position=?1 WHERE album_id=?2 AND file_id=?3",
+            params![position as i64, album_id, id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
+/// Дерево альбомов в порядке обхода: корни по `position`, затем их подальбомы.
+/// `depth` — отступ для интерфейса; счётчики — строки и объём файлов альбома.
+pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
+    let mut st = conn.prepare(
+        "SELECT a.id, a.parent_id, a.position, a.name, a.note,
+                (SELECT COUNT(*) FROM album_files af WHERE af.album_id=a.id),
+                (SELECT COUNT(*) FROM album_files af JOIN files f ON f.id=af.file_id
+                  WHERE af.album_id=a.id AND f.trashed_at IS NOT NULL),
+                (SELECT COUNT(*) FROM albums c WHERE c.parent_id=a.id),
+                (SELECT COALESCE(SUM(f.size),0) FROM album_files af
+                  JOIN files f ON f.id=af.file_id WHERE af.album_id=a.id),
+                (SELECT f.thumb FROM album_files af JOIN files f ON f.id=af.file_id
+                  WHERE af.album_id=a.id AND f.trashed_at IS NULL
+                  ORDER BY af.position, f.id LIMIT 1)
+         FROM albums a ORDER BY a.parent_id, a.position, a.id",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok(AlbumNode {
+            id: r.get(0)?,
+            parent_id: r.get(1)?,
+            position: r.get(2)?,
+            name: r.get(3)?,
+            note: r.get(4)?,
+            depth: 0,
+            files: r.get(5)?,
+            trashed: r.get(6)?,
+            subalbums: r.get(7)?,
+            bytes: r.get(8)?,
+            cover: r.get(9)?,
+        })
+    })?;
+    let mut by_parent: HashMap<i64, Vec<AlbumNode>> = HashMap::new();
+    for row in rows {
+        let node = row?;
+        by_parent.entry(node.parent_id).or_default().push(node);
+    }
+    fn walk(
+        parent: i64,
+        depth: usize,
+        by_parent: &mut HashMap<i64, Vec<AlbumNode>>,
+        out: &mut Vec<AlbumNode>,
+    ) {
+        let Some(nodes) = by_parent.remove(&parent) else {
+            return;
+        };
+        for mut node in nodes {
+            node.depth = depth;
+            let id = node.id;
+            out.push(node);
+            walk(id, depth + 1, by_parent, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(0, 0, &mut by_parent, &mut out);
+    // Строка с потерянным родителем не должна пропасть из интерфейса.
+    while let Some(&parent) = by_parent.keys().min() {
+        walk(parent, 0, &mut by_parent, &mut out);
+    }
+    Ok(out)
+}
+
+/// Файлы альбома в его порядке. Включает строки корзины приложения: интерфейс
+/// скрывает их в сетке и считает отдельно, а данные остаются.
+pub fn album_items(conn: &Connection, album_id: i64) -> Result<Vec<FileRow>> {
+    let sql = "SELECT f.id, f.path, f.size, f.sha256, f.kind, COALESCE(f.width,0),
+                COALESCE(f.height,0), f.taken_at, COALESCE(f.taken_src,''), f.lat, f.lon,
+                f.camera, f.dhash, f.sharpness, f.duration_s, f.thumb, f.decision,
+                f.trashed_at, COALESCE(f.mtime,0)
+         FROM album_files af JOIN files f ON f.id=af.file_id
+         WHERE af.album_id=?1 ORDER BY af.position, f.id";
+    let mut st = conn.prepare(sql)?;
+    let rows = st.query_map([album_id], file_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Альбомы, в которых лежит файл: id и путь в дереве. Для инспектора и карточки.
+pub fn album_refs_of_file(conn: &Connection, file_id: i64) -> Result<Vec<(i64, String)>> {
+    let map = album_rows(conn)?;
+    let ids: Vec<i64> = {
+        let mut st =
+            conn.prepare("SELECT album_id FROM album_files WHERE file_id=?1 ORDER BY album_id")?;
+        let rows = st.query_map([file_id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut out: Vec<(i64, String)> = ids
+        .into_iter()
+        .filter(|id| map.contains_key(id))
+        .map(|id| (id, path_in(&map, id)))
+        .collect();
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    Ok(out)
+}
+
+/// Только пути альбомов файла — для инспектора (M19). Карточка берёт
+/// `album_refs_of_file`, потому что «×» нужен id; эта форма — для отчётов.
+#[allow(dead_code)]
+pub fn albums_of_file(conn: &Connection, file_id: i64) -> Result<Vec<String>> {
+    Ok(album_refs_of_file(conn, file_id)?
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect())
+}
+
 pub fn print_stats(db_path: &Path) -> Result<()> {
     let conn = open(db_path)?;
     let mut st = conn.prepare(
@@ -1707,6 +2228,8 @@ mod tests {
         let back = load_settings(&c);
         assert_eq!(back.grid_layout, GridLayout::Months);
         assert_eq!(back.grid_sort, GridSort::DateDesc);
+        assert_eq!(GridSort::parse("album"), GridSort::Album);
+        assert_eq!(GridSort::Album.as_str(), "album");
     }
 
     #[test]
@@ -1789,4 +2312,240 @@ mod tests {
         insert(&c, &changed).unwrap(); // файл подменили — решение устарело
         assert_eq!(load_all(&c).unwrap()[0].decision, None);
     }
+    fn три_файла(c: &Connection) -> Vec<i64> {
+        for (path, sha) in [("/a.jpg", "aa"), ("/b.jpg", "bb"), ("/c.jpg", "cc")] {
+            insert(c, &row(path, sha, 1.0)).unwrap();
+        }
+        vec![id_of(c, "/a.jpg"), id_of(c, "/b.jpg"), id_of(c, "/c.jpg")]
+    }
+
+    #[test]
+    fn дерево_альбомов_идёт_в_порядке_и_считает_файлы() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = три_файла(&c);
+        let дача = create_album(&c, 0, "Дача 2024", "").unwrap();
+        let май = create_album(&c, дача, "Май", "").unwrap();
+        let июнь = create_album(&c, дача, "Июнь", "").unwrap();
+        let год = create_album(&c, май, "1 год", "").unwrap();
+        let печать = create_album(&c, 0, "На печать", "").unwrap();
+        add_to_album(&c, дача, &[ids[0], ids[1]]).unwrap();
+        add_to_album(&c, июнь, &[ids[2]]).unwrap();
+
+        let tree = albums_tree(&c).unwrap();
+        let names: Vec<&str> = tree.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, ["Дача 2024", "Май", "1 год", "Июнь", "На печать"]);
+        let depths: Vec<usize> = tree.iter().map(|n| n.depth).collect();
+        assert_eq!(depths, [0, 1, 2, 1, 0]);
+        let root = tree.iter().find(|n| n.id == дача).unwrap();
+        assert_eq!((root.files, root.subalbums), (2, 2));
+        assert!(tree.iter().any(|n| n.id == год && n.files == 0));
+        assert_eq!(album_path(&c, год).unwrap(), "Дача 2024 / Май / 1 год");
+        assert_eq!(
+            albums_of_file(&c, ids[0]).unwrap(),
+            vec!["Дача 2024".to_string()]
+        );
+
+        // Порядок подальбомов — данные: «Май» можно опустить ниже «Июня».
+        move_album(&c, май, дача, Some(1)).unwrap();
+        let tree = albums_tree(&c).unwrap();
+        let siblings: Vec<&str> = tree
+            .iter()
+            .filter(|n| n.parent_id == дача)
+            .map(|n| n.name.as_str())
+            .collect();
+        assert_eq!(siblings, ["Июнь", "Май"]);
+        // Ветвь «На печать» осталась на месте.
+        assert_eq!(
+            tree.iter().find(|n| n.id == печать).unwrap().position,
+            1
+        );
+    }
+
+    #[test]
+    fn имя_уникально_среди_соседей_и_не_ломается_на_пустом() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let дача23 = create_album(&c, 0, "Дача 2024", "").unwrap();
+        let дача24 = create_album(&c, 0, "Дача 2025", "").unwrap();
+        assert!(create_album(&c, 0, "дача 2024", "").is_err());
+        // В разных ветвях одинаковые имена разрешены.
+        create_album(&c, дача23, "Май", "").unwrap();
+        create_album(&c, дача24, "Май", "").unwrap();
+        assert!(create_album(&c, дача23, "  ", "").is_err());
+        assert!(create_album(&c, 0, &"я".repeat(81), "").is_err());
+        // 80 символов — уже допустимо; хвостовые пробелы срезаются.
+        let id = create_album(&c, 0, &format!("  {}  ", "я".repeat(80)), "").unwrap();
+        assert_eq!(album_path(&c, id).unwrap().chars().count(), 80);
+        assert!(rename_album(&c, дача23, "Дача 2025").is_err());
+        rename_album(&c, дача23, "Дача на даче").unwrap();
+        assert_eq!(album_path(&c, дача23).unwrap(), "Дача на даче");
+    }
+
+    #[test]
+    fn перемещение_запрещает_цикл_и_перенумеровывает_соседей() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let a = create_album(&c, 0, "A", "").unwrap();
+        let b = create_album(&c, a, "B", "").unwrap();
+        let d = create_album(&c, b, "D", "").unwrap();
+        let e = create_album(&c, 0, "E", "").unwrap();
+        assert!(move_album(&c, a, b, None).is_err());
+        assert!(move_album(&c, a, a, None).is_err());
+        // Перенос в конец и в начало: позиции плотные 0..n−1.
+        move_album(&c, d, 0, None).unwrap();
+        let roots = |c: &Connection| -> Vec<String> {
+            albums_tree(c)
+                .unwrap()
+                .into_iter()
+                .filter(|n| n.parent_id == 0)
+                .map(|n| n.name)
+                .collect()
+        };
+        assert_eq!(roots(&c), ["A", "E", "D"]);
+        assert_eq!(
+            albums_tree(&c)
+                .unwrap()
+                .iter()
+                .filter(|n| n.parent_id == 0)
+                .map(|n| n.position)
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        move_album(&c, d, 0, Some(0)).unwrap();
+        assert_eq!(roots(&c), ["D", "A", "E"]);
+        // Имена по-прежнему уникальны среди новых соседей.
+        assert!(move_album(&c, e, a, None).is_ok());
+        assert!(create_album(&c, a, "E", "").is_err());
+    }
+
+    #[test]
+    fn удаление_поддерева_трогает_только_строки() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = три_файла(&c);
+        let дача = create_album(&c, 0, "Дача", "").unwrap();
+        let май = create_album(&c, дача, "Май", "").unwrap();
+        let июнь = create_album(&c, дача, "Июнь", "").unwrap();
+        add_to_album(&c, май, &ids[..2]).unwrap();
+        add_to_album(&c, июнь, &ids[2..]).unwrap();
+        let печать = create_album(&c, 0, "На печать", "").unwrap();
+        add_to_album(&c, печать, &ids).unwrap();
+
+        assert_eq!(delete_album(&c, дача).unwrap(), 3);
+        assert!(albums_tree(&c).unwrap().iter().all(|n| n.name != "Май"));
+        assert_eq!(album_items(&c, май).unwrap().len(), 0);
+        assert_eq!(album_items(&c, печать).unwrap().len(), 3);
+        // Файлы на диске не наши: строки files целы.
+        assert_eq!(load_all(&c).unwrap().len(), 3);
+        // «На печать» остался единственным корнем с позицией 0.
+        let root = &albums_tree(&c).unwrap()[0];
+        assert_eq!((root.name.as_str(), root.position), ("На печать", 0));
+    }
+
+    #[test]
+    fn добавление_идемпотентно_и_порядок_плотный() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = три_файла(&c);
+        let album = create_album(&c, 0, "Май", "").unwrap();
+        assert_eq!(add_to_album(&c, album, &ids).unwrap(), (3, 0));
+        assert_eq!(add_to_album(&c, album, &ids).unwrap(), (0, 3));
+        assert_eq!(add_to_album(&c, album, &[ids[0], ids[1]]).unwrap(), (0, 2));
+        assert_eq!(add_to_album(&c, album, &[9999]).unwrap(), (0, 0));
+        let order: Vec<i64> = album_items(&c, album)
+            .unwrap()
+            .iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(order, ids);
+        // «Выше/Ниже» меняет только порядок, не состав.
+        assert!(move_in_album(&c, album, ids[2], -1).unwrap());
+        let order: Vec<i64> = album_items(&c, album)
+            .unwrap()
+            .iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(order, [ids[0], ids[2], ids[1]]);
+        assert!(!move_in_album(&c, album, ids[0], -1).unwrap());
+        // Убрали средний — позиции снова 0,1,2 без дырки.
+        assert_eq!(remove_from_album(&c, album, &[ids[2]]).unwrap(), 1);
+        let positions: Vec<i64> = {
+            let mut st = c
+                .prepare("SELECT position FROM album_files WHERE album_id=?1 ORDER BY position")
+                .unwrap();
+            let rows = st.query_map([album], |r| r.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
+        };
+        assert_eq!(positions, [0, 1]);
+    }
+
+    #[test]
+    fn файл_в_корзине_остаётся_строкой_альбома() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = три_файла(&c);
+        let album = create_album(&c, 0, "Май", "").unwrap();
+        add_to_album(&c, album, &ids).unwrap();
+        c.execute("UPDATE files SET trashed_at=1 WHERE id=?1", [ids[1]])
+            .unwrap();
+        let node = &albums_tree(&c).unwrap()[0];
+        assert_eq!((node.files, node.trashed), (3, 1));
+        // Сетка берёт только неудалённые, данные альбома не теряются.
+        let visible = album_items(&c, album)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.trashed_at.is_none())
+            .count();
+        assert_eq!(visible, 2);
+    }
+
+    #[test]
+    fn удаление_строк_файла_чистит_альбом_и_сжимает_порядок() {
+        let mut c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = три_файла(&c);
+        let album = create_album(&c, 0, "Май", "").unwrap();
+        add_to_album(&c, album, &ids).unwrap();
+        // Так же, как «убрать каталог» и сброс индекса: строки files → album_files.
+        delete_file_rows(&c, &[ids[1]]).unwrap();
+        let left = album_items(&c, album).unwrap();
+        assert_eq!(left.len(), 2);
+        assert!(left.iter().all(|r| r.id != ids[1]));
+        let positions: Vec<i64> = {
+            let mut st = c
+                .prepare("SELECT position FROM album_files WHERE album_id=?1 ORDER BY position")
+                .unwrap();
+            let rows = st.query_map([album], |r| r.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
+        };
+        assert_eq!(positions, [0, 1]);
+        let _ = &mut c;
+    }
+
+    #[test]
+    fn старая_база_получает_альбомы_и_не_теряет_файлы() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE files(
+                id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
+                mtime INTEGER, sha256 TEXT, kind TEXT NOT NULL, width INTEGER, height INTEGER,
+                taken_at TEXT, taken_src TEXT, lat REAL, lon REAL, camera TEXT, dhash INTEGER,
+                thumb TEXT, indexed_at INTEGER NOT NULL);
+             INSERT INTO files(path,size,kind,indexed_at) VALUES('/old.jpg',10,'image',0);
+             PRAGMA user_version=4;",
+        )
+        .unwrap();
+        init(&c).unwrap();
+        let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 5);
+        assert_eq!(load_all(&c).unwrap().len(), 1);
+        let album = create_album(&c, 0, "Старое", "").unwrap();
+        add_to_album(&c, album, &[id_of(&c, "/old.jpg")]).unwrap();
+        assert_eq!(album_items(&c, album).unwrap().len(), 1);
+        init(&c).unwrap(); // повторный init не падает и не плодит таблиц/строк
+        assert_eq!(albums_tree(&c).unwrap().len(), 1);
+        assert_eq!(album_items(&c, album).unwrap().len(), 1);
+    }
+
 }

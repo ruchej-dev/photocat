@@ -118,6 +118,7 @@ pub fn reset_index(db_path: &Path) -> Result<()> {
         "faces",
         "face_scans",
         "face_clusters",
+        "album_files",
         "files",
     ] {
         tx.execute(&format!("DELETE FROM {table}"), [])

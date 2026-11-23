@@ -23,7 +23,14 @@ cargo build --release      # первый раз ~3 минуты
 ./target/release/photocat dupes --max-dist 4 --csv /tmp/dupes.csv
 ./target/release/photocat dupes --max-dist 6 --plan /tmp/dupes-plan.csv   # план: что оставить
 
-# 4. Витрина (по умолчанию только план, ничего не меняет и не переименовывает)
+# 4. Альбомы: дерево и порядок файлов — только строки БД, на диске ничего не меняется
+./target/release/photocat albums new --name "Дача 2024"
+./target/release/photocat albums new --name "Май" --parent 1
+./target/release/photocat albums add --id 2 ~/Фото/IMG_0001.jpg ~/Фото/IMG_0002.jpg
+./target/release/photocat albums list --tree
+./target/release/photocat albums show --id 2 --tree
+
+# 5. Витрина (по умолчанию только план, ничего не меняет и не переименовывает)
 ./target/release/photocat organize --out ~/Фото-витрина
 ./target/release/photocat organize --out ~/Фото-витрина --by month     # ГГГГ/ГГГГ-ММ
 ./target/release/photocat organize --out ~/Фото-витрина --by event     # день + место по GPS
@@ -33,31 +40,31 @@ cargo build --release      # первый раз ~3 минуты
 ./target/release/photocat organize --out ~/Фото-витрина --exclude-dup    # без помеченных лишними
 ./target/release/photocat organize --out ~/Фото-витрина --name '{date}_{camera}_{orig}'
 
-# 5. CLIP: смысловые теги и поиск (модель скачивается один раз, дальше всё локально)
+# 6. CLIP: смысловые теги и поиск (модель скачивается один раз, дальше всё локально)
 bash scripts/fetch-model.sh
 ./target/release/photocat embed                        # 2229 файлов ≈ 177 с на CPU (два кадра)
 ./target/release/photocat embed --refresh              # пересчитать векторы после смены входа
 ./target/release/photocat search "торт" --top 20
 ./target/release/photocat clusters --k 30              # → plan/M3-clusters.md
 
-# 6. Текст на документах и скриншотах (нужен tesseract с языками rus+eng)
+# 7. Текст на документах и скриншотах (нужен tesseract с языками rus+eng)
 ./target/release/photocat ocr --dry-run
 ./target/release/photocat ocr
 ./target/release/photocat search "справка" --text
 
-# 7. Лица: детекция, группы, имена (модель 182.4 МиБ — в «Настройках» с согласием)
+# 8. Лица: детекция, группы, имена (модель 182.4 МиБ — в «Настройках» с согласием)
 ./target/release/photocat faces --dry-run
 ./target/release/photocat faces
 ./target/release/photocat faces --list
 ./target/release/photocat faces label --id 5 --name Лиза
 ./target/release/photocat faces split --id 123
 
-# 8. Целостность и бэкап (только чтение, код 0 — совпало, 1 — есть расхождения)
+# 9. Целостность и бэкап (только чтение, код 0 — совпало, 1 — есть расхождения)
 ./target/release/photocat verify ~/Фото ~/backup/Фото
 ./target/release/photocat manifest ~/Фото --out ~/Фото.sha256
 ./target/release/photocat verify --manifest ~/Фото.sha256 ~/backup/Фото
 
-# 9. GUI
+# 10. GUI
 ./target/release/photocat gui
 ./target/release/photocat gui --db /путь/к/фотокат.db
 ```
@@ -90,6 +97,7 @@ bash scripts/fetch-model.sh
 | «Лучший кадр из серии»: совет по резкости/разрешению/размеру | ✅ |
 | Сверка двух копий архива (`verify`, размер → sha256) и слепок `sha256sum` (`manifest`) | ✅ |
 | Корзина приложения и очистка в системную корзину ОС по подтверждению; занятое место и очистка кэша | ✅ |
+| Альбомы: дерево с подальбомами и порядком файлов, только данные в БД; CLI и вид «Альбомы» | ✅ |
 
 ## Продолжить в новой сессии
 
@@ -102,7 +110,7 @@ bash scripts/fetch-model.sh
 | `plan/BACKLOG.md` | задачи M2–M13 с критериями приёмки |
 | `docs/ARCHITECTURE.md` | слои, поток индексации, схема БД, замеры |
 | `docs/UI.md` | экраны, метрики, состояния, тексты, клавиатура |
-| `docs/DECISIONS.md` | 23 коротких ADR: egui, SQLite, dHash, решения в БД, CLIP/ONNX, лица, внешние программы, неприкосновенность файлов, сверка и слепок |
+| `docs/DECISIONS.md` | 34 коротких ADR: egui, SQLite, dHash, решения в БД, CLIP/ONNX, лица, альбомы, внешние программы, неприкосновенность файлов, сверка и слепок |
 | `.pi/skills/ui-design` | процедура и рубрика для любого экрана |
 | `.pi/skills/add-view` | добавить вид/вкладку/фильтр целиком, с ловушками borrow checker |
 | `.pi/skills/enforce-architecture` | машинная проверка слоёв и запретов (`scripts/check.sh`) |

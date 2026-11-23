@@ -11,7 +11,7 @@ use crate::player;
 use crate::recycle;
 use crate::storage;
 use crate::tools::{self, Tool};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Datelike;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,7 @@ enum FaceReply {
 #[derive(Clone, Copy, PartialEq)]
 enum View {
     Grid,
+    Albums,
     Dupes,
     Calendar,
     Faces,
@@ -151,6 +152,41 @@ impl SettingsTab {
     }
 }
 
+/// Что делает диалог альбома (M19): создание, переименование, перенос или удаление.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AlbumDialog {
+    New,
+    Sub,
+    Rename,
+    Move,
+    Delete,
+}
+
+impl AlbumDialog {
+    fn title(self) -> &'static str {
+        match self {
+            AlbumDialog::New => "Новый альбом",
+            AlbumDialog::Sub => "Новый подальбом",
+            AlbumDialog::Rename => "Переименовать альбом",
+            AlbumDialog::Move => "Переместить альбом",
+            AlbumDialog::Delete => "Удалить альбом?",
+        }
+    }
+}
+
+/// Действие панели вида «Альбомы»: применяется после кадра, когда отпущены
+/// заимствования текстур (`M19`). Диалоги открываются отдельно.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AlbumAction {
+    Select(i64),
+    Up,
+    Down,
+    AddPicked,
+    RemovePicked,
+    FileUp,
+    FileDown,
+}
+
 /// Вид клика по плитке (M18): Ctrl — добавить/убрать, Shift — диапазон по порядку сетки.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PickClick {
@@ -183,6 +219,9 @@ struct PickScope {
     hits: Option<usize>,
     sort: db::GridSort,
     layout: db::GridLayout,
+    /// Открытый альбом и режим «Все файлы» внутри него (M19).
+    album: Option<i64>,
+    browse_all: bool,
 }
 
 /// Акцент проекта: значит ровно «выбрано», «уверенный тег», «оставить» (docs/UI.md).
@@ -208,11 +247,14 @@ const GRID_SORTS: [(db::GridSort, &str); 4] = [
 ];
 
 fn sort_label(sort: db::GridSort) -> &'static str {
-    GRID_SORTS
-        .iter()
-        .find(|(value, _)| *value == sort)
-        .map(|(_, label)| *label)
-        .unwrap_or("Дата: новые сверху")
+    match sort {
+        db::GridSort::Album => "Порядок альбома",
+        _ => GRID_SORTS
+            .iter()
+            .find(|(value, _)| *value == sort)
+            .map(|(_, label)| *label)
+            .unwrap_or("Дата: новые сверху"),
+    }
 }
 
 /// Сравнение дат: «без даты» — всегда в конце, в обе стороны (M17).
@@ -465,6 +507,8 @@ struct Chips {
     tag: Option<String>,
     kind: KindFilter,
     hits: Option<usize>,
+    /// Открытый альбом (M19): чип «Альбом «Имя»» с «×».
+    album: Option<String>,
     /// Мультивыбор (M18): сколько отмечено, их объём и можно ли выбирать в этом виде.
     picked: usize,
     picked_bytes: i64,
@@ -478,6 +522,8 @@ struct FilterClear {
     tag: bool,
     kind: bool,
     hits: bool,
+    /// Снять открытый альбом: вернуться к дереву альбомов.
+    album: bool,
     /// «Выбрать все (M)» — отметить видимое, не трогая скрытое фильтром.
     pick_all: bool,
     /// «Снять выделение» — пустое выделение, как по Esc.
@@ -509,6 +555,12 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
             any = true;
             if filter_chip(ui, &format!("тег: {}", shorten(tag, 24))) {
                 clear.tag = true;
+            }
+        }
+        if let Some(album) = &chips.album {
+            any = true;
+            if filter_chip(ui, &format!("Альбом «{}»", shorten(album, 22))) {
+                clear.album = true;
             }
         }
         if let Some(label) = chips.kind.chip() {
@@ -606,6 +658,161 @@ fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64) {
     ui.add_space(4.0);
 }
 
+/// Путь альбома в дереве по уже загруженным узлам: «Дача 2024 / Май».
+fn album_label(albums: &[db::AlbumNode], id: i64) -> String {
+    let mut names = Vec::new();
+    let mut at = id;
+    for _ in 0..256 {
+        let Some(node) = albums.iter().find(|n| n.id == at) else {
+            break;
+        };
+        names.push(node.name.clone());
+        if node.parent_id == 0 {
+            break;
+        }
+        at = node.parent_id;
+    }
+    names.reverse();
+    names.join(" / ")
+}
+
+/// Виден ли узел при текущем свёртывании: все его родители раскрыты.
+fn album_visible(albums: &[db::AlbumNode], node: &db::AlbumNode, expanded: &BTreeSet<i64>) -> bool {
+    let mut parent = node.parent_id;
+    for _ in 0..256 {
+        if parent == 0 {
+            return true;
+        }
+        if !expanded.contains(&parent) {
+            return false;
+        }
+        let Some(up) = albums.iter().find(|n| n.id == parent) else {
+            return true;
+        };
+        parent = up.parent_id;
+    }
+    true
+}
+
+/// Дерево альбомов: отступ по глубине, треугольник свёртывания, счётчики.
+/// Возвращает выбранный узел; клик по треугольнику выбор не меняет.
+fn draw_album_tree(
+    ui: &mut egui::Ui,
+    albums: &[db::AlbumNode],
+    selected: Option<i64>,
+    expanded: &mut BTreeSet<i64>,
+) -> Option<i64> {
+    let mut chosen = None;
+    for node in albums {
+        if !album_visible(albums, node, expanded) {
+            continue;
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(node.depth as f32 * 14.0);
+            if node.subalbums > 0 {
+                let open = expanded.contains(&node.id);
+                if ui
+                    .add(egui::Button::new(if open { "▾" } else { "▸" }).small())
+                    .on_hover_text(if open {
+                        "свернуть подальбомы"
+                    } else {
+                        "раскрыть подальбомы"
+                    })
+                    .clicked()
+                {
+                    if open {
+                        expanded.remove(&node.id);
+                    } else {
+                        expanded.insert(node.id);
+                    }
+                }
+            } else {
+                ui.add_space(22.0);
+            }
+            let trashed = if node.trashed > 0 {
+                format!(" · в корзине {}", node.trashed)
+            } else {
+                String::new()
+            };
+            let text = format!(
+                "{} · файлов {}{} · подальбомов {} · {}",
+                node.name,
+                node.files,
+                trashed,
+                node.subalbums,
+                db::human(node.bytes)
+            );
+            if ui
+                .selectable_label(selected == Some(node.id), text)
+                .on_hover_text(if !node.note.trim().is_empty() {
+                    node.note.clone()
+                } else if node.cover.is_some() {
+                    "открыть альбом; обложка — первый снимок в его порядке".to_string()
+                } else {
+                    "открыть альбом".to_string()
+                })
+                .clicked()
+            {
+                chosen = Some(node.id);
+            }
+        });
+    }
+    chosen
+}
+
+/// Плитка подальбома: папка с именем и счётчиками, клик открывает её.
+fn draw_album_cell(ui: &mut egui::Ui, node: &db::AlbumNode, tile: f32) -> bool {
+    let w = tile.clamp(100.0, 260.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 96.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        ui.painter()
+            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+        let folder = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 10.0, rect.top() + 10.0),
+            egui::vec2(w - 20.0, 34.0),
+        );
+        ui.painter().rect_filled(folder, 3.0, selected_fill());
+        ui.painter().text(
+            egui::pos2(rect.left() + 10.0, rect.top() + 22.0),
+            egui::Align2::LEFT_CENTER,
+            "▸",
+            egui::FontId::proportional(14.0),
+            ACCENT,
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + 28.0, rect.top() + 22.0),
+            egui::Align2::LEFT_CENTER,
+            shorten(&node.name, 20),
+            egui::FontId::proportional(13.0),
+            ui.visuals().text_color(),
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + 10.0, rect.top() + 54.0),
+            egui::Align2::LEFT_TOP,
+            format!("файлов {}", node.files),
+            egui::FontId::proportional(11.0),
+            DIM,
+        );
+        ui.painter().text(
+            egui::pos2(rect.left() + 10.0, rect.top() + 72.0),
+            egui::Align2::LEFT_TOP,
+            db::human(node.bytes),
+            egui::FontId::proportional(11.0),
+            DIM,
+        );
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    resp.clicked()
+}
+
 /// Строка прогресса фонового прохода: `done/total`, «Стоп» рядом.
 /// Возвращает `true`, если нажали «Стоп».
 fn progress_row(ui: &mut egui::Ui, name: &str, p: &Arc<Progress>, running: bool) -> bool {
@@ -661,6 +868,23 @@ struct App {
     items: Vec<FileRow>,
     /// Файлы в корзине приложения: на диске не тронуты, из обычных видов скрыты.
     trash_items: Vec<FileRow>,
+    /// Альбомы (M19): дерево, открытый узел и его файлы в порядке альбома.
+    albums: Vec<db::AlbumNode>,
+    album_selected: Option<i64>,
+    album_expanded: BTreeSet<i64>,
+    album_files: Vec<i64>,
+    album_set: HashSet<i64>,
+    album_trashed: usize,
+    /// «Все файлы» внутри вида «Альбомы»: временный взгляд, чтобы набрать снимки
+    /// и нажать «Добавить выбранные». Настройкой не сохраняется.
+    album_browse_all: bool,
+    album_dialog: Option<AlbumDialog>,
+    album_name_input: String,
+    album_move_parent: i64,
+    album_delete_text: String,
+    /// Альбомы выбранного файла для карточки: кэш на один файл.
+    file_albums: Vec<(i64, String)>,
+    file_albums_for: Option<i64>,
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
@@ -810,6 +1034,19 @@ impl App {
             thumbs_dir: thumb_dir,
             items: Vec::new(),
             trash_items: Vec::new(),
+            albums: Vec::new(),
+            album_selected: None,
+            album_expanded: BTreeSet::new(),
+            album_files: Vec::new(),
+            album_set: HashSet::new(),
+            album_trashed: 0,
+            album_browse_all: false,
+            album_dialog: None,
+            album_name_input: String::new(),
+            album_move_parent: 0,
+            album_delete_text: String::new(),
+            file_albums: Vec::new(),
+            file_albums_for: None,
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
@@ -823,6 +1060,8 @@ impl App {
                 hits: None,
                 sort: db::GridSort::DateDesc,
                 layout: db::GridLayout::Months,
+                album: None,
+                browse_all: false,
             },
             view: View::Grid,
             groups: Vec::new(),
@@ -935,6 +1174,7 @@ impl App {
         self.face_textures.clear();
         self.face_missing.clear();
         self.semantic_hits = None;
+        self.file_albums_for = None;
         self.ocr_text.clear();
         self.ocr_snippets.clear();
         match db::open(&self.db_path).and_then(|c| {
@@ -1042,6 +1282,314 @@ impl App {
                 self.pick_scope = self.pick_scope_now();
             }
             Err(e) => self.status = format!("ошибка чтения индекса: {e}"),
+        }
+        self.refresh_albums();
+    }
+
+    /// Дерево альбомов и файлы открытого узла (M19). Только строки БД.
+    fn refresh_albums(&mut self) {
+        // Состав альбомов изменился — строка «Альбомы» в карточке читается заново.
+        self.file_albums_for = None;
+        let loaded = db::open(&self.db_path).and_then(|c| {
+            let tree = db::albums_tree(&c)?;
+            let items = match self.album_selected {
+                Some(id) if tree.iter().any(|n| n.id == id) => Some(db::album_items(&c, id)?),
+                _ => None,
+            };
+            Ok((tree, items))
+        });
+        match loaded {
+            Ok((tree, items)) => {
+                if self.album_expanded.is_empty() {
+                    for node in tree.iter().filter(|n| n.parent_id == 0) {
+                        self.album_expanded.insert(node.id);
+                    }
+                }
+                self.albums = tree;
+                match items {
+                    Some(rows) => self.set_album_rows(rows),
+                    None => {
+                        self.album_selected = None;
+                        self.album_files.clear();
+                        self.album_set.clear();
+                        self.album_trashed = 0;
+                        if self.settings.grid_sort == db::GridSort::Album {
+                            self.settings.grid_sort = db::GridSort::DateDesc;
+                            self.save_settings();
+                        }
+                    }
+                }
+            }
+            Err(e) => self.status = format!("альбомы не прочитаны: {e}"),
+        }
+    }
+
+    fn set_album_rows(&mut self, rows: Vec<FileRow>) {
+        self.album_trashed = rows.iter().filter(|r| r.trashed_at.is_some()).count();
+        self.album_files = rows
+            .into_iter()
+            .filter(|r| r.trashed_at.is_none())
+            .map(|r| r.id)
+            .collect();
+        self.album_set = self.album_files.iter().copied().collect();
+    }
+
+    /// Открыть альбом: показать его файлы в порядке альбома и подставить этот порядок.
+    fn album_open(&mut self, id: i64) {
+        self.album_selected = Some(id);
+        self.album_browse_all = false;
+        // Родители раскрыты, иначе выбранный узел не виден в дереве.
+        let mut at = id;
+        for _ in 0..256 {
+            let Some(node) = self.albums.iter().find(|n| n.id == at) else {
+                break;
+            };
+            if node.parent_id == 0 {
+                break;
+            }
+            self.album_expanded.insert(node.parent_id);
+            at = node.parent_id;
+        }
+        self.settings.grid_sort = db::GridSort::Album;
+        self.save_settings();
+        match db::open(&self.db_path).and_then(|c| db::album_items(&c, id)) {
+            Ok(rows) => {
+                let files = rows.iter().filter(|r| r.trashed_at.is_none()).count();
+                let trashed = rows.len() - files;
+                self.set_album_rows(rows);
+                let path = self
+                    .albums
+                    .iter()
+                    .find(|n| n.id == id)
+                    .map(|n| n.name.clone())
+                    .unwrap_or_default();
+                self.status = format!(
+                    "альбом «{path}»: файлов {files}{} — порядок альбома",
+                    if trashed > 0 {
+                        format!(", в корзине {trashed}")
+                    } else {
+                        String::new()
+                    }
+                );
+            }
+            Err(e) => self.status = format!("альбом не открыт: {e}"),
+        }
+    }
+
+    /// Закрыть альбом: дерево остаётся, сетка гаснет, порядок возвращается к дате.
+    fn album_close(&mut self) {
+        self.album_selected = None;
+        self.album_browse_all = false;
+        self.album_files.clear();
+        self.album_set.clear();
+        self.album_trashed = 0;
+        if self.settings.grid_sort == db::GridSort::Album {
+            self.settings.grid_sort = db::GridSort::DateDesc;
+            self.save_settings();
+        }
+    }
+
+    fn album_node(&self, id: i64) -> Option<&db::AlbumNode> {
+        self.albums.iter().find(|n| n.id == id)
+    }
+
+    /// Сколько альбомов и строк файлов уйдёт вместе с узлом: для подтверждения.
+    fn album_subtree(&self, id: i64) -> Vec<&db::AlbumNode> {
+        let mut out = Vec::new();
+        let mut seen = vec![id];
+        if let Some(node) = self.album_node(id) {
+            out.push(node);
+        }
+        loop {
+            let mut grown = false;
+            for node in &self.albums {
+                if seen.contains(&node.parent_id) && !seen.contains(&node.id) {
+                    seen.push(node.id);
+                    out.push(node);
+                    grown = true;
+                }
+            }
+            if !grown {
+                break;
+            }
+        }
+        out
+    }
+
+    fn album_open_dialog(&mut self, dialog: AlbumDialog) {
+        let id = match self.album_selected {
+            Some(id) => id,
+            None if dialog == AlbumDialog::New => 0,
+            None => {
+                self.status = "сначала выберите альбом в дереве".into();
+                return;
+            }
+        };
+        self.album_name_input = match dialog {
+            AlbumDialog::Rename => self
+                .album_node(id)
+                .map(|n| n.name.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        self.album_move_parent = match dialog {
+            AlbumDialog::Move => self.album_node(id).map(|n| n.parent_id).unwrap_or(0),
+            _ => 0,
+        };
+        if dialog == AlbumDialog::Delete {
+            let subtree = self.album_subtree(id);
+            let rows: i64 = subtree.iter().map(|n| n.files).sum();
+            let names: Vec<&str> = subtree.iter().map(|n| n.name.as_str()).collect();
+            self.album_delete_text = format!(
+                "Будет удалено: {}. Альбомов {}, строк файлов {}. Файлы на диске останутся.",
+                names
+                    .iter()
+                    .map(|n| format!("«{n}»"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                subtree.len(),
+                rows
+            );
+        }
+        self.album_dialog = Some(dialog);
+    }
+
+    /// Подтверждённое действие диалога. Все операции — строки БД, не файлы.
+    fn album_commit_dialog(&mut self, dialog: AlbumDialog) {
+        let selected = self.album_selected;
+        let result: Result<String> = (|| {
+            let conn = db::open(&self.db_path)?;
+            match dialog {
+                AlbumDialog::New | AlbumDialog::Sub => {
+                    let parent = if dialog == AlbumDialog::New {
+                        0
+                    } else {
+                        selected.unwrap_or(0)
+                    };
+                    let id = db::create_album(
+                        &conn,
+                        parent,
+                        &self.album_name_input,
+                        "",
+                    )?;
+                    self.album_selected = Some(id);
+                    Ok(format!(
+                        "альбом создан: {}",
+                        db::album_path(&conn, id)?
+                    ))
+                }
+                AlbumDialog::Rename => {
+                    let id = selected.context("альбом не выбран")?;
+                    db::rename_album(&conn, id, &self.album_name_input)?;
+                    Ok(format!(
+                        "альбом переименован: {}",
+                        db::album_path(&conn, id)?
+                    ))
+                }
+                AlbumDialog::Move => {
+                    let id = selected.context("альбом не выбран")?;
+                    db::move_album(&conn, id, self.album_move_parent, None)?;
+                    Ok(format!(
+                        "альбом перемещён: {}",
+                        db::album_path(&conn, id)?
+                    ))
+                }
+                AlbumDialog::Delete => {
+                    let id = selected.context("альбом не выбран")?;
+                    let albums = db::delete_album(&conn, id)?;
+                    Ok(format!("удалено альбомов {albums}; файлы на диске не тронуты"))
+                }
+            }
+        })();
+        self.album_dialog = None;
+        match result {
+            Ok(msg) => {
+                if matches!(dialog, AlbumDialog::Delete) {
+                    self.album_selected = None;
+                }
+                self.refresh_albums();
+                if let Some(id) = self.album_selected
+                    && matches!(dialog, AlbumDialog::New | AlbumDialog::Sub | AlbumDialog::Rename | AlbumDialog::Move)
+                {
+                    self.album_open(id);
+                }
+                self.status = msg;
+            }
+            Err(e) => self.status = format!("альбом не изменён: {e}"),
+        }
+    }
+
+    /// Действия панели вида «Альбомы». Ошибки — в статус, данные не теряются.
+    fn album_apply(&mut self, action: AlbumAction) {
+        let Some(id) = self.album_selected else {
+            return;
+        };
+        let res: Result<String> = (|| {
+            let conn = db::open(&self.db_path)?;
+            match action {
+                AlbumAction::Select(other) => {
+                    self.album_open(other);
+                    Ok(String::new())
+                }
+                AlbumAction::Up | AlbumAction::Down => {
+                    let node = self.album_node(id).cloned().context("альбома нет")?;
+                    let position = if action == AlbumAction::Up {
+                        (node.position - 1).max(0)
+                    } else {
+                        node.position + 1
+                    };
+                    db::move_album(&conn, id, node.parent_id, Some(position))?;
+                    Ok(format!("альбом сдвинут: {}", db::album_path(&conn, id)?))
+                }
+                AlbumAction::AddPicked => {
+                    let ids: Vec<i64> = self.picked.iter().copied().collect();
+                    if ids.is_empty() {
+                        return Ok("ничего не выбрано".into());
+                    }
+                    let (added, already) = db::add_to_album(&conn, id, &ids)?;
+                    Ok(format!(
+                        "в альбом добавлено {added}, уже было {already}; теперь файлов {}",
+                        db::album_items(&conn, id)?.len()
+                    ))
+                }
+                AlbumAction::RemovePicked => {
+                    let ids: Vec<i64> = self
+                        .picked
+                        .iter()
+                        .copied()
+                        .filter(|file| self.album_set.contains(file))
+                        .collect();
+                    if ids.is_empty() {
+                        return Ok("в альбоме нечего убирать".into());
+                    }
+                    let removed = db::remove_from_album(&conn, id, &ids)?;
+                    Ok(format!(
+                        "из альбома убрано {removed}; осталось {}",
+                        db::album_items(&conn, id)?.len()
+                    ))
+                }
+                AlbumAction::FileUp | AlbumAction::FileDown => {
+                    let Some(file) = self.selected else {
+                        return Ok("сначала выберите снимок в сетке".into());
+                    };
+                    let delta = if action == AlbumAction::FileUp { -1 } else { 1 };
+                    let moved = db::move_in_album(&conn, id, file, delta)?;
+                    Ok(if moved {
+                        "порядок в альбоме изменён".into()
+                    } else {
+                        "файл уже на краю".into()
+                    })
+                }
+            }
+        })();
+        match res {
+            Ok(msg) => {
+                if !msg.is_empty() {
+                    self.status = msg;
+                }
+                self.refresh_albums();
+            }
+            Err(e) => self.status = format!("альбом не изменён: {e}"),
         }
     }
 
@@ -1423,6 +1971,95 @@ impl App {
                 }
                 Err(e) => self.status = format!("очистка не удалась: {e:#}"),
             }
+        }
+    }
+
+    /// Диалог альбома (M19): имя, выбор родителя или подтверждение удаления.
+    /// Ни одна кнопка здесь не открывает и не меняет файлы на диске.
+    fn album_modal(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.album_dialog else {
+            return;
+        };
+        let mut name = self.album_name_input.clone();
+        let mut parent = self.album_move_parent;
+        let mut confirm = false;
+        let mut cancel = false;
+        let selected = self.album_selected;
+        // Свои потомки в списке родителей недоступны: цикл запрещён и в БД, и здесь.
+        let banned: HashSet<i64> = selected
+            .map(|id| self.album_subtree(id).iter().map(|n| n.id).collect())
+            .unwrap_or_default();
+        let parents: Vec<(i64, String)> = std::iter::once((0i64, "Корень".to_string()))
+            .chain(
+                self.albums
+                    .iter()
+                    .filter(|n| !banned.contains(&n.id))
+                    .map(|n| (n.id, album_label(&self.albums, n.id))),
+            )
+            .collect();
+        let delete_text = self.album_delete_text.clone();
+        let resp = egui::Modal::new(egui::Id::unique("photocat-album")).show(ctx, |ui| {
+            ui.set_min_width(480.0);
+            ui.label(egui::RichText::new(dialog.title()).size(16.0));
+            ui.add_space(6.0);
+            match dialog {
+                AlbumDialog::Delete => {
+                    ui.label(&delete_text);
+                }
+                AlbumDialog::Move => {
+                    ui.label(
+                        "Новый родитель. Свои подальбомы в списке недоступны — иначе получился бы цикл.",
+                    );
+                    let current = parents
+                        .iter()
+                        .find(|(id, _)| *id == parent)
+                        .map(|(_, label)| label.as_str())
+                        .unwrap_or("Корень");
+                    egui::ComboBox::from_id_salt("album-parent")
+                        .selected_text(current)
+                        .width(360.0)
+                        .show_ui(ui, |ui| {
+                            for (id, label) in &parents {
+                                ui.selectable_value(&mut parent, *id, label);
+                            }
+                        });
+                }
+                _ => {
+                    ui.label("Имя альбома: до 80 символов, уникально среди соседей без учёта регистра.");
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text("Дача 2024, Май, На печать")
+                            .desired_width(360.0),
+                    );
+                    field.request_focus();
+                }
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let label = match dialog {
+                    AlbumDialog::New | AlbumDialog::Sub => "Создать",
+                    AlbumDialog::Rename => "Сохранить",
+                    AlbumDialog::Move => "Переместить",
+                    AlbumDialog::Delete => "Удалить альбом",
+                };
+                if ui.add(primary_button(label)).clicked() {
+                    confirm = true;
+                }
+                if ui.button("Отмена").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() {
+            cancel = true;
+        }
+        self.album_name_input = name;
+        self.album_move_parent = parent;
+        if cancel {
+            self.album_dialog = None;
+        }
+        if confirm {
+            self.album_commit_dialog(dialog);
         }
     }
 
@@ -2233,11 +2870,24 @@ impl App {
     /// Снимок фильтров для строки чипов: чипы рисуются без доступа к `self`, потому что
     /// в этот момент сетка уже держит `&mut self.textures`. Снятие применяется после кадра.
     fn chips_snapshot(&self) -> Chips {
+        // Чип альбома — только в его виде: в «Все файлы» сетка не сужена альбомом,
+        // хотя выбранный узел остаётся, чтобы вернуться к нему одним кликом.
+        let album = (self.view == View::Albums)
+            .then(|| {
+                self.album_selected.and_then(|id| {
+                    self.albums
+                        .iter()
+                        .find(|n| n.id == id)
+                        .map(|n| n.name.clone())
+                })
+            })
+            .flatten();
         Chips {
             query: self.query.trim().to_string(),
             tag: self.tag_filter.clone(),
             kind: self.kind_filter,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
+            album,
             picked: self.picked.len(),
             picked_bytes: self
                 .items
@@ -2246,7 +2896,8 @@ impl App {
                 .map(|r| r.size)
                 .sum(),
             // Выделение есть только в сетке: дубли, лица и корзина живут своим выбором.
-            pickable: self.view == View::Grid,
+            pickable: self.view == View::Grid
+                || (self.view == View::Albums && self.album_selected.is_some()),
         }
     }
 
@@ -2261,12 +2912,20 @@ impl App {
         // Карта приложения — две группы с числами справа (PhotoPrism: Library / Tools).
         // Число объясняет цену пункта до клика: 103 группы, 617 лиц, 3 в корзине.
         nav_section(ui, "БИБЛИОТЕКА");
+        let was_albums = self.view == View::Albums;
         nav_item(
             ui,
             &mut self.view,
             View::Grid,
             "Все файлы",
             Some(self.items.len().to_string()),
+        );
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Albums,
+            "Альбомы",
+            Some(self.albums.len().to_string()),
         );
         nav_item(ui, &mut self.view, View::Calendar, "Календарь", None);
         nav_item(
@@ -2291,6 +2950,18 @@ impl App {
             "Корзина",
             Some(self.trash_items.len().to_string()),
         );
+        // «Порядок альбома» живёт только внутри открытого альбома: вне его
+        // сортировка возвращается к дате, чтобы сетка «Все файлы» не стояла молча.
+        if self.view != View::Albums && self.settings.grid_sort == db::GridSort::Album {
+            self.settings.grid_sort = db::GridSort::DateDesc;
+            self.save_settings();
+        }
+        if !was_albums
+            && self.view == View::Albums
+            && let Some(id) = self.album_selected
+        {
+            self.album_open(id);
+        }
 
         ui.add_space(8.0);
         ui.separator();
@@ -3001,6 +3672,44 @@ impl App {
             "SHA256",
             &format!("{}…", &f.sha256[..16.min(f.sha256.len())]),
         );
+
+        // Альбомы файла (M19): строка в инспекторе, «×» убирает только строку
+        // альбома. На диске ничего не меняется.
+        if self.file_albums_for != Some(id) {
+            self.file_albums_for = Some(id);
+            self.file_albums = db::open(&self.db_path)
+                .and_then(|c| db::album_refs_of_file(&c, id))
+                .unwrap_or_default();
+        }
+        if !self.file_albums.is_empty() {
+            section_label(ui, "Альбомы");
+            let list = self.file_albums.clone();
+            let mut remove_from: Option<i64> = None;
+            for (album_id, path) in &list {
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button("×")
+                        .on_hover_text("убрать снимок из этого альбома; файл на диске не меняется")
+                        .clicked()
+                    {
+                        remove_from = Some(*album_id);
+                    }
+                    ui.label(egui::RichText::new(shorten(path, 34)).size(12.0));
+                });
+            }
+            if let Some(album_id) = remove_from {
+                match db::open(&self.db_path)
+                    .and_then(|c| db::remove_from_album(&c, album_id, &[id]))
+                {
+                    Ok(n) => {
+                        self.file_albums_for = None;
+                        self.refresh_albums();
+                        self.status = format!("снимок убран из альбома: строк {n}");
+                    }
+                    Err(e) => self.status = format!("из альбома не убрать: {e}"),
+                }
+            }
+        }
 
         section_label(ui, "Теги ИИ");
         // Уверенность — по отрыву первого тега от второго (порог и отрыв в настройках).
@@ -4083,6 +4792,34 @@ impl App {
                 let (ra, rb) = (&items[a], &items[b]);
                 rb.size.cmp(&ra.size).then(ra.id.cmp(&rb.id))
             }),
+            db::GridSort::Album => {
+                // Порядок альбома — данные (M19). Вне открытого альбома или во
+                // временном взгляде «Все файлы» он читается как дата ↓.
+                if self.view == View::Albums
+                    && self.album_selected.is_some()
+                    && !self.album_browse_all
+                {
+                    let rank: HashMap<i64, usize> = self
+                        .album_files
+                        .iter()
+                        .enumerate()
+                        .map(|(n, id)| (*id, n))
+                        .collect();
+                    out.sort_by_key(|&i| {
+                        (rank.get(&items[i].id).copied().unwrap_or(usize::MAX), items[i].id)
+                    });
+                } else {
+                    out.sort_by(|&a, &b| {
+                        let (ra, rb) = (&items[a], &items[b]);
+                        cmp_date_none_last(
+                            ra.taken_at.as_deref(),
+                            rb.taken_at.as_deref(),
+                            true,
+                        )
+                        .then(ra.id.cmp(&rb.id))
+                    });
+                }
+            }
         }
         out
     }
@@ -4097,6 +4834,8 @@ impl App {
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
             sort: self.settings.grid_sort,
             layout: self.settings.grid_layout,
+            album: self.album_selected,
+            browse_all: self.album_browse_all,
         }
     }
 
@@ -4117,6 +4856,14 @@ impl App {
             "изменился фильтр по тегу"
         } else if now.hits != self.pick_scope.hits {
             "изменился поиск"
+        } else if now.album != self.pick_scope.album {
+            if now.album.is_none() {
+                "закрыт альбом"
+            } else {
+                "открыт другой альбом"
+            }
+        } else if now.browse_all != self.pick_scope.browse_all {
+            "изменился состав сетки альбома"
         } else {
             "изменился порядок"
         };
@@ -4217,7 +4964,9 @@ impl App {
             || self.picker_open
             || self.storage_confirm.is_some()
             || self.trash_confirm;
-        if modal || self.view != View::Grid || ctx.text_edit_focused() {
+        let grid_active = self.view == View::Grid
+            || (self.view == View::Albums && self.album_selected.is_some());
+        if modal || !grid_active || ctx.text_edit_focused() {
             return;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -4230,10 +4979,14 @@ impl App {
 
     fn filtered(&self) -> Vec<usize> {
         let q = self.query.to_lowercase();
+        let album_scope = self.view == View::Albums
+            && self.album_selected.is_some()
+            && !self.album_browse_all;
         let mut out: Vec<usize> = self
             .items
             .iter()
             .enumerate()
+            .filter(|(_, r)| !album_scope || self.album_set.contains(&r.id))
             .filter(|(_, r)| match self.kind_filter {
                 KindFilter::All => true,
                 KindFilter::Images => r.kind == "image",
@@ -5675,6 +6428,7 @@ impl eframe::App for App {
         self.roots_modal(ctx);
         self.picker_modal(ctx);
         self.storage_modal(ctx);
+        self.album_modal(ctx);
         self.trash_modal(ctx);
         self.poll_photo(ctx);
         self.poll_video(ctx);
@@ -5710,6 +6464,12 @@ impl eframe::App for App {
         };
         let groups = std::mem::take(&mut self.groups);
         let trash_items = std::mem::take(&mut self.trash_items);
+        let albums = std::mem::take(&mut self.albums);
+        let album_selected = self.album_selected;
+        let mut album_expanded = std::mem::take(&mut self.album_expanded);
+        let mut album_browse = self.album_browse_all;
+        let mut album_action: Option<AlbumAction> = None;
+        let mut album_dialog_request: Option<AlbumDialog> = None;
         let mut trash_clear = false;
         let mut trash_restore_all = false;
         let face_clusters = std::mem::take(&mut self.face_clusters);
@@ -5757,6 +6517,31 @@ impl eframe::App for App {
                     format!("файлов {} из {}", visible.len(), items.len())
                 },
             ),
+            View::Albums => {
+                let node = self
+                    .album_selected
+                    .and_then(|id| albums.iter().find(|n| n.id == id));
+                match node {
+                    Some(node) => (
+                        format!("Альбом «{}»", node.name),
+                        format!(
+                            "файлов {} · подальбомов {} · {}{}",
+                            node.files,
+                            node.subalbums,
+                            db::human(node.bytes),
+                            if node.trashed > 0 {
+                                format!(" · в корзине {}", node.trashed)
+                            } else {
+                                String::new()
+                            }
+                        ),
+                    ),
+                    None => (
+                        "Альбомы".to_string(),
+                        format!("альбомов {}", albums.len()),
+                    ),
+                }
+            }
             View::Dupes => {
                 let waste: i64 = groups.iter().map(|g| g.waste).sum();
                 (
@@ -5807,13 +6592,23 @@ impl eframe::App for App {
                             .color(DIM),
                     )
                     .on_hover_text("размер плиток, 100–260 px");
-                    if view == View::Grid {
+                    // Порядок доступен в сетке и внутри альбома (M19), но не в дереве.
+                    let album_scope_now =
+                        view == View::Albums && self.album_selected.is_some();
+                    if view == View::Grid || album_scope_now {
                         // M17: как смотреть (месяцы/подряд) и в каком порядке.
                         // Пока идёт смысловой поиск, порядок задаёт поиск — переключатель погашен.
                         let searching = self.semantic_hits.is_some();
                         let mut sort = self.settings.grid_sort;
                         let sort_resp = ui.add_enabled_ui(!searching, |ui| {
                             ui.menu_button("Сортировка", |ui| {
+                                if album_scope_now {
+                                    ui.selectable_value(
+                                        &mut sort,
+                                        db::GridSort::Album,
+                                        "Порядок альбома",
+                                    );
+                                }
                                 for (value, label) in GRID_SORTS {
                                     ui.selectable_value(&mut sort, value, label);
                                 }
@@ -5836,28 +6631,30 @@ impl eframe::App for App {
                             self.settings.grid_sort = sort;
                             view_save = true;
                         }
-                        let mut layout = self.settings.grid_layout;
-                        for (value, label) in [
-                            (db::GridLayout::Flat, "Подряд"),
-                            (db::GridLayout::Months, "По месяцам"),
-                        ] {
-                            let r = ui.add_enabled_ui(!searching, |ui| {
-                                ui.selectable_label(layout == value, label)
-                            });
-                            if r.inner.clicked() {
-                                layout = value;
+                        if view == View::Grid {
+                            let mut layout = self.settings.grid_layout;
+                            for (value, label) in [
+                                (db::GridLayout::Flat, "Подряд"),
+                                (db::GridLayout::Months, "По месяцам"),
+                            ] {
+                                let r = ui.add_enabled_ui(!searching, |ui| {
+                                    ui.selectable_label(layout == value, label)
+                                });
+                                if r.inner.clicked() {
+                                    layout = value;
+                                }
+                                r.inner.on_disabled_hover_text("порядок задаёт поиск");
                             }
-                            r.inner.on_disabled_hover_text("порядок задаёт поиск");
-                        }
-                        if layout != self.settings.grid_layout {
-                            self.settings.grid_layout = layout;
-                            view_save = true;
+                            if layout != self.settings.grid_layout {
+                                self.settings.grid_layout = layout;
+                                view_save = true;
+                            }
                         }
                     }
                 });
             });
             ui.add_space(4.0);
-            if matches!(view, View::Grid | View::Calendar) {
+            if matches!(view, View::Grid | View::Calendar | View::Albums) {
                 clear_chips = draw_filter_chips(ui, &chips, (visible.len(), items.len()));
             }
             ui.add_space(2.0);
@@ -5930,6 +6727,215 @@ impl eframe::App for App {
                             });
                             ui.add_space(16.0);
                         }
+                    });
+                if bg.clicked() && cells.clicked.is_none() {
+                    empty_click = true;
+                }
+            }
+            View::Albums => {
+                // Дерево (M19): отступы и свёртывание. Клик открывает альбом,
+                // треугольник раскрывает подальбомы, не меняя выбора.
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("+ Новый альбом").clicked() {
+                        album_dialog_request = Some(AlbumDialog::New);
+                    }
+                    if albums.is_empty() {
+                        ui.label(
+                            egui::RichText::new(
+                                "Альбом — это набор снимков с порядком и подальбомами. \
+                                 Только данные: файлы на диске не меняются.",
+                            )
+                            .size(11.0)
+                            .color(DIM),
+                        );
+                    }
+                });
+                if !albums.is_empty() {
+                    egui::ScrollArea::vertical()
+                        .id_salt("album-tree")
+                        .max_height(190.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            if let Some(id) =
+                                draw_album_tree(ui, &albums, album_selected, &mut album_expanded)
+                            {
+                                album_action = Some(AlbumAction::Select(id));
+                            }
+                        });
+                }
+                ui.separator();
+                let chosen = album_selected.and_then(|id| albums.iter().find(|n| n.id == id));
+                let Some(node) = chosen else {
+                    ui.add_space(8.0);
+                    ui.label(
+                        "Выберите альбом в дереве или создайте новый. Внутри — подальбомы \
+                         и снимки в том порядке, в котором они лягут на диск.",
+                    );
+                    return;
+                };
+                let node = node.clone();
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("+ Подальбом").clicked() {
+                        album_dialog_request = Some(AlbumDialog::Sub);
+                    }
+                    if ui.button("Переименовать").clicked() {
+                        album_dialog_request = Some(AlbumDialog::Rename);
+                    }
+                    if ui.button("Переместить в…").clicked() {
+                        album_dialog_request = Some(AlbumDialog::Move);
+                    }
+                    if ui
+                        .add_enabled(node.position > 0, egui::Button::new("Выше"))
+                        .on_hover_text("поднять альбом среди соседей")
+                        .clicked()
+                    {
+                        album_action = Some(AlbumAction::Up);
+                    }
+                    if ui
+                        .add_enabled(
+                            node.position + 1 < albums.iter().filter(|n| n.parent_id == node.parent_id).count() as i64,
+                            egui::Button::new("Ниже"),
+                        )
+                        .on_hover_text("опустить альбом среди соседей")
+                        .clicked()
+                    {
+                        album_action = Some(AlbumAction::Down);
+                    }
+                    if ui
+                        .button("Удалить альбом")
+                        .on_hover_text("удалить строки альбома и подальбомов; файлы на диске останутся")
+                        .clicked()
+                    {
+                        album_dialog_request = Some(AlbumDialog::Delete);
+                    }
+                });
+                let children: Vec<db::AlbumNode> = albums
+                    .iter()
+                    .filter(|n| n.parent_id == node.id)
+                    .cloned()
+                    .collect();
+                if !children.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new("Подальбомы").size(11.0).color(DIM));
+                    ui.horizontal_wrapped(|ui| {
+                        for child in &children {
+                            if draw_album_cell(ui, child, self.tile_size) {
+                                album_action = Some(AlbumAction::Select(child.id));
+                            }
+                        }
+                    });
+                }
+                ui.add_space(6.0);
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    // «Все файлы» внутри альбома — временный взгляд, чтобы набрать
+                    // снимки в альбом: иначе выделение живёт только в этой сетке (M18).
+                    if ui
+                        .selectable_label(!album_browse, "В альбоме")
+                        .on_hover_text("снимки этого альбома в его порядке")
+                        .clicked()
+                    {
+                        album_browse = false;
+                    }
+                    if ui
+                        .selectable_label(album_browse, "Все файлы")
+                        .on_hover_text(
+                            "временный взгляд на весь архив: выберите снимки и нажмите \
+                             «Добавить выбранные»",
+                        )
+                        .clicked()
+                    {
+                        album_browse = true;
+                    }
+                    ui.separator();
+                    let picked_now = self.picked.len();
+                    if ui
+                        .add_enabled(
+                            picked_now > 0,
+                            egui::Button::new(format!("Добавить выбранные ({picked_now})")),
+                        )
+                        .on_hover_text("добавить отмеченные снимки в конец альбома; повтор не плодит строк")
+                        .clicked()
+                    {
+                        album_action = Some(AlbumAction::AddPicked);
+                    }
+                    let in_album = self
+                        .picked
+                        .iter()
+                        .filter(|id| self.album_set.contains(id))
+                        .count();
+                    if ui
+                        .add_enabled(
+                            in_album > 0,
+                            egui::Button::new(format!("Убрать из альбома ({in_album})")),
+                        )
+                        .on_hover_text("строки альбома уйдут; файлы на диске не меняются")
+                        .clicked()
+                    {
+                        album_action = Some(AlbumAction::RemovePicked);
+                    }
+                    let file_in_album =
+                        self.selected.is_some_and(|id| self.album_set.contains(&id));
+                    if ui
+                        .add_enabled(file_in_album, egui::Button::new("Файл выше"))
+                        .on_hover_text("сдвинуть выбранный снимок вверх в порядке альбома")
+                        .clicked()
+                    {
+                        album_action = Some(AlbumAction::FileUp);
+                    }
+                    if ui
+                        .add_enabled(file_in_album, egui::Button::new("Файл ниже"))
+                        .on_hover_text("сдвинуть выбранный снимок вниз в порядке альбома")
+                        .clicked()
+                    {
+                        album_action = Some(AlbumAction::FileDown);
+                    }
+                    if ui
+                        .add_enabled(false, egui::Button::new("Выгрузить на диск…"))
+                        .on_hover_text("появится вместе с выгрузкой альбома (M20)")
+                        .clicked()
+                    {}
+                });
+                if album_browse {
+                    ui.label(
+                        egui::RichText::new(
+                            "Временный взгляд: сетка показывает весь архив. Выделите снимки и \
+                             нажмите «Добавить выбранные».",
+                        )
+                        .size(11.0)
+                        .color(DIM),
+                    );
+                }
+                ui.add_space(4.0);
+                if visible.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(if album_browse {
+                        "В архиве нет снимков под текущим фильтром."
+                    } else if node.files == 0 {
+                        "В альбоме пока нет файлов — переключитесь на «Все файлы», выберите \
+                         снимки и нажмите «Добавить выбранные»."
+                    } else {
+                        "Все файлы альбома в корзине приложения — верните их или уберите строки."
+                    });
+                    return;
+                }
+                let bg = ui.interact(
+                    ui.available_rect_before_wrap(),
+                    egui::Id::unique("album-grid-empty"),
+                    egui::Sense::click(),
+                );
+                egui::ScrollArea::vertical()
+                    .id_salt("album-grid")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.scope(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+                            ui.horizontal_wrapped(|ui| {
+                                for &i in &ordered {
+                                    draw_cell(ui, ctx, &mut cells, &items[i]);
+                                }
+                            });
+                        });
                     });
                 if bg.clicked() && cells.clicked.is_none() {
                     empty_click = true;
@@ -6810,6 +7816,9 @@ impl eframe::App for App {
         self.items = items;
         self.groups = groups;
         self.trash_items = trash_items;
+        self.albums = albums;
+        self.album_expanded = album_expanded;
+        self.album_browse_all = album_browse;
         self.face_clusters = face_clusters;
         self.face_views = face_views;
         let face_split = face_cells.split_clicked;
@@ -6844,6 +7853,13 @@ impl eframe::App for App {
         if view_save {
             self.save_settings();
         }
+        // Диалог альбома открывается после отпускания заимствований сетки (M19).
+        if let Some(dialog) = album_dialog_request {
+            self.album_open_dialog(dialog);
+        }
+        if let Some(action) = album_action {
+            self.album_apply(action);
+        }
         // Чип снимает ровно свой фильтр; сетка пересчитается следующим кадром.
         if clear_chips.query {
             self.query.clear();
@@ -6857,6 +7873,9 @@ impl eframe::App for App {
         if clear_chips.hits {
             self.semantic_hits = None;
             self.ocr_snippets.clear();
+        }
+        if clear_chips.album {
+            self.album_close();
         }
         if clear_chips.pick_all {
             self.pick_all();
@@ -6991,9 +8010,9 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CalScale, KindFilter, PickClick, Viewer, days_in_month, db, first_weekday_monday,
-        fit_rect, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
-        score_percentile, shift_month, shift_to_file_month,
+        App, CalScale, KindFilter, PickClick, View, Viewer, days_in_month, db,
+        first_weekday_monday, fit_rect, monday_of, month_groups, nearest_file_month,
+        parse_date, pick_kind, score_percentile, shift_month, shift_to_file_month,
     };
     use crate::embed;
     use std::collections::BTreeSet;
@@ -7685,4 +8704,99 @@ mod tests {
             "инспектор показывает размер выделения: {texts:?}"
         );
     }
+    #[test]
+    fn сетка_альбома_показывает_только_его_файлы_и_порядок_альбома() {
+        let mut app = m17_app();
+        app.view = View::Albums;
+        app.album_selected = Some(7);
+        // Порядок альбома — данные: id 3, затем 1, затем 4. Файла 2 в альбоме нет.
+        app.album_files = vec![3, 1, 4];
+        app.album_set = [3, 1, 4].into_iter().collect();
+        app.settings.grid_sort = db::GridSort::Album;
+        let visible = app.filtered();
+        assert_eq!(visible.len(), 3);
+        assert!(!visible.contains(&1), "файла 2 в альбоме нет");
+        assert_eq!(app.ordered(&visible), vec![2, 0, 3], "порядок берётся из альбома");
+        // Вне альбома «Порядок альбома» читается как дата ↓, а не молчит.
+        app.view = View::Grid;
+        app.album_selected = None;
+        assert_eq!(app.ordered(&visible), vec![0, 2, 3], "вне альбома — дата ↓");
+        // «Все файлы» внутри альбома — временный взгляд: состав не сужается.
+        app.view = View::Albums;
+        app.album_selected = Some(7);
+        app.album_browse_all = true;
+        assert_eq!(app.filtered().len(), app.items.len());
+    }
+
+    #[test]
+    fn чип_альбома_показывает_имя_и_снимается() {
+        let mut app = m17_app();
+        app.view = View::Albums;
+        app.album_selected = Some(7);
+        app.albums = vec![db::AlbumNode {
+            id: 7,
+            parent_id: 0,
+            position: 0,
+            name: "Дача 2024".into(),
+            note: String::new(),
+            depth: 0,
+            files: 3,
+            trashed: 0,
+            subalbums: 0,
+            bytes: 30,
+            cover: None,
+        }];
+        let chips = app.chips_snapshot();
+        assert_eq!(chips.album.as_deref(), Some("Дача 2024"));
+        assert!(chips.pickable, "в открытом альбоме выделение работает");
+        // В «Все файлы» чипа альбома нет: сетка там не сужена альбомом.
+        app.view = View::Grid;
+        assert!(app.chips_snapshot().album.is_none());
+        app.view = View::Albums;
+        // Закрытие альбома возвращает дату ↓ и гасит сетку.
+        app.album_close();
+        assert_eq!(app.album_selected, None);
+        assert_eq!(app.settings.grid_sort, db::GridSort::DateDesc);
+        assert!(app.chips_snapshot().album.is_none());
+    }
+
+    #[test]
+    fn окно_рисует_альбом_дерево_и_кнопки_добавления() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-frame-{}.db",
+            std::process::id()
+        ));
+        let album;
+        {
+            let conn = db::open(&path).unwrap();
+            db::insert(&conn, &file_row(0, "image", "album.jpg")).unwrap();
+            let file = conn
+                .query_row("SELECT id FROM files WHERE path=?1", ["/tmp/album.jpg"], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap();
+            album = db::create_album(&conn, 0, "Дача 2024", "").unwrap();
+            db::add_to_album(&conn, album, &[file]).unwrap();
+        }
+        let mut app = App::new(path.clone());
+        app.view = View::Albums;
+        app.album_open(album);
+        let ctx = egui::Context::default();
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t.contains("Дача 2024")),
+            "дерево и выбранный альбом видны: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("Добавить выбранные")),
+            "кнопка добавления на месте: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("Выгрузить на диск")),
+            "выгрузка (M20) обозначена: {texts:?}"
+        );
+        // На диске ничего не создано: альбом — только строки БД.
+        assert!(!std::path::Path::new("/tmp/album.jpg").exists());
+    }
+
 }

@@ -53,7 +53,7 @@
 |---|---|---|---|
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (дата/GPS/камера), превью, дата из имени | БД, UI, индексатор |
 | `src/tools.rs` | L0 | пути к `ffmpeg`/`ffprobe`/`tesseract`/`curl`, поиск в `PATH`, проверка версии | БД, UI, декодирование |
-| `src/db.rs` | L1 | схема SQLite, вставка/выборка, `Progress`, `human()` | egui, декодирование картинок |
+| `src/db.rs` | L1 | схема SQLite, вставка/выборка, альбомы (дерево и порядок), `Progress`, `human()` | egui, декодирование картинок |
 | `src/index.rs` | L2 | обход `walkdir`, rayon-параллелизм, поток-писатель | egui |
 | `src/dupes.rs` | L2 | union-find, точные и похожие дубли, CSV | egui |
 | `src/embed.rs` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means | egui, БД-строки |
@@ -75,7 +75,9 @@
 - БД: `~/.cache/photocat/photocat.db` (SQLite, WAL). Пересоздаётся индексацией; в каталог архива
   не пишем никогда. `files.trashed_at` — корзина приложения (файл на диске цел), `user_tags` —
   свои теги владельца. Список каталогов хранится в `settings.roots` строкой; каталог убирается
-  из индекса удалением строк, не файлов.
+  из индекса удалением строк, не файлов. Альбомы (`albums`, `album_files`) — дерево и порядок
+  файлов, тоже только строки: имя уникально среди соседей, `position` плотный, один снимок —
+  одна строка в альбоме. Удаление альбома чистит только строки.
 - Превью: `~/.cache/photocat/thumbs/<2 симв.>/<sha256[..24]>.jpg`, 320 px по длинной стороне.
 - Лица: кропы `~/.cache/photocat/faces/<2 симв.>/<sha256[..24]>-<N>.jpg`, 112×112;
   векторы и группы — в БД.
@@ -101,6 +103,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat index <каталог>    # индексация (пишет в кэш)
 ./target/release/photocat stats
 ./target/release/photocat dupes --max-dist 6
+./target/release/photocat albums list --tree             # дерево альбомов (только данные)
+./target/release/photocat albums new --name "Дача 2024"  # альбом; add/remove путями из индекса
 ./target/release/photocat organize --out DIR            # dry-run
 ./target/release/photocat verify A B                    # две копии: размер → sha256, код 0/1
 ./target/release/photocat manifest DIR --out file.sha256 # слепок для будущих проверок
