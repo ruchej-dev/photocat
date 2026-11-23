@@ -399,6 +399,9 @@ struct App {
     video_tex: Option<egui::TextureHandle>,
     /// Запасной путь: внешний ffplay, когда встроенный плеер отказался.
     video_child: Option<std::process::Child>,
+    /// Когда последний раз обновляли текстуру видео: заливка кадра — самая
+    /// дорогая операция в кадре, чаще 30 раз в секунду её делать незачем.
+    video_tex_at: Option<std::time::Instant>,
     /// Сообщение «декодер не успевает» показывается один раз на файл.
     video_lag_shown: bool,
     video_id: Option<i64>,
@@ -506,6 +509,7 @@ impl App {
             video: None,
             video_tex: None,
             video_child: None,
+            video_tex_at: None,
             video_id: None,
             video_lag_shown: false,
             cal_scale: CalScale::Month,
@@ -2858,6 +2862,7 @@ impl App {
 
     fn stop_video(&mut self) {
         self.video_lag_shown = false;
+        self.video_tex_at = None;
         if let Some(mut p) = self.video.take() {
             p.stop();
         }
@@ -2879,7 +2884,10 @@ impl App {
             self.status = "ffplay: видео закрыто".into();
         }
         let Some(p) = self.video.as_ref() else { return };
-        if let Some(frame) = p.take_frame() {
+        let due = self
+            .video_tex_at
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(25));
+        if due && let Some(frame) = p.take_frame() {
             let image = egui::ColorImage::from_rgba_unmultiplied(
                 [frame.width, frame.height],
                 &frame.rgba,
@@ -2894,10 +2902,12 @@ impl App {
                     ))
                 }
             }
+            self.video_tex_at = Some(std::time::Instant::now());
         }
         if p.audio_lag() && !self.video_lag_shown {
             self.video_lag_shown = true;
-            self.status = "видео идёт медленнее звука: звук выключен, чтобы кадры шли".into();
+            self.status =
+                "декодер не успевает за звуком: звук выключен, видео идёт медленнее".into();
         }
         if let Some(e) = p.error() {
             self.status = format!("видео остановилось: {e}");

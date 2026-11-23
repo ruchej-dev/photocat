@@ -1,7 +1,8 @@
 //! Встроенный плеер видео: чистый Rust, без внешних программ и без C.
 //!
-//! Слой L2: не знает про egui. Отдаёт готовый RGBA-кадр (уже повёрнутый по
-//! метаданным контейнера) и состояние воспроизведения; рисует `app.rs`.
+//! Слой L2: не знает про egui. Отдаёт готовый RGBA-кадр (уже повёрнутый и
+//! уменьшенный по метаданным контейнера) и состояние воспроизведения; рисует
+//! `app.rs`.
 //!
 //! Демультиплексор и декодеры — семейство `rff`: `rff-format-mp4` /
 //! `rff-format-mkv` дают пакеты с PTS и индекс сэмплов (seek по ключевому
@@ -11,44 +12,61 @@
 //! пакет, который надо ставить. Ни `ffmpeg`, ни `ffplay`, ни `mpv`, ни
 //! GStreamer в воспроизведении не участвуют (ADR 0030, 0031).
 //!
-//! Часы. Если звук играет, мастер — он: позиция считается по проигранным
-//! сэмплам, видео ждёт звук. Если устройства нет (headless, нет звуковой
-//! карты), мастер — настенные часы, и видео всё равно играет.
+//! Три потока, и это не роскошь:
 //!
-//! Память. Впереди держится ровно один кадр: новый затирает старый. Очередь
-//! звука — около секунды. Отставание не копится, а выбрасывается.
+//! ```text
+//! photocat-video    демукс + декод кадров → очередь (3 кадра вперёд)
+//! photocat-audio    свой демуксер + декод звука → кольцо → cpal
+//! photocat-player   часы, показ: кадр → RGBA → `Shared.frame`
+//! ```
+//!
+//! Почему именно так. Одним потоком декод кадров и звука шли вперемешку: пока
+//! декодировался кадр, кольцо звука пустело, звук захлёбывался, а часы,
+//! считавшиеся по проигранным сэмплам, замедлялись — и видео «еле шевелилось»
+//! вместе со звуком. Теперь звук кормится своим потоком, а часы берут звук
+//! мастером только пока он реально идёт (кольцо не пусто); иначе идут
+//! настенные часы, и видео не стоит.
+//!
+//! Память ограничена: очередь кадров 3 штуки, кольцо звука ~2 с, кадр для
+//! показа один. Отставание выбрасывается, а не копится.
 
 use anyhow::{Context, Result};
 use rff_codec::{CodecParams, CodecRegistry, Decoder};
 use rff_core::{ColorRange, Frame, MediaType, Packet, PixelFormat, VideoFrame as RawFrame};
 use rff_format::{Demuxer, FormatRegistry, Stream};
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-/// Запас звука впереди: около секунды, чтобы декодер не дёргался на каждом пакете.
+/// Запас звука впереди: ~2 с при 48 кГц стерео.
 const RING_SAMPLES: usize = 192_000;
 /// Кадр, опоздавший больше чем на это, выбрасывается: догонять смысла нет.
 const LATE_S: f64 = 0.20;
 /// Насколько раньше времени кадр считается «рано» и ждёт.
 const EARLY_S: f64 = 0.004;
-/// Шаг ожидания в цикле воспроизведения.
+/// Шаг ожидания в циклах.
 const TICK: Duration = Duration::from_millis(5);
 
 /// Что нужно от плеера вызывающему коду.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
-    /// Выводить звук. `false` — видео без звука (headless-замеры, «Стоп видео»).
+    /// Выводить звук. `false` — видео без звука (headless-замеры).
     pub audio: bool,
+    /// До какой ширины уменьшать кадр перед показом. 0 — не уменьшать.
+    /// Экран не показывает 2520 пикселей в строке, а каждая лишняя тысяча
+    /// пикселей — это мегабайты на кадр и лишняя работа при конверсии.
+    pub max_width: usize,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { audio: true }
+        Options {
+            audio: true,
+            max_width: 1280,
+        }
     }
 }
 
@@ -61,13 +79,6 @@ pub struct VideoFrame {
     pub pts_s: f64,
 }
 
-enum Command {
-    Play,
-    Pause,
-    Seek(f64),
-    Stop,
-}
-
 /// Состояние, которое читает интерфейс.
 struct Shared {
     frame: Mutex<Option<VideoFrame>>,
@@ -77,10 +88,8 @@ struct Shared {
     playing: AtomicBool,
     finished: AtomicBool,
     audio: AtomicBool,
-    /// Декодер не успевает за звуком: звук выключен, видео идёт как может.
+    /// Звук прерывается: декодер не успевает кормить звуковую карту.
     audio_lag: AtomicBool,
-    /// Куда попросили перейти: поток показа ставит по этому часы.
-    seek_ms: AtomicU64,
 }
 
 impl Shared {
@@ -94,7 +103,6 @@ impl Shared {
             finished: AtomicBool::new(false),
             audio: AtomicBool::new(false),
             audio_lag: AtomicBool::new(false),
-            seek_ms: AtomicU64::new(0),
         }
     }
 
@@ -106,7 +114,7 @@ impl Shared {
     }
 }
 
-/// Часы звука: единственный источник правды о позиции, когда звук играет.
+/// Часы звука: единственный источник правды о позиции, пока звук идёт.
 struct AudioClock {
     /// 0 — устройство открывается, 1 — играет, 2 — звука нет, 3 — остановлено.
     state: AtomicU8,
@@ -134,6 +142,10 @@ impl AudioClock {
     fn playing(&self) -> bool {
         self.state.load(Ordering::Relaxed) == 1
     }
+
+    fn rate(&self) -> u32 {
+        self.rate.load(Ordering::Relaxed).max(1)
+    }
 }
 
 /// Кольцевой буфер звука между декодером и звуковой картой.
@@ -158,9 +170,82 @@ impl Ring {
         self.buf.lock().map(|b| b.len()).unwrap_or(0)
     }
 
+    /// В кольце есть хотя бы 20 мс звука: карта не голодает.
+    fn healthy(&self, rate: u32) -> bool {
+        self.len() >= (rate as usize / 50).max(256)
+    }
+
     fn clear(&self) {
         if let Ok(mut b) = self.buf.lock() {
             b.clear();
+        }
+    }
+}
+
+/// Управление из интерфейса: без каналов и без блокировок.
+struct Control {
+    stop: AtomicBool,
+    seek_epoch: AtomicU64,
+    seek_ms: AtomicU64,
+    /// Отдельный seek только для видео: показ просит «догони звук», когда
+    /// декодер отстал настолько, что выбрасывать по кадру уже бессмысленно.
+    video_epoch: AtomicU64,
+    video_ms: AtomicU64,
+}
+
+impl Control {
+    fn new() -> Control {
+        Control {
+            stop: AtomicBool::new(false),
+            seek_epoch: AtomicU64::new(0),
+            seek_ms: AtomicU64::new(0),
+            video_epoch: AtomicU64::new(0),
+            video_ms: AtomicU64::new(0),
+        }
+    }
+}
+
+/// Очередь декодированных кадров между потоком декода и потоком показа.
+struct FrameQueue {
+    q: Mutex<VecDeque<Queued>>,
+    cap: usize,
+    /// Декодер дошёл до конца файла.
+    closed: AtomicBool,
+}
+
+struct Queued {
+    pts_s: f64,
+    frame: RawFrame,
+}
+
+impl FrameQueue {
+    fn new(cap: usize) -> FrameQueue {
+        FrameQueue {
+            q: Mutex::new(VecDeque::with_capacity(cap)),
+            cap,
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.q.lock().map(|q| q.len()).unwrap_or(0)
+    }
+
+    fn push(&self, pts_s: f64, frame: RawFrame) {
+        if let Ok(mut q) = self.q.lock() {
+            q.push_back(Queued { pts_s, frame });
+        }
+    }
+
+    /// Снять кадр с очереди. Блокировка держится микросекунды: конверсия в
+    /// RGBA делается уже без неё.
+    fn pop(&self) -> Option<Queued> {
+        self.q.lock().ok().and_then(|mut q| q.pop_front())
+    }
+
+    fn clear(&self) {
+        if let Ok(mut q) = self.q.lock() {
+            q.clear();
         }
     }
 }
@@ -170,8 +255,8 @@ pub struct Player {
     shared: Arc<Shared>,
     clock: Arc<AudioClock>,
     ring: Arc<Ring>,
+    control: Arc<Control>,
     volume: Arc<AtomicU32>,
-    tx: Option<Sender<Command>>,
     threads: Vec<JoinHandle<()>>,
 }
 
@@ -181,66 +266,83 @@ impl Player {
     /// предложить ли внешний плеер.
     pub fn open(path: &Path, opts: Options) -> Result<Player> {
         let media = Media::open(path)?;
+        let video_stream = media
+            .video
+            .clone()
+            .with_context(|| format!("в файле нет видео: {}", path.display()))?;
+        // Декодер видео проверяем сразу: кодек вне области — честная ошибка,
+        // и `app` успеет предложить ffplay.
+        let decoder = make_decoder(&video_stream)?;
+
         let shared = Arc::new(Shared::new());
         shared
             .duration_ms
             .store((media.duration_s() * 1000.0).max(0.0) as u64, Ordering::Relaxed);
-
         let clock = Arc::new(AudioClock::new());
         let ring = Arc::new(Ring::new());
+        let control = Arc::new(Control::new());
         let volume = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let frames = Arc::new(FrameQueue::new(3));
         let mut threads = Vec::new();
 
         if opts.audio && media.audio.is_some() {
-            let (r, c, v) = (ring.clone(), clock.clone(), volume.clone());
+            let (p, s, r, c, ctl, v) = (
+                path.to_path_buf(),
+                shared.clone(),
+                ring.clone(),
+                clock.clone(),
+                control.clone(),
+                volume.clone(),
+            );
             threads.push(
                 std::thread::Builder::new()
                     .name("photocat-audio".into())
-                    .spawn(move || audio_thread(r, c, v))
+                    .spawn(move || audio_loop(p, s, r, c, ctl, v))
                     .context("не запустить поток звука")?,
             );
-            // Устройство открывается быстро; ждём недолго, чтобы не начинать со звуком,
-            // который появится на середине ролика.
-            let deadline = Instant::now() + Duration::from_millis(600);
-            while clock.state.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
-                std::thread::sleep(TICK);
-            }
-            shared.audio.store(clock.playing(), Ordering::Relaxed);
+            shared.audio.store(true, Ordering::Relaxed);
         } else {
             clock.state.store(2, Ordering::Relaxed);
         }
 
-        let (tx, rx) = mpsc::channel();
-        let (s, r, c) = (shared.clone(), ring.clone(), clock.clone());
+        let (f, ctl, sh) = (frames.clone(), control.clone(), shared.clone());
+        threads.push(
+            std::thread::Builder::new()
+                .name("photocat-video".into())
+                .spawn(move || video_loop(media, f, ctl, sh, Some(decoder)))
+                .context("не запустить поток декодирования")?,
+        );
+
+        let (f, sh, c, r, ctl) = (
+            frames,
+            shared.clone(),
+            clock.clone(),
+            ring.clone(),
+            control.clone(),
+        );
         threads.push(
             std::thread::Builder::new()
                 .name("photocat-player".into())
-                .spawn(move || run(media, s, rx, r, c))
-                .context("не запустить поток декодирования")?,
+                .spawn(move || present_loop(f, sh, c, r, ctl, video_stream, opts.max_width))
+                .context("не запустить поток показа")?,
         );
 
         Ok(Player {
             shared,
             clock,
             ring,
+            control,
             volume,
-            tx: Some(tx),
             threads,
         })
     }
 
-    fn send(&self, cmd: Command) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.send(cmd);
-        }
-    }
-
     pub fn play(&self) {
-        self.send(Command::Play);
+        self.clock.paused.store(false, Ordering::Relaxed);
     }
 
     pub fn pause(&self) {
-        self.send(Command::Pause);
+        self.clock.paused.store(true, Ordering::Relaxed);
     }
 
     /// Пауза ↔ играть.
@@ -253,7 +355,9 @@ impl Player {
     }
 
     pub fn seek(&self, seconds: f64) {
-        self.send(Command::Seek(seconds.max(0.0)));
+        let ms = (seconds.max(0.0) * 1000.0) as u64;
+        self.control.seek_ms.store(ms, Ordering::Relaxed);
+        self.control.seek_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn set_volume(&self, volume: f32) {
@@ -290,7 +394,7 @@ impl Player {
         self.shared.audio.load(Ordering::Relaxed)
     }
 
-    /// Звук выключен, потому что декодер не успевает: видео идёт медленнее.
+    /// Звук прерывается: декодер не успевает.
     pub fn audio_lag(&self) -> bool {
         self.shared.audio_lag.load(Ordering::Relaxed)
     }
@@ -300,18 +404,18 @@ impl Player {
     }
 
     /// Остановить воспроизведение и освободить звуковое устройство.
+    ///
+    /// **Не ждём потоки.** Раньше `join` здесь вешал окно: владелец нажимал
+    /// «Стоп» и не мог закрыть программу. Потоки видят флаг и выходят сами,
+    /// а дескрипторы отпускаются — зависать интерфейсу не на чем.
     pub fn stop(&mut self) {
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(Command::Stop);
-        }
+        self.control.stop.store(true, Ordering::Relaxed);
         self.clock.paused.store(true, Ordering::Relaxed);
         if self.clock.state.load(Ordering::Relaxed) == 1 {
             self.clock.state.store(3, Ordering::Relaxed);
         }
         self.ring.clear();
-        for t in self.threads.drain(..) {
-            let _ = t.join();
-        }
+        self.threads.clear();
     }
 }
 
@@ -425,9 +529,15 @@ fn make_decoder(stream: &Stream) -> Result<Box<dyn Decoder>> {
     Ok(dec)
 }
 
-// ---------------------------------------------------------------- звук
 
-fn audio_thread(ring: Arc<Ring>, clock: Arc<AudioClock>, volume: Arc<AtomicU32>) {
+/// Открыть звуковое устройство и запустить поток. Перебираем все выходы:
+/// устройство по умолчанию бывает занято (PipeWire держит hw-устройство, а
+/// cpal идёт через ALSA).
+fn open_output_any(
+    ring: &Arc<Ring>,
+    clock: &Arc<AudioClock>,
+    volume: &Arc<AtomicU32>,
+) -> Option<(cpal::Stream, u32, usize)> {
     use cpal::traits::HostTrait;
 
     let host = cpal::default_host();
@@ -438,34 +548,20 @@ fn audio_thread(ring: Arc<Ring>, clock: Arc<AudioClock>, volume: Arc<AtomicU32>)
     if let Ok(devices) = host.output_devices() {
         candidates.extend(devices);
     }
-
-    // Устройство по умолчанию бывает занято (PipeWire держит hw-устройство,
-    // а cpal идёт через ALSA): перебираем все выходы и берём первый, который
-    // реально открылся.
     for device in candidates {
-        if let Some((stream, config)) = open_output(&device, &ring, &clock, &volume) {
-            clock.rate.store(config.sample_rate, Ordering::Relaxed);
-            clock.channels.store(config.channels as u32, Ordering::Relaxed);
-            clock.state.store(1, Ordering::Relaxed);
-            // Поток обязан жить в том же потоке, что его создал.
-            while clock.state.load(Ordering::Relaxed) == 1 {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            drop(stream);
-            return;
+        if let Some(ok) = open_output(&device, ring, clock, volume) {
+            return Some(ok);
         }
     }
-    clock.state.store(2, Ordering::Relaxed);
+    None
 }
 
-/// Открыть поток f32 на устройстве. Форматы вроде i32/i24 не берём: это
-/// лишняя ветка ради редкости, а звук важнее не «какой-нибудь», а рабочий.
 fn open_output(
     device: &cpal::Device,
     ring: &Arc<Ring>,
     clock: &Arc<AudioClock>,
     volume: &Arc<AtomicU32>,
-) -> Option<(cpal::Stream, cpal::StreamConfig)> {
+) -> Option<(cpal::Stream, u32, usize)> {
     use cpal::traits::{DeviceTrait, StreamTrait};
 
     let mut supported = Vec::new();
@@ -523,7 +619,7 @@ fn open_output(
         )
         .ok()?;
     stream.play().ok()?;
-    Some((stream, config))
+    Some((stream, config.sample_rate, channels))
 }
 
 /// Пересчёт в формат устройства: каналы и частота.
@@ -645,6 +741,7 @@ fn audio_to_f32(frame: &rff_core::AudioFrame) -> Vec<f32> {
     out
 }
 
+
 // ---------------------------------------------------------------- часы
 
 /// Настенные часы: позиция, когда звука нет или он ещё не пошёл.
@@ -691,383 +788,8 @@ impl WallClock {
     }
 }
 
-// ---------------------------------------------------------------- воркер
 
-/// Откуда берём пакеты: индекс сэмплов (MP4/MKV) или последовательное чтение.
-enum Source {
-    Stream,
-    Index { v: u64, a: u64 },
-}
-
-/// Очередь декодированных кадров между потоком декода и потоком показа.
-/// Декодер работает без остановок (так процессор не сбрасывает частоту),
-/// показ идёт по часам — поэтому это два потока, а не один цикл.
-struct FrameQueue {
-    q: Mutex<VecDeque<Queued>>,
-    cap: usize,
-    /// Номер «поколения»: растёт на каждом seek, чтобы показ сбросил часы.
-    epoch: AtomicU64,
-    /// Декодер дошёл до конца файла.
-    closed: AtomicBool,
-}
-
-struct Queued {
-    pts_s: f64,
-    frame: RawFrame,
-}
-
-impl FrameQueue {
-    fn new(cap: usize) -> FrameQueue {
-        FrameQueue {
-            q: Mutex::new(VecDeque::with_capacity(cap)),
-            cap,
-            epoch: AtomicU64::new(0),
-            closed: AtomicBool::new(false),
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.q.lock().map(|q| q.len()).unwrap_or(0)
-    }
-
-    fn push(&self, pts_s: f64, frame: RawFrame) {
-        if let Ok(mut q) = self.q.lock() {
-            q.push_back(Queued { pts_s, frame });
-        }
-    }
-
-    fn front_pts(&self) -> Option<f64> {
-        self.q.lock().ok().and_then(|q| q.front().map(|f| f.pts_s))
-    }
-
-    fn pop(&self) -> Option<Queued> {
-        self.q.lock().ok().and_then(|mut q| q.pop_front())
-    }
-
-    /// Перевести передний кадр в RGBA, не снимая его с очереди.
-    fn convert_front(&self, stream: &Stream) -> Option<(f64, VideoFrame)> {
-        let q = self.q.lock().ok()?;
-        let f = q.front()?;
-        to_rgba(&f.frame, stream).map(|vf| (f.pts_s, vf))
-    }
-
-    fn clear(&self) {
-        if let Ok(mut q) = self.q.lock() {
-            q.clear();
-        }
-    }
-}
-
-fn run(
-    media: Media,
-    shared: Arc<Shared>,
-    rx: Receiver<Command>,
-    ring: Arc<Ring>,
-    clock: Arc<AudioClock>,
-) {
-    /// Сколько кадров держим впереди показа. Три кадра — это ~100 мс: декодер
-    /// успевает идти ровно, показ не ждёт его вплотную.
-    const AHEAD: usize = 3;
-
-    let frames = Arc::new(FrameQueue::new(AHEAD));
-    let video_stream = media.video.clone();
-    let (f, r, c, s) = (frames.clone(), ring.clone(), clock.clone(), shared.clone());
-    let decoder = std::thread::Builder::new()
-        .name("photocat-decode".into())
-        .spawn(move || decode_loop(media, rx, f, r, c, s));
-    let decoder = match decoder {
-        Ok(h) => h,
-        Err(e) => {
-            shared.fail(format!("не запустить поток декодирования: {e}"));
-            return;
-        }
-    };
-    present_loop(frames, shared, clock, ring, video_stream);
-    let _ = decoder.join();
-}
-
-/// Декодер: читает пакеты, наполняет очередь кадров и кольцо звука.
-/// Спит только когда очередь полна (то есть когда показ не успевает) —
-/// так процессор не переходит в низкую частоту между кадрами.
-fn decode_loop(
-    mut media: Media,
-    rx: Receiver<Command>,
-    frames: Arc<FrameQueue>,
-    ring: Arc<Ring>,
-    clock: Arc<AudioClock>,
-    shared: Arc<Shared>,
-) {
-    let mut dec_v = match media.video.as_ref().map(make_decoder) {
-        Some(Ok(d)) => Some(d),
-        Some(Err(e)) => {
-            shared.fail(format!("{e:#}"));
-            frames.closed.store(true, Ordering::Relaxed);
-            return;
-        }
-        None => None,
-    };
-    let mut dec_a = if clock.playing() {
-        media.audio.as_ref().and_then(|s| make_decoder(s).ok())
-    } else {
-        None
-    };
-
-    let (src_rate, src_ch) = media
-        .audio
-        .as_ref()
-        .map(|s| (s.sample_rate.max(1), s.channels.max(1) as usize))
-        .unwrap_or((48_000, 2));
-    let dst_rate = clock.rate.load(Ordering::Relaxed);
-    let dst_ch = clock.channels.load(Ordering::Relaxed) as usize;
-    let mut resampler = Resampler::new(src_rate, src_ch, dst_rate, dst_ch);
-
-    let mut source = if media.demuxer.sample_index().is_some() {
-        Source::Index { v: 0, a: 0 }
-    } else {
-        Source::Stream
-    };
-    let mut audio_buf: Vec<f32> = Vec::new();
-    let mut paused = false;
-    // Если декодер не успевает за звуком, звук выключается: лучше замедленное
-    // видео без звука, чем чёрный экран с синхронным звуком.
-    let mut audio_off = false;
-    let mut video_done = false;
-    let mut audio_done = false;
-
-    'decode: loop {
-        loop {
-            let cmd = match rx.try_recv() {
-                Ok(c) => c,
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => Command::Stop,
-            };
-            match cmd {
-                Command::Stop => break 'decode,
-                Command::Play => {
-                    paused = false;
-                    clock.paused.store(false, Ordering::Relaxed);
-                }
-                Command::Pause => {
-                    paused = true;
-                    clock.paused.store(true, Ordering::Relaxed);
-                    ring.clear();
-                }
-                Command::Seek(t) => {
-                    frames.clear();
-                    seek(
-                        &mut media,
-                        t,
-                        &mut source,
-                        &mut dec_v,
-                        &mut dec_a,
-                        &ring,
-                        &clock,
-                        paused,
-                    );
-                    shared
-                        .seek_ms
-                        .store((t * 1000.0).max(0.0) as u64, Ordering::Relaxed);
-                    frames.epoch.fetch_add(1, Ordering::Relaxed);
-                }
-            }
-        }
-
-        if paused {
-            std::thread::sleep(TICK);
-            continue;
-        }
-
-        // Видео и звук читаются независимо: полное кольцо звука больше не
-        // останавливает декод кадров (и наоборот).
-        let mut worked = false;
-        if !video_done && frames.len() < frames.cap {
-            match next_for(&mut media, &mut source, Kind::Video) {
-                Some(pkt) => {
-                    worked = true;
-                    if let Some(dec) = dec_v.as_mut()
-                        && dec.send_packet(&pkt).is_ok()
-                    {
-                        let tb = media
-                            .video
-                            .as_ref()
-                            .map(|s| s.time_base.as_f64())
-                            .unwrap_or(0.0);
-                        while let Ok(Frame::Video(f)) = dec.receive_frame() {
-                            let pts = f.pts.map(|p| p as f64 * tb).unwrap_or(0.0);
-                            frames.push(pts, f);
-                        }
-                    }
-                }
-                None => video_done = true,
-            }
-        }
-        let audio_wanted = !audio_off && clock.playing();
-        if !audio_done && audio_wanted && ring.len() + 4096 < RING_SAMPLES {
-            match next_for(&mut media, &mut source, Kind::Audio) {
-                Some(pkt) => {
-                    worked = true;
-                    if let Some(dec) = dec_a.as_mut()
-                        && dec.send_packet(&pkt).is_ok()
-                    {
-                        while let Ok(Frame::Audio(af)) = dec.receive_frame() {
-                            audio_buf.clear();
-                            resampler.push(&audio_to_f32(&af), &mut audio_buf);
-                            ring.push_all(&audio_buf);
-                        }
-                    }
-                }
-                None => audio_done = true,
-            }
-        }
-        if !audio_wanted {
-            audio_done = true;
-        }
-        if video_done && audio_done {
-            break 'decode;
-        }
-        if !worked {
-            std::thread::sleep(TICK);
-        }
-
-        // Отставание видео от звука меряет поток показа; здесь только реакция.
-        if shared.audio_lag.load(Ordering::Relaxed) {
-            audio_off = true;
-        }
-    }
-
-    frames.closed.store(true, Ordering::Relaxed);
-}
-
-/// Показ: держит часы, отдаёт кадры в интерфейс, выбрасывает опоздавшие.
-fn present_loop(
-    frames: Arc<FrameQueue>,
-    shared: Arc<Shared>,
-    clock: Arc<AudioClock>,
-    ring: Arc<Ring>,
-    video: Option<Stream>,
-) {
-    let dst_rate = clock.rate.load(Ordering::Relaxed).max(1);
-    let mut wall = WallClock::new();
-    wall.play();
-    let mut played_base = clock.played.load(Ordering::Relaxed);
-    let mut started = false;
-    let mut paused_last = false;
-    let mut epoch = frames.epoch.load(Ordering::Relaxed);
-    // Кадр, уже переведённый в RGBA: конверсия делается заранее, чтобы не
-    // попадать в бюджет показа.
-    let mut prepared: Option<(f64, VideoFrame)> = None;
-    let mut audio_off = false;
-
-    let position = |wall: &WallClock, played_base: u64, audio_off: bool| -> f64 {
-        if !audio_off && clock.playing() {
-            let played = clock
-                .played
-                .load(Ordering::Relaxed)
-                .saturating_sub(played_base);
-            if played > 0 {
-                return wall.base_s + played as f64 / dst_rate as f64;
-            }
-        }
-        wall.position()
-    };
-
-    loop {
-        let paused = clock.paused.load(Ordering::Relaxed);
-        if paused != paused_last {
-            if paused {
-                let pos = position(&wall, played_base, audio_off);
-                wall.pause();
-                wall.set(pos);
-            } else {
-                wall.play();
-                played_base = clock.played.load(Ordering::Relaxed);
-            }
-            paused_last = paused;
-        }
-        let e = frames.epoch.load(Ordering::Relaxed);
-        if e != epoch {
-            epoch = e;
-            wall.set(shared.seek_ms.load(Ordering::Relaxed) as f64 / 1000.0);
-            played_base = clock.played.load(Ordering::Relaxed);
-            started = false;
-            prepared = None;
-            if !paused {
-                wall.play();
-            }
-        }
-        if paused {
-            shared.playing.store(false, Ordering::Relaxed);
-            std::thread::sleep(TICK);
-            continue;
-        }
-        shared.playing.store(true, Ordering::Relaxed);
-
-        let Some(pts) = frames.front_pts() else {
-            if frames.closed.load(Ordering::Relaxed) {
-                shared.finished.store(true, Ordering::Relaxed);
-                break;
-            }
-            std::thread::sleep(TICK);
-            continue;
-        };
-
-        if !started {
-            wall.set(pts.max(0.0));
-            played_base = clock.played.load(Ordering::Relaxed);
-            started = true;
-            // Видео готово — можно начинать звук: часы пойдут от первого кадра.
-            clock.started.store(true, Ordering::Relaxed);
-        }
-        let audio_master = !audio_off
-            && clock.playing()
-            && clock.played.load(Ordering::Relaxed) > played_base;
-        let now = position(&wall, played_base, audio_off);
-        if pts + LATE_S < now {
-            if audio_master && now - pts < 1.5 {
-                // Звук — мастер: кадр опаздывает, догоняем без него.
-                frames.pop();
-                prepared = None;
-                continue;
-            }
-            if audio_master {
-                // Отстали настолько, что декодер явно не успевает: выключаем
-                // звук и продолжаем в своём темпе.
-                audio_off = true;
-                clock.state.store(2, Ordering::Relaxed);
-                ring.clear();
-                shared.audio_lag.store(true, Ordering::Relaxed);
-                shared.audio.store(false, Ordering::Relaxed);
-            }
-            // Звука нет: часы идут за декодером, а не наоборот.
-            wall.set(pts);
-            played_base = clock.played.load(Ordering::Relaxed);
-        }
-        // Готовим кадр заранее — за 150 мс до показа.
-        if prepared.as_ref().is_none_or(|(p, _)| *p != pts)
-            && pts <= position(&wall, played_base, audio_off) + 0.15
-        {
-            prepared = video.as_ref().and_then(|s| frames.convert_front(s));
-        }
-        if pts > position(&wall, played_base, audio_off) + EARLY_S {
-            std::thread::sleep(TICK);
-            continue;
-        }
-        let Some(queued) = frames.pop() else { continue };
-        let vf = match prepared.take() {
-            Some((p, vf)) if (p - queued.pts_s).abs() < 1e-6 => Some(vf),
-            _ => None,
-        };
-        if let Some(vf) = vf
-            && let Ok(mut slot) = shared.frame.lock()
-        {
-            *slot = Some(vf);
-        }
-        shared
-            .position_ms
-            .store((queued.pts_s.max(0.0) * 1000.0) as u64, Ordering::Relaxed);
-    }
-    shared.playing.store(false, Ordering::Relaxed);
-}
+// ---------------------------------------------------------------- потоки
 
 /// Какой поток нужен: видео или звук.
 #[derive(Clone, Copy, PartialEq)]
@@ -1076,9 +798,22 @@ enum Kind {
     Audio,
 }
 
+/// Откуда берём пакеты: индекс сэмплов (MP4/MKV) или последовательное чтение.
+enum Source {
+    Stream,
+    Index { v: u64, a: u64 },
+}
+
+fn new_source(media: &mut Media) -> Source {
+    if media.demuxer.sample_index().is_some() {
+        Source::Index { v: 0, a: 0 }
+    } else {
+        Source::Stream
+    }
+}
+
 /// Следующий пакет нужного потока. В режиме индекса у видео и звука свои
-/// курсоры: заполнение очереди кадров не блокируется звуком и наоборот —
-/// поэтому кольцо звука не может остановить декод видео.
+/// курсоры, поэтому полная очередь кадров не останавливает звук и наоборот.
 fn next_for(media: &mut Media, source: &mut Source, kind: Kind) -> Option<Packet> {
     match source {
         Source::Stream => loop {
@@ -1107,50 +842,362 @@ fn next_for(media: &mut Media, source: &mut Source, kind: Kind) -> Option<Packet
     }
 }
 
-/// Перейти к позиции `target_s`: декодеры с нуля, курсоры на ключевой кадр.
-#[allow(clippy::too_many_arguments)]
-fn seek(
-    media: &mut Media,
-    target_s: f64,
-    source: &mut Source,
-    dec_v: &mut Option<Box<dyn Decoder>>,
-    dec_a: &mut Option<Box<dyn Decoder>>,
-    ring: &Ring,
-    clock: &AudioClock,
-    paused: bool,
+/// Декодировать видео и складывать кадры в очередь. Спит только когда очередь
+/// полна — то есть когда показ не успевает.
+fn video_loop(
+    mut media: Media,
+    frames: Arc<FrameQueue>,
+    control: Arc<Control>,
+    shared: Arc<Shared>,
+    mut decoder: Option<Box<dyn Decoder>>,
 ) {
-    ring.clear();
-    clock.started.store(false, Ordering::Relaxed);
-    *dec_v = media.video.as_ref().map(make_decoder).and_then(|r| r.ok());
-    *dec_a = if clock.playing() {
-        media.audio.as_ref().map(make_decoder).and_then(|r| r.ok())
-    } else {
-        None
+    let Some(stream) = media.video.clone() else {
+        frames.closed.store(true, Ordering::Relaxed);
+        return;
     };
+    let mut source = new_source(&mut media);
+    // С нуля, а не с текущего значения: seek, попрошенный до старта потока,
+    // иначе потерялся бы.
+    let mut epoch = 0u64;
+    let mut video_epoch = 0u64;
+    let mut done = false;
 
-    let mut vpos = 0u64;
-    let mut apos = 0u64;
-    if let Some(idx) = media.demuxer.sample_index() {
-        if let Some(v) = &media.video {
-            let tb = v.time_base.as_f64();
-            let target = (target_s / tb) as i64;
-            if let Some(s) = idx.sync_at_or_before(v.index, target) {
-                vpos = s;
+    while !control.stop.load(Ordering::Relaxed) {
+        let e = control.seek_epoch.load(Ordering::Relaxed);
+        let ve = control.video_epoch.load(Ordering::Relaxed);
+        let catch_up = ve != video_epoch;
+        if catch_up {
+            video_epoch = ve;
+        }
+        if e != epoch || catch_up {
+            if e != epoch {
+                epoch = e;
+            }
+            frames.clear();
+            done = false;
+            let target = if catch_up {
+                control.video_ms.load(Ordering::Relaxed) as f64 / 1000.0
+            } else {
+                control.seek_ms.load(Ordering::Relaxed) as f64 / 1000.0
+            };
+            decoder = match media.video.as_ref().map(make_decoder) {
+                Some(Ok(d)) => Some(d),
+                other => {
+                    if let Some(Err(e)) = other {
+                        shared.fail(format!("{e:#}"));
+                    }
+                    None
+                }
+            };
+            if let Some(idx) = media.demuxer.sample_index() {
+                let tb = stream.time_base.as_f64();
+                let pts = (target / tb) as i64;
+                let start = idx.sync_at_or_before(stream.index, pts).unwrap_or(0);
+                source = Source::Index {
+                    v: start,
+                    a: match &source {
+                        Source::Index { a, .. } => *a,
+                        Source::Stream => 0,
+                    },
+                };
+            } else {
+                source = Source::Stream;
+            }
+            continue;
+        }
+        if done || frames.len() >= frames.cap {
+            std::thread::sleep(TICK);
+            continue;
+        }
+        match next_for(&mut media, &mut source, Kind::Video) {
+            Some(pkt) => {
+                let Some(dec) = decoder.as_mut() else {
+                    done = true;
+                    continue;
+                };
+                if dec.send_packet(&pkt).is_err() {
+                    continue;
+                }
+                let tb = stream.time_base.as_f64();
+                while let Ok(Frame::Video(f)) = dec.receive_frame() {
+                    let pts = f.pts.map(|p| p as f64 * tb).unwrap_or(0.0);
+                    frames.push(pts, f);
+                }
+            }
+            None => done = true,
+        }
+    }
+    frames.closed.store(true, Ordering::Relaxed);
+}
+
+/// Декодировать звук и кормить звуковую карту. Свой демуксер: так звук не
+/// зависит от того, сколько времени занял декод кадра.
+fn audio_loop(
+    path: PathBuf,
+    shared: Arc<Shared>,
+    ring: Arc<Ring>,
+    clock: Arc<AudioClock>,
+    control: Arc<Control>,
+    volume: Arc<AtomicU32>,
+) {
+    let Some((device, rate, channels)) = open_output_any(&ring, &clock, &volume) else {
+        clock.state.store(2, Ordering::Relaxed);
+        return;
+    };
+    clock.rate.store(rate, Ordering::Relaxed);
+    clock.channels.store(channels as u32, Ordering::Relaxed);
+    clock.state.store(1, Ordering::Relaxed);
+
+    let mut media = match Media::open(&path) {
+        Ok(m) => m,
+        Err(e) => {
+            shared.fail(format!("звук: {e:#}"));
+            clock.state.store(2, Ordering::Relaxed);
+            return;
+        }
+    };
+    let Some(stream) = media.audio.clone() else {
+        clock.state.store(2, Ordering::Relaxed);
+        return;
+    };
+    let mut decoder = make_decoder(&stream).ok();
+    let mut source = new_source(&mut media);
+    let mut epoch = 0u64;
+    let mut resampler = Resampler::new(
+        stream.sample_rate.max(1),
+        stream.channels.max(1) as usize,
+        rate,
+        channels,
+    );
+    let mut buf: Vec<f32> = Vec::new();
+
+    while !control.stop.load(Ordering::Relaxed) && clock.state.load(Ordering::Relaxed) == 1 {
+        if clock.paused.load(Ordering::Relaxed) || !clock.started.load(Ordering::Relaxed) {
+            std::thread::sleep(TICK);
+            continue;
+        }
+        let e = control.seek_epoch.load(Ordering::Relaxed);
+        if e != epoch {
+            epoch = e;
+            ring.clear();
+            let target = control.seek_ms.load(Ordering::Relaxed) as f64 / 1000.0;
+            decoder = media.audio.as_ref().and_then(|s| make_decoder(s).ok());
+            if let Some(idx) = media.demuxer.sample_index() {
+                let tb = stream.time_base.as_f64();
+                let pts = (target / tb) as i64;
+                let start = idx.sync_at_or_before(stream.index, pts).unwrap_or(0);
+                source = Source::Index {
+                    v: match &source {
+                        Source::Index { v, .. } => *v,
+                        Source::Stream => 0,
+                    },
+                    a: start,
+                };
+            } else {
+                source = Source::Stream;
+            }
+            continue;
+        }
+        if ring.len() + 4096 >= RING_SAMPLES {
+            std::thread::sleep(TICK);
+            continue;
+        }
+        match next_for(&mut media, &mut source, Kind::Audio) {
+            Some(pkt) => {
+                let Some(dec) = decoder.as_mut() else { break };
+                if dec.send_packet(&pkt).is_err() {
+                    continue;
+                }
+                while let Ok(Frame::Audio(af)) = dec.receive_frame() {
+                    buf.clear();
+                    resampler.push(&audio_to_f32(&af), &mut buf);
+                    ring.push_all(&buf);
+                }
+            }
+            None => {
+                // Звук кончился: ждём стоп, seek или паузу.
+                std::thread::sleep(TICK);
             }
         }
-        if let Some(a) = &media.audio {
-            let tb = a.time_base.as_f64();
-            let target = (target_s / tb) as i64;
-            if let Some(s) = idx.sync_at_or_before(a.index, target) {
-                apos = s;
-            }
-        }
-        *source = Source::Index { v: vpos, a: apos };
-    } else {
-        *source = Source::Stream;
     }
 
-    let _ = paused;
+    clock.state.store(3, Ordering::Relaxed);
+    drop(device);
+}
+
+/// Показ: держит часы, отдаёт кадры в интерфейс, выбрасывает опоздавшие.
+fn present_loop(
+    frames: Arc<FrameQueue>,
+    shared: Arc<Shared>,
+    clock: Arc<AudioClock>,
+    ring: Arc<Ring>,
+    control: Arc<Control>,
+    video: Stream,
+    max_width: usize,
+) {
+    let mut wall = WallClock::new();
+    wall.play();
+    let mut played_base = clock.played.load(Ordering::Relaxed);
+    let mut started = false;
+    let mut paused_last = false;
+    let mut epoch = 0u64;
+    // Кадр, уже переведённый в RGBA и ждущий своего времени.
+    let mut ready: Option<(f64, VideoFrame)> = None;
+    let mut starving = 0u32;
+    // Догон стоит дорого (декод с ключевого кадра), поэтому не чаще раза в 1.5 с.
+    let mut last_catch_up: Option<Instant> = None;
+    // Если догонять пришлось дважды за 4 с, декодер не успевает за звуком:
+    // выключаем звук и играем медленно, но плавно (лучше, чем 2 кадра в секунду).
+    let mut catch_ups: VecDeque<Instant> = VecDeque::new();
+    let mut audio_off = false;
+
+    let position = |wall: &WallClock, played_base: u64| -> f64 {
+        // Звук — мастер, только пока он реально идёт: в кольце есть данные.
+        if clock.playing()
+            && clock.started.load(Ordering::Relaxed)
+            && ring.healthy(clock.rate())
+        {
+            let played = clock
+                .played
+                .load(Ordering::Relaxed)
+                .saturating_sub(played_base);
+            let audio_pos = wall.base_s + played as f64 / clock.rate() as f64;
+            if (audio_pos - wall.position()).abs() < 0.35 {
+                return audio_pos;
+            }
+        }
+        wall.position()
+    };
+
+    while !control.stop.load(Ordering::Relaxed) {
+        let paused = clock.paused.load(Ordering::Relaxed);
+        if paused != paused_last {
+            if paused {
+                let pos = position(&wall, played_base);
+                wall.pause();
+                wall.set(pos);
+            } else {
+                wall.play();
+                played_base = clock.played.load(Ordering::Relaxed);
+            }
+            paused_last = paused;
+        }
+        let e = control.seek_epoch.load(Ordering::Relaxed);
+        if e != epoch {
+            epoch = e;
+            wall.set(control.seek_ms.load(Ordering::Relaxed) as f64 / 1000.0);
+            played_base = clock.played.load(Ordering::Relaxed);
+            started = false;
+            ready = None;
+            if !paused {
+                wall.play();
+            }
+        }
+        if paused {
+            shared.playing.store(false, Ordering::Relaxed);
+            std::thread::sleep(TICK);
+            continue;
+        }
+        shared.playing.store(true, Ordering::Relaxed);
+
+        // Конверсия делается, как только кадр появился: не в момент показа.
+        if ready.is_none()
+            && let Some(q) = frames.pop()
+            && let Some(vf) = to_rgba(&q.frame, &video, max_width)
+        {
+            ready = Some((q.pts_s, vf));
+        }
+        let Some((pts, _)) = ready.as_ref() else {
+            if frames.closed.load(Ordering::Relaxed) {
+                shared.finished.store(true, Ordering::Relaxed);
+                break;
+            }
+            std::thread::sleep(TICK);
+            continue;
+        };
+        let pts = *pts;
+        if !started {
+            wall.set(pts.max(0.0));
+            played_base = clock.played.load(Ordering::Relaxed);
+            started = true;
+            // Видео готово — можно начинать звук: часы пойдут от первого кадра.
+            clock.started.store(true, Ordering::Relaxed);
+        }
+        let audio_master = !audio_off
+            && clock.playing()
+            && clock.started.load(Ordering::Relaxed)
+            && ring.healthy(clock.rate());
+        let now = position(&wall, played_base);
+        // Допуск на опоздание: без звука кадры не выбрасываются вовсе (часы
+        // идут за декодером), со звуком — до 0.5 с, чтобы не превращать видео
+        // в слайд-шоу из-за 2–3 кадров в секунду нехватки.
+        let late = if audio_master { 0.5 } else { LATE_S };
+        if pts + late < now {
+            if !audio_master {
+                // Звука нет (или он уже отключён): часы идут за декодером,
+                // видео играет медленнее, но плавно.
+                wall.set(pts);
+                played_base = clock.played.load(Ordering::Relaxed);
+            } else {
+                // Звук — мастер. Если декодер отстал сильно, просим его
+                // перескочить на текущую позицию: иначе выбрасывались бы все
+                // кадры подряд и видео стояло бы.
+                let may_catch_up =
+                    last_catch_up.is_none_or(|t| t.elapsed() > Duration::from_millis(1500));
+                if now - pts > 1.2 && may_catch_up {
+                    control
+                        .video_ms
+                        .store((now * 1000.0) as u64, Ordering::Relaxed);
+                    control.video_epoch.fetch_add(1, Ordering::Relaxed);
+                    last_catch_up = Some(Instant::now());
+                    catch_ups.push_back(Instant::now());
+                    while catch_ups
+                        .front()
+                        .is_some_and(|t| t.elapsed() > Duration::from_secs(4))
+                    {
+                        catch_ups.pop_front();
+                    }
+                    if catch_ups.len() >= 2 {
+                        // Декодер не тянет: звук выключаем, видео идёт как может.
+                        audio_off = true;
+                        clock.state.store(2, Ordering::Relaxed);
+                        ring.clear();
+                        shared.audio_lag.store(true, Ordering::Relaxed);
+                        shared.audio.store(false, Ordering::Relaxed);
+                        wall.set(pts);
+                        played_base = clock.played.load(Ordering::Relaxed);
+                        ready = Some((pts, ready.take().map(|(_, vf)| vf).unwrap()));
+                        continue;
+                    }
+                }
+                // Отстаём, но в пределах допуска: показываем как есть.
+            }
+        }
+        if pts > now + EARLY_S {
+            // Звук голодает? Считаем, но не чаще одного раза в 60 тиков.
+            if clock.playing() && clock.started.load(Ordering::Relaxed) {
+                if ring.healthy(clock.rate()) {
+                    starving = 0;
+                } else {
+                    starving += 1;
+                    if starving == 60 {
+                        shared.audio_lag.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+            std::thread::sleep(TICK);
+            continue;
+        }
+        if let Some((_, vf)) = ready.take()
+            && let Ok(mut slot) = shared.frame.lock()
+        {
+            *slot = Some(vf);
+        }
+        shared
+            .position_ms
+            .store((pts.max(0.0) * 1000.0) as u64, Ordering::Relaxed);
+    }
+    shared.playing.store(false, Ordering::Relaxed);
 }
 
 // ---------------------------------------------------------------- кадр
@@ -1161,7 +1208,7 @@ fn seek(
 /// одному потоку их не успеть за кадр. Целая арифметика в 8.8, без float.
 /// Форматы кроме 4:2:0 8/10 бит не обещаем: вызывающий код уступит внешнему
 /// плееру (ADR 0030).
-fn to_rgba(f: &RawFrame, s: &Stream) -> Option<VideoFrame> {
+fn to_rgba(f: &RawFrame, s: &Stream, max_width: usize) -> Option<VideoFrame> {
     use rayon::prelude::*;
 
     let (w, h) = (f.width as usize, f.height as usize);
@@ -1198,19 +1245,33 @@ fn to_rgba(f: &RawFrame, s: &Stream) -> Option<VideoFrame> {
     };
     let c = coefficients(s);
     let rot = rotation_deg(s);
-    let (dw, dh) = if rot == 90 || rot == 270 { (h, w) } else { (w, h) };
+    // Уменьшаем до ширины экрана: 2520 пикселей в строке никому не видны,
+    // а каждая лишняя тысяча — это мегабайты на кадр и лишняя работа.
+    let step = if max_width > 0 && w > max_width {
+        w.div_ceil(max_width)
+    } else {
+        1
+    };
+    let (sw, sh) = (w.div_ceil(step), h.div_ceil(step));
+    let (dw, dh) = if rot == 90 || rot == 270 {
+        (sh, sw)
+    } else {
+        (sw, sh)
+    };
     let cw = w / 2;
     let mut rgba = vec![0u8; dw * dh * 4];
 
     if rot == 0 {
-        rgba.par_chunks_mut(w * 4)
+        rgba.par_chunks_mut(sw * 4)
             .enumerate()
             .for_each(|(y, orow)| {
-                let yrow = &planes.y[y * planes.ys..y * planes.ys + w];
-                let urow = &planes.u[(y / 2) * planes.us..(y / 2) * planes.us + cw];
-                let vrow = &planes.v[(y / 2) * planes.vs..(y / 2) * planes.vs + cw];
+                let sy = y * step;
+                let yrow = &planes.y[sy * planes.ys..sy * planes.ys + w];
+                let urow = &planes.u[(sy / 2) * planes.us..(sy / 2) * planes.us + cw];
+                let vrow = &planes.v[(sy / 2) * planes.vs..(sy / 2) * planes.vs + cw];
                 for (x, px) in orow.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-                    let (r, g, b) = pixel(c, yrow[x], urow[x / 2], vrow[x / 2]);
+                    let sx = x * step;
+                    let (r, g, b) = pixel(c, yrow[sx], urow[sx / 2], vrow[sx / 2]);
                     px[0] = r;
                     px[1] = g;
                     px[2] = b;
@@ -1222,7 +1283,8 @@ fn to_rgba(f: &RawFrame, s: &Stream) -> Option<VideoFrame> {
             .enumerate()
             .for_each(|(dy, orow)| {
                 for (dx, px) in orow.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-                    let (sx, sy) = map_rot(rot, w, h, dx, dy);
+                    let (ux, uy) = map_rot(rot, sw, sh, dx, dy);
+                    let (sx, sy) = (ux * step, uy * step);
                     let (r, g, b) = pixel(
                         c,
                         planes.y[sy * planes.ys + sx],
@@ -1367,6 +1429,7 @@ fn map_rot(rot: u16, w: usize, h: usize, dx: usize, dy: usize) -> (usize, usize)
     }
 }
 
+
 // ---------------------------------------------------------------- CLI
 
 /// `photocat play ФАЙЛ [--frames N] [--seek S] [--no-audio] [--decode-only]`
@@ -1407,6 +1470,7 @@ pub fn cli(args: &[String]) -> Result<()> {
 
     let opts = Options {
         audio: !flag("--no-audio"),
+        max_width: num("--max-width", 1280.0) as usize,
     };
     let player = Player::open(&path, opts)?;
     let seek = num("--seek", 0.0);
@@ -1488,7 +1552,7 @@ fn decode_only(path: &Path, limit: usize, convert: bool, indexed: bool, dump: Op
             first.get_or_insert_with(|| t0.elapsed().as_secs_f64());
             if convert {
                 let tc = Instant::now();
-                if let Some(vf) = to_rgba(&f, &video) {
+                if let Some(vf) = to_rgba(&f, &video, 0) {
                     converted += 1;
                     if let Some(out) = dump.as_ref().filter(|_| converted == 1) {
                         write_ppm(out, &vf)?;
@@ -1518,6 +1582,7 @@ fn decode_only(path: &Path, limit: usize, convert: bool, indexed: bool, dump: Op
     );
     Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -1558,7 +1623,7 @@ mod tests {
     fn черный_кадр_остаётся_чёрным() {
         // Ограниченный диапазон: Y=16, Cb=Cr=128 — это чёрный.
         let f = yuv420(4, 2, 16, 128, 128);
-        let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited)).unwrap();
+        let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited), 0).unwrap();
         assert_eq!((out.width, out.height), (4, 2));
         for px in out.rgba.chunks(4) {
             assert!(px[0] <= 1 && px[1] <= 1 && px[2] <= 1, "не чёрный: {px:?}");
@@ -1568,7 +1633,7 @@ mod tests {
     #[test]
     fn белый_кадр_остаётся_белым() {
         let f = yuv420(4, 2, 235, 128, 128);
-        let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited)).unwrap();
+        let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited), 0).unwrap();
         for px in out.rgba.chunks(4) {
             assert!(px[0] >= 254 && px[1] >= 254 && px[2] >= 254, "не белый: {px:?}");
         }
@@ -1577,8 +1642,8 @@ mod tests {
     #[test]
     fn полный_диапазон_читается_по_другому() {
         let f = yuv420(2, 2, 16, 128, 128);
-        let limited = to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited)).unwrap();
-        let full = to_rgba(&f, &stream(2, 2, 1, ColorRange::Full)).unwrap();
+        let limited = to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited), 0).unwrap();
+        let full = to_rgba(&f, &stream(2, 2, 1, ColorRange::Full), 0).unwrap();
         assert!(limited.rgba[0] <= 1, "ограниченный Y=16 должен быть чёрным");
         assert!(full.rgba[0] >= 14, "в полном диапазоне Y=16 — тёмно-серый");
     }
@@ -1588,7 +1653,7 @@ mod tests {
         let f = yuv420(4, 2, 128, 128, 128);
         let mut s = stream(4, 2, 1, ColorRange::Limited);
         s.display_matrix = Some([0, 1 << 16, 0, -(1 << 16), 0, 0, 0, 0, 1 << 30]);
-        let out = to_rgba(&f, &s).unwrap();
+        let out = to_rgba(&f, &s, 0).unwrap();
         assert_eq!((out.width, out.height), (2, 4));
     }
 
@@ -1606,7 +1671,7 @@ mod tests {
     fn неизвестный_формат_кадра_не_обещаем() {
         let mut f = yuv420(2, 2, 128, 128, 128);
         f.format = PixelFormat::Yuv444p;
-        assert!(to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited)).is_none());
+        assert!(to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited), 0).is_none());
     }
 
     #[test]
