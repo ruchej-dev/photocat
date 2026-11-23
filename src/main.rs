@@ -452,6 +452,8 @@ fn main() -> Result<()> {
         "settings" => {
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let conn = db::open(&db_path)?;
+            // Первый запуск: язык интерфейса берётся из системы (M21, ADR 0040).
+            db::ensure_lang(&conn)?;
             let mut settings = db::load_settings(&conn);
             let mut changed = false;
             if let Some(dir) = flag_str(&args, "--models-dir") {

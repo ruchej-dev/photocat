@@ -761,7 +761,10 @@ Russian the second. Details and the screen-by-screen order — `plan/I18N.md`.
 **Do not.** Add a translation framework or a second source of UI strings; translate identifiers or
 DB enums; ship a half-translated screen and call it done; drop the Russian variant.
 
-**Done (M21.1).** Apache-2.0 license and notice; bilingual README/AGENTS; `src/i18n.rs` with the
+**Done (M21.1/M21.2).** Apache-2.0 license and notice; bilingual README/AGENTS; `src/i18n.rs` with the
 `Lang` type and the pair table; `settings.lang` + "Interface" settings tab + CLI flag; translated
 shell (55 labels); ADR 0040; `plan/I18N.md`; tests for translation, persistence and table sanity.
 `cargo test` — 182 passed, 6 `#[ignore]`; `clippy` clean; `check.sh` — 44/0.
+M21.2: language detected from the system locale on the first launch (`db::ensure_lang`, English when
+unknown); the grid is translated (title, counts, month headers, sort/layout, chips, empty state,
+`db::human_in` units, `i18n::count` plurals) — `cargo test` 185 passed.

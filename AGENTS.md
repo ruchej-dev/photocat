@@ -94,7 +94,10 @@ The one-dependency rule: **a module depends only on lower layers**. Checked by
   order, also rows only: the name is unique among siblings, `position` is dense, one snapshot is one
   row in an album. Deleting an album clears rows only.
 - UI language: `settings.lang` = `en` (main) or `ru` (second). The choice is made in
-  "Settings → Interface" and applied to the whole window.
+  "Settings → Interface" and applied to the whole window. On the first launch (no `lang` row) the
+  language comes from the system locale via `db::ensure_lang` (`LC_ALL`/`LC_MESSAGES` decide when
+  set, otherwise `LANGUAGE`/`LANG`), English if it cannot be detected; the result is stored, so the
+  owner's later choice always wins.
 - Previews: `~/.cache/photocat/thumbs/<2 chars>/<sha256[..24]>.jpg`, 320 px on the long side.
 - Faces: crops `~/.cache/photocat/faces/<2 chars>/<sha256[..24]>-<N>.jpg`, 112×112; vectors and
   groups are in the DB.
@@ -171,8 +174,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   `i18n::t(lang, "…")`; the English text is added to the `PAIRS` table in `src/i18n.rs`. A screen is
   considered translated only when every label on it goes through `t()`. Untranslated screens keep
   showing Russian — that is a visible state, not an error, and `plan/I18N.md` tracks the coverage.
-- UI identifiers are English, UI labels are translated; numbers with units always go through
-  `db::human()`.
+- UI identifiers are English, UI labels are translated; numbers with units in the GUI go through
+  `db::human_in(lang, n)` (`КиБ/МиБ` or `KiB/MiB`), CLI reports keep `db::human()`.
 - A new view or panel follows the `add-view` skill. A new screen follows the `ui-design` skill.
 - Do not add a dependency until `docs/DECISIONS.md` records why it is there and what we would do
   without it, and that its license fits Apache-2.0.

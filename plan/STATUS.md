@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21 (language policy, Apache-2.0 license, UI language switch) → next:M15.6 (multilingual model and calibration), then M15.7 (check on two folders); translations continue per `plan/I18N.md`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid) → next:M21.3 (file card and inspector), then M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1070,3 +1070,33 @@ rejects empty, duplicate and non-Cyrillic keys); `cargo clippy --all-targets` cl
 
 **Next.** `plan/I18N.md` lists the screens and documents in order; content panes (grid, card,
 calendar, faces, trash, integrity, viewer) are M21.2–M21.5.
+
+## M21.2 — the grid in English, language detected on the first launch (2026-11-24)
+
+Owner's answers: choose the right default (English, detected from the system), no release exists so an
+old DB may be re-indexed, history is not translated, CLI text follows the chosen language (M21.6), the
+copyright holder stays, push.
+
+**Language on the first launch.** `db::ensure_lang` looks at the locale — a set `LC_ALL` or
+`LC_MESSAGES` decides on its own (`C`/`POSIX`/unknown → English), otherwise `LANGUAGE` and `LANG` —
+stores the answer in `settings.lang`, and runs before the window opens (`app::run`) and before
+`photocat settings` prints.
+The owner's own choice in the dialog always wins because the row already exists.
+
+**Grid (M21.2).** View title and counts (`4 files`, `Album “X”`, `3 groups · 1.2 GiB wasted`,
+`5 people on 6 photos`), `Tiles`/`Sort`/`Flat`/`By months`, the sort menu labels with `now: …`,
+month headers (`May 2024`, `No date`), the chips row (`path/date:`/`tag:`/`by relevance:`/`found 4 of
+10`/`no filters`/`Select all (4)`/`Clear selection`/`2 selected · 40 B`), the empty state. Plural
+forms live in `i18n::count` (Russian 1/2–4/5+, English 1/N); month names in `i18n::month_name`; sizes
+in `db::human_in(lang, n)` (`КиБ`/`KiB`) while `db::human()` stays for CLI.
+
+**Checks.** `cargo test` — 185 passed, 6 `#[ignore]` (new: locale parsing, plural counter, month
+names; the grid tests now assert `May 2024`, `April 2024`, `No date`, `Select all (4)`, `2 selected ·
+40 B`); `clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations; `settings --lang en|ru`
+and the first-launch detection checked on fresh DBs: `LANG=ru_RU.UTF-8` → `ru`; `LC_ALL=C` → `en`;
+`LC_ALL=en_US.UTF-8 LANG=ru_RU.UTF-8` → `en`; `LANG=de_DE.UTF-8` and no locale at all → `en`.
+`timeout 6 gui --db /tmp/m21g.db` — exit code 124, no panic.
+
+**Next.** M21.3: file card and inspector (labels, date source, tags, OCR excerpt, decisions), then
+M21.4 (duplicates, calendar, faces, trash, integrity) and M21.6 (CLI reports take `lang` in the
+structs).

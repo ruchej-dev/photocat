@@ -644,6 +644,15 @@ pub fn verify_due(s: &Settings, now: chrono::DateTime<chrono::Utc>) -> VerifyDue
 }
 
 /// Одно значение из `settings` — для служебных ключей вроде версии словаря тегов.
+/// Язык интерфейса на первом запуске (M21, ADR 0040): если владелец его ещё не выбирал,
+/// берём локаль системы и сохраняем — дальше язык читается из БД, а не угадывается заново.
+pub fn ensure_lang(conn: &Connection) -> Result<()> {
+    if get_setting(conn, "lang").is_none() {
+        set_setting(conn, "lang", crate::i18n::Lang::from_env().code())?;
+    }
+    Ok(())
+}
+
 pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0))
         .ok()
@@ -1598,8 +1607,24 @@ pub fn search_ocr(conn: &Connection, q: &str, limit: usize) -> Result<Vec<(i64, 
 }
 
 pub fn human(bytes: i64) -> String {
+    human_with(bytes, ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"])
+}
+
+/// То же, что `human`, но единицы на языке интерфейса (M21): `21.2 ГиБ` / `21.2 GiB`.
+/// Формат числа один, меняются только подписи единиц, поэтому функция живёт здесь,
+/// рядом с `human`, а не в `i18n`.
+pub fn human_in(lang: crate::i18n::Lang, bytes: i64) -> String {
+    human_with(
+        bytes,
+        match lang {
+            crate::i18n::Lang::En => ["B", "KiB", "MiB", "GiB", "TiB"],
+            crate::i18n::Lang::Ru => ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"],
+        },
+    )
+}
+
+fn human_with(bytes: i64, units: [&str; 5]) -> String {
     let b = bytes as f64;
-    let units = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
     let mut v = b;
     let mut i = 0;
     while v >= 1024.0 && i < units.len() - 1 {

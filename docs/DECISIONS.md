@@ -880,12 +880,28 @@ travels from `Settings` into the drawing functions.
 with no benefit; the table is ~1 reference file, edited by hand. Revisit only if a third language
 with plural rules appears.
 
+**First launch.** There were no releases, so an old DB is not migrated: if the `lang` row is absent,
+`db::ensure_lang` reads the locale: a set `LC_ALL` or `LC_MESSAGES` decides on its own (so
+`LC_ALL=C` means English even when `LANG=ru_RU.UTF-8`), otherwise `LANGUAGE` (a preference list) and
+`LANG`; an unknown language or a non-language locale (`C`, `POSIX`, `de_DE`) means English. The
+result is stored once. The window and the CLI both call it before printing anything.
+
+**CLI reports** follow the same language, but without a process-wide variable: the report structs of
+`verify`, `organize`, `embed`, `faces`, `ocr` get a `lang` field filled from `settings.lang`, and
+their `Display` impls go through `t(lang, …)`. Until that lands (M21.6) CLI text stays Russian.
+
 **Consequences.** `t()` takes `&'static str`, so dynamic fragments are translated as parts, and
-screens with numbers are translated piecewise. Coverage is tracked in `plan/I18N.md`; an untranslated
+screens with numbers are translated piecewise. `db::human_in(lang, n)` carries the units
+(`КиБ/МиБ` or `KiB/MiB`); `db::human()` stays for CLI output. `i18n::count` owns the plural rules
+(Russian 1 / 2–4 / 5+, English 1 / N), so a counter is never glued together from a word and a number
+in the wrong order. Coverage is tracked in `plan/I18N.md`; an untranslated
 screen shows Russian — a visible state, not a bug. `db::human()` units (`КиБ/МиБ`) and month names
 are content, not labels: they move to the table when the content panes are translated.
 
 **Checks (M21).** `cargo test` — the English shell test renders the window headlessly and asserts
 `All files`, `Settings`, `LIBRARY`, `FILTER`; the persistence test reopens the DB and finds
-`settings.lang = ru`; the i18n table test rejects empty, duplicate or non-Cyrillic keys.
+`settings.lang = ru`; the i18n table test rejects empty, duplicate or non-Cyrillic keys; the locale
+test parses `ru_RU.UTF-8`, `de:ru`, `C`, `POSIX` and an empty tag; the counter test pins `1 файл`,
+`2 файла`, `11 файлов`, `1 file`; the grid tests assert `May 2024`, `No date`, `Select all (4)`,
+`2 selected · 40 B`; the month test checks both language tables and out-of-range numbers.
 `clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.

@@ -418,14 +418,14 @@ const GRID_SORTS: [(db::GridSort, &str); 4] = [
     (db::GridSort::SizeDesc, "Размер: крупные сверху"),
 ];
 
-fn sort_label(sort: db::GridSort) -> &'static str {
+fn sort_label(sort: db::GridSort, lang: i18n::Lang) -> &'static str {
     match sort {
-        db::GridSort::Album => "Порядок альбома",
+        db::GridSort::Album => t(lang, "Порядок альбома"),
         _ => GRID_SORTS
             .iter()
             .find(|(value, _)| *value == sort)
-            .map(|(_, label)| *label)
-            .unwrap_or("Дата: новые сверху"),
+            .map(|(_, label)| t(lang, label))
+            .unwrap_or(t(lang, "Дата: новые сверху")),
     }
 }
 
@@ -716,24 +716,32 @@ fn shorten(text: &str, max: usize) -> String {
 /// Строка чипов над сеткой: видно, что включено, «×» снимает именно это, справа — итог.
 /// Строка живёт всегда (при пустом фильтре — «фильтров нет»), поэтому заголовок вида не прыгает.
 fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) -> FilterClear {
+    let lang = chips.lang;
     let mut clear = FilterClear::default();
     let mut any = false;
     ui.horizontal(|ui| {
         if !chips.query.is_empty() {
             any = true;
-            if filter_chip(ui, &format!("путь/дата: {}", shorten(&chips.query, 24))) {
+            let text = format!("{} {}", t(lang, "путь/дата:"), shorten(&chips.query, 24));
+            if filter_chip(ui, &text) {
                 clear.query = true;
             }
         }
         if let Some(tag) = &chips.tag {
             any = true;
-            if filter_chip(ui, &format!("тег: {}", shorten(tag, 24))) {
+            let text = format!("{} {}", t(lang, "тег:"), shorten(tag, 24));
+            if filter_chip(ui, &text) {
                 clear.tag = true;
             }
         }
         if let Some(album) = &chips.album {
             any = true;
-            if filter_chip(ui, &format!("Альбом «{}»", shorten(album, 22))) {
+            let name = shorten(album, 22);
+            let text = match lang {
+                i18n::Lang::En => format!("Album “{name}”"),
+                i18n::Lang::Ru => format!("Альбом «{name}»"),
+            };
+            if filter_chip(ui, &text) {
                 clear.album = true;
             }
         }
@@ -745,16 +753,16 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
         }
         if let Some(n) = chips.hits {
             any = true;
-            if filter_chip(ui, &format!("по релевантности: {n} файлов")) {
+            if filter_chip(ui, &i18n::relevance(lang, n)) {
                 clear.hits = true;
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(if any {
-                    format!("найдено {} из {}", found.0, found.1)
+                    i18n::found(lang, found.0, found.1)
                 } else {
-                    "фильтров нет".to_string()
+                    t(lang, "фильтров нет").to_string()
                 })
                 .size(11.0)
                 .color(DIM),
@@ -765,10 +773,15 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                 if chips.picked > 0
                     && ui
                         .add(
-                            egui::Button::new(egui::RichText::new("Снять выделение").size(11.0))
-                                .small(),
+                            egui::Button::new(
+                                egui::RichText::new(t(lang, "Снять выделение")).size(11.0),
+                            )
+                            .small(),
                         )
-                        .on_hover_text("выделение в этой сетке снимется; Esc делает то же")
+                        .on_hover_text(t(
+                            lang,
+                            "выделение в этой сетке снимется; Esc делает то же",
+                        ))
                         .clicked()
                 {
                     clear.clear_pick = true;
@@ -776,25 +789,25 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new(format!("Выбрать все ({})", found.0)).size(11.0),
+                            egui::RichText::new(i18n::select_all(lang, found.0)).size(11.0),
                         )
                         .small(),
                     )
-                    .on_hover_text("отметить всё, что видно сейчас; Ctrl+A делает то же")
+                    .on_hover_text(t(
+                        lang,
+                        "отметить всё, что видно сейчас; Ctrl+A делает то же",
+                    ))
                     .clicked()
                 {
                     clear.pick_all = true;
                 }
                 if chips.picked > 0 {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "выбрано {} · {}",
-                            chips.picked,
-                            db::human(chips.picked_bytes)
-                        ))
-                        .size(11.0)
-                        .color(ACCENT),
-                    );
+                    let size = db::human_in(lang, chips.picked_bytes);
+                    let text = match lang {
+                        i18n::Lang::En => format!("{} selected · {size}", chips.picked),
+                        i18n::Lang::Ru => format!("выбрано {} · {size}", chips.picked),
+                    };
+                    ui.label(egui::RichText::new(text).size(11.0).color(ACCENT));
                 }
             }
         });
@@ -804,30 +817,32 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
 
 /// Заголовок группы сетки: месяц 14 px, число файлов и объём 11 px (как в PhotoPrism).
 /// Месяц без даты — отдельная последняя группа, а не мусорный ключ в начале списка.
-fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64) {
+fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i18n::Lang) {
     let title = if key == "без даты" {
-        "Без даты".to_string()
+        t(lang, "Без даты").to_string()
     } else {
         match (key.get(0..4), key.get(5..7)) {
             (Some(y), Some(m)) => match (y.parse::<i32>(), m.parse::<usize>()) {
                 (Ok(y), Ok(m)) if (1..=12).contains(&m) => {
-                    format!("{} {y}", MONTHS[m - 1])
+                    format!("{} {y}", i18n::month_name(lang, m))
                 }
                 _ => key.to_string(),
             },
             _ => key.to_string(),
         }
     };
+    let summary = match lang {
+        // Английский ставит число перед словом: «· 5 files · 1.2 MiB».
+        i18n::Lang::En => format!(
+            "· {} · {}",
+            i18n::count(lang, files, ["файл", "файла", "файлов"], "file", "files"),
+            db::human_in(lang, bytes)
+        ),
+        i18n::Lang::Ru => format!("· файлов {files} · {}", db::human_in(lang, bytes)),
+    };
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(title).size(14.0));
-        ui.label(
-            egui::RichText::new(format!(
-                "· файлов {files} · {}",
-                db::human(bytes)
-            ))
-            .size(11.0)
-            .color(DIM),
-        );
+        ui.label(egui::RichText::new(summary).size(11.0).color(DIM));
     });
     ui.add_space(4.0);
 }
@@ -8050,6 +8065,8 @@ impl eframe::App for App {
         let mut view_save = false;
         let mut clear_chips = FilterClear::default();
         let view = self.view;
+        let lang = self.settings.lang;
+        let files_n = |n: usize| i18n::count(lang, n, ["файл", "файла", "файлов"], "file", "files");
         let mut cal_year = self.cal_year;
         let mut cal_month = self.cal_month;
         let mut cal_day = self.cal_day.clone();
@@ -8058,11 +8075,18 @@ impl eframe::App for App {
 
         let (title, count) = match view {
             View::Grid => (
-                "Все файлы".to_string(),
+                t(lang, "Все файлы").to_string(),
                 if visible.len() == items.len() {
-                    format!("файлов {}", items.len())
+                    files_n(items.len())
                 } else {
-                    format!("файлов {} из {}", visible.len(), items.len())
+                    match lang {
+                        i18n::Lang::En => {
+                            format!("{} of {} files", visible.len(), items.len())
+                        }
+                        i18n::Lang::Ru => {
+                            format!("файлов {} из {}", visible.len(), items.len())
+                        }
+                    }
                 },
             ),
             View::Albums => {
@@ -8070,58 +8094,106 @@ impl eframe::App for App {
                     .album_selected
                     .and_then(|id| albums.iter().find(|n| n.id == id));
                 match node {
-                    Some(node) => (
-                        format!("Альбом «{}»", node.name),
-                        format!(
-                            "файлов {} · подальбомов {} · {}{}",
-                            node.files,
-                            node.subalbums,
-                            db::human(node.bytes),
-                            if node.trashed > 0 {
-                                format!(" · в корзине {}", node.trashed)
-                            } else {
-                                String::new()
+                    Some(node) => {
+                        let size = db::human_in(lang, node.bytes);
+                        let title = match lang {
+                            i18n::Lang::En => format!("Album “{}”", node.name),
+                            i18n::Lang::Ru => format!("Альбом «{}»", node.name),
+                        };
+                        let count = match lang {
+                            i18n::Lang::En => {
+                                let mut s = format!(
+                                    "{} · {} · {size}",
+                                    files_n(node.files as usize),
+                                    i18n::count(
+                                        lang,
+                                        node.subalbums as usize,
+                                        ["подальбом", "подальбома", "подальбомов"],
+                                        "sub-album",
+                                        "sub-albums"
+                                    ),
+                                );
+                                if node.trashed > 0 {
+                                    s.push_str(&format!(" · {} in trash", node.trashed));
+                                }
+                                s
                             }
-                        ),
-                    ),
+                            i18n::Lang::Ru => format!(
+                                "файлов {} · подальбомов {} · {}{}",
+                                node.files,
+                                node.subalbums,
+                                size,
+                                if node.trashed > 0 {
+                                    format!(" · в корзине {}", node.trashed)
+                                } else {
+                                    String::new()
+                                }
+                            ),
+                        };
+                        (title, count)
+                    }
                     None => (
-                        "Альбомы".to_string(),
-                        format!("альбомов {}", albums.len()),
+                        t(lang, "Альбомы").to_string(),
+                        i18n::count(lang, albums.len(), ["альбом", "альбома", "альбомов"], "album", "albums"),
                     ),
                 }
             }
             View::Dupes => {
                 let waste: i64 = groups.iter().map(|g| g.waste).sum();
                 (
-                    "Дубли и серии".to_string(),
-                    format!("групп {}, зря {}", groups.len(), db::human(waste)),
+                    t(lang, "Дубли и серии").to_string(),
+                    match lang {
+                        i18n::Lang::En => format!(
+                            "{} · {} wasted",
+                            i18n::count(lang, groups.len(), ["группа", "группы", "групп"], "group", "groups"),
+                            db::human_in(lang, waste)
+                        ),
+                        i18n::Lang::Ru => {
+                            format!("групп {}, зря {}", groups.len(), db::human(waste))
+                        }
+                    },
                 )
             }
             View::Calendar => (
-                "Календарь".to_string(),
-                format!(
-                    "{} {}",
-                    MONTHS[(cal_month.clamp(1, 12) - 1) as usize],
-                    cal_year
-                ),
+                t(lang, "Календарь").to_string(),
+                format!("{} {cal_year}", i18n::month_name(lang, cal_month as usize)),
             ),
             View::Faces => (
-                "Лица".to_string(),
-                format!("лиц {} на {} снимках", face_total, face_photos),
+                t(lang, "Лица").to_string(),
+                match lang {
+                    i18n::Lang::En => format!(
+                        "{} on {}",
+                        i18n::count(lang, face_total as usize, ["лицо", "лица", "лиц"], "person", "people"),
+                        i18n::count(lang, face_photos as usize, ["снимок", "снимка", "снимков"], "photo", "photos")
+                    ),
+                    i18n::Lang::Ru => {
+                        format!("лиц {} на {} снимках", face_total, face_photos)
+                    }
+                },
             ),
             View::Trash => (
-                "Корзина".to_string(),
-                format!(
-                    "файлов {}, {}",
-                    self.trash_items.len(),
-                    db::human(self.trash_items.iter().map(|r| r.size).sum())
-                ),
+                t(lang, "Корзина").to_string(),
+                match lang {
+                    i18n::Lang::En => format!(
+                        "{} · {}",
+                        files_n(self.trash_items.len()),
+                        db::human_in(
+                            lang,
+                            self.trash_items.iter().map(|r| r.size).sum()
+                        )
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "файлов {}, {}",
+                        self.trash_items.len(),
+                        db::human(self.trash_items.iter().map(|r| r.size).sum())
+                    ),
+                },
             ),
             // Экран «Целостность» рисуется раньше сетки (см. `ui`), ветка нужна
             // только для полноты разбора перечисления.
             View::Integrity => (
-                "Целостность".to_string(),
-                "сверка копий и слепок sha256".to_string(),
+                t(lang, "Целостность").to_string(),
+                t(lang, "сверка копий и слепок sha256").to_string(),
             ),
         };
 
@@ -8141,11 +8213,15 @@ impl eframe::App for App {
                         tile_save = true;
                     }
                     ui.label(
-                        egui::RichText::new(format!("Плитки {:.0}", self.tile_size))
-                            .size(11.0)
-                            .color(DIM),
+                        egui::RichText::new(format!(
+                            "{} {:.0}",
+                            t(lang, "Плитки"),
+                            self.tile_size
+                        ))
+                        .size(11.0)
+                        .color(DIM),
                     )
-                    .on_hover_text("размер плиток, 100–260 px");
+                    .on_hover_text(t(lang, "размер плиток, 100–260 px"));
                     // Порядок доступен в сетке и внутри альбома (M19), но не в дереве.
                     let album_scope_now =
                         view == View::Albums && self.album_selected.is_some();
@@ -8155,21 +8231,22 @@ impl eframe::App for App {
                         let searching = self.semantic_hits.is_some();
                         let mut sort = self.settings.grid_sort;
                         let sort_resp = ui.add_enabled_ui(!searching, |ui| {
-                            ui.menu_button("Сортировка", |ui| {
+                            ui.menu_button(t(lang, "Сортировка"), |ui| {
                                 if album_scope_now {
                                     ui.selectable_value(
                                         &mut sort,
                                         db::GridSort::Album,
-                                        "Порядок альбома",
+                                        t(lang, "Порядок альбома"),
                                     );
                                 }
                                 for (value, label) in GRID_SORTS {
-                                    ui.selectable_value(&mut sort, value, label);
+                                    ui.selectable_value(&mut sort, value, t(lang, label));
                                 }
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "сейчас: {}",
-                                        sort_label(sort)
+                                        "{} {}",
+                                        t(lang, "сейчас:"),
+                                        sort_label(sort, lang)
                                     ))
                                     .size(11.0)
                                     .color(DIM),
@@ -8179,8 +8256,8 @@ impl eframe::App for App {
                         sort_resp
                             .inner
                             .response
-                            .on_disabled_hover_text("порядок задаёт поиск")
-                            .on_hover_text("порядок плиток: дата, имя или размер");
+                            .on_disabled_hover_text(t(lang, "порядок задаёт поиск"))
+                            .on_hover_text(t(lang, "порядок плиток: дата, имя или размер"));
                         if sort != self.settings.grid_sort {
                             self.settings.grid_sort = sort;
                             view_save = true;
@@ -8188,8 +8265,8 @@ impl eframe::App for App {
                         if view == View::Grid {
                             let mut layout = self.settings.grid_layout;
                             for (value, label) in [
-                                (db::GridLayout::Flat, "Подряд"),
-                                (db::GridLayout::Months, "По месяцам"),
+                                (db::GridLayout::Flat, t(lang, "Подряд")),
+                                (db::GridLayout::Months, t(lang, "По месяцам")),
                             ] {
                                 let r = ui.add_enabled_ui(!searching, |ui| {
                                     ui.selectable_label(layout == value, label)
@@ -8197,7 +8274,7 @@ impl eframe::App for App {
                                 if r.inner.clicked() {
                                     layout = value;
                                 }
-                                r.inner.on_disabled_hover_text("порядок задаёт поиск");
+                                r.inner.on_disabled_hover_text(t(lang, "порядок задаёт поиск"));
                             }
                             if layout != self.settings.grid_layout {
                                 self.settings.grid_layout = layout;
@@ -8217,10 +8294,11 @@ impl eframe::App for App {
             View::Grid => {
                 if items.is_empty() {
                     ui.add_space(12.0);
-                    ui.label(
+                    ui.label(t(
+                        lang,
                         "Добавьте каталог кнопкой «Каталоги» или введите путь вверху, затем \
                          нажмите «Индексировать».",
-                    );
+                    ));
                     return;
                 }
                 if visible.is_empty() {
@@ -8231,7 +8309,7 @@ impl eframe::App for App {
                              опустите ползунок порога в левой панели",
                             self.settings.tag_show_pct
                         )),
-                        None => ui.label("ничего не найдено"),
+                        None => ui.label(t(lang, "ничего не найдено")),
                     };
                     if ui.button("Сбросить фильтр").clicked() {
                         reset = true;
@@ -8270,7 +8348,7 @@ impl eframe::App for App {
                         let ascend = self.settings.grid_sort == db::GridSort::DateAsc;
                         for (key, ids) in month_groups(&ordered, &items, ascend) {
                             let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
-                            month_header(ui, &key, ids.len(), bytes);
+                            month_header(ui, &key, ids.len(), bytes, lang);
                             ui.scope(|ui| {
                                 ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
                                 ui.horizontal_wrapped(|ui| {
@@ -10087,9 +10165,9 @@ mod tests {
                 .position(|t| t == needle)
                 .unwrap_or_else(|| panic!("нет заголовка «{needle}»: {texts:?}"))
         };
-        let (may, april_pos, no_date) = (pos("май 2024"), pos("апрель 2024"), pos("Без даты"));
+        let (may, april_pos, no_date) = (pos("May 2024"), pos("April 2024"), pos("No date"));
         assert!(may < april_pos, "май свежее апреля: {texts:?}");
-        assert!(april_pos < no_date, "«Без даты» — последняя группа: {texts:?}");
+        assert!(april_pos < no_date, "«No date» — последняя группа: {texts:?}");
         // Внутри месяца подписи плиток идут от свежих к старым.
         let may_new = texts.iter().position(|t| t == "2024-05-09 10:00").unwrap();
         let may_old = texts.iter().position(|t| t == "2024-05-01 08:00").unwrap();
@@ -10306,11 +10384,11 @@ mod tests {
         app.selected = Some(2);
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
-            texts.iter().any(|t| t.starts_with("выбрано 2 · ")),
+            texts.iter().any(|t| t.starts_with("2 selected · ")),
             "в строке чипов виден счёт и объём: {texts:?}"
         );
-        assert!(texts.iter().any(|t| t == "Выбрать все (4)"), "{texts:?}");
-        assert!(texts.iter().any(|t| t == "Снять выделение"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Select all (4)"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Clear selection"), "{texts:?}");
     }
 
     #[test]
