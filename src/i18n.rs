@@ -206,6 +206,22 @@ pub fn select_all(lang: Lang, n: usize) -> String {
     format!("{} ({n})", t(lang, "Выбрать все"))
 }
 
+/// «3 из 12» / «3 of 12» — счётчик полного экрана.
+pub fn position(lang: Lang, index: usize, total: usize) -> String {
+    match lang {
+        Lang::En => format!("{index} of {total}"),
+        Lang::Ru => format!("{index} из {total}"),
+    }
+}
+
+/// «3 с» / «3 s» — интервал слайд-шоу.
+pub fn seconds(lang: Lang, n: u64) -> String {
+    match lang {
+        Lang::En => format!("{n} s"),
+        Lang::Ru => format!("{n} с"),
+    }
+}
+
 /// Все переведённые строки: русский оригинал → английский текст.
 ///
 /// Ключ — ровно та строка, что стоит в коде. Одна и та же русская строка переводится
@@ -955,6 +971,107 @@ const PAIRS: &[(&str, &str)] = &[
         "веса модели придётся положить вручную (scripts/fetch-model.sh)",
         "the model weights will have to be placed by hand (scripts/fetch-model.sh)",
     ),
+
+    // --- полный экран, плеер, выбор каталога, очистка кэша (M21.5) ----------------
+    ("предыдущий файл — ←", "previous file — ←"),
+    ("следующий файл — →", "next file — →"),
+    ("ffplay отдельным окном", "ffplay in its own window"),
+    ("пауза и продолжение — пробел", "pause and resume — space"),
+    ("смотреть видео — пробел", "play the video — space"),
+    ("слайд-шоу — пробел", "slideshow — space"),
+    ("нет устройства", "no device"),
+    ("Стоп видео", "Stop the video"),
+    ("остановить и вернуться к кадру", "stop and go back to the poster frame"),
+    ("Стоп слайд-шоу", "Stop the slideshow"),
+    ("Слайд-шоу", "Slideshow"),
+    (
+        "пробел — пуск/стоп; листает текущий список",
+        "space — start/stop; walks the current list",
+    ),
+    ("интервал:", "interval:"),
+    ("уменьшить", "zoom out"),
+    ("увеличить", "zoom in"),
+    ("Вписать", "Fit"),
+    ("масштаб", "zoom"),
+    ("В системном просмотрщике", "In the system viewer"),
+    ("видео · нажмите ▶, чтобы смотреть", "video · press ▶ to play"),
+    ("загрузка следующего кадра…", "loading the next frame…"),
+    ("полный кадр загружается…", "the full frame is loading…"),
+    (
+        "Текст не распознан. Кнопка «Распознать текст» — в карточке файла.",
+        "No text recognized. The “Recognize text” button is in the file card.",
+    ),
+    ("файл не найден в индексе — просмотр закрыт", "file not found in the index — viewer closed"),
+    ("открываю системным проигрывателем", "opening in the system player"),
+    ("открываю системным плеером", "opening in the system player"),
+    ("не открыть", "cannot open"),
+    ("видео не открыть", "cannot open the video"),
+    ("кадр не декодирован", "the frame was not decoded"),
+    ("видео", "video"),
+    (" (со звуком)", " (with sound)"),
+    (" (без звука)", " (without sound)"),
+    ("встроенный плеер не взялся", "the built-in player could not open it"),
+    ("открываю ffplay", "opening ffplay"),
+    ("ffplay не запустился", "ffplay did not start"),
+    ("системный проигрыватель", "the system player"),
+    ("ffplay: видео закрыто", "ffplay: the video is closed"),
+    (
+        "декодер не успевает за звуком: звук выключен, видео идёт медленнее",
+        "the decoder cannot keep up with the sound: sound is off, the video runs slower",
+    ),
+    ("видео остановилось", "the video stopped"),
+    ("видео доиграло", "the video has finished"),
+    // Каталоги архива и выбор папки.
+    ("Каталоги архива", "Archive folders"),
+    (
+        "Индексировать можно несколько каталогов. «Добавить каталог…» сразу предлагает \
+         индексацию; «Убрать из индекса» удаляет только строки БД — файлы на диске целы.",
+        "You can index several folders. “Add a folder…” offers indexing straight away; \
+         “Remove from the index” deletes DB rows only — the files on disk are untouched.",
+    ),
+    ("Каталогов пока нет — добавьте кнопкой ниже.", "No folders yet — add one with the button below."),
+    ("Убрать из индекса", "Remove from the index"),
+    ("файлы на диске не удаляются", "files on disk are not deleted"),
+    ("Добавить каталог…", "Add a folder…"),
+    ("Добавить каталог", "Add a folder"),
+    ("Индексировать все", "Index all"),
+    ("Вверх", "Up"),
+    ("Добавить и индексировать", "Add and index"),
+    ("Добавить без индексации", "Add without indexing"),
+    ("Подкаталогов нет.", "No subfolders."),
+    ("каталог добавлен", "folder added"),
+    ("каталог убран из индекса", "folder removed from the index"),
+    ("каталог не убран из индекса", "the folder was not removed from the index"),
+    ("удалено строк", "rows deleted"),
+    ("файлы на диске целы", "the files on disk are intact"),
+    // Очистка кэша и индекса: подтверждение.
+    ("Очистить превью?", "Clear the previews?"),
+    (
+        "Будут удалены только файлы <кэш>/photocat/thumbs. Сетка покажет «нет превью», \
+         пока каталог не проиндексируют заново. Оригиналы не меняются.",
+        "Only the files in <cache>/photocat/thumbs are deleted. The grid shows “no preview” \
+         until the folder is indexed again. The originals are unchanged.",
+    ),
+    ("Очистить превью", "Clear the previews"),
+    ("Очистить кропы лиц?", "Clear the face crops?"),
+    (
+        "Будут удалены кропы и строки лиц в БД; группы исчезнут. «Найти лица» заново \
+         создаст их. Фотографии и оригиналы не меняются.",
+        "The crops and the face rows in the DB are deleted; the groups disappear. \
+         “Find faces” creates them again. The photos and originals are unchanged.",
+    ),
+    ("Очистить лица", "Clear the faces"),
+    ("Сбросить индекс?", "Reset the index?"),
+    (
+        "Будут удалены строки БД: файлы, теги, текст, векторы и лица. Настройки, модели \
+         и все файлы на диске остаются. После этого нужна индексация заново.",
+        "The DB rows are deleted: files, tags, text, vectors and faces. The settings, the models \
+         and every file on disk stay. Indexing is needed again afterwards.",
+    ),
+    ("Сбросить индекс", "Reset the index"),
+    ("индекс сброшен; проиндексируйте каталог", "index reset; index a folder now"),
+    ("кэш очищен", "cache cleared"),
+    ("очистка не удалась", "cleaning failed"),
 ];
 
 #[cfg(test)]
@@ -993,6 +1110,14 @@ mod tests {
         assert_eq!(Lang::from_tag(""), None);
         // Неизвестная локаль не превращается в панику: всегда есть основной язык.
         assert_eq!(Lang::default(), Lang::En);
+    }
+
+    #[test]
+    fn счётчик_позиции_и_интервал_на_двух_языках() {
+        assert_eq!(position(Lang::En, 3, 12), "3 of 12");
+        assert_eq!(position(Lang::Ru, 3, 12), "3 из 12");
+        assert_eq!(seconds(Lang::En, 5), "5 s");
+        assert_eq!(seconds(Lang::Ru, 5), "5 с");
     }
 
     #[test]

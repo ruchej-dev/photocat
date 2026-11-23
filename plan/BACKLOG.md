@@ -792,3 +792,10 @@ M21.4f: the left panel (model block with the tag filter, the text block, the sum
 settings panes are translated; `tools::Tool::purpose`/`without`/`Tools::source` are wrapped in `t()`
 by the GUI and stay Russian for `doctor` until M21.6 — `cargo test` 194 tests include a headless
 English left-panel frame and six settings-pane frames; `check.sh` 44/0.
+M21.5: the full screen viewer and the built-in player controls are translated (header, playback and
+slideshow rows, zoom row, the frame overlays and every player status), together with the archive
+folders dialog, the folder picker and the storage confirmation — the last Russian surfaces inside the
+window; `i18n::position`/`i18n::seconds` build the counter and the interval per language,
+`draw_viewer_image`/`paint_play_overlay` take `lang` — `cargo test` 198 tests include a headless
+English viewer frame (image and video), the two folder dialogs and all three storage confirmations;
+`check.sh` 44/0.

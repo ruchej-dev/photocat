@@ -2649,6 +2649,7 @@ impl App {
         if !self.roots_open {
             return;
         }
+        let lang = self.settings.lang;
         let mut close = false;
         let mut add = false;
         let mut index_all = false;
@@ -2656,18 +2657,19 @@ impl App {
         let roots = self.roots.clone();
         let resp = egui::Modal::new(egui::Id::unique("photocat-roots")).show(ctx, |ui| {
             ui.set_min_width(520.0);
-            ui.label(egui::RichText::new("Каталоги архива").size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Каталоги архива")).size(16.0));
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
+                    lang,
                     "Индексировать можно несколько каталогов. «Добавить каталог…» сразу предлагает \
                      индексацию; «Убрать из индекса» удаляет только строки БД — файлы на диске целы.",
-                )
+                ))
                 .size(11.0)
                 .color(DIM),
             );
             ui.add_space(8.0);
             if roots.is_empty() {
-                ui.label("Каталогов пока нет — добавьте кнопкой ниже.");
+                ui.label(t(lang, "Каталогов пока нет — добавьте кнопкой ниже."));
             }
             egui::ScrollArea::vertical()
                 .id_salt("roots-list")
@@ -2680,8 +2682,8 @@ impl App {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     if ui
-                                        .small_button("Убрать из индекса")
-                                        .on_hover_text("файлы на диске не удаляются")
+                                        .small_button(t(lang, "Убрать из индекса"))
+                                        .on_hover_text(t(lang, "файлы на диске не удаляются"))
                                         .clicked()
                                     {
                                         remove = Some(root.clone());
@@ -2693,16 +2695,16 @@ impl App {
                 });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Добавить каталог…").clicked() {
+                if ui.button(t(lang, "Добавить каталог…")).clicked() {
                     add = true;
                 }
                 if ui
-                    .add_enabled(!roots.is_empty(), primary_button("Индексировать все"))
+                    .add_enabled(!roots.is_empty(), primary_button(t(lang, "Индексировать все")))
                     .clicked()
                 {
                     index_all = true;
                 }
-                if ui.button("Закрыть").clicked() {
+                if ui.button(t(lang, "Закрыть")).clicked() {
                     close = true;
                 }
             });
@@ -2729,10 +2731,17 @@ impl App {
                     self.settings.roots = self.roots.clone();
                     self.save_settings();
                     self.reload();
-                    self.status =
-                        format!("каталог убран из индекса: удалено строк {n}; файлы на диске целы");
+                    self.status = format!(
+                        "{}: {} {n}; {}",
+                        t(lang, "каталог убран из индекса"),
+                        t(lang, "удалено строк"),
+                        t(lang, "файлы на диске целы")
+                    );
                 }
-                Err(e) => self.status = format!("каталог не убран из индекса: {e}"),
+                Err(e) => {
+                    self.status =
+                        format!("{}: {e}", t(lang, "каталог не убран из индекса"))
+                }
             }
         }
     }
@@ -2751,7 +2760,11 @@ impl App {
                 self.picker_entries.sort();
             }
             Err(e) => {
-                self.picker_error = format!("не прочитать {}: {e}", self.picker_current.display())
+                self.picker_error = format!(
+                    "{} {}: {e}",
+                    t(self.settings.lang, "не прочитать"),
+                    self.picker_current.display()
+                )
             }
         }
     }
@@ -2761,6 +2774,7 @@ impl App {
         if !self.picker_open {
             return;
         }
+        let lang = self.settings.lang;
         let mut close = false;
         let mut nav: Option<PathBuf> = None;
         let mut add = false;
@@ -2770,7 +2784,7 @@ impl App {
         let error = self.picker_error.clone();
         let resp = egui::Modal::new(egui::Id::unique("photocat-picker")).show(ctx, |ui| {
             ui.set_min_width(520.0);
-            ui.label(egui::RichText::new("Добавить каталог").size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Добавить каталог")).size(16.0));
             ui.label(
                 egui::RichText::new(current.display().to_string())
                     .size(11.0)
@@ -2781,21 +2795,21 @@ impl App {
             }
             ui.horizontal(|ui| {
                 if let Some(parent) = current.parent()
-                    && ui.button("Вверх").clicked()
+                    && ui.button(t(lang, "Вверх")).clicked()
                 {
                     nav = Some(parent.to_path_buf());
                 }
                 if ui
-                    .add(primary_button("Добавить и индексировать"))
+                    .add(primary_button(t(lang, "Добавить и индексировать")))
                     .clicked()
                 {
                     add = true;
                     add_and_index = true;
                 }
-                if ui.button("Добавить без индексации").clicked() {
+                if ui.button(t(lang, "Добавить без индексации")).clicked() {
                     add = true;
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(t(lang, "Отмена")).clicked() {
                     close = true;
                 }
             });
@@ -2805,7 +2819,7 @@ impl App {
                 .max_height(320.0)
                 .show(ui, |ui| {
                     if entries.is_empty() {
-                        ui.label("Подкаталогов нет.");
+                        ui.label(t(lang, "Подкаталогов нет."));
                     }
                     for p in &entries {
                         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("?");
@@ -2832,7 +2846,7 @@ impl App {
                 self.settings.roots = self.roots.clone();
                 self.path_input = path.clone();
                 self.save_settings();
-                self.status = format!("каталог добавлен: {path}");
+                self.status = format!("{}: {path}", t(lang, "каталог добавлен"));
             }
             self.picker_open = false;
             if add_and_index {
@@ -2846,24 +2860,34 @@ impl App {
         let Some(action) = self.storage_confirm else {
             return;
         };
+        let lang = self.settings.lang;
         let (title, text, button) = match action {
             StorageAction::Thumbs => (
-                "Очистить превью?",
-                "Будут удалены только файлы <кэш>/photocat/thumbs. Сетка покажет «нет превью», \
-                 пока каталог не проиндексируют заново. Оригиналы не меняются.",
-                "Очистить превью",
+                t(lang, "Очистить превью?"),
+                t(
+                    lang,
+                    "Будут удалены только файлы <кэш>/photocat/thumbs. Сетка покажет «нет превью», \
+                     пока каталог не проиндексируют заново. Оригиналы не меняются.",
+                ),
+                t(lang, "Очистить превью"),
             ),
             StorageAction::Faces => (
-                "Очистить кропы лиц?",
-                "Будут удалены кропы и строки лиц в БД; группы исчезнут. «Найти лица» заново \
-                 создаст их. Фотографии и оригиналы не меняются.",
-                "Очистить лица",
+                t(lang, "Очистить кропы лиц?"),
+                t(
+                    lang,
+                    "Будут удалены кропы и строки лиц в БД; группы исчезнут. «Найти лица» заново \
+                     создаст их. Фотографии и оригиналы не меняются.",
+                ),
+                t(lang, "Очистить лица"),
             ),
             StorageAction::Index => (
-                "Сбросить индекс?",
-                "Будут удалены строки БД: файлы, теги, текст, векторы и лица. Настройки, модели \
-                 и все файлы на диске остаются. После этого нужна индексация заново.",
-                "Сбросить индекс",
+                t(lang, "Сбросить индекс?"),
+                t(
+                    lang,
+                    "Будут удалены строки БД: файлы, теги, текст, векторы и лица. Настройки, модели \
+                     и все файлы на диске остаются. После этого нужна индексация заново.",
+                ),
+                t(lang, "Сбросить индекс"),
             ),
         };
         let mut confirmed = false;
@@ -2878,7 +2902,7 @@ impl App {
                 if ui.add(primary_button(button)).clicked() {
                     confirmed = true;
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(t(lang, "Отмена")).clicked() {
                     cancel = true;
                 }
             });
@@ -2905,11 +2929,15 @@ impl App {
                     self.groups.clear();
                     self.reload();
                     self.status = match action {
-                        StorageAction::Index => "индекс сброшен; проиндексируйте каталог".into(),
-                        _ => format!("кэш очищен: {c}"),
+                        StorageAction::Index => {
+                            t(lang, "индекс сброшен; проиндексируйте каталог").into()
+                        }
+                        _ => format!("{}: {c}", t(lang, "кэш очищен")),
                     };
                 }
-                Err(e) => self.status = format!("очистка не удалась: {e:#}"),
+                Err(e) => {
+                    self.status = format!("{}: {e:#}", t(lang, "очистка не удалась"))
+                }
             }
         }
     }
@@ -5966,7 +5994,7 @@ impl App {
             Ok((id, Err(e))) => {
                 self.photo_loading.remove(&id);
                 self.photo_rx = None;
-                self.status = format!("кадр не декодирован: {e:#}");
+                self.status = format!("{}: {e:#}", t(self.settings.lang, "кадр не декодирован"));
                 self.pump_photo();
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -5983,32 +6011,53 @@ impl App {
     /// Если файл ему не по зубам (кодек вне области, битый контейнер) —
     /// честно уступаем внешнему `ffplay`, а не показываем чёрный экран.
     fn start_video_playback(&mut self, f: &FileRow) {
+        let lang = self.settings.lang;
         self.stop_video();
         self.video_lag_shown = false;
         self.video_id = Some(f.id);
         match player::Player::open(Path::new(&f.path), player::Options::default()) {
             Ok(p) => {
                 self.status = format!(
-                    "видео: {}{}",
+                    "{}: {}{}",
+                    t(lang, "видео"),
                     f.path,
-                    if p.has_audio() { " (со звуком)" } else { " (без звука)" }
+                    if p.has_audio() {
+                        t(lang, " (со звуком)")
+                    } else {
+                        t(lang, " (без звука)")
+                    }
                 );
                 self.video = Some(p);
             }
             Err(e) => {
-                self.status = format!("встроенный плеер не взялся ({e:#}); открываю ffplay");
+                self.status = format!(
+                    "{} ({e:#}); {}",
+                    t(lang, "встроенный плеер не взялся"),
+                    t(lang, "открываю ffplay")
+                );
                 let tools = self.settings.tools.clone();
                 match tools::ffplay(&tools, Path::new(&f.path)) {
                     Ok(child) => {
                         self.video_child = Some(child);
                     }
                     Err(e2) => {
-                        self.status = format!("ffplay не запустился ({e2:#}); системный проигрыватель");
+                        self.status = format!(
+                            "{} ({e2:#}); {}",
+                            t(lang, "ffplay не запустился"),
+                            t(lang, "системный проигрыватель")
+                        );
                         match tools::open_path(Path::new(&f.path)) {
                             Ok(()) => {
-                                self.status = format!("открываю системным плеером: {}", f.path)
+                                self.status = format!(
+                                    "{}: {}",
+                                    t(lang, "открываю системным плеером"),
+                                    f.path
+                                )
                             }
-                            Err(e3) => self.status = format!("видео не открыть: {e3:#}"),
+                            Err(e3) => {
+                                self.status =
+                                    format!("{}: {e3:#}", t(lang, "видео не открыть"))
+                            }
                         }
                         self.video_id = None;
                     }
@@ -6034,12 +6083,13 @@ impl App {
 
     /// Кадр плеера → текстура. Пока видео играет, окно перерисовывается 30 раз в секунду.
     fn poll_video(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.lang;
         if let Some(child) = &mut self.video_child
             && child.try_wait().ok().flatten().is_some()
         {
             self.video_child = None;
             self.video_id = None;
-            self.status = "ffplay: видео закрыто".into();
+            self.status = t(lang, "ffplay: видео закрыто").into();
         }
         let Some(p) = self.video.as_ref() else { return };
         let due = self
@@ -6064,18 +6114,21 @@ impl App {
         }
         if p.audio_lag() && !self.video_lag_shown {
             self.video_lag_shown = true;
-            self.status =
-                "декодер не успевает за звуком: звук выключен, видео идёт медленнее".into();
+            self.status = t(
+                lang,
+                "декодер не успевает за звуком: звук выключен, видео идёт медленнее",
+            )
+            .into();
         }
         if let Some(e) = p.error() {
-            self.status = format!("видео остановилось: {e}");
+            self.status = format!("{}: {e}", t(lang, "видео остановилось"));
             self.video = None;
             self.video_id = None;
             self.video_tex = None;
             return;
         }
         if p.is_finished() {
-            self.status = "видео доиграло".into();
+            self.status = t(lang, "видео доиграло").into();
             // Доигравший файл сам уступает место следующему (см. `viewer_modal`).
             self.video_ended = self.viewer.is_some();
             self.video = None;
@@ -6189,6 +6242,7 @@ impl App {
         if v.ids.is_empty() {
             return;
         }
+        let lang = self.settings.lang;
         v.idx = v.idx.min(v.ids.len() - 1);
         // Видео доиграло — показываем следующий файл сами: иначе показ стоит на
         // последнем кадре, и кажется, что листание не работает.
@@ -6235,7 +6289,7 @@ impl App {
             .find(|r| r.id == id)
             .cloned()
         else {
-            self.status = "файл не найден в индексе — просмотр закрыт".into();
+            self.status = t(lang, "файл не найден в индексе — просмотр закрыт").into();
             return;
         };
         self.request_around(&v.ids, v.idx);
@@ -6328,14 +6382,14 @@ impl App {
                     .taken_at
                     .as_deref()
                     .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-                    .unwrap_or_else(|| "без даты".into());
+                    .unwrap_or_else(|| t(lang, "без даты").into());
                 ui.label(egui::RichText::new(date).size(11.0).color(DIM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Закрыть").clicked() {
+                    if ui.button(t(lang, "Закрыть")).clicked() {
                         close = true;
                     }
                     ui.label(
-                        egui::RichText::new(format!("{} из {}", v.idx + 1, v.ids.len()))
+                        egui::RichText::new(i18n::position(lang, v.idx + 1, v.ids.len()))
                             .size(11.0)
                             .color(DIM),
                     );
@@ -6344,14 +6398,14 @@ impl App {
             ui.add_space(4.0);
             // Панель воспроизведения: листание, пуск/пауза, перемотка, звук.
             ui.horizontal_wrapped(|ui| {
-                if icon_button(ui, Icon::Prev, 32.0, "предыдущий файл — ←").clicked() {
+                if icon_button(ui, Icon::Prev, 32.0, t(lang, "предыдущий файл — ←")).clicked() {
                     step_click = -1;
                 }
                 let playing = video_active && self.video.as_ref().is_some_and(|p| p.is_playing());
                 if f.kind == "video" {
                     if video_active && self.video.is_none() {
                         ui.label(
-                            egui::RichText::new("ffplay отдельным окном")
+                            egui::RichText::new(t(lang, "ffplay отдельным окном"))
                                 .size(11.0)
                                 .color(DIM),
                         );
@@ -6360,9 +6414,9 @@ impl App {
                         if playing { Icon::Pause } else { Icon::Play },
                         32.0,
                         if video_active {
-                            "пауза и продолжение — пробел"
+                            t(lang, "пауза и продолжение — пробел")
                         } else {
-                            "смотреть видео — пробел"
+                            t(lang, "смотреть видео — пробел")
                         },
                     )
                     .clicked()
@@ -6377,13 +6431,13 @@ impl App {
                     ui,
                     if v.slideshow { Icon::Pause } else { Icon::Play },
                     32.0,
-                    "слайд-шоу — пробел",
+                    t(lang, "слайд-шоу — пробел"),
                 )
                 .clicked()
                 {
                     new_slideshow = !v.slideshow;
                 }
-                if icon_button(ui, Icon::Next, 32.0, "следующий файл — →").clicked() {
+                if icon_button(ui, Icon::Next, 32.0, t(lang, "следующий файл — →")).clicked() {
                     step_click = 1;
                 }
                 if f.kind == "video" {
@@ -6422,14 +6476,16 @@ impl App {
                         }
                         if !p.has_audio() {
                             ui.label(
-                                egui::RichText::new("нет устройства").size(11.0).color(DIM),
+                                egui::RichText::new(t(lang, "нет устройства"))
+                                    .size(11.0)
+                                    .color(DIM),
                             );
                         }
                     }
                     if video_active
                         && ui
-                            .selectable_label(true, "Стоп видео")
-                            .on_hover_text("остановить и вернуться к кадру")
+                            .selectable_label(true, t(lang, "Стоп видео"))
+                            .on_hover_text(t(lang, "остановить и вернуться к кадру"))
                             .clicked()
                     {
                         stop_video = true;
@@ -6439,20 +6495,20 @@ impl App {
                         .selectable_label(
                             v.slideshow,
                             if v.slideshow {
-                                "Стоп слайд-шоу"
+                                t(lang, "Стоп слайд-шоу")
                             } else {
-                                "Слайд-шоу"
+                                t(lang, "Слайд-шоу")
                             },
                         )
-                        .on_hover_text("пробел — пуск/стоп; листает текущий список")
+                        .on_hover_text(t(lang, "пробел — пуск/стоп; листает текущий список"))
                         .clicked()
                     {
                         new_slideshow = !v.slideshow;
                     }
-                    ui.label(egui::RichText::new("интервал:").size(11.0).color(DIM));
+                    ui.label(egui::RichText::new(t(lang, "интервал:")).size(11.0).color(DIM));
                     for secs in [3u64, 5, 10] {
                         if ui
-                            .selectable_label(v.interval_s == secs, format!("{secs} с"))
+                            .selectable_label(v.interval_s == secs, i18n::seconds(lang, secs))
                             .clicked()
                         {
                             new_interval = secs;
@@ -6461,27 +6517,31 @@ impl App {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                if ui.button("−").on_hover_text("уменьшить").clicked() {
+                if ui.button("−").on_hover_text(t(lang, "уменьшить")).clicked() {
                     new_zoom = (v.zoom - 0.25).max(0.5);
                 }
-                if ui.button("Вписать").clicked() {
+                if ui.button(t(lang, "Вписать")).clicked() {
                     new_zoom = 1.0;
                 }
-                if ui.button("+").on_hover_text("увеличить").clicked() {
+                if ui.button("+").on_hover_text(t(lang, "увеличить")).clicked() {
                     new_zoom = (v.zoom + 0.25).min(4.0);
                 }
                 ui.label(
-                    egui::RichText::new(format!("масштаб {:.0}%", v.zoom * 100.0))
-                        .size(11.0)
-                        .color(DIM),
+                    egui::RichText::new(format!(
+                        "{} {:.0}%",
+                        t(lang, "масштаб"),
+                        v.zoom * 100.0
+                    ))
+                    .size(11.0)
+                    .color(DIM),
                 );
                 if ui
-                    .selectable_label(v.show_text, "Текст на фото")
+                    .selectable_label(v.show_text, t(lang, "Текст на фото"))
                     .clicked()
                 {
                     new_text = !v.show_text;
                 }
-                if f.kind != "video" && ui.button("В системном просмотрщике").clicked() {
+                if f.kind != "video" && ui.button(t(lang, "В системном просмотрщике")).clicked() {
                     open_video = true;
                 }
             });
@@ -6506,6 +6566,7 @@ impl App {
                             v.zoom,
                             img_w,
                             content_h,
+                            lang,
                         ));
                     });
                     ui.separator();
@@ -6513,13 +6574,18 @@ impl App {
                         .id_salt("viewer-text")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new("Текст на фото").size(11.0).color(DIM));
+                            ui.label(
+                                egui::RichText::new(t(lang, "Текст на фото"))
+                                    .size(11.0)
+                                    .color(DIM),
+                            );
                             let text = self.ocr_text.get(&id).cloned().unwrap_or_default();
                             if text.trim().is_empty() {
                                 ui.label(
-                                    egui::RichText::new(
+                                    egui::RichText::new(t(
+                                        lang,
                                         "Текст не распознан. Кнопка «Распознать текст» — в карточке файла.",
-                                    )
+                                    ))
                                     .size(12.0)
                                     .color(DIM),
                                 );
@@ -6542,6 +6608,7 @@ impl App {
                     v.zoom,
                     avail.x,
                     content_h,
+                    lang,
                 ));
             }
             // Клик по кадру видео — как большая кнопка ▶: пуск или пауза.
@@ -6565,8 +6632,14 @@ impl App {
         v.interval_s = new_interval;
         if open_video {
             match tools::open_path(Path::new(&f.path)) {
-                Ok(()) => self.status = format!("открываю системным проигрывателем: {}", f.path),
-                Err(e) => self.status = format!("не открыть: {e:#}"),
+                Ok(()) => {
+                    self.status = format!(
+                        "{}: {}",
+                        t(lang, "открываю системным проигрывателем"),
+                        f.path
+                    )
+                }
+                Err(e) => self.status = format!("{}: {e:#}", t(lang, "не открыть")),
             }
         }
         if let Some(p) = self.video.as_ref() {
@@ -7850,7 +7923,7 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui:
 
 /// Большая кнопка воспроизведения по центру кадра видео: до запуска видно, что
 /// это видео, а не снимок, и один клик запускает его.
-fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect) {
+fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
     let center = area.center();
     let p = ui.painter();
     let plate = egui::Rect::from_center_size(center, egui::vec2(76.0, 76.0));
@@ -7870,7 +7943,7 @@ fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect) {
     );
     // Подпись на подложке: поверх светлого кадра текст иначе не читается.
     let galley = p.layout_no_wrap(
-        "видео · нажмите ▶, чтобы смотреть".into(),
+        t(lang, "видео · нажмите ▶, чтобы смотреть").into(),
         egui::FontId::proportional(12.0),
         egui::Color32::from_gray(235),
     );
@@ -7890,6 +7963,7 @@ fn draw_viewer_image(
     zoom: f32,
     w: f32,
     h: f32,
+    lang: i18n::Lang,
 ) -> egui::Response {
     let (area, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
     let resp = if f.kind == "video" {
@@ -7909,7 +7983,7 @@ fn draw_viewer_image(
             egui::Color32::WHITE,
         );
         if tex.paused {
-            paint_play_overlay(ui, area);
+            paint_play_overlay(ui, area, lang);
         }
         return resp;
     }
@@ -7939,7 +8013,7 @@ fn draw_viewer_image(
         ui.painter().text(
             egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
             egui::Align2::LEFT_BOTTOM,
-            "загрузка следующего кадра…",
+            i18n::t(lang, "загрузка следующего кадра…"),
             egui::FontId::proportional(11.0),
             egui::Color32::from_gray(235),
         );
@@ -7960,7 +8034,7 @@ fn draw_viewer_image(
             ui.painter().text(
                 egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
                 egui::Align2::LEFT_BOTTOM,
-                "полный кадр загружается…",
+                i18n::t(lang, "полный кадр загружается…"),
                 egui::FontId::proportional(11.0),
                 egui::Color32::from_gray(235),
             );
@@ -7969,13 +8043,13 @@ fn draw_viewer_image(
         ui.painter().text(
             area.center(),
             egui::Align2::CENTER_CENTER,
-            "полный кадр загружается…",
+            t(lang, "полный кадр загружается…"),
             egui::FontId::proportional(14.0),
             DIM,
         );
     }
     if f.kind == "video" {
-        paint_play_overlay(ui, area);
+        paint_play_overlay(ui, area, lang);
     }
     resp
 }
@@ -10295,9 +10369,9 @@ impl eframe::App for App {
 mod tests {
     use super::{
         App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick,
-        SettingsTab, View, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
-        month_groups, nearest_file_month, parse_date, pick_kind, score_percentile, shift_month,
-        shift_to_file_month,
+        SettingsTab, StorageAction, View, Viewer, days_in_month, db, first_weekday_monday,
+        fit_rect, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
+        score_percentile, shift_month, shift_to_file_month,
     };
     use crate::embed;
     use crate::i18n;
@@ -10414,6 +10488,38 @@ mod tests {
             ..Default::default()
         };
         let out = ctx.run_ui(raw, |ui| app.settings_section(ui, tab));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// Один кадр модального диалога без окна: `picker_modal`, `storage_modal`, `roots_modal`.
+    /// Как и `viewer_frame`, кадр прогоняется дважды: модальное окно на первом кадре
+    /// ещё не знает своего размера и рисует только фон.
+    fn modal_frame(
+        app: &mut App,
+        ctx: &egui::Context,
+        draw: fn(&mut App, &egui::Context),
+    ) -> Vec<String> {
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1240.0, 840.0),
+            )),
+            ..Default::default()
+        };
+        let first = ctx.run_ui(raw(), |ui| {
+            let ctx = ui.ctx().clone();
+            draw(app, &ctx);
+        });
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| {
+            let ctx = ui.ctx().clone();
+            draw(app, &ctx);
+        });
         let mut texts = Vec::new();
         for c in &out.shapes {
             collect_text(&c.shape, &mut texts);
@@ -11052,6 +11158,149 @@ mod tests {
         }
     }
 
+    /// M21.5: полный экран и управление плеером переведены целиком: заголовок,
+    /// листание, слайд-шоу, масштаб, текст на фото и подпись поверх кадра видео.
+    #[test]
+    fn английский_язык_переводит_полный_экран() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-viewer-i18n.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.open_viewer(1);
+        let ctx = egui::Context::default();
+        let texts = viewer_frame(&mut app, &ctx, None);
+        for want in [
+            "Close",
+            "Slideshow",
+            "Fit",
+            "interval:",
+            "3 s",
+            "Text on the photo",
+            "In the system viewer",
+            "1 of 1",
+            "the full frame is loading…",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want || t.contains(want)),
+                "нет «{want}» на полном экране: {texts:?}"
+            );
+        }
+        for ru in [
+            "Закрыть",
+            "Вписать",
+            "Слайд-шоу",
+            "интервал:",
+            "Текст на фото",
+            "В системном просмотрщике",
+            "масштаб",
+            "полный кадр загружается",
+            "из",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t.contains(ru)),
+                "русская подпись «{ru}» осталась на полном экране: {texts:?}"
+            );
+        }
+        // Видео: подпись на большой кнопке ▶ тоже переведена.
+        app.items = vec![file_row(2, "video", "b.mp4")];
+        app.open_viewer(2);
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts.iter().any(|t| t.contains("press ▶ to play")),
+            "подпись на видео не переведена: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("нажмите ▶")),
+            "русская подпись на видео осталась: {texts:?}"
+        );
+    }
+
+    /// M21.5: каталоги архива и встроенный выбор папки переведены вместе:
+    /// открыть каталог без перевода родительского диалога — это полуперевод.
+    #[test]
+    fn английский_язык_переводит_каталоги_и_выбор_папки() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-picker-i18n.db"));
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        app.roots_open = true;
+        let roots = modal_frame(&mut app, &ctx, App::roots_modal);
+        for want in [
+            "Archive folders",
+            "No folders yet — add one with the button below.",
+            "Add a folder…",
+            "Index all",
+            "Close",
+        ] {
+            assert!(
+                roots.iter().any(|t| t == want),
+                "нет «{want}» в списке каталогов: {roots:?}"
+            );
+        }
+        for ru in ["Каталоги архива", "Добавить каталог", "Индексировать все", "Закрыть"] {
+            assert!(
+                !roots.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась в каталогах: {roots:?}"
+            );
+        }
+        // Пустой каталог: видно подсказку вместо списка подкаталогов.
+        let empty = std::env::temp_dir().join("photocat-test-picker-empty");
+        std::fs::create_dir_all(&empty).expect("временный каталог");
+        app.roots_open = false;
+        app.picker_open = true;
+        app.picker_current = empty;
+        app.refresh_picker();
+        let picker = modal_frame(&mut app, &ctx, App::picker_modal);
+        for want in [
+            "Add a folder",
+            "Up",
+            "Add and index",
+            "Add without indexing",
+            "Cancel",
+            "No subfolders.",
+        ] {
+            assert!(
+                picker.iter().any(|t| t == want),
+                "нет «{want}» в выборе папки: {picker:?}"
+            );
+        }
+        for ru in ["Добавить каталог", "Вверх", "Отмена", "Подкаталогов нет."] {
+            assert!(
+                !picker.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась в выборе папки: {picker:?}"
+            );
+        }
+        app.picker_open = false;
+    }
+
+    /// M21.5: подтверждение очистки кэша и индекса переведено — все три варианта.
+    #[test]
+    fn английский_язык_переводит_подтверждение_очистки() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-storage-i18n.db"));
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        for (action, title, button) in [
+            (StorageAction::Thumbs, "Clear the previews?", "Clear the previews"),
+            (StorageAction::Faces, "Clear the face crops?", "Clear the faces"),
+            (StorageAction::Index, "Reset the index?", "Reset the index"),
+        ] {
+            app.storage_confirm = Some(action);
+            let texts = modal_frame(&mut app, &ctx, App::storage_modal);
+            for want in [title, button, "Cancel"] {
+                assert!(
+                    texts.iter().any(|t| t == want),
+                    "нет «{want}» в подтверждении очистки: {texts:?}"
+                );
+            }
+            for ru in ["Очистить превью?", "Очистить кропы лиц?", "Сбросить индекс?", "Отмена"] {
+                assert!(
+                    !texts.iter().any(|t| t == ru),
+                    "русская подпись «{ru}» осталась в подтверждении: {texts:?}"
+                );
+            }
+            // Кадр — только чтение: подтверждение снимается, ничего не удаляется.
+            app.storage_confirm = None;
+        }
+    }
+
     #[test]
     fn листание_идёт_по_кругу_и_сбрасывает_таймер_слайдшоу() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -11089,6 +11338,8 @@ mod tests {
             file_row(2, "video", "b.mp4"),
             file_row(3, "image", "c.jpg"),
         ];
+        // Проверяется поведение, а не язык: подписи на кадре — русские.
+        app.settings.lang = i18n::Lang::Ru;
         app.open_viewer(2);
         let ctx = egui::Context::default();
         let texts = viewer_frame(&mut app, &ctx, None);
@@ -11115,6 +11366,7 @@ mod tests {
     fn переход_на_видео_не_оставляет_прошлый_снимок() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.items = vec![file_row(1, "image", "a.jpg"), file_row(2, "video", "b.mp4")];
+        app.settings.lang = i18n::Lang::Ru;
         app.open_viewer(1);
         let ctx = egui::Context::default();
         let prev = ctx.load_texture(

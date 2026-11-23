@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes) → next:M21.5 (viewer, player, folder picker, storage modal), then M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible screen of the shell now goes through `t()`, CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation) → next:M21.6 (CLI reports), then M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window now goes through `t()`, CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1300,3 +1300,54 @@ ffprobe description; the Russian list checks all panes at once); `cargo clippy -
 **Next.** M21.5: the full screen viewer and built-in player controls, the folder picker (`roots_modal`,
 `picker_modal`) and the storage confirmation modal — the last Russian surfaces inside the window.
 After that M21.6 gives the CLI reports a `lang` field.
+
+## M21.5 — the full screen viewer, the player, the folder dialogs and the storage modal in English (2026-11-24)
+
+The last Russian surfaces inside the window. After M21.4f the left panel and the settings spoke
+English, but the full screen viewer, the player controls, the folder dialogs and the storage
+confirmation still answered in Russian — the owner would have hit the half-translated state exactly
+where the archive is looked at.
+
+**What moved.** The viewer header (`Close`, the `1 of 3` counter through `i18n::position`, the
+`no date` fallback). The playback row: the `previous file — ←` / `next file — →` hints, the play
+button hints (`play the video — space` / `pause and resume — space`), `ffplay in its own window`,
+`no device`, `Stop the video` with its hint. The slideshow row: `Slideshow` / `Stop the slideshow`
+with the “walks the current list” hint, `interval:` and the `3 s` / `5 s` / `10 s` choices through
+`i18n::seconds`. The zoom row: `zoom out`, `Fit`, `zoom in`, `zoom 100%`, `Text on the photo`,
+`In the system viewer`. The frame itself: the poster overlay `video · press ▶ to play`, `the full
+frame is loading…` and `loading the next frame…`; the OCR column with the “no text” note. Every
+status the viewer can write: frame not decoded, file not found in the index, opening in the system
+player, the built-in player falling back to `ffplay` and then to the system player, `ffplay: the
+video is closed`, the video finished, the decoder lagging behind the sound.
+The archive folders dialog (`Archive folders`, the note about indexing several folders, the empty
+state, `Remove from the index` with its hint, `Add a folder…`, `Index all`, `Close`, the
+removed/not-removed statuses), the folder picker (`Add a folder`, `Up`, `Add and index`, `Add
+without indexing`, `Cancel`, `No subfolders.`, `cannot read …`, `folder added: …`) and the storage
+confirmation (three titles, three texts, three buttons, `Cancel`, `index reset; index a folder now`,
+`cache cleared: …`, `cleaning failed: …`) moved in one commit: the picker sits on top of the folders
+dialog, and a translated picker over a Russian parent is a half-translated flow.
+
+**Shape.** `viewer_modal`, `start_video_playback`, `poll_video`, `roots_modal`, `picker_modal` and
+`storage_modal` read `self.settings.lang` once and pass it down; `draw_viewer_image` and
+`paint_play_overlay` take `lang` as an argument, as `draw_face_cell` does since M21.4c. Two new
+helpers keep numbers out of the sentence: `i18n::position(lang, i, n)` and `i18n::seconds(lang, n)`.
+Dynamic fragments elsewhere are translated as parts (`format!("{}: {path}", t(lang, "folder added"))`).
+File names, paths, dates, durations and the video frame stay as data.
+
+**Checks.** `cargo test` — 198 passed, 6 `#[ignore]` (new:
+`английский_язык_переводит_полный_экран` — a headless viewer frame for a photo and for a video:
+`Close`, `Slideshow`, `Fit`, `interval:`, `3 s`, `Text on the photo`, `In the system viewer`,
+`1 of 1`, `the full frame is loading…`, `press ▶ to play`, and no Russian label left;
+`английский_язык_переводит_каталоги_и_выбор_папки` — two headless modal frames through the new
+`modal_frame` helper: `Archive folders`, the empty state, `Add a folder…`, `Index all`, `Close`, then
+`Add a folder`, `Up`, `Add and index`, `Add without indexing`, `Cancel`, `No subfolders.`;
+`английский_язык_переводит_подтверждение_очистки` — all three storage confirmations with their
+titles and buttons. The two viewer behaviour tests that assert the Russian `нажмите ▶` label now set
+`settings.lang = Ru` themselves, as the integrity tests did; and a unit test for `i18n::position` /
+`i18n::seconds`: `3 of 12` / `3 из 12`, `5 s` / `5 с`). `cargo clippy --all-targets` clean;
+`check.sh` — 44 checks, 0 violations; release build and a 6 s `photocat gui` smoke test on a copy of
+the real DB (30 MB, 2230 files, twice) — code 124, no panic.
+
+**Next.** M21.6: the CLI reports get a `lang` field set from `settings.lang` so `index`, `stats`,
+`dupes`, `organize`, `verify`, `embed`, `faces`, `ocr`, `doctor` and `settings` print English too —
+no global language variable. Then M21.7 (`docs/`), M21.8 (`plan/`), M21.9 (`.pi/`) and M15.6/M15.7.
