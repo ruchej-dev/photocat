@@ -54,12 +54,15 @@ enum IntegrityJob {
 }
 
 impl IntegrityJob {
-    fn title(self) -> &'static str {
-        match self {
-            IntegrityJob::Verify => "сверка копий",
-            IntegrityJob::Manifest => "запись слепка",
-            IntegrityJob::Check => "проверка по слепку",
-        }
+    fn title(self, lang: i18n::Lang) -> &'static str {
+        t(
+            lang,
+            match self {
+                IntegrityJob::Verify => "сверка копий",
+                IntegrityJob::Manifest => "запись слепка",
+                IntegrityJob::Check => "проверка по слепку",
+            },
+        )
     }
 }
 
@@ -110,51 +113,89 @@ impl IntegrityOutcome {
     }
 
     /// Одна строка вердикта для экрана: словами, без догадок.
-    fn verdict(&self) -> String {
+    fn verdict(&self, lang: i18n::Lang) -> String {
         match self {
             IntegrityOutcome::Verify { report, .. } => {
                 if report.cancelled {
-                    "сверка остановлена: проверено не всё".into()
+                    t(lang, "сверка остановлена: проверено не всё").into()
                 } else if report.identical() {
-                    "копии совпадают".into()
+                    t(lang, "копии совпадают").into()
                 } else {
-                    format!(
-                        "найдены расхождения: только A {}, только B {}, размер {}, содержимое {}, ошибок {}",
-                        report.only_a.len(),
-                        report.only_b.len(),
-                        report.size_diff.len(),
-                        report.content_diff.len(),
-                        report.errors()
-                    )
+                    match lang {
+                        i18n::Lang::En => format!(
+                            "differences found: only in A {}, only in B {}, size {}, content {}, errors {}",
+                            report.only_a.len(),
+                            report.only_b.len(),
+                            report.size_diff.len(),
+                            report.content_diff.len(),
+                            report.errors()
+                        ),
+                        i18n::Lang::Ru => format!(
+                            "найдены расхождения: только A {}, только B {}, размер {}, содержимое {}, ошибок {}",
+                            report.only_a.len(),
+                            report.only_b.len(),
+                            report.size_diff.len(),
+                            report.content_diff.len(),
+                            report.errors()
+                        ),
+                    }
                 }
             }
             IntegrityOutcome::Manifest { stats, out, .. } => {
                 if stats.written {
-                    format!(
-                        "слепок записан: {} файлов ({}) → {}",
-                        stats.files,
-                        db::human(stats.bytes as i64),
-                        out.display()
-                    )
+                    match lang {
+                        i18n::Lang::En => format!(
+                            "manifest written: {} ({}) → {}",
+                            i18n::count(
+                                lang,
+                                stats.files,
+                                ["файл", "файла", "файлов"],
+                                "file",
+                                "files"
+                            ),
+                            db::human_in(lang, stats.bytes as i64),
+                            out.display()
+                        ),
+                        i18n::Lang::Ru => format!(
+                            "слепок записан: {} файлов ({}) → {}",
+                            stats.files,
+                            db::human(stats.bytes as i64),
+                            out.display()
+                        ),
+                    }
                 } else if stats.cancelled {
-                    "слепок не записан: проход остановлен".into()
+                    t(lang, "слепок не записан: проход остановлен").into()
                 } else {
-                    format!("слепок не записан: ошибок {}", stats.errors)
+                    format!(
+                        "{}: {} {}",
+                        t(lang, "слепок не записан"),
+                        t(lang, "ошибок"),
+                        stats.errors
+                    )
                 }
             }
             IntegrityOutcome::Check { report, .. } => {
                 if report.cancelled {
-                    "проверка остановлена: проверено не всё".into()
+                    t(lang, "проверка остановлена: проверено не всё").into()
                 } else if report.identical() {
-                    "каталог совпадает со слепком".into()
+                    t(lang, "каталог совпадает со слепком").into()
                 } else {
-                    format!(
-                        "каталог расходится со слепком: изменено {}, нет в каталоге {}, нет в слепке {}, ошибок {}",
-                        report.changed.len(),
-                        report.missing.len(),
-                        report.extra.len(),
-                        report.errors()
-                    )
+                    match lang {
+                        i18n::Lang::En => format!(
+                            "the folder differs from the manifest: changed {}, missing in the folder {}, missing in the manifest {}, errors {}",
+                            report.changed.len(),
+                            report.missing.len(),
+                            report.extra.len(),
+                            report.errors()
+                        ),
+                        i18n::Lang::Ru => format!(
+                            "каталог расходится со слепком: изменено {}, нет в каталоге {}, нет в слепке {}, ошибок {}",
+                            report.changed.len(),
+                            report.missing.len(),
+                            report.extra.len(),
+                            report.errors()
+                        ),
+                    }
                 }
             }
         }
@@ -173,24 +214,40 @@ impl IntegrityOutcome {
         }
     }
 
-    fn status(&self) -> String {
+    fn status(&self, lang: i18n::Lang) -> String {
         match self {
-            IntegrityOutcome::Verify { report, .. } => format!(
-                "{}; A {}, B {}; за {:.1} с",
-                self.verdict(),
-                report.files_a,
-                report.files_b,
-                report.seconds
-            ),
-            IntegrityOutcome::Manifest { stats, .. } => {
-                format!("{}, за {:.1} с", self.verdict(), stats.seconds)
+            IntegrityOutcome::Verify { report, .. } => {
+                let verdict = self.verdict(lang);
+                match lang {
+                    i18n::Lang::En => format!(
+                        "{verdict}; A {}, B {}; {:.1} s",
+                        report.files_a, report.files_b, report.seconds
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "{verdict}; A {}, B {}; за {:.1} с",
+                        report.files_a, report.files_b, report.seconds
+                    ),
+                }
             }
-            IntegrityOutcome::Check { report, .. } => format!(
-                "{}; совпало {}; за {:.1} с",
-                self.verdict(),
-                report.same,
-                report.seconds
-            ),
+            IntegrityOutcome::Manifest { stats, .. } => {
+                let verdict = self.verdict(lang);
+                match lang {
+                    i18n::Lang::En => format!("{verdict}, {:.1} s", stats.seconds),
+                    i18n::Lang::Ru => format!("{verdict}, за {:.1} с", stats.seconds),
+                }
+            }
+            IntegrityOutcome::Check { report, .. } => {
+                let verdict = self.verdict(lang);
+                match lang {
+                    i18n::Lang::En => format!(
+                        "{verdict}; {} same; {:.1} s",
+                        report.same, report.seconds
+                    ),
+                    i18n::Lang::Ru => {
+                        format!("{verdict}; совпало {}; за {:.1} с", report.same, report.seconds)
+                    }
+                }
+            }
         }
     }
 }
@@ -1904,62 +1961,73 @@ impl App {
     /// Проверка полей экрана «Целостность» и разбор путей. Только чтение: ни одного
     /// создания файла здесь нет — слепок пишется в фоне по кнопке.
     fn integrity_plan(&self, job: IntegrityJob) -> Result<IntegrityPlan, String> {
+        let lang = self.settings.lang;
         let dir = |s: &str, what: &str| -> Result<PathBuf, String> {
-            let t = s.trim();
-            if t.is_empty() {
-                return Err(format!("укажите {what}"));
+            let name = s.trim();
+            if name.is_empty() {
+                return Err(format!("{} {what}", t(lang, "укажите")));
             }
-            let p = PathBuf::from(t);
+            let p = PathBuf::from(name);
             if !p.is_dir() {
-                return Err(format!("{what} не каталог: {t}"));
+                return Err(format!("{what} {}: {name}", t(lang, "не каталог")));
             }
             Ok(p)
         };
+        let dir_a = t(lang, "каталог A (архив)");
+        let manifest_hint = t(lang, "файл слепка");
         match job {
             IntegrityJob::Verify => {
-                let a = dir(&self.integrity_a, "каталог A (архив)")?;
-                let b = dir(&self.integrity_b, "каталог B (копия)")?;
+                let a = dir(&self.integrity_a, dir_a)?;
+                let b = dir(&self.integrity_b, t(lang, "каталог B (копия)"))?;
                 let ca = a.canonicalize().unwrap_or_else(|_| a.clone());
                 let cb = b.canonicalize().unwrap_or_else(|_| b.clone());
                 if ca == cb {
-                    return Err(
-                        "каталог A и каталог B — один и тот же путь; сверять нечего".into()
-                    );
+                    return Err(t(
+                        lang,
+                        "каталог A и каталог B — один и тот же путь; сверять нечего",
+                    )
+                    .into());
                 }
                 Ok(IntegrityPlan::Verify(a, b))
             }
             IntegrityJob::Manifest => {
-                let a = dir(&self.integrity_a, "каталог A (архив)")?;
+                let a = dir(&self.integrity_a, dir_a)?;
                 let m = self.integrity_manifest.trim();
                 if m.is_empty() {
-                    return Err(
-                        "укажите файл слепка: это путь, по которому он будет записан".into()
-                    );
+                    return Err(t(
+                        lang,
+                        "укажите файл слепка: это путь, по которому он будет записан",
+                    )
+                    .into());
                 }
                 let out = PathBuf::from(m);
                 if out.is_dir() {
-                    return Err(format!("файл слепка — это каталог: {m}"));
+                    return Err(format!(
+                        "{manifest_hint} — {}: {m}",
+                        t(lang, "это каталог")
+                    ));
                 }
                 if let Some(parent) = out.parent()
                     && !parent.as_os_str().is_empty()
                     && !parent.is_dir()
                 {
                     return Err(format!(
-                        "каталог для слепка не существует: {}",
+                        "{}: {}",
+                        t(lang, "каталог для слепка не существует"),
                         parent.display()
                     ));
                 }
                 Ok(IntegrityPlan::Manifest(a, out))
             }
             IntegrityJob::Check => {
-                let a = dir(&self.integrity_a, "каталог A (архив)")?;
+                let a = dir(&self.integrity_a, dir_a)?;
                 let m = self.integrity_manifest.trim();
                 if m.is_empty() {
-                    return Err("укажите файл слепка, по которому проверять".into());
+                    return Err(t(lang, "укажите файл слепка, по которому проверять").into());
                 }
                 let file = PathBuf::from(m);
                 if !file.is_file() {
-                    return Err(format!("файл слепка не найден: {m}"));
+                    return Err(format!("{}: {m}", t(lang, "файл слепка не найден")));
                 }
                 Ok(IntegrityPlan::Check(a, file))
             }
@@ -1969,20 +2037,29 @@ impl App {
     /// Запуск фонового прохода. Существующий слепок не перезаписывается без второго
     /// нажатия: возвращает `true`, если вместо запуска попросили подтверждение.
     fn integrity_start(&mut self, job: IntegrityJob) {
+        let lang = self.settings.lang;
         if self.integrity_rx.is_some() {
-            self.status = "проход уже идёт: дождитесь конца или нажмите «Стоп»".into();
+            self.status = t(lang, "проход уже идёт: дождитесь конца или нажмите «Стоп»").into();
             return;
         }
         if job == IntegrityJob::Manifest && !self.integrity_overwrite {
             let path = Path::new(self.integrity_manifest.trim());
             if path.is_file() {
                 self.integrity_overwrite = true;
-                self.integrity_error = format!(
-                    "файл слепка уже есть: {}. Нажмите «Перезаписать слепок», чтобы заменить \
-                     его целиком, или «Отмена».",
-                    path.display()
-                );
-                self.status = "слепок не записан: нужно подтверждение перезаписи".into();
+                self.integrity_error = match lang {
+                    i18n::Lang::En => format!(
+                        "the manifest already exists: {}. Press “Overwrite the manifest” to replace \
+                         it whole, or “Cancel”.",
+                        path.display()
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "файл слепка уже есть: {}. Нажмите «Перезаписать слепок», чтобы заменить \
+                         его целиком, или «Отмена».",
+                        path.display()
+                    ),
+                };
+                self.status =
+                    t(lang, "слепок не записан: нужно подтверждение перезаписи").into();
                 return;
             }
         }
@@ -1990,7 +2067,7 @@ impl App {
             Ok(plan) => plan,
             Err(e) => {
                 self.integrity_error = e.clone();
-                self.status = format!("{}: {e}", job.title());
+                self.status = format!("{}: {e}", job.title(lang));
                 return;
             }
         };
@@ -2007,7 +2084,8 @@ impl App {
             if let Err(e) =
                 db::open(&self.db_path).and_then(|c| db::save_settings(&c, &self.settings))
             {
-                self.integrity_error = format!("настройки напоминания не сохранены: {e}");
+                self.integrity_error =
+                    format!("{}: {e}", t(lang, "настройки напоминания не сохранены"));
             }
             self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
         }
@@ -2034,7 +2112,7 @@ impl App {
         self.integrity_rx = Some(rx);
         self.integrity_result = None;
         self.integrity_error.clear();
-        self.status = format!("{}: идёт в фоне", job.title());
+        self.status = format!("{}: {}", job.title(lang), t(lang, "идёт в фоне"));
     }
 
     /// Итог завершённого прохода для напоминания (M10): дата, «ок» и полный отчёт.
@@ -2056,11 +2134,18 @@ impl App {
         let mut warn = None;
         if let Err(e) = db::open(&self.db_path).and_then(|c| db::save_settings(&c, &self.settings))
         {
-            warn = Some(format!("итог не сохранён в настройках: {e}"));
+            warn = Some(format!(
+                "{}: {e}",
+                t(self.settings.lang, "итог не сохранён в настройках")
+            ));
         }
         let path = db::cache_dir().join("verify-last.txt");
         if let Err(e) = std::fs::write(&path, &report) {
-            warn = Some(format!("отчёт не записан в {}: {e}", path.display()));
+            warn = Some(format!(
+                "{} {}: {e}",
+                t(self.settings.lang, "отчёт не записан в"),
+                path.display()
+            ));
         }
         warn
     }
@@ -2068,20 +2153,22 @@ impl App {
     /// Экран «Целостность»: поля, три кнопки, прогресс в верхней панели и отчёт.
     /// Рисуется до сетки: ей не нужны ни плитки, ни кэш превью.
     fn integrity_panel(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("Целостность").size(18.0));
+        ui.label(egui::RichText::new(t(lang, "Целостность")).size(18.0));
         ui.label(
-            egui::RichText::new("сверка копий и слепок sha256")
+            egui::RichText::new(t(lang, "сверка копий и слепок sha256"))
                 .size(12.0)
                 .color(DIM),
         );
         ui.add_space(4.0);
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                lang,
                 "Сверка только читает: сначала размеры, sha256 — лишь у файлов одинакового \
                  размера. Слепок — файл формата sha256sum для будущих проверок; он пишется \
                  только по кнопке. В каталог архива не записывается ничего.",
-            )
+            ))
             .size(11.0)
             .color(DIM),
         );
@@ -2092,7 +2179,7 @@ impl App {
             .num_columns(2)
             .spacing([8.0, 6.0])
             .show(ui, |ui| {
-                ui.label("Каталог A (архив):");
+                ui.label(format!("{}:", t(lang, "Каталог A (архив)")));
                 a_changed |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.integrity_a)
@@ -2101,14 +2188,14 @@ impl App {
                     )
                     .changed();
                 ui.end_row();
-                ui.label("Каталог B (копия):");
+                ui.label(format!("{}:", t(lang, "Каталог B (копия)")));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.integrity_b)
                         .hint_text("/mnt/backup/Фотографии с телефона")
                         .desired_width(460.0),
                 );
                 ui.end_row();
-                ui.label("Файл слепка:");
+                ui.label(format!("{}:", t(lang, "Файл слепка")));
                 manifest_changed |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.integrity_manifest)
@@ -2130,14 +2217,17 @@ impl App {
             self.integrity_result = None;
         }
         ui.add_space(4.0);
-        ui.checkbox(&mut self.integrity_show_all, "Показать все пути");
+        ui.checkbox(&mut self.integrity_show_all, t(lang, "Показать все пути"));
         ui.add_space(4.0);
         let running = self.integrity_rx.is_some();
-        let manifest_label = if self.integrity_overwrite {
-            "Перезаписать слепок"
-        } else {
-            "Записать слепок"
-        };
+        let manifest_label = t(
+            lang,
+            if self.integrity_overwrite {
+                "Перезаписать слепок"
+            } else {
+                "Записать слепок"
+            },
+        );
         let mut verify_clicked = false;
         let mut manifest_clicked = false;
         let mut check_clicked = false;
@@ -2146,38 +2236,38 @@ impl App {
         let mut copy_last = false;
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(!running, primary_button("Сверить копии"))
-                .on_hover_text("сравнить каталог A и каталог B побайтово")
+                .add_enabled(!running, primary_button(t(lang, "Сверить копии")))
+                .on_hover_text(t(lang, "сравнить каталог A и каталог B побайтово"))
                 .clicked()
             {
                 verify_clicked = true;
             }
             if ui
                 .add_enabled(!running, egui::Button::new(manifest_label))
-                .on_hover_text("sha256 всех файлов каталога A в файл слепка")
+                .on_hover_text(t(lang, "sha256 всех файлов каталога A в файл слепка"))
                 .clicked()
             {
                 manifest_clicked = true;
             }
             if ui
-                .add_enabled(
-                    !running,
-                    egui::Button::new("Проверить по слепку"),
-                )
-                .on_hover_text("сравнить каталог A с сохранённым слепком")
+                .add_enabled(!running, egui::Button::new(t(lang, "Проверить по слепку")))
+                .on_hover_text(t(lang, "сравнить каталог A с сохранённым слепком"))
                 .clicked()
             {
                 check_clicked = true;
             }
-            if self.integrity_overwrite && ui.button("Отмена").clicked() {
+            if self.integrity_overwrite && ui.button(t(lang, "Отмена")).clicked() {
                 cancel_overwrite = true;
             }
         });
         if running {
             ui.label(
-                egui::RichText::new("проход идёт: прогресс и «Стоп» — в верхней панели")
-                    .size(11.0)
-                    .color(DIM),
+                egui::RichText::new(t(
+                    lang,
+                    "проход идёт: прогресс и «Стоп» — в верхней панели",
+                ))
+                .size(11.0)
+                .color(DIM),
             );
         }
         // Напоминание (M10): срок живёт в настройках, проверка запускается только кнопкой
@@ -2185,54 +2275,83 @@ impl App {
         ui.add_space(4.0);
         let mut interval_changed = false;
         ui.horizontal(|ui| {
-            ui.label("Напоминать о проверке каждые");
+            ui.label(t(lang, "Напоминать о проверке каждые"));
             interval_changed = ui
                 .add(
                     egui::DragValue::new(&mut self.settings.verify_interval_days)
                         .range(0..=3650)
-                        .suffix(" дн."),
+                        .suffix(t(lang, " дн.")),
                 )
-                .on_hover_text("срок считается от последнего полного прохода по архиву")
+                .on_hover_text(t(
+                    lang,
+                    "срок считается от последнего полного прохода по архиву",
+                ))
                 .changed();
-            ui.label(egui::RichText::new("0 — не напоминать").size(11.0).color(DIM));
+            ui.label(
+                egui::RichText::new(t(lang, "0 — не напоминать"))
+                    .size(11.0)
+                    .color(DIM),
+            );
         });
         if interval_changed {
             let value = self.settings.verify_interval_days.to_string();
             if let Err(e) = db::open(&self.db_path)
                 .and_then(|c| db::set_setting(&c, "verify_interval_days", &value))
             {
-                self.integrity_error = format!("интервал напоминания не сохранён: {e}");
+                self.integrity_error =
+                    format!("{}: {e}", t(lang, "интервал напоминания не сохранён"));
             }
             self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
         }
         let last = if self.settings.verify_manifest.trim().is_empty() {
-            "слепок не задан — напоминание молчит".to_string()
+            t(lang, "слепок не задан — напоминание молчит").to_string()
         } else if self.settings.verify_last_at.trim().is_empty() {
-            "последнего прохода ещё не было".to_string()
-        } else if let Some(t) = db::parse_stamp(&self.settings.verify_last_at) {
-            format!(
-                "последний проход: {} · {}",
-                t.with_timezone(&chrono::Local)
-                    .format("%Y-%m-%d %H:%M"),
+            t(lang, "последнего прохода ещё не было").to_string()
+        } else if let Some(stamp) = db::parse_stamp(&self.settings.verify_last_at) {
+            let when = stamp
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string();
+            let outcome = t(
+                lang,
                 if self.settings.verify_last_ok {
                     "совпало"
                 } else {
                     "были расхождения"
-                }
-            )
+                },
+            );
+            match lang {
+                i18n::Lang::En => format!("last pass: {when} · {outcome}"),
+                i18n::Lang::Ru => format!("последний проход: {when} · {outcome}"),
+            }
         } else {
-            "дата последнего прохода непонятна — напомним при запуске".to_string()
+            t(lang, "дата последнего прохода непонятна — напомним при запуске").to_string()
         };
         ui.label(egui::RichText::new(last).size(11.0).color(DIM));
         let (next, urgent) = match self.verify_due {
-            db::VerifyDue::NoManifest => ("напоминание: слепок не задан".to_string(), false),
-            db::VerifyDue::Disabled => ("напоминание выключено (интервал 0)".to_string(), false),
-            db::VerifyDue::NotYet { days_left } => {
-                (format!("следующая проверка: через {days_left} дн."), false)
+            db::VerifyDue::NoManifest => {
+                (t(lang, "напоминание: слепок не задан").to_string(), false)
             }
-            db::VerifyDue::Due { days_over: 0 } => ("пора проверить: срок вышел".to_string(), true),
+            db::VerifyDue::Disabled => {
+                (t(lang, "напоминание выключено (интервал 0)").to_string(), false)
+            }
+            db::VerifyDue::NotYet { days_left } => (
+                format!(
+                    "{} {days_left} {}",
+                    t(lang, "следующая проверка: через"),
+                    t(lang, "дн.")
+                ),
+                false,
+            ),
+            db::VerifyDue::Due { days_over: 0 } => {
+                (t(lang, "пора проверить: срок вышел").to_string(), true)
+            }
             db::VerifyDue::Due { days_over } => (
-                format!("пора проверить: срок вышел {days_over} дн. назад"),
+                format!(
+                    "{} {days_over} {}",
+                    t(lang, "пора проверить: срок вышел"),
+                    t(lang, "дн. назад")
+                ),
                 true,
             ),
         };
@@ -2245,13 +2364,14 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(format!(
-                        "отчёт прошлого прохода: {}",
+                        "{}: {}",
+                        t(lang, "отчёт прошлого прохода"),
                         db::cache_dir().join("verify-last.txt").display()
                     ))
                     .size(11.0)
                     .color(DIM),
                 );
-                if ui.button("Скопировать прошлый отчёт").clicked() {
+                if ui.button(t(lang, "Скопировать прошлый отчёт")).clicked() {
                     copy_last = true;
                 }
             });
@@ -2265,11 +2385,11 @@ impl App {
         }
         let verdict = self.integrity_result.as_ref().map(|r| {
             (
-                r.verdict(),
+                r.verdict(lang),
                 r.identical(),
                 r.cancelled(),
                 r.report(self.integrity_show_all),
-                r.job().title(),
+                r.job().title(lang),
             )
         });
         if let Some((verdict, ok, cancelled, report, job)) = verdict {
@@ -2288,12 +2408,13 @@ impl App {
                     .color(color),
             );
             ui.horizontal(|ui| {
-                if ui.button("Скопировать отчёт").clicked() {
+                if ui.button(t(lang, "Скопировать отчёт")).clicked() {
                     copy = true;
                 }
                 ui.label(
                     egui::RichText::new(format!(
-                        "{job}: тот же отчёт, что печатает CLI; в архив ничего не записано"
+                        "{job}: {}",
+                        t(lang, "тот же отчёт, что печатает CLI; в архив ничего не записано")
                     ))
                     .size(11.0)
                     .color(DIM),
@@ -2312,17 +2433,17 @@ impl App {
         if cancel_overwrite {
             self.integrity_overwrite = false;
             self.integrity_error.clear();
-            self.status = "перезапись слепка отменена".into();
+            self.status = t(lang, "перезапись слепка отменена").into();
         }
         if copy {
             if let Some(r) = &self.integrity_result {
                 ui.ctx().copy_text(r.report(self.integrity_show_all));
             }
-            self.status = "отчёт скопирован в буфер обмена".into();
+            self.status = t(lang, "отчёт скопирован в буфер обмена").into();
         }
         if copy_last && !self.settings.verify_last_report.is_empty() {
             ui.ctx().copy_text(self.settings.verify_last_report.clone());
-            self.status = "отчёт прошлого прохода скопирован в буфер обмена".into();
+            self.status = t(lang, "отчёт прошлого прохода скопирован в буфер обмена").into();
         }
         if verify_clicked {
             self.integrity_start(IntegrityJob::Verify);
@@ -8050,9 +8171,11 @@ impl eframe::App for App {
                         Ok(outcome) => {
                             self.integrity_error.clear();
                             let warn = self.note_integrity(&outcome);
+                            let lang = self.settings.lang;
+                            let done = outcome.status(lang);
                             self.status = match warn {
-                                Some(w) => format!("{}; {w}", outcome.status()),
-                                None => outcome.status(),
+                                Some(w) => format!("{done}; {w}"),
+                                None => done,
                             };
                             self.integrity_result = Some(outcome);
                         }
@@ -8060,7 +8183,12 @@ impl eframe::App for App {
                             // Ошибка прохода не трогает прошлый успешный отчёт и дату:
                             // напоминание продолжает считаться от него.
                             self.integrity_error = format!("{e:#}");
-                            self.status = format!("{}: ошибка", job.title());
+                            let lang = self.settings.lang;
+                            self.status = format!(
+                                "{}: {}",
+                                job.title(lang),
+                                t(lang, "ошибка")
+                            );
                         }
                     }
                 }
@@ -10386,6 +10514,78 @@ mod tests {
         }
     }
 
+    /// M21.4e: экран «Целостность» переводится целиком — поля, три кнопки, напоминание
+    /// и вердикт. Текст отчёта — вывод модуля `verify` (как у CLI), его переводит M21.6.
+    #[test]
+    fn английский_язык_переводит_целостность() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity-i18n.db"));
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Integrity;
+        app.integrity_result = Some(IntegrityOutcome::Verify {
+            a: std::path::PathBuf::from("/tmp/a"),
+            b: std::path::PathBuf::from("/tmp/b"),
+            report: crate::verify::Report {
+                files_a: 2,
+                files_b: 2,
+                only_a: Vec::new(),
+                only_b: Vec::new(),
+                size_diff: Vec::new(),
+                content_diff: Vec::new(),
+                read_errors: Vec::new(),
+                same: 2,
+                hashed: 2,
+                hashed_bytes: 20,
+                unchecked: 0,
+                scan_errors: 0,
+                skipped_a: 0,
+                skipped_b: 0,
+                cancelled: false,
+                seconds: 1.0,
+            },
+        });
+        let texts = window_frame(&mut app, &egui::Context::default());
+        for want in [
+            "Integrity",
+            "comparing copies and a sha256 manifest",
+            "Folder A (archive):",
+            "Folder B (copy):",
+            "Manifest file:",
+            "Show all paths",
+            "Compare the copies",
+            "Write the manifest",
+            "Check against the manifest",
+            "Remind me to check every",
+            "0 — do not remind",
+            "no manifest set — the reminder stays quiet",
+            "the copies match",
+            "Copy the report",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "нет «{want}»: {texts:?}"
+            );
+        }
+        for ru in [
+            "Сверить копии",
+            "Записать слепок",
+            "Проверить по слепку",
+            "Показать все пути",
+            "Каталог A (архив):",
+            "Напоминать о проверке каждые",
+            "Скопировать отчёт",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
+        // Текст отчёта пока русский: это вывод `verify`, M21.6 отдаст ему `lang`.
+        assert!(
+            texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
+            "отчёт рисуется как есть: {texts:?}"
+        );
+    }
+
     #[test]
     fn листание_идёт_по_кругу_и_сбрасывает_таймер_слайдшоу() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -11067,6 +11267,7 @@ mod tests {
     #[test]
     fn экран_целостности_показывает_поля_и_кнопки() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.settings.lang = i18n::Lang::Ru;
         app.view = View::Integrity;
         let texts = window_frame(&mut app, &egui::Context::default());
         for want in [
@@ -11096,6 +11297,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.settings.lang = i18n::Lang::Ru;
         app.integrity_a = dir.to_string_lossy().to_string();
         app.integrity_b = dir.to_string_lossy().to_string();
         let err = app
@@ -11119,6 +11321,7 @@ mod tests {
         let manifest = dir.join("list.sha256");
         std::fs::write(&manifest, b"old").unwrap();
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.settings.lang = i18n::Lang::Ru;
         app.integrity_a = dir.to_string_lossy().to_string();
         app.integrity_manifest = manifest.to_string_lossy().to_string();
         app.integrity_start(IntegrityJob::Manifest);
@@ -11170,6 +11373,7 @@ mod tests {
     #[test]
     fn результат_сверки_виден_на_экране() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
+        app.settings.lang = i18n::Lang::Ru;
         app.view = View::Integrity;
         app.integrity_result = Some(IntegrityOutcome::Verify {
             a: std::path::PathBuf::from("/tmp/a"),

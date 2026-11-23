@@ -784,3 +784,7 @@ takes `lang` — `cargo test` 190 tests include a headless English faces frame; 
 M21.4d: the trash is translated (screen, count, `Restore all`, `Empty the trash`, tile marks, the
 confirmation dialog and the statuses) — `cargo test` 191 tests include a headless English trash
 frame with the open dialog; `check.sh` 44/0.
+M21.4e: the integrity screen is translated (fields, three buttons with hints, reminder row, verdicts,
+copy buttons, plan errors); `title`/`verdict`/`status` take `lang`, the report body stays with the
+CLI reports (M21.6) — `cargo test` 192 tests include a headless English integrity frame; `check.sh`
+44/0. Four integrity tests that assert Russian set `settings.lang = Ru` themselves.

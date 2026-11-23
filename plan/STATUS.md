@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash) → next:M21.4e (integrity, then the left panel and settings panes), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity) → next:M21.4f (left panel blocks, settings panes), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1227,3 +1227,35 @@ frames, as the viewer test does); `cargo clippy --all-targets` clean; `check.sh`
 **Next.** M21.4e: the integrity screen (three buttons, fields, verdict and report labels, statuses),
 then M21.4f — the left panel blocks and the settings dialog panes, still Russian and visible on
 every screen.
+
+## M21.4e — the integrity screen in English (2026-11-24)
+
+The last of the five content screens in `plan/I18N.md` M21.4. The screen that decides whether the
+archive still matches the backup could not stay Russian while everything around it speaks English.
+
+**What moved.** The title, the read-only note, the three fields (`Folder A (archive)`,
+`Folder B (copy)`, `Manifest file`), `Show all paths`, the three buttons with their hints
+(`Compare the copies`, `Write the manifest`, `Overwrite the manifest`, `Check against the manifest`),
+the running note, the reminder row (`Remind me to check every N days`, `0 — do not remind`), the
+last-pass line (`last pass: 2026-11-24 10:00 · matched`), the next-check line, the verdicts
+(`the copies match`, `manifest written: 2 files (20 B) → …`, `the folder matches the manifest`, the
+stopped and error forms with their counters), `Copy the report` / `Copy the last report` and every
+plan error (`please give folder A (archive)`, `folder A and folder B are the same path; nothing to
+compare`, `the manifest already exists: …`). `IntegrityJob::title`, `IntegrityOutcome::verdict` and
+`IntegrityOutcome::status` now take `lang`; `integrity_plan` and `integrity_start` build their
+messages on the same language. The report body is still the text `verify` prints for the CLI: it is
+the CLI's output, and M21.6 gives those report functions a `lang` field — the test asserts both
+(the labels are English, the report line is still Russian).
+
+**Checks.** `cargo test` — 192 passed, 6 `#[ignore]` (new:
+`the_english_language_translates_the_integrity_screen` — a headless integrity frame with a finished
+verdict: `Integrity`, `Folder A (archive):`, `Folder B (copy):`, `Manifest file:`, `Show all paths`,
+`Compare the copies`, `Write the manifest`, `Check against the manifest`, `Remind me to check every`,
+`0 — do not remind`, `the copies match`, `Copy the report`, and no Russian label left; the four
+integrity tests that assert Russian set `settings.lang = Ru` themselves, as the card tests do);
+`cargo clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.
+
+**Next.** M21.4f: the left panel blocks (`Сводка`, the model and tag filter, `все теги`) and the
+settings dialog panes (model, indexing, tags, faces, storage, tools) — they are still Russian and
+visible on every screen. After that M21.5 (viewer, player, folder picker, storage modal) and M21.6
+(CLI reports).
