@@ -1296,6 +1296,22 @@ mod tests {
     }
 
     #[test]
+    fn близкие_веса_дают_не_уверен_а_отрыв_даёт_тег() {
+        let close = vec![
+            ("документ".to_string(), 0.276),
+            ("интерьер".to_string(), 0.271),
+        ];
+        assert!(confident_tag_with(&close, 0.22, 0.01).is_none());
+        let clear = vec![
+            ("мебель".to_string(), 0.30),
+            ("интерьер".to_string(), 0.25),
+        ];
+        assert_eq!(confident_tag_with(&clear, 0.22, 0.01).unwrap().0, "мебель");
+        // Ниже порога уверенности — тоже «не уверен», даже с отрывом.
+        assert!(confident_tag_with(&clear, 0.35, 0.01).is_none());
+    }
+
+    #[test]
     fn фильтр_по_тегу_берёт_любой_вес_выше_порога() {
         let scores = vec![
             ("одежда".to_string(), 0.24),

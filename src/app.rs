@@ -2566,37 +2566,49 @@ impl App {
         );
 
         section_label(ui, "Теги ИИ");
+        // Уверенность — по отрыву первого тега от второго (порог и отрыв в настройках).
+        // Если отрыва нет, «документ» не подсвечивается: честное «не уверен» и топ-3,
+        // остальные веса — под раскрывающейся строкой, чтобы не выдавать шум за ответ.
         let confident = self.tags.get(&id).and_then(|tags| {
             embed::confident_tag_with(tags, self.settings.tag_show, self.settings.tag_margin)
                 .map(|(tag, _)| tag.to_string())
         });
         let mut hide: Option<String> = None;
         if let Some(tags) = self.tags.get(&id).cloned() {
-            let spacing = ui.spacing_mut().item_spacing.y;
-            ui.spacing_mut().item_spacing.y = 2.0;
-            for (tag, score) in &tags {
-                ui.horizontal(|ui| {
-                    let color = if confident.as_deref() == Some(tag.as_str()) {
-                        ACCENT
-                    } else {
-                        ui.visuals().text_color()
-                    };
-                    ui.label(egui::RichText::new(tag).size(12.0).color(color));
+            match &confident {
+                Some(tag) => {
                     ui.label(
-                        egui::RichText::new(format!("{score:.2}"))
-                            .size(11.0)
+                        egui::RichText::new(format!("тег: {tag}"))
+                            .size(12.0)
+                            .color(ACCENT),
+                    );
+                }
+                None if !tags.is_empty() => {
+                    ui.label(
+                        egui::RichText::new("тег: не уверен — первые веса близки")
+                            .size(12.0)
                             .color(DIM),
                     );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("убрать")
-                            .on_hover_text("убрать тег у этого фото; оригинал не меняется")
-                            .clicked()
-                        {
-                            hide = Some(tag.clone());
+                }
+                None => {}
+            }
+            ui.add_space(2.0);
+            let spacing = ui.spacing_mut().item_spacing.y;
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let top = if confident.is_some() { tags.len() } else { 3.min(tags.len()) };
+            for (tag, score) in tags.iter().take(top) {
+                let pct = self.tag_percentile(tag, *score);
+                tag_row(ui, tag, *score, pct, confident.as_deref(), &mut hide);
+            }
+            if confident.is_none() && tags.len() > top {
+                egui::CollapsingHeader::new(format!("все теги ({})", tags.len()))
+                    .id_salt(("card_tags", id))
+                    .show(ui, |ui| {
+                        for (tag, score) in tags.iter().skip(top) {
+                            let pct = self.tag_percentile(tag, *score);
+                            tag_row(ui, tag, *score, pct, None, &mut hide);
                         }
                     });
-                });
             }
             ui.spacing_mut().item_spacing.y = spacing;
         } else {
@@ -3689,6 +3701,16 @@ impl App {
             .unwrap_or(self.settings.tag_show)
     }
 
+    /// Процентиль веса тега в индексе: 100 — самый сильный снимок этого тега.
+    /// На маленьком каталоге не показывается (там шумно), остаётся только вес.
+    fn tag_percentile(&self, tag: &str, score: f32) -> Option<u32> {
+        if self.tags.len() < 100 {
+            return None;
+        }
+        let d = self.tag_dists.get(tag)?;
+        score_percentile(d, score)
+    }
+
     /// Снимков на каждый тег из `TAG_LABELS` при его процентильном пороге: число рядом
     /// с тегом честно говорит «ноль», а не удивляет после нажатия.
     fn tag_counts(&self) -> Vec<usize> {
@@ -4116,6 +4138,52 @@ fn short_version(line: &str) -> String {
         .take(3)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Процентиль веса по убывающему распределению: доля снимков с меньшим весом.
+/// Самый сильный снимок тега — 100 (после округления), слабейший — 0.
+fn score_percentile(sorted_desc: &[f32], score: f32) -> Option<u32> {
+    if sorted_desc.is_empty() {
+        return None;
+    }
+    let below = sorted_desc.iter().filter(|s| **s < score).count();
+    Some((below as f64 * 100.0 / sorted_desc.len() as f64).round() as u32)
+}
+
+/// Строка тега в карточке: подпись, вес, процентиль и «убрать».
+fn tag_row(
+    ui: &mut egui::Ui,
+    tag: &str,
+    score: f32,
+    pct: Option<u32>,
+    confident: Option<&str>,
+    hide: &mut Option<String>,
+) {
+    ui.horizontal(|ui| {
+        let color = if confident == Some(tag) {
+            ACCENT
+        } else {
+            ui.visuals().text_color()
+        };
+        ui.label(egui::RichText::new(tag).size(12.0).color(color));
+        ui.label(
+            egui::RichText::new(match pct {
+                Some(p) => format!("{score:.2} · {p}%"),
+                None => format!("{score:.2}"),
+            })
+            .size(11.0)
+            .color(DIM),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .small_button("убрать")
+                .on_hover_text("убрать тег у этого фото; оригинал не меняется")
+                .clicked()
+            {
+                *hide = Some(tag.to_string());
+            }
+        });
+    });
 }
 
 struct Cells<'a> {
@@ -6116,7 +6184,7 @@ impl eframe::App for App {
 mod tests {
     use super::{
         App, CalScale, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
-        nearest_file_month, parse_date, shift_month, shift_to_file_month,
+        nearest_file_month, parse_date, score_percentile, shift_month, shift_to_file_month,
     };
     use crate::embed;
     use std::collections::BTreeSet;
@@ -6145,6 +6213,18 @@ mod tests {
         }
     }
 
+    fn collect_text(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_text(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Один кадр полноэкранного просмотра без окна: возвращает весь нарисованный текст.
     /// Единственный способ проверить «листание показывает следующий файл» без GUI.
     fn viewer_frame(
@@ -6152,17 +6232,6 @@ mod tests {
         ctx: &egui::Context,
         key: Option<egui::Key>,
     ) -> Vec<String> {
-        fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
-            match shape {
-                egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
-                egui::Shape::Vec(v) => {
-                    for s in v {
-                        collect(s, out);
-                    }
-                }
-                _ => {}
-            }
-        }
         let raw = |key: Option<egui::Key>| {
             let mut raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -6196,7 +6265,25 @@ mod tests {
         });
         let mut texts = Vec::new();
         for c in &out.shapes {
-            collect(&c.shape, &mut texts);
+            collect_text(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// Один кадр карточки файла без окна: проверяет текст «не уверен» и топ-3.
+    fn card_frame(app: &mut App, ctx: &egui::Context) -> Vec<String> {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 840.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(raw, |ui| app.details_panel(ui));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text(&c.shape, &mut texts);
         }
         out.drop_without_applying_deltas();
         texts
@@ -6216,6 +6303,54 @@ mod tests {
 
     /// Листание в полном экране обязано менять файл в ту же секунду, а видео —
     /// останавливаться. Иначе кадр старого видео рисуется поверх нового файла.
+    /// Владелец: «сверху документ, ниже скриншот, а мебель потом». При близких весах
+    /// карточка обязана сказать «не уверен», показать топ-3 и ничего не подсвечивать.
+    #[test]
+    fn карточка_пишет_не_уверен_при_близких_тегах() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        app.items = vec![file_row(1, "image", "8.jpg")];
+        app.selected = Some(1);
+        app.tags.insert(
+            1,
+            vec![
+                ("документ".to_string(), 0.276),
+                ("интерьер".to_string(), 0.271),
+                ("мебель".to_string(), 0.255),
+                ("дети".to_string(), 0.080),
+            ],
+        );
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        let texts = card_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t.contains("тег: не уверен")),
+            "нет честного «не уверен»: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "документ"));
+        assert!(texts.iter().any(|t| t == "мебель"));
+        assert!(
+            !texts.iter().any(|t| t == "дети"),
+            "четвёртый тег спрятан под «все теги»: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn карточка_подсвечивает_уверенный_тег() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.selected = Some(1);
+        app.tags.insert(
+            1,
+            vec![
+                ("мебель".to_string(), 0.30),
+                ("интерьер".to_string(), 0.25),
+            ],
+        );
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        let texts = card_frame(&mut app, &egui::Context::default());
+        assert!(texts.iter().any(|t| t == "тег: мебель"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.contains("не уверен")), "{texts:?}");
+    }
+
     #[test]
     fn листание_идёт_по_кругу_и_сбрасывает_таймер_слайдшоу() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -6420,6 +6555,16 @@ mod tests {
         app.tags.retain(|id, _| *id < 50);
         app.settings.tag_show = 0.22;
         assert!((app.tag_threshold("мебель") - 0.22).abs() < 1e-6);
+    }
+
+    #[test]
+    fn процентиль_веса_считает_долю_слабейших() {
+        let d = [0.30, 0.20, 0.10];
+        assert_eq!(score_percentile(&d, 0.30), Some(67));
+        assert_eq!(score_percentile(&d, 0.20), Some(33));
+        assert_eq!(score_percentile(&d, 0.10), Some(0));
+        assert_eq!(score_percentile(&d, 0.40), Some(100));
+        assert_eq!(score_percentile(&[], 0.2), None);
     }
 
     #[test]
