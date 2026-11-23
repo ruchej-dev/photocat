@@ -24,12 +24,15 @@ declare -A ALLOWED=(
   [index]="derive db tools"
   [dupes]="db derive"
   [organize]="db"
+  [recycle]="db"
+  [storage]="db"
   [verify]="db derive"
   [embed]="derive db tools"
   [ocr]="derive db tools"
   [faces]="derive db embed"
-  [app]="derive db index dupes organize embed ocr faces tools"
-  [main]="derive db index dupes organize verify embed ocr faces app tools"
+  [player]=""
+  [app]="derive db index dupes organize embed ocr faces player tools recycle storage"
+  [main]="derive db index dupes organize verify embed ocr faces player app tools"
 )
 
 echo "1. зависимости между модулями"
@@ -59,13 +62,14 @@ fi
 
 # ---------------------------------------------------------------- 3. файлы архива
 echo "3. запрет удаления и переименования файлов"
-bad=$(grep -nE '\b(fs::remove_file|fs::remove_dir|fs::remove_dir_all|fs::rename|remove_file|remove_dir_all)' src/*.rs 2>/dev/null || true)
+# Исключение — src/storage.rs: он удаляет только содержимое <кэш>/photocat (проверка пути внутри).
+bad=$(grep -nE '\b(fs::remove_file|fs::remove_dir|fs::remove_dir_all|fs::rename|remove_file|remove_dir_all)' src/*.rs 2>/dev/null | grep -v '^src/storage.rs:' || true)
 if [[ -n $bad ]]; then
   err "в src/ есть удаление/переименование (ADR 0005):"
   echo "$bad" | sed 's/^/      /'
 else
   pass
-  note "ок" "ни один код не удаляет и не переименовывает"
+  note "ок" "архив не удаляется и не переименовывается; кэш — только storage.rs"
 fi
 
 # ---------------------------------------------------------------- 4. сеть

@@ -452,6 +452,95 @@ pub fn load_oriented(src: &Path) -> Result<image::DynamicImage> {
     Ok(img)
 }
 
+/// Быстрый кадр для полноэкранного просмотра: JPEG декодируется сразу в уменьшенном
+/// масштабе через libjpeg-turbo (Linux), поворот EXIF применяется после. Остальные форматы
+/// и платформы идут через `load_oriented` + `thumbnail`.
+pub fn fast_view(src: &Path, max_side: u32) -> Result<(usize, usize, Vec<u8>)> {
+    #[cfg(target_os = "linux")]
+    if let Ok(frame) = fast_jpeg(src, max_side) {
+        return Ok(frame);
+    }
+    let img = load_oriented(src)?.thumbnail(max_side, max_side).to_rgba8();
+    Ok((
+        img.width() as usize,
+        img.height() as usize,
+        img.into_raw(),
+    ))
+}
+
+/// DCT-масштабирование TurboJPEG: для 108 МП снимка 1/4 даёт 3008 px за ~0,5 с вместо
+/// полного декода 12 032×9 024 и последующего ресайза (~1,3 с).
+#[cfg(target_os = "linux")]
+fn fast_jpeg(src: &Path, max_side: u32) -> Result<(usize, usize, Vec<u8>)> {
+    use turbojpeg::{Decompressor, PixelFormat, ScalingFactor};
+    let data = std::fs::read(src)?;
+    let mut d = Decompressor::new()?;
+    let head = d.read_header(&data)?;
+    let long = head.width.max(head.height);
+    let target = max_side.max(64) as usize;
+    let factor = if long / 8 >= target {
+        ScalingFactor::new(1, 8)
+    } else if long / 4 >= target {
+        ScalingFactor::new(1, 4)
+    } else if long / 2 >= target {
+        ScalingFactor::new(1, 2)
+    } else {
+        ScalingFactor::ONE
+    };
+    d.set_scaling_factor(factor)?;
+    let scaled = head.scaled(factor);
+    let mut img = turbojpeg::Image {
+        pixels: vec![0u8; scaled.width * scaled.height * 4],
+        width: scaled.width,
+        pitch: scaled.width * 4,
+        height: scaled.height,
+        format: PixelFormat::RGBA,
+    };
+    d.decompress(&data, img.as_deref_mut())?;
+    let orientation = exif_orientation(src).unwrap_or(1);
+    Ok(orient_rgba(scaled.width, scaled.height, img.pixels, orientation))
+}
+
+/// EXIF-поворот без декодирования пикселей.
+pub fn exif_orientation(src: &Path) -> Option<u8> {
+    use std::io::BufReader;
+    let file = std::fs::File::open(src).ok()?;
+    let r = exif::Reader::new();
+    let exif = r.read_from_container(&mut BufReader::new(file)).ok()?;
+    exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY)?
+        .value
+        .get_uint(0)
+        .map(|v| v as u8)
+}
+
+/// Применить EXIF-поворот к уже декодированным RGBA-пикселям.
+fn orient_rgba(w: usize, h: usize, data: Vec<u8>, orientation: u8) -> (usize, usize, Vec<u8>) {
+    if orientation <= 1 {
+        return (w, h, data);
+    }
+    let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, data) else {
+        return (w, h, Vec::new());
+    };
+    let out = match orientation {
+        2 => image::imageops::flip_horizontal(&img),
+        3 => image::imageops::rotate180(&img),
+        4 => image::imageops::flip_vertical(&img),
+        5 => {
+            let t = image::imageops::rotate90(&img);
+            image::imageops::flip_horizontal(&t)
+        }
+        6 => image::imageops::rotate90(&img),
+        7 => {
+            let t = image::imageops::rotate90(&img);
+            image::imageops::flip_vertical(&t)
+        }
+        8 => image::imageops::rotate270(&img),
+        _ => img,
+    };
+    let (w, h) = out.dimensions();
+    (w as usize, h as usize, out.into_raw())
+}
+
 /// Вход для OCR: повёрнутый по EXIF кадр не больше `max_side`, PNG в памяти.
 /// Декодируем сами: `tesseract` не читает EXIF-поворот, а снимок с телефона иначе ляжет боком.
 fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
@@ -589,6 +678,25 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    #[ignore = "нужен PHOTOCAT_BIG_JPEG: путь к тяжёлому JPEG"]
+    fn fast_view_быстрее_полного_декода_большого_jpeg() {
+        let Some(path) = std::env::var_os("PHOTOCAT_BIG_JPEG").map(std::path::PathBuf::from)
+        else {
+            return;
+        };
+        let t0 = std::time::Instant::now();
+        let (w, h, raw) = fast_view(&path, 1920).unwrap();
+        let fast = t0.elapsed();
+        assert!(w > 0 && h > 0 && raw.len() == w * h * 4);
+        let t1 = std::time::Instant::now();
+        let img = load_oriented(&path).unwrap().thumbnail(1920, 1920);
+        assert!(img.width() > 0);
+        let full = t1.elapsed();
+        println!("fast_view {w}x{h}: {fast:?}; полный декод + thumbnail: {full:?}");
+        assert!(fast < full);
+    }
 
     fn probe(json: &str) -> Result<VideoMeta> {
         parse_probe(json.as_bytes(), Path::new("/v.mp4"))

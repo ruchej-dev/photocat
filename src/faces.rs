@@ -788,6 +788,12 @@ pub fn label(db_path: &Path, cluster_id: i64, label: &str) -> Result<()> {
     db::label_face_cluster(&conn, cluster_id, label)
 }
 
+/// Пакетное назначение: отмеченные лица уезжают в одну группу с именем.
+pub fn group_picked(db_path: &Path, face_ids: &[i64], label: &str) -> Result<i64> {
+    let conn = db::open(db_path)?;
+    db::group_faces(&conn, face_ids, label)
+}
+
 /// Разъединить ложную склейку: одно лицо уезжает в новую группу.
 pub fn split(db_path: &Path, face_id: i64) -> Result<i64> {
     let mut conn = db::open(db_path)?;

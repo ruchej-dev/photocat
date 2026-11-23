@@ -1,11 +1,11 @@
 //! Работа с SQLite: схема, вставка, чтение, статистика.
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Прогресс индексации (атомики, чтобы читать из GUI-потока).
 #[derive(Default)]
@@ -96,7 +96,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
 /// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
 /// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 4;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -146,6 +146,13 @@ fn init(c: &Connection) -> Result<()> {
             hidden_at INTEGER NOT NULL,
             PRIMARY KEY(file_id, tag)
          );
+         CREATE TABLE IF NOT EXISTS user_tags(
+            file_id INTEGER NOT NULL,
+            tag     TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY(file_id, tag)
+         );
+         CREATE INDEX IF NOT EXISTS idx_user_tag ON user_tags(tag);
          CREATE TABLE IF NOT EXISTS settings(
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -242,6 +249,7 @@ fn init(c: &Connection) -> Result<()> {
     ensure_column(c, "files", "sharpness", "REAL")?;
     ensure_column(c, "files", "decision", "TEXT")?;
     ensure_column(c, "files", "duration_s", "REAL")?;
+    ensure_column(c, "files", "trashed_at", "INTEGER")?;
     // Теги старых версий были без модели в источнике; переводим на id текущей модели.
     c.execute(
         "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
@@ -273,6 +281,10 @@ pub struct Settings {
     pub tools: crate::tools::Tools,
     /// Порог косинуса для склейки лиц в одного человека (ADR 0021).
     pub face_threshold: f32,
+    /// Размер плитки сетки, px (docs/UI.md).
+    pub tile_size: f32,
+    /// Каталоги, которые индексируются одной кнопкой; пусто — путь из верхней панели.
+    pub roots: Vec<String>,
 }
 
 impl Default for Settings {
@@ -281,13 +293,18 @@ impl Default for Settings {
             models_dir: cache_dir().join("models"),
             model_id: String::new(),
             max_model_mb: 250,
-            index_jobs: 8,
+            index_jobs: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(8)
+                .clamp(2, 16),
             max_dist: 6,
             tag_show: 0.22,
             tag_margin: 0.01,
             ocr_lang: "rus+eng".into(),
             tools: crate::tools::Tools::default(),
             face_threshold: 0.45,
+            tile_size: 150.0,
+            roots: Vec::new(),
         }
     }
 }
@@ -297,7 +314,8 @@ pub fn load_settings(conn: &Connection) -> Settings {
     let Ok(mut st) = conn.prepare("SELECT key, value FROM settings") else {
         return s;
     };
-    let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else {
+    let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    else {
         return s;
     };
     for row in rows.flatten() {
@@ -316,6 +334,15 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "tool_tesseract" => s.tools.tesseract = v,
             "tool_curl" => s.tools.curl = v,
             "face_threshold" => s.face_threshold = v.parse().unwrap_or(s.face_threshold),
+            "tile_size" => s.tile_size = v.parse().unwrap_or(s.tile_size),
+            "roots" => {
+                s.roots = v
+                    .lines()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            }
             _ => {}
         }
     }
@@ -333,6 +360,8 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("tag_margin", s.tag_margin.to_string()),
         ("ocr_lang", s.ocr_lang.clone()),
         ("face_threshold", s.face_threshold.to_string()),
+        ("tile_size", s.tile_size.to_string()),
+        ("roots", s.roots.join("\n")),
     ];
     for tool in crate::tools::ALL {
         pairs.push((tool.setting_key(), s.tools.get(tool).to_string()));
@@ -375,6 +404,40 @@ pub fn load_hidden_counts(conn: &Connection) -> Result<HashMap<i64, usize>> {
     Ok(out)
 }
 
+/// Свои теги владельца: file_id → список подписей.
+pub fn load_user_tags(conn: &Connection) -> Result<HashMap<i64, Vec<String>>> {
+    let mut st = conn.prepare("SELECT file_id, tag FROM user_tags ORDER BY tag")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+    for r in rows {
+        let (id, tag) = r?;
+        out.entry(id).or_default().push(tag);
+    }
+    Ok(out)
+}
+
+pub fn add_user_tag(db: &Path, file_id: i64, tag: &str) -> Result<()> {
+    let tag = tag.trim();
+    if tag.is_empty() {
+        return Ok(());
+    }
+    let conn = open(db)?;
+    conn.execute(
+        "INSERT INTO user_tags(file_id,tag,created_at) VALUES(?1,?2,?3)
+         ON CONFLICT(file_id,tag) DO NOTHING",
+        params![file_id, tag, now()],
+    )?;
+    Ok(())
+}
+
+pub fn remove_user_tag(db: &Path, file_id: i64, tag: &str) -> Result<()> {
+    let conn = open(db)?;
+    conn.execute(
+        "DELETE FROM user_tags WHERE file_id=?1 AND tag=?2",
+        params![file_id, tag],
+    )?;
+    Ok(())
+}
 
 fn ensure_column(c: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
     let exists = {
@@ -418,6 +481,9 @@ pub struct FileRow {
     pub thumb: Option<String>,
     /// Решение владельца по дублю: `keep` | `drop` | `NULL` (не решено).
     pub decision: Option<String>,
+    /// Время помещения в корзину приложения; `NULL` — файл в обычных видах.
+    #[allow(dead_code)]
+    pub trashed_at: Option<i64>,
 }
 
 pub fn insert(conn: &Connection, r: &FileRow) -> Result<()> {
@@ -464,7 +530,10 @@ pub fn mark_keep(db: &Path, keep: i64, drops: &[i64]) -> Result<()> {
 
 fn mark_keep_conn(conn: &mut Connection, keep: i64, drops: &[i64]) -> Result<()> {
     let tx = conn.transaction()?;
-    tx.execute("UPDATE files SET decision='keep' WHERE id=?1", params![keep])?;
+    tx.execute(
+        "UPDATE files SET decision='keep' WHERE id=?1",
+        params![keep],
+    )?;
     for &id in drops {
         tx.execute("UPDATE files SET decision='drop' WHERE id=?1", params![id])?;
     }
@@ -480,17 +549,28 @@ pub fn now() -> i64 {
 }
 
 pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
-    let mut st = conn.prepare(
+    load_where(conn, "trashed_at IS NULL")
+}
+
+/// Файлы корзины приложения: они ещё на диске, но скрыты из обычных видов.
+pub fn load_trashed(conn: &Connection) -> Result<Vec<FileRow>> {
+    load_where(conn, "trashed_at IS NOT NULL")
+}
+
+fn load_where(conn: &Connection, filter: &str) -> Result<Vec<FileRow>> {
+    let sql = format!(
         "SELECT id,path,size,sha256,kind,COALESCE(width,0),COALESCE(height,0),
-                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,duration_s,thumb,decision
-         FROM files ORDER BY COALESCE(taken_at,'9999') , path",
-    )?;
+                taken_at,COALESCE(taken_src,''),lat,lon,camera,dhash,sharpness,duration_s,thumb,decision,trashed_at,
+                COALESCE(mtime,0)
+         FROM files WHERE {filter} ORDER BY COALESCE(taken_at,'9999') , path"
+    );
+    let mut st = conn.prepare(&sql)?;
     let rows = st.query_map([], |r| {
         Ok(FileRow {
             id: r.get(0)?,
             path: r.get(1)?,
             size: r.get(2)?,
-            mtime: 0,
+            mtime: r.get(18)?,
             sha256: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
             kind: r.get(4)?,
             width: r.get(5)?,
@@ -505,6 +585,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
             duration_s: r.get(14)?,
             thumb: r.get(15)?,
             decision: r.get(16)?,
+            trashed_at: r.get(17)?,
         })
     })?;
     let mut out = Vec::new();
@@ -512,6 +593,83 @@ pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
         out.push(r?);
     }
     Ok(out)
+}
+
+/// Пометить файл в корзину приложения: на диске ничего не меняется.
+pub fn mark_trashed(db: &Path, file_id: i64) -> Result<()> {
+    let conn = open(db)?;
+    conn.execute(
+        "UPDATE files SET trashed_at=?1 WHERE id=?2",
+        params![now(), file_id],
+    )?;
+    Ok(())
+}
+
+/// Вернуть файл из корзины приложения.
+pub fn untrash(db: &Path, file_id: i64) -> Result<()> {
+    let conn = open(db)?;
+    conn.execute(
+        "UPDATE files SET trashed_at=NULL WHERE id=?1",
+        params![file_id],
+    )?;
+    Ok(())
+}
+
+/// Убрать файл из индекса после переноса в системную корзину. Оригинал уже не наш.
+pub fn purge_file(db: &Path, file_id: i64) -> Result<()> {
+    let conn = open(db)?;
+    delete_file_rows(&conn, &[file_id])
+}
+
+/// Убрать каталог из индекса: строки БД, не файлы на диске.
+pub fn remove_root(db: &Path, root: &str) -> Result<usize> {
+    let mut conn = open(db)?;
+    let root = root.trim_end_matches(['/', '\\']);
+    let root = std::fs::canonicalize(root)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| root.to_string());
+    let like = format!("{}{}%", escape_like(&root), std::path::MAIN_SEPARATOR);
+    let ids: Vec<i64> = {
+        let mut st =
+            conn.prepare("SELECT id FROM files WHERE path=?1 OR path LIKE ?2 ESCAPE '\\'")?;
+        let rows = st.query_map(params![root, like], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<i64>>>()?
+    };
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let tx = conn.transaction()?;
+    delete_file_rows_tx(&tx, &ids)?;
+    tx.commit()?;
+    Ok(ids.len())
+}
+
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+fn delete_file_rows(conn: &Connection, ids: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    delete_file_rows_tx(&tx, ids)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn delete_file_rows_tx(tx: &Connection, ids: &[i64]) -> Result<()> {
+    for id in ids {
+        tx.execute("DELETE FROM ocr WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM embeddings WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM tags WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM tag_hidden WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM user_tags WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM faces WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM face_scans WHERE file_id=?1", params![id])?;
+        tx.execute("DELETE FROM files WHERE id=?1", params![id])?;
+    }
+    delete_empty_face_clusters(tx)?;
+    Ok(())
 }
 
 /// sha256 уже посчитанных векторов: file_id → sha256 файла на момент расчёта.
@@ -776,6 +934,43 @@ pub fn label_face_cluster(conn: &Connection, cluster_id: i64, label: &str) -> Re
     Ok(())
 }
 
+/// Собрать несколько отмеченных лиц в группу с одним именем. Если имя уже есть,
+/// используется существующая группа; пустое имя создаёт новую без подписи.
+/// `manual=1` закрепляет решение при пересборке.
+pub fn group_faces(conn: &Connection, face_ids: &[i64], label: &str) -> Result<i64> {
+    let label = label.trim();
+    let existing: Option<i64> = if label.is_empty() {
+        None
+    } else {
+        conn.query_row(
+            "SELECT id FROM face_clusters WHERE label=?1 LIMIT 1",
+            params![label],
+            |r| r.get(0),
+        )
+        .optional()?
+    };
+    let cluster_id = match existing {
+        Some(id) => id,
+        None => {
+            conn.execute(
+                "INSERT INTO face_clusters(label,created_at) VALUES(?1,?2)",
+                params![label, now()],
+            )?;
+            conn.last_insert_rowid()
+        }
+    };
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut st = tx.prepare("UPDATE faces SET cluster_id=?1, manual=1 WHERE id=?2")?;
+        for &id in face_ids {
+            st.execute(params![cluster_id, id])?;
+        }
+    }
+    tx.commit()?;
+    delete_empty_face_clusters(conn)?;
+    Ok(cluster_id)
+}
+
 /// Отделить одно лицо в новую группу: ложная склейка разъединяется одним действием.
 pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
     let tx = conn.transaction()?;
@@ -808,11 +1003,9 @@ pub fn delete_empty_face_clusters(conn: &Connection) -> Result<usize> {
 
 /// План прохода по лицам: `(снимков всего, ещё не просканировано)`.
 pub fn face_scan_plan(conn: &Connection) -> Result<(usize, usize)> {
-    let images: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM files WHERE kind='image'",
-        [],
-        |r| r.get(0),
-    )?;
+    let images: i64 = conn.query_row("SELECT COUNT(*) FROM files WHERE kind='image'", [], |r| {
+        r.get(0)
+    })?;
     let todo: i64 = conn.query_row(
         "SELECT COUNT(*) FROM files f LEFT JOIN face_scans s ON s.file_id=f.id
          WHERE f.kind='image' AND COALESCE(s.sha256,'') != COALESCE(f.sha256,'')",
@@ -825,11 +1018,9 @@ pub fn face_scan_plan(conn: &Connection) -> Result<(usize, usize)> {
 /// `(лиц, снимков с лицами, кластеров)` — для панели и отчёта.
 pub fn face_summary(conn: &Connection) -> Result<(i64, i64, i64)> {
     let faces: i64 = conn.query_row("SELECT COUNT(*) FROM faces", [], |r| r.get(0))?;
-    let photos: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT file_id) FROM faces",
-        [],
-        |r| r.get(0),
-    )?;
+    let photos: i64 = conn.query_row("SELECT COUNT(DISTINCT file_id) FROM faces", [], |r| {
+        r.get(0)
+    })?;
     let clusters: i64 = conn.query_row(
         "SELECT COUNT(*) FROM face_clusters WHERE id IN (SELECT cluster_id FROM faces WHERE cluster_id IS NOT NULL)",
         [],
@@ -849,9 +1040,7 @@ pub fn replace_tags(
         "DELETE FROM tags WHERE file_id=?1 AND source=?2",
         params![file_id, source],
     )?;
-    let mut st = conn.prepare(
-        "INSERT INTO tags(file_id,tag,score,source) VALUES(?1,?2,?3,?4)",
-    )?;
+    let mut st = conn.prepare("INSERT INTO tags(file_id,tag,score,source) VALUES(?1,?2,?3,?4)")?;
     for (tag, score) in tags {
         st.execute(params![file_id, tag, score, source])?;
     }
@@ -869,7 +1058,9 @@ pub fn load_tags(conn: &Connection, source: &str) -> Result<HashMap<i64, Vec<(St
          WHERE t.source=?1 AND h.tag IS NULL
          ORDER BY t.file_id, t.score DESC",
     )?;
-    let rows = st.query_map([source], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?)))?;
+    let rows = st.query_map([source], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?))
+    })?;
     let mut out: HashMap<i64, Vec<(String, f32)>> = HashMap::new();
     for r in rows {
         let (id, tag, score) = r?;
@@ -904,7 +1095,14 @@ pub fn save_ocr(
          ON CONFLICT(file_id) DO UPDATE SET
             sha256=excluded.sha256, lang=excluded.lang, text=excluded.text,
             chars=excluded.chars, created_at=excluded.created_at",
-        params![file_id, sha256, lang, text, text.chars().count() as i64, now()],
+        params![
+            file_id,
+            sha256,
+            lang,
+            text,
+            text.chars().count() as i64,
+            now()
+        ],
     )?;
     Ok(())
 }
@@ -942,7 +1140,11 @@ pub fn load_visible_tags(conn: &Connection) -> Result<HashMap<i64, Vec<(String, 
          SELECT file_id, tag, score FROM visible ORDER BY file_id, score DESC",
     )?;
     let rows = st.query_map([], |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, f32>(2)?))
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, f32>(2)?,
+        ))
     })?;
     let mut out: HashMap<i64, Vec<(String, f32)>> = HashMap::new();
     for r in rows {
@@ -970,11 +1172,7 @@ pub fn fts_query(q: &str) -> Option<String> {
 
 /// Полнотекстовый поиск по распознанному тексту: `(file_id, фрагмент с «…»)`.
 /// Фрагмент уже подсвечен маркерами: UI красит совпадения, CLI печатает как есть.
-pub fn search_ocr(
-    conn: &Connection,
-    q: &str,
-    limit: usize,
-) -> Result<Vec<(i64, String)>> {
+pub fn search_ocr(conn: &Connection, q: &str, limit: usize) -> Result<Vec<(i64, String)>> {
     let Some(match_q) = fts_query(q) else {
         return Ok(Vec::new());
     };
@@ -1047,11 +1245,10 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
         [],
         |r| r.get(0),
     )?;
-    let no_hash: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM files WHERE dhash IS NULL",
-        [],
-        |r| r.get(0),
-    )?;
+    let no_hash: i64 =
+        conn.query_row("SELECT COUNT(*) FROM files WHERE dhash IS NULL", [], |r| {
+            r.get(0)
+        })?;
     let uniq_sha: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT sha256) FROM files WHERE sha256 IS NOT NULL",
         [],
@@ -1066,7 +1263,10 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
     println!("всего: {total_n} файлов, {}", human(total_b));
     println!("без даты съёмки: {no_date}");
     println!("без перцептивного хеша: {no_hash}");
-    println!("уникальных sha256: {uniq_sha}  (точных копий: {})", total_n - uniq_sha);
+    println!(
+        "уникальных sha256: {uniq_sha}  (точных копий: {})",
+        total_n - uniq_sha
+    );
     println!("уникальных dhash: {uniq_dhash}");
     let (vid_n, vid_dur): (i64, f64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(duration_s),0) FROM files
@@ -1074,7 +1274,10 @@ pub fn print_stats(db_path: &Path) -> Result<()> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    println!("видео с длительностью: {vid_n}, суммарно {}", duration(vid_dur));
+    println!(
+        "видео с длительностью: {vid_n}, суммарно {}",
+        duration(vid_dur)
+    );
     let (ocr_n, ocr_chars) = ocr_summary(&conn)?;
     if ocr_n > 0 {
         println!("файлов с распознанным текстом: {ocr_n}, знаков: {ocr_chars}");
@@ -1106,6 +1309,7 @@ mod tests {
             duration_s: None,
             thumb: None,
             decision: None,
+            trashed_at: None,
         }
     }
 
@@ -1135,7 +1339,10 @@ mod tests {
         };
         save_faces_for_file(&c, file_id, "aa", &[face]).unwrap();
         assert_eq!(load_faces(&c).unwrap().len(), 1);
-        assert_eq!(face_scan_shas(&c).unwrap().get(&file_id), Some(&"aa".into()));
+        assert_eq!(
+            face_scan_shas(&c).unwrap().get(&file_id),
+            Some(&"aa".into())
+        );
         let face_id = load_faces(&c).unwrap()[0].id;
         let clustered = create_face_cluster(&c).unwrap();
         save_face_assignments(&mut c, &[(face_id, Some(clustered))], false).unwrap();
@@ -1152,6 +1359,56 @@ mod tests {
         insert(&c, &row("/a.jpg", "bb", 1.0)).unwrap();
         assert!(load_faces(&c).unwrap().is_empty());
         assert!(face_scan_shas(&c).unwrap().is_empty());
+    }
+
+    #[test]
+    fn корзина_приложения_скрывает_файл_из_обычных_видов() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
+        let id = id_of(&c, "/a.jpg");
+        c.execute("UPDATE files SET trashed_at=1 WHERE id=?1", [id])
+            .unwrap();
+        assert!(load_all(&c).unwrap().is_empty());
+        assert_eq!(load_trashed(&c).unwrap().len(), 1);
+        c.execute("UPDATE files SET trashed_at=NULL WHERE id=?1", [id])
+            .unwrap();
+        assert_eq!(load_all(&c).unwrap().len(), 1);
+        assert!(load_trashed(&c).unwrap().is_empty());
+    }
+
+    #[test]
+    fn пакетное_назначение_лиц_собирает_группу_с_именем() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
+        let file_id = id_of(&c, "/a.jpg");
+        let mk = |x: i32| FaceRow {
+            id: 0,
+            x,
+            y: 20,
+            w: 30,
+            h: 40,
+            score: 0.9,
+            quality: 0.8,
+            thumb: None,
+            embedding: vec![1.0, 0.0],
+            cluster_id: None,
+            manual: false,
+        };
+        save_faces_for_file(&c, file_id, "aa", &[mk(10), mk(60)]).unwrap();
+        let ids: Vec<i64> = load_faces(&c).unwrap().iter().map(|f| f.id).collect();
+        let cid = group_faces(&c, &ids, "Лиза").unwrap();
+        let clusters = load_face_clusters(&c).unwrap();
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0].id, cid);
+        assert_eq!(clusters[0].label, "Лиза");
+        assert!(
+            load_faces(&c)
+                .unwrap()
+                .iter()
+                .all(|f| f.cluster_id == Some(cid) && f.manual)
+        );
     }
 
     #[test]
@@ -1183,8 +1440,7 @@ mod tests {
         let r = row("/a.jpg", "aa", 10.0);
         insert(&c, &r).unwrap();
         let id = id_of(&c, "/a.jpg");
-        replace_tags(&c, id, "clip", &[("пляж".into(), 0.3), ("еда".into(), 0.1)])
-            .unwrap();
+        replace_tags(&c, id, "clip", &[("пляж".into(), 0.3), ("еда".into(), 0.1)]).unwrap();
         assert_eq!(load_tags(&c, "clip").unwrap()[&id].len(), 2);
         c.execute(
             "INSERT INTO tag_hidden(file_id,tag,hidden_at) VALUES(?1,'пляж',0)",
@@ -1240,7 +1496,11 @@ mod tests {
         let hits = search_ocr(&c, "справ", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, id);
-        assert!(hits[0].1.contains('«') && hits[0].1.contains('»'), "{}", hits[0].1);
+        assert!(
+            hits[0].1.contains('«') && hits[0].1.contains('»'),
+            "{}",
+            hits[0].1
+        );
         assert!(search_ocr(&c, "договор", 10).unwrap().is_empty());
         // синтаксис FTS не должен превращать пользовательский ввод в ошибку
         assert!(search_ocr(&c, "\"),", 10).is_ok());
@@ -1318,7 +1578,10 @@ mod tests {
     fn face_threshold_survives_roundtrip() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let s = Settings { face_threshold: 0.51, ..Default::default() };
+        let s = Settings {
+            face_threshold: 0.51,
+            ..Default::default()
+        };
         save_settings(&c, &s).unwrap();
         let back = load_settings(&c);
         assert!((back.face_threshold - 0.51).abs() < 1e-6);

@@ -27,11 +27,25 @@ pub const TAG_SHOW: f32 = 0.22;
 pub const TAG_MARGIN: f32 = 0.01;
 
 /// Русские подписи тегов. Промпты зависят от модели (русские или английские).
-pub const TAG_LABELS: [&str; 7] = [
-    "пляж", "документ", "скриншот", "еда", "животные", "дети", "праздник",
+/// Набор фиксирован: это подсказки, а не детектор; свободный запрос ищет любые слова.
+pub const TAG_LABELS: [&str; 14] = [
+    "пляж",
+    "документ",
+    "скриншот",
+    "еда",
+    "животные",
+    "дети",
+    "праздник",
+    "мебель",
+    "интерьер",
+    "одежда",
+    "природа",
+    "город",
+    "транспорт",
+    "растения",
 ];
 
-const PROMPTS_RU: [&str; 7] = [
+const PROMPTS_RU: [&str; 14] = [
     "фотография пляжа и моря",
     "фотография документа, лист бумаги с текстом",
     "снимок экрана, интерфейс программы",
@@ -39,9 +53,16 @@ const PROMPTS_RU: [&str; 7] = [
     "фотография животного, кошка или собака",
     "фотография детей, ребёнок",
     "праздник, торт со свечами, вечеринка",
+    "фотография мебели, шкаф, стол, диван",
+    "фотография комнаты, интерьер квартиры",
+    "фотография одежды, куртка, платье",
+    "фотография природы, лес, поле, небо",
+    "фотография улицы и домов, город",
+    "фотография транспорта, автомобиль, автобус",
+    "фотография растений, цветы и деревья",
 ];
 
-const PROMPTS_EN: [&str; 7] = [
+const PROMPTS_EN: [&str; 14] = [
     "a photo of a beach and the sea",
     "a photo of a document, a sheet of paper with text",
     "a screenshot of a computer screen",
@@ -49,6 +70,13 @@ const PROMPTS_EN: [&str; 7] = [
     "a photo of an animal, a cat or a dog",
     "a photo of children, a child",
     "a party, a birthday cake with candles",
+    "a photo of furniture, a cupboard, table or sofa",
+    "a photo of a room interior",
+    "a photo of clothes, a jacket or a dress",
+    "a photo of nature, forest, field or sky",
+    "a photo of a city street and buildings",
+    "a photo of a vehicle, car or bus",
+    "a photo of plants, flowers and trees",
 ];
 
 /// Как текстовая башня отдаёт вектор: через проекцию 768→512 или сразу `text_embeds`.
@@ -427,6 +455,14 @@ impl Model {
     }
 }
 
+/// Фильтр по тегу: подходит любой вес выше порога, а не только самый верхний.
+/// Так 14 подсказок не «съедают» друг друга: фото с детьми видно и в «дети», и в «одежда».
+pub fn tag_above(scores: &[(String, f32)], want: &str, show: f32) -> bool {
+    scores
+        .iter()
+        .any(|(tag, score)| tag == want && *score >= show)
+}
+
 /// Уверенный тег с настраиваемыми порогами.
 pub fn confident_tag_with(
     scores: &[(String, f32)],
@@ -689,6 +725,70 @@ pub fn embed_missing(
         seconds: t0.elapsed().as_secs_f64(),
         model_bytes: model_bytes_in(&settings.models_dir, entry),
         cancelled: progress.as_ref().is_some_and(|p| p.cancelled()),
+    })
+}
+
+/// Пересчитать теги по уже сохранённым векторам: новые подписи без повторного CLIP по фото.
+pub struct RetagStats {
+    pub model: &'static str,
+    pub total: usize,
+    pub tagged: usize,
+    pub seconds: f64,
+}
+
+impl std::fmt::Display for RetagStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "теги ({}): пересчитано {}/{}, за {:.1} с",
+            self.model, self.tagged, self.total, self.seconds
+        )
+    }
+}
+
+/// Одна кнопка «Посчитать теги»: сначала эмбеддинги для новых файлов, затем подписи по всем.
+pub fn embed_and_retag(
+    db_path: &Path,
+    threads: usize,
+    batch: usize,
+    progress: Option<Arc<Progress>>,
+) -> Result<(EmbedStats, RetagStats)> {
+    let embed = embed_missing(db_path, threads, batch, progress)?;
+    let tags = retag(db_path, threads, None)?;
+    Ok((embed, tags))
+}
+
+/// Пересчитать только теги: читает готовые эмбеддинги и промпты модели, без декодирования фото.
+pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) -> Result<RetagStats> {
+    let t0 = std::time::Instant::now();
+    let conn = db::open(db_path)?;
+    let settings = db::load_settings(&conn);
+    let entry = active_entry(&settings);
+    let rows = db::load_embeddings(&conn, entry.id)?;
+    if let Some(p) = &progress {
+        p.set_total(rows.len());
+        p.set_msg("CLIP: пересчёт тегов без фото…");
+    }
+    let model = Model::load(&settings, threads)?;
+    let mut tagged = 0usize;
+    let tx = conn.unchecked_transaction()?;
+    for (id, vec) in &rows {
+        db::replace_tags(&tx, *id, &tag_source(entry), &model.tag_scores(vec))?;
+        tagged += 1;
+        if let Some(p) = &progress {
+            p.tick();
+        }
+    }
+    tx.commit()?;
+    if let Some(p) = &progress {
+        p.set_msg("CLIP: теги пересчитаны");
+        p.finish();
+    }
+    Ok(RetagStats {
+        model: entry.id,
+        total: rows.len(),
+        tagged,
+        seconds: t0.elapsed().as_secs_f64(),
     })
 }
 
@@ -1064,6 +1164,19 @@ mod tests {
         assert_ne!(a, b);
         assert!(labels.iter().step_by(2).all(|&l| l == a));
         assert!(labels.iter().skip(1).step_by(2).all(|&l| l == b));
+    }
+
+    #[test]
+    fn фильтр_по_тегу_берёт_любой_вес_выше_порога() {
+        let scores = vec![
+            ("одежда".to_string(), 0.24),
+            ("дети".to_string(), 0.23),
+            ("мебель".to_string(), 0.10),
+        ];
+        assert!(tag_above(&scores, "дети", 0.22));
+        assert!(tag_above(&scores, "одежда", 0.22));
+        assert!(!tag_above(&scores, "мебель", 0.22));
+        assert!(!tag_above(&scores, "город", 0.22));
     }
 
     #[test]

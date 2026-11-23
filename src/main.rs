@@ -23,6 +23,9 @@ mod faces;
 mod index;
 mod ocr;
 mod organize;
+mod player;
+mod recycle;
+mod storage;
 mod tools;
 mod verify;
 
@@ -113,10 +116,16 @@ fn main() -> Result<()> {
         "organize" => organize::cli(&args[1..]),
         "verify" => verify::cli(&args[1..]),
         "manifest" => verify::manifest_cli(&args[1..]),
+        "play" => player::cli(&args[1..]),
         "embed" => {
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let jobs = flag_num(&args, "--jobs", 8);
             let batch = flag_num(&args, "--batch", 8);
+            if args.iter().any(|a| a == "--retag") {
+                let stats = embed::retag(&db_path, jobs, Some(Arc::new(Progress::default())))?;
+                println!("{stats}");
+                return Ok(());
+            }
             let progress = Arc::new(Progress::default());
             let show = progress.clone();
             std::thread::spawn(move || {

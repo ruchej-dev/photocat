@@ -292,6 +292,7 @@ mod tests {
             duration_s: None,
             thumb: None,
             decision: None,
+            trashed_at: None,
         }
     }
 

@@ -1,22 +1,28 @@
 //! GUI на egui: сетка превью, группы дублей, таймлайн, запуск индексации.
 
 use crate::db::{self, FileRow, Progress};
+use crate::derive;
 use crate::dupes::{self, Group};
 use crate::embed;
 use crate::faces;
 use crate::index;
 use crate::ocr;
+use crate::player;
+use crate::recycle;
+use crate::storage;
 use crate::tools::{self, Tool};
 use anyhow::Result;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use chrono::Datelike;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
 
 type SearchReply = Result<(embed::Model, Vec<(i64, f32)>, f32)>;
-type EmbedReply = Result<embed::EmbedStats>;
+type EmbedReply = Result<(embed::EmbedStats, embed::RetagStats)>;
 type OcrReply = Result<ocr::Stats>;
+type TrashReply = Result<recycle::Report>;
+type PhotoReply = (i64, Result<(usize, usize, Vec<u8>)>);
 
 enum FaceReply {
     Scan(Result<faces::Stats>),
@@ -29,6 +35,43 @@ enum View {
     Dupes,
     Calendar,
     Faces,
+    Trash,
+}
+
+/// Что именно очищаем в «Хранилище»: кэш превью, кропы лиц или строки индекса.
+#[derive(Clone, Copy, PartialEq)]
+enum StorageAction {
+    Thumbs,
+    Faces,
+    Index,
+}
+
+/// Градация календаря: год, месяц, неделя (docs/UI.md).
+#[derive(Clone, Copy, PartialEq)]
+enum CalScale {
+    Year,
+    Month,
+    Week,
+}
+
+/// Текстуры для полного экрана: текущий кадр, миниатюра и предыдущий резкий кадр.
+struct ViewerTextures<'a> {
+    full: Option<&'a (i64, egui::TextureHandle)>,
+    preview: Option<&'a egui::TextureHandle>,
+    stale: Option<&'a egui::TextureHandle>,
+    /// Кадр встроенного плеера: пока он есть, он важнее статичного снимка.
+    video: Option<&'a egui::TextureHandle>,
+}
+
+/// Полноэкранный просмотр: один снимок поверх всей сетки, со слайд-шоу и текстом.
+struct Viewer {
+    ids: Vec<i64>,
+    idx: usize,
+    zoom: f32,
+    show_text: bool,
+    slideshow: bool,
+    interval_s: u64,
+    last_advance: std::time::Instant,
 }
 
 /// Раздел диалога «Настройки»: редкие настройки не отнимают экран у сетки.
@@ -242,7 +285,14 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
     eframe::run_native(
         "photocat",
         opts,
-        Box::new(move |_cc| Ok(Box::new(App::new(db_path.clone())))),
+        Box::new(move |cc| {
+            // Плавная прокрутка: колесо не «шагает» на строку, а догоняет позицию.
+            cc.egui_ctx.all_styles_mut(|s| {
+                s.scroll_animation.points_per_second = 1400.0;
+                s.scroll_animation.duration = egui::Rangef::new(0.08, 0.24);
+            });
+            Ok(Box::new(App::new(db_path.clone())))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }
@@ -251,6 +301,8 @@ struct App {
     db_path: PathBuf,
     thumbs_dir: PathBuf,
     items: Vec<FileRow>,
+    /// Файлы в корзине приложения: на диске не тронуты, из обычных видов скрыты.
+    trash_items: Vec<FileRow>,
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
@@ -264,6 +316,9 @@ struct App {
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
     /// Теги CLIP: file_id → [(тег, вес)] по убыванию.
     tags: HashMap<i64, Vec<(String, f32)>>,
+    /// Свои теги владельца: file_id → подписи.
+    user_tags: HashMap<i64, Vec<String>>,
+    user_tag_input: String,
     tag_filter: Option<String>,
     semantic_query: String,
     /// Результаты смыслового поиска в порядке убывания похожести.
@@ -326,6 +381,50 @@ struct App {
     /// Диалог «Настройки»: открыт ли и какой раздел показан.
     settings_open: bool,
     settings_tab: SettingsTab,
+    /// Правая панель сведений: её можно закрыть, чтобы освободить место календарю и сетке.
+    details_open: bool,
+    /// Размер плитки и календаря; хранится в настройках.
+    tile_size: f32,
+    /// Полноэкранный просмотр и загрузка большого кадра в фоне.
+    viewer: Option<Viewer>,
+    viewer_tex: Option<(i64, egui::TextureHandle)>,
+    /// Заранее декодированный кадр выбранного файла: полный экран открывается без ожидания.
+    photo_cache: HashMap<i64, (usize, usize, Vec<u8>)>,
+    photo_loading: HashSet<i64>,
+    photo_jobs: VecDeque<i64>,
+    photo_rx: Option<mpsc::Receiver<PhotoReply>>,
+    /// Встроенный плеер: видео и звук в окне приложения (ADR 0030).
+    video: Option<player::Player>,
+    /// Кадр плеера как текстура; обновляется из `poll_video`.
+    video_tex: Option<egui::TextureHandle>,
+    /// Запасной путь: внешний ffplay, когда встроенный плеер отказался.
+    video_child: Option<std::process::Child>,
+    /// Сообщение «декодер не успевает» показывается один раз на файл.
+    video_lag_shown: bool,
+    video_id: Option<i64>,
+    /// Календарь: градация и понедельник выбранной недели.
+    cal_scale: CalScale,
+    cal_week: chrono::NaiveDate,
+    /// Выбранные лица для пакетного назначения имени.
+    face_picked: HashSet<i64>,
+    face_group_input: String,
+    /// Группы, отмеченные для поиска «все вместе на одном снимке».
+    face_picked_clusters: HashSet<i64>,
+    face_together: bool,
+    /// Подтверждение очистки корзины: без него в системную корзину ничего не уходит.
+    trash_confirm: bool,
+    trash_progress: Option<Arc<Progress>>,
+    trash_rx: Option<mpsc::Receiver<TrashReply>>,
+    /// Каталоги и встроенный выбор каталога (без зависимости от системного диалога).
+    roots: Vec<String>,
+    roots_open: bool,
+    picker_open: bool,
+    picker_current: PathBuf,
+    picker_entries: Vec<PathBuf>,
+    picker_error: String,
+    /// Занятое место считается по кнопке, а не каждым кадром.
+    storage_usage: Option<storage::Usage>,
+    storage_confirm: Option<StorageAction>,
     status: String,
 }
 
@@ -336,6 +435,7 @@ impl App {
             db_path,
             thumbs_dir: thumb_dir,
             items: Vec::new(),
+            trash_items: Vec::new(),
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
@@ -348,6 +448,8 @@ impl App {
             progress: None,
             rx: None,
             tags: HashMap::new(),
+            user_tags: HashMap::new(),
+            user_tag_input: String::new(),
             tag_filter: None,
             semantic_query: String::new(),
             semantic_hits: None,
@@ -393,6 +495,40 @@ impl App {
             tool_states: std::array::from_fn(|_| String::new()),
             settings_open: false,
             settings_tab: SettingsTab::Model,
+            details_open: true,
+            tile_size: 150.0,
+            viewer: None,
+            viewer_tex: None,
+            photo_cache: HashMap::new(),
+            photo_loading: HashSet::new(),
+            photo_jobs: VecDeque::new(),
+            photo_rx: None,
+            video: None,
+            video_tex: None,
+            video_child: None,
+            video_id: None,
+            video_lag_shown: false,
+            cal_scale: CalScale::Month,
+            cal_week: chrono::Local::now().date_naive(),
+            face_picked: HashSet::new(),
+            face_group_input: String::new(),
+            face_picked_clusters: HashSet::new(),
+            face_together: false,
+            trash_confirm: false,
+            trash_progress: None,
+            trash_rx: None,
+            roots: Vec::new(),
+            roots_open: false,
+            picker_open: false,
+            picker_current: std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("/")),
+            picker_entries: Vec::new(),
+            picker_error: String::new(),
+            storage_usage: None,
+            storage_confirm: None,
             status: String::new(),
         };
         me.reload();
@@ -402,6 +538,11 @@ impl App {
     fn reload(&mut self) {
         self.textures.clear();
         self.missing.clear();
+        self.photo_cache.clear();
+        self.photo_jobs.clear();
+        self.photo_loading.clear();
+        self.viewer_tex = None;
+        self.stop_video();
         self.face_textures.clear();
         self.face_missing.clear();
         self.semantic_hits = None;
@@ -411,7 +552,9 @@ impl App {
             let settings = db::load_settings(&c);
             let source = embed::tag_source(embed::active_entry(&settings));
             let rows = db::load_all(&c)?;
+            let trashed = db::load_trashed(&c)?;
             let tags = db::load_tags(&c, &source)?;
+            let user_tags = db::load_user_tags(&c)?;
             let hidden = db::load_hidden_counts(&c)?;
             let (ocr_files, ocr_chars) = db::ocr_summary(&c)?;
             let face_clusters = db::load_face_clusters(&c)?;
@@ -419,13 +562,37 @@ impl App {
             let (face_faces, face_photos, _) = db::face_summary(&c)?;
             let (face_images, face_todo) = db::face_scan_plan(&c)?;
             Ok((
-                settings, rows, tags, hidden, ocr_files, ocr_chars, face_clusters, face_views,
-                face_faces, face_photos, face_images, face_todo,
+                settings,
+                rows,
+                trashed,
+                tags,
+                user_tags,
+                hidden,
+                ocr_files,
+                ocr_chars,
+                face_clusters,
+                face_views,
+                face_faces,
+                face_photos,
+                face_images,
+                face_todo,
             ))
         }) {
             Ok((
-                settings, rows, tags, hidden, ocr_files, ocr_chars, face_clusters, face_views,
-                face_faces, face_photos, face_images, face_todo,
+                settings,
+                rows,
+                trashed,
+                tags,
+                user_tags,
+                hidden,
+                ocr_files,
+                ocr_chars,
+                face_clusters,
+                face_views,
+                face_faces,
+                face_photos,
+                face_images,
+                face_todo,
             )) => {
                 self.status = format!(
                     "в индексе {} файлов, {}",
@@ -439,8 +606,17 @@ impl App {
                 self.refresh_tool_states();
                 self.models_dir_input = self.settings.models_dir.to_string_lossy().to_string();
                 self.max_dist = self.settings.max_dist;
+                self.tile_size = self.settings.tile_size.clamp(100.0, 260.0);
+                self.roots = self.settings.roots.clone();
+                if self.path_input.trim().is_empty()
+                    && let Some(first) = self.roots.first()
+                {
+                    self.path_input = first.clone();
+                }
                 self.items = rows;
+                self.trash_items = trashed;
                 self.tags = tags;
+                self.user_tags = user_tags;
                 self.hidden_tags = hidden;
                 self.ocr_files = ocr_files;
                 self.ocr_chars = ocr_chars;
@@ -474,25 +650,28 @@ impl App {
         if self.cal_year != 0 {
             return;
         }
-        if let Some(date) = self
+        let date = self
             .items
             .iter()
             .filter_map(|r| r.taken_at.as_deref())
-            .max()
-        {
+            .max();
+        if let Some(date) = date {
             let y = date.get(0..4).and_then(|v| v.parse().ok()).unwrap_or(2024);
             let m = date.get(5..7).and_then(|v| v.parse().ok()).unwrap_or(1);
             self.cal_year = y;
             self.cal_month = m;
+            if let Some(d) = parse_date(date) {
+                self.cal_week = monday_of(d);
+            }
         } else {
             self.cal_year = 2024;
             self.cal_month = 1;
+            self.cal_week = monday_of(chrono::Local::now().date_naive());
         }
     }
 
     fn save_settings(&mut self) {
-        let res = db::open(&self.db_path)
-            .and_then(|c| db::save_settings(&c, &self.settings));
+        let res = db::open(&self.db_path).and_then(|c| db::save_settings(&c, &self.settings));
         match res {
             Ok(()) => self.status = "настройки сохранены".into(),
             Err(e) => self.status = format!("настройки не сохранены: {e}"),
@@ -577,6 +756,353 @@ impl App {
         }
     }
 
+    /// Список каталогов: добавить новый, убрать из индекса (не с диска), индексировать все.
+    fn roots_modal(&mut self, ctx: &egui::Context) {
+        if !self.roots_open {
+            return;
+        }
+        let mut close = false;
+        let mut add = false;
+        let mut index_all = false;
+        let mut remove: Option<String> = None;
+        let roots = self.roots.clone();
+        let resp = egui::Modal::new(egui::Id::unique("photocat-roots")).show(ctx, |ui| {
+            ui.set_min_width(520.0);
+            ui.label(egui::RichText::new("Каталоги архива").size(16.0));
+            ui.label(
+                egui::RichText::new(
+                    "Индексировать можно несколько каталогов. «Добавить каталог…» сразу предлагает \
+                     индексацию; «Убрать из индекса» удаляет только строки БД — файлы на диске целы.",
+                )
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.add_space(8.0);
+            if roots.is_empty() {
+                ui.label("Каталогов пока нет — добавьте кнопкой ниже.");
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("roots-list")
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    for root in &roots {
+                        ui.horizontal(|ui| {
+                            ui.label(root);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .small_button("Убрать из индекса")
+                                        .on_hover_text("файлы на диске не удаляются")
+                                        .clicked()
+                                    {
+                                        remove = Some(root.clone());
+                                    }
+                                },
+                            );
+                        });
+                    }
+                });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Добавить каталог…").clicked() {
+                    add = true;
+                }
+                if ui
+                    .add_enabled(!roots.is_empty(), primary_button("Индексировать все"))
+                    .clicked()
+                {
+                    index_all = true;
+                }
+                if ui.button("Закрыть").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() {
+            close = true;
+        }
+        if close {
+            self.roots_open = false;
+        }
+        if add {
+            self.roots_open = false;
+            self.picker_open = true;
+            self.refresh_picker();
+        }
+        if index_all {
+            self.roots_open = false;
+            self.start_index();
+        }
+        if let Some(root) = remove {
+            match db::remove_root(&self.db_path, &root) {
+                Ok(n) => {
+                    self.roots.retain(|r| r != &root);
+                    self.settings.roots = self.roots.clone();
+                    self.save_settings();
+                    self.reload();
+                    self.status =
+                        format!("каталог убран из индекса: удалено строк {n}; файлы на диске целы");
+                }
+                Err(e) => self.status = format!("каталог не убран из индекса: {e}"),
+            }
+        }
+    }
+
+    fn refresh_picker(&mut self) {
+        self.picker_entries.clear();
+        self.picker_error.clear();
+        match std::fs::read_dir(&self.picker_current) {
+            Ok(rd) => {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        self.picker_entries.push(p);
+                    }
+                }
+                self.picker_entries.sort();
+            }
+            Err(e) => {
+                self.picker_error = format!("не прочитать {}: {e}", self.picker_current.display())
+            }
+        }
+    }
+
+    /// Встроенный выбор каталога: без зависимости от системного диалога и без ввода пути руками.
+    fn picker_modal(&mut self, ctx: &egui::Context) {
+        if !self.picker_open {
+            return;
+        }
+        let mut close = false;
+        let mut nav: Option<PathBuf> = None;
+        let mut add = false;
+        let mut add_and_index = false;
+        let current = self.picker_current.clone();
+        let entries = self.picker_entries.clone();
+        let error = self.picker_error.clone();
+        let resp = egui::Modal::new(egui::Id::unique("photocat-picker")).show(ctx, |ui| {
+            ui.set_min_width(520.0);
+            ui.label(egui::RichText::new("Добавить каталог").size(16.0));
+            ui.label(
+                egui::RichText::new(current.display().to_string())
+                    .size(11.0)
+                    .color(DIM),
+            );
+            if !error.is_empty() {
+                ui.label(egui::RichText::new(error).size(12.0).color(DIM));
+            }
+            ui.horizontal(|ui| {
+                if let Some(parent) = current.parent()
+                    && ui.button("Вверх").clicked()
+                {
+                    nav = Some(parent.to_path_buf());
+                }
+                if ui
+                    .add(primary_button("Добавить и индексировать"))
+                    .clicked()
+                {
+                    add = true;
+                    add_and_index = true;
+                }
+                if ui.button("Добавить без индексации").clicked() {
+                    add = true;
+                }
+                if ui.button("Отмена").clicked() {
+                    close = true;
+                }
+            });
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt("picker-list")
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    if entries.is_empty() {
+                        ui.label("Подкаталогов нет.");
+                    }
+                    for p in &entries {
+                        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("?");
+                        if ui.button(format!("{name}/")).clicked() {
+                            nav = Some(p.clone());
+                        }
+                    }
+                });
+        });
+        if resp.backdrop_response.clicked() {
+            close = true;
+        }
+        if close {
+            self.picker_open = false;
+        }
+        if let Some(p) = nav {
+            self.picker_current = p;
+            self.refresh_picker();
+        }
+        if add {
+            let path = self.picker_current.to_string_lossy().to_string();
+            if !self.roots.iter().any(|r| r == &path) {
+                self.roots.push(path.clone());
+                self.settings.roots = self.roots.clone();
+                self.path_input = path.clone();
+                self.save_settings();
+                self.status = format!("каталог добавлен: {path}");
+            }
+            self.picker_open = false;
+            if add_and_index {
+                self.start_index();
+            }
+        }
+    }
+
+    /// Подтверждение очистки кэша/индекса: архив и модели не трогаются.
+    fn storage_modal(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.storage_confirm else {
+            return;
+        };
+        let (title, text, button) = match action {
+            StorageAction::Thumbs => (
+                "Очистить превью?",
+                "Будут удалены только файлы <кэш>/photocat/thumbs. Сетка покажет «нет превью», \
+                 пока каталог не проиндексируют заново. Оригиналы не меняются.",
+                "Очистить превью",
+            ),
+            StorageAction::Faces => (
+                "Очистить кропы лиц?",
+                "Будут удалены кропы и строки лиц в БД; группы исчезнут. «Найти лица» заново \
+                 создаст их. Фотографии и оригиналы не меняются.",
+                "Очистить лица",
+            ),
+            StorageAction::Index => (
+                "Сбросить индекс?",
+                "Будут удалены строки БД: файлы, теги, текст, векторы и лица. Настройки, модели \
+                 и все файлы на диске остаются. После этого нужна индексация заново.",
+                "Сбросить индекс",
+            ),
+        };
+        let mut confirmed = false;
+        let mut cancel = false;
+        let resp = egui::Modal::new(egui::Id::unique("photocat-storage")).show(ctx, |ui| {
+            ui.set_min_width(460.0);
+            ui.label(egui::RichText::new(title).size(16.0));
+            ui.add_space(4.0);
+            ui.label(text);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.add(primary_button(button)).clicked() {
+                    confirmed = true;
+                }
+                if ui.button("Отмена").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() {
+            cancel = true;
+        }
+        if cancel {
+            self.storage_confirm = None;
+        }
+        if confirmed {
+            self.storage_confirm = None;
+            let res = match action {
+                StorageAction::Thumbs => storage::clear_thumbs(),
+                StorageAction::Faces => storage::clear_faces(&self.db_path),
+                StorageAction::Index => {
+                    storage::reset_index(&self.db_path).map(|()| storage::Cleared::default())
+                }
+            };
+            match res {
+                Ok(c) => {
+                    self.storage_usage = None;
+                    self.selected = None;
+                    self.groups.clear();
+                    self.reload();
+                    self.status = match action {
+                        StorageAction::Index => "индекс сброшен; проиндексируйте каталог".into(),
+                        _ => format!("кэш очищен: {c}"),
+                    };
+                }
+                Err(e) => self.status = format!("очистка не удалась: {e:#}"),
+            }
+        }
+    }
+
+    /// Подтверждение очистки корзины: единственное действие, которое убирает файл с диска.
+    fn trash_modal(&mut self, ctx: &egui::Context) {
+        if !self.trash_confirm {
+            return;
+        }
+        let mut confirmed = false;
+        let mut cancel = false;
+        let n = self.trash_items.len();
+        let bytes: i64 = self.trash_items.iter().map(|r| r.size).sum();
+        let resp = egui::Modal::new(egui::Id::unique("photocat-trash")).show(ctx, |ui| {
+            ui.set_min_width(460.0);
+            ui.label(egui::RichText::new("Очистить корзину?").size(16.0));
+            ui.add_space(4.0);
+            ui.label(format!(
+                "Будет перенесено в системную корзину ОС: файлов {n}, {}.",
+                db::human(bytes)
+            ));
+            ui.label(
+                egui::RichText::new(
+                    "Внутри приложения безвозвратного удаления нет: файлы остаются в системной \
+                     корзине, пока вы сами её не очистите. Оригиналы в архиве исчезнут из своих \
+                     каталогов — это необратимо средствами приложения.",
+                )
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(primary_button("Переместить в системную корзину"))
+                    .clicked()
+                {
+                    confirmed = true;
+                }
+                if ui.button("Отмена").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() {
+            cancel = true;
+        }
+        if cancel {
+            self.trash_confirm = false;
+        }
+        if confirmed {
+            self.trash_confirm = false;
+            self.start_trash();
+        }
+    }
+
+    fn start_trash(&mut self) {
+        if self.trash_rx.is_some() {
+            return;
+        }
+        let items: Vec<(i64, String, i64)> = self
+            .trash_items
+            .iter()
+            .map(|r| (r.id, r.path.clone(), r.size))
+            .collect();
+        if items.is_empty() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let progress = Arc::new(Progress::default());
+        self.trash_progress = Some(progress.clone());
+        let (tx, rx) = mpsc::channel();
+        self.trash_rx = Some(rx);
+        self.status = format!(
+            "корзина: переношу {} файлов в системную корзину…",
+            items.len()
+        );
+        std::thread::spawn(move || {
+            let r = recycle::empty(&db_path, &items, Some(progress));
+            let _ = tx.send(r);
+        });
+    }
+
     fn settings_section(&mut self, ui: &mut egui::Ui, tab: SettingsTab) {
         ui.label(egui::RichText::new(tab.label()).size(16.0));
         ui.add_space(4.0);
@@ -610,12 +1136,7 @@ impl App {
                     ui.selectable_value(
                         &mut chosen,
                         e.id,
-                        format!(
-                            "{} — {} · {}",
-                            e.title,
-                            db::human(e.bytes() as i64),
-                            e.note
-                        ),
+                        format!("{} — {} · {}", e.title, db::human(e.bytes() as i64), e.note),
                     );
                 }
             });
@@ -628,18 +1149,27 @@ impl App {
         }
         ui.add_space(8.0);
 
-        ui.label(egui::RichText::new("Состояние модели").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Состояние модели")
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         let state = if embed::model_present(&self.settings) {
-            format!("Скачана · проверена · {}", db::human(embed::model_bytes_in(&self.settings.models_dir, current)))
+            format!(
+                "Скачана · проверена · {}",
+                db::human(embed::model_bytes_in(&self.settings.models_dir, current))
+            )
         } else {
             "Не скачана".to_string()
         };
-        ui.label(
-            egui::RichText::new(state)
-                .size(12.0)
-                .color(if embed::model_present(&self.settings) { ACCENT } else { DIM }),
-        );
+        ui.label(egui::RichText::new(state).size(12.0).color(
+            if embed::model_present(&self.settings) {
+                ACCENT
+            } else {
+                DIM
+            },
+        ));
         if ui.button("Проверить модель").clicked() {
             match embed::check_model(&self.settings) {
                 Ok(()) => {
@@ -672,10 +1202,18 @@ impl App {
                 }
             }
         });
-        ui.label(egui::RichText::new(self.settings.models_dir.display().to_string()).size(11.0).color(DIM));
+        ui.label(
+            egui::RichText::new(self.settings.models_dir.display().to_string())
+                .size(11.0)
+                .color(DIM),
+        );
         ui.add_space(12.0);
 
-        ui.label(egui::RichText::new("Лимит на скачивание").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Лимит на скачивание")
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             let r = ui.add(
@@ -718,7 +1256,11 @@ impl App {
         }
         ui.add_space(12.0);
 
-        ui.label(egui::RichText::new("Согласие на сеть").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Согласие на сеть")
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         ui.checkbox(
             &mut self.download_consent,
@@ -786,7 +1328,11 @@ impl App {
     }
 
     fn settings_index(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Потоков на индексацию").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Потоков на индексацию")
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         let r = ui.add(
             egui::DragValue::new(&mut self.settings.index_jobs)
@@ -799,9 +1345,7 @@ impl App {
         ui.add_space(12.0);
         ui.label(egui::RichText::new("Порог дублей").size(12.0).color(DIM));
         ui.add_space(2.0);
-        let r = ui.add(
-            egui::Slider::new(&mut self.settings.max_dist, 0..=16).text("бит из 64"),
-        );
+        let r = ui.add(egui::Slider::new(&mut self.settings.max_dist, 0..=16).text("бит из 64"));
         if r.drag_stopped() || r.lost_focus() {
             self.max_dist = self.settings.max_dist;
             self.save_settings();
@@ -817,14 +1361,22 @@ impl App {
     }
 
     fn settings_tags(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Порог уверенного тега").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Порог уверенного тега")
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         let r = ui.add(egui::Slider::new(&mut self.settings.tag_show, 0.10..=0.50));
         if r.drag_stopped() || r.lost_focus() {
             self.save_settings();
         }
         ui.add_space(12.0);
-        ui.label(egui::RichText::new("Отрыв от второго тега").size(12.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Отрыв от второго тега")
+                .size(12.0)
+                .color(DIM),
+        );
         ui.add_space(2.0);
         let r = ui.add(egui::Slider::new(&mut self.settings.tag_margin, 0.0..=0.10));
         if r.drag_stopped() || r.lost_focus() {
@@ -848,7 +1400,11 @@ impl App {
                 "{} · {} · {}",
                 faces::MODEL_ID,
                 db::human(faces::model_bytes(&self.settings)),
-                if present { "на месте" } else { "не скачана" }
+                if present {
+                    "на месте"
+                } else {
+                    "не скачана"
+                }
             ))
             .size(12.0)
             .color(if present { ACCENT } else { DIM }),
@@ -860,9 +1416,8 @@ impl App {
                 .color(DIM),
         );
         ui.add_space(2.0);
-        let r = ui.add(
-            egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70).step_by(0.01),
-        );
+        let r =
+            ui.add(egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70).step_by(0.01));
         if r.drag_stopped() || r.lost_focus() {
             self.save_settings();
         }
@@ -923,10 +1478,14 @@ impl App {
     fn settings_storage(&mut self, ui: &mut egui::Ui) {
         let n = self.items.len();
         let bytes: i64 = self.items.iter().map(|r| r.size).sum();
-        meta_row(ui, "Индекс", &format!("файлов {n}, {}", db::human(bytes)));
+        let trashed = self.trash_items.len();
+        meta_row(
+            ui,
+            "Индекс",
+            &format!("файлов {n}, {} · в корзине {trashed}", db::human(bytes)),
+        );
         meta_row(ui, "БД", &self.db_path.display().to_string());
         meta_row(ui, "Кэш", &db::cache_dir().display().to_string());
-        meta_row(ui, "Превью", &self.thumbs_dir.display().to_string());
         meta_row(
             ui,
             "Модели",
@@ -948,6 +1507,45 @@ impl App {
                 db::human(faces::model_bytes(&self.settings))
             ),
         );
+        ui.add_space(8.0);
+        if ui.button("Посчитать занятое место").clicked() {
+            self.storage_usage = Some(storage::usage(&self.db_path, &self.settings.models_dir));
+        }
+        if let Some(u) = &self.storage_usage {
+            stat_row(ui, "База данных:", &db::human(u.db_bytes as i64));
+            stat_row(ui, "Превью:", &db::human(u.thumbs_bytes as i64));
+            stat_row(ui, "Кропы лиц:", &db::human(u.faces_bytes as i64));
+            stat_row(ui, "Модели:", &db::human(u.models_bytes as i64));
+            stat_row(ui, "Весь кэш:", &db::human(u.total_bytes as i64));
+        }
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("Очистка кэша и индекса")
+                .size(11.0)
+                .color(DIM),
+        );
+        if ui
+            .button("Очистить превью…")
+            .on_hover_text("только <кэш>/photocat/thumbs; архив не трогается")
+            .clicked()
+        {
+            self.storage_confirm = Some(StorageAction::Thumbs);
+        }
+        if ui
+            .button("Очистить кропы лиц…")
+            .on_hover_text("кропы и строки лиц; после этого «Найти лица» пройдёт заново")
+            .clicked()
+        {
+            self.storage_confirm = Some(StorageAction::Faces);
+        }
+        if ui
+            .button("Сбросить индекс…")
+            .on_hover_text("строки БД: файлы, теги, OCR, векторы, лица; оригиналы целы")
+            .clicked()
+        {
+            self.storage_confirm = Some(StorageAction::Index);
+        }
+        ui.add_space(8.0);
         ui.label(
             egui::RichText::new(
                 "В каталог архива photocat не пишет: только строки в БД и превью в кэше. \
@@ -1014,7 +1612,7 @@ impl App {
             let w = (ui.available_width() - 300.0).clamp(240.0, 520.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.path_input)
-                    .hint_text("путь к каталогу с фото")
+                    .hint_text("путь к каталогу; несколько — кнопкой «Каталоги»")
                     .desired_width(w),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -1027,6 +1625,24 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Настройки").clicked() {
                     self.settings_open = true;
+                }
+                if ui
+                    .button(format!("Каталоги ({})", self.roots.len()))
+                    .on_hover_text("добавить несколько каталогов и убрать каталог из индекса")
+                    .clicked()
+                {
+                    self.roots_open = true;
+                }
+                if ui
+                    .button(if self.details_open {
+                        "Скрыть сведения"
+                    } else {
+                        "Сведения"
+                    })
+                    .on_hover_text("правая панель с датой, камерой, тегами и текстом")
+                    .clicked()
+                {
+                    self.details_open = !self.details_open;
                 }
             });
         });
@@ -1066,12 +1682,13 @@ impl App {
                     .hint_text(if self.search_ocr {
                         "справка, квитанция, 2024"
                     } else {
-                        "торт, море, документ"
+                        "торт, море, мебель, документ"
                     })
                     .desired_width(340.0),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add_enabled(ready, egui::Button::new("Найти")).clicked() || (enter && ready) {
+            if ui.add_enabled(ready, egui::Button::new("Найти")).clicked() || (enter && ready)
+            {
                 self.start_search();
             }
             if ui
@@ -1083,7 +1700,11 @@ impl App {
                 self.status = "поиск сброшен".into();
             }
             if self.search_rx.is_some() {
-                ui.label(egui::RichText::new("загрузка модели…").size(11.0).color(DIM));
+                ui.label(
+                    egui::RichText::new("загрузка модели…")
+                        .size(11.0)
+                        .color(DIM),
+                );
             } else if !ready {
                 ui.label(
                     egui::RichText::new(if self.search_ocr {
@@ -1121,6 +1742,12 @@ impl App {
                 p.cancel();
             }
         }
+        if let Some(p) = &self.trash_progress {
+            let running = self.trash_rx.is_some();
+            if progress_row(ui, "Корзина", p, running) {
+                p.cancel();
+            }
+        }
         ui.add_space(4.0);
     }
 
@@ -1146,12 +1773,9 @@ impl App {
                         .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
                         .unwrap_or_else(|| "без даты".into());
                     ui.label(
-                        egui::RichText::new(format!(
-                            "Выбрано: {} · {date}",
-                            file_name(&f.path)
-                        ))
-                        .size(11.0)
-                        .color(DIM),
+                        egui::RichText::new(format!("Выбрано: {} · {date}", file_name(&f.path)))
+                            .size(11.0)
+                            .color(DIM),
                     );
                 }
             });
@@ -1171,10 +1795,20 @@ impl App {
         nav_item(ui, &mut self.view, View::Dupes, "Дубли и серии");
         nav_item(ui, &mut self.view, View::Calendar, "Календарь");
         nav_item(ui, &mut self.view, View::Faces, "Лица");
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Trash,
+            &format!("Корзина · {}", self.trash_items.len()),
+        );
         ui.add_space(8.0);
         ui.separator();
         ui.add_space(2.0);
-        ui.label(egui::RichText::new("Поиск по пути или дате").size(11.0).color(DIM));
+        ui.label(
+            egui::RichText::new("Поиск по пути или дате")
+                .size(11.0)
+                .color(DIM),
+        );
         ui.add(
             egui::TextEdit::singleline(&mut self.query)
                 .hint_text("2024-05, отпуск")
@@ -1182,6 +1816,21 @@ impl App {
         );
         ui.add_space(2.0);
         ui.checkbox(&mut self.only_images, "только изображения");
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(format!("Размер плиток: {:.0} px", self.tile_size))
+                .size(11.0)
+                .color(DIM),
+        );
+        let size = ui.add(
+            egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
+                .step_by(10.0)
+                .show_value(false),
+        );
+        if size.drag_stopped() || size.lost_focus() {
+            self.settings.tile_size = self.tile_size;
+            self.save_settings();
+        }
         ui.add_space(2.0);
 
         // На широком окне сводка прижата к низу панели. На узком — карточка и сводка
@@ -1257,6 +1906,10 @@ impl App {
             ui.add_space(4.0);
             if ui
                 .add_enabled(has_groups, egui::Button::new("Экспорт плана"))
+                .on_hover_text(
+                    "записать CSV в кэш приложения: group, keep_path, drop_path, reason, wasted_bytes; \
+                     это список для проверки, а не удаление",
+                )
                 .clicked()
             {
                 let path = db::cache_dir().join("plan.csv");
@@ -1277,9 +1930,25 @@ impl App {
                 .on_hover_text("весь план CSV в буфер обмена")
                 .clicked()
             {
-                ui.ctx().copy_text(dupes::plan_csv(&self.items, &self.groups));
+                ui.ctx()
+                    .copy_text(dupes::plan_csv(&self.items, &self.groups));
                 self.status = "план скопирован в буфер обмена".into();
             }
+            ui.label(
+                egui::RichText::new(
+                    "«оставить» выбирает лучший кадр группы: он остаётся, остальные помечаются лишними. \
+                     Файлы не удаляются; решение хранится в БД и попадает в план.",
+                )
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "«Экспорт плана» пишет CSV в кэш приложения — это отчёт для проверки, не удаление.",
+                )
+                .size(11.0)
+                .color(DIM),
+            );
             let no_sharp = self
                 .items
                 .iter()
@@ -1307,8 +1976,7 @@ impl App {
                 self.settings.face_threshold
             )));
             let r = ui.add(
-                egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70)
-                    .step_by(0.01),
+                egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70).step_by(0.01),
             );
             if r.drag_stopped() || r.lost_focus() {
                 self.save_settings();
@@ -1359,10 +2027,7 @@ impl App {
                     format!("Найти лица ({})", self.face_todo)
                 };
                 if ui
-                    .add_enabled(
-                        model && self.face_todo > 0,
-                        egui::Button::new(scan_label),
-                    )
+                    .add_enabled(model && self.face_todo > 0, egui::Button::new(scan_label))
                     .on_hover_text(
                         "долгий проход: детекция и эмбеддинги локально, без сети; \
                          уже просканированные снимки пропускаются по sha256",
@@ -1372,10 +2037,7 @@ impl App {
                     self.start_faces();
                 }
                 if ui
-                    .add_enabled(
-                        self.face_faces > 0,
-                        egui::Button::new("Пересобрать группы"),
-                    )
+                    .add_enabled(self.face_faces > 0, egui::Button::new("Пересобрать группы"))
                     .on_hover_text(
                         "порог применяется к лицам; ручные подписи и разъединения сохраняются",
                     )
@@ -1407,18 +2069,63 @@ impl App {
                         } else {
                             c.label.clone()
                         };
-                        if ui
-                            .selectable_label(
-                                self.face_selected_cluster == Some(c.id),
-                                format!("{label} · {} фото", c.photos),
-                            )
-                            .clicked()
-                        {
-                            self.face_selected_cluster = Some(c.id);
-                            self.face_label_input = c.label;
-                        }
+                        ui.horizontal(|ui| {
+                            let mut mark = self.face_picked_clusters.contains(&c.id);
+                            if ui
+                                .checkbox(&mut mark, "")
+                                .on_hover_text("отметить группу для поиска «все вместе»")
+                                .changed()
+                            {
+                                if mark {
+                                    self.face_picked_clusters.insert(c.id);
+                                } else {
+                                    self.face_picked_clusters.remove(&c.id);
+                                }
+                            }
+                            if ui
+                                .selectable_label(
+                                    self.face_selected_cluster == Some(c.id),
+                                    format!("{label} · {} фото", c.photos),
+                                )
+                                .clicked()
+                            {
+                                self.face_selected_cluster = Some(c.id);
+                                self.face_label_input = c.label;
+                            }
+                        });
                     }
                 });
+            // «Все вместе»: снимки, где есть хотя бы по одному лицу из каждой отмеченной группы.
+            if self.face_picked_clusters.len() >= 2 {
+                let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
+                for f in &self.face_views {
+                    if let Some(cid) = f.cluster_id
+                        && self.face_picked_clusters.contains(&cid)
+                    {
+                        per_file.entry(f.file_id).or_default().insert(cid);
+                    }
+                }
+                let n = per_file
+                    .values()
+                    .filter(|set| self.face_picked_clusters.iter().all(|c| set.contains(c)))
+                    .count();
+                if ui
+                    .add_enabled(
+                        n > 0,
+                        egui::Button::new(if self.face_together {
+                            format!("Показать лица (вместе: {n})")
+                        } else {
+                            format!("Фото, где все вместе ({n})")
+                        }),
+                    )
+                    .on_hover_text("показать только снимки, где есть лица из всех отмеченных групп")
+                    .clicked()
+                {
+                    self.face_together = !self.face_together;
+                }
+            } else {
+                self.face_together = false;
+            }
         });
     }
 
@@ -1439,9 +2146,10 @@ impl App {
                     .color(DIM),
                 );
                 if ui
-                    .add_enabled(
-                        self.embed_rx.is_none(),
-                        egui::Button::new("Посчитать теги"),
+                    .add_enabled(self.embed_rx.is_none(), egui::Button::new("Посчитать теги"))
+                    .on_hover_text(
+                        "локально прогнать CLIP по превью: 14 приблизительных категорий; \
+                         нужный предмет ищите смысловым поиском словами; ничего не отправляется",
                     )
                     .clicked()
                 {
@@ -1466,6 +2174,17 @@ impl App {
                         .size(11.0)
                         .color(DIM),
                 );
+                ui.label(
+                    egui::RichText::new(
+                        "свободный смысловой поиск понимает любые слова, не только 14 тегов",
+                    )
+                    .size(11.0)
+                    .color(DIM),
+                );
+                let mut own_tags: Vec<String> =
+                    self.user_tags.values().flatten().cloned().collect();
+                own_tags.sort();
+                own_tags.dedup();
                 egui::ComboBox::from_id_salt("tag_filter")
                     .width(ui.available_width())
                     .selected_text(
@@ -1487,6 +2206,18 @@ impl App {
                                     &mut self.tag_filter,
                                     Some(label.to_string()),
                                     label,
+                                )
+                                .clicked()
+                            {
+                                ui.close();
+                            }
+                        }
+                        for label in &own_tags {
+                            if ui
+                                .selectable_value(
+                                    &mut self.tag_filter,
+                                    Some(label.clone()),
+                                    format!("свой: {label}"),
                                 )
                                 .clicked()
                             {
@@ -1584,13 +2315,41 @@ impl App {
         stat_row(ui, "Объём:", &db::human(bytes));
         stat_row(ui, "Без даты:", &no_date.to_string());
         stat_row(ui, "Без превью:", &no_thumb.to_string());
+        let no_cover = self
+            .items
+            .iter()
+            .filter(|r| r.kind == "video" && r.thumb.is_none())
+            .count();
+        if no_cover > 0 {
+            stat_row(ui, "Видео без обложки:", &no_cover.to_string());
+            ui.label(
+                egui::RichText::new("нажмите «Индексировать» — обложки создаст ffmpeg")
+                    .size(11.0)
+                    .color(DIM),
+            );
+        }
         ui.add_space(4.0);
     }
 
     /// Правая панель: сведения и действия по выбранному файлу.
     fn details_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("Сведения о файле").size(12.0).color(DIM));
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Сведения о файле")
+                    .size(12.0)
+                    .color(DIM),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("Скрыть")
+                    .on_hover_text("освободить место сетке и календарю")
+                    .clicked()
+                {
+                    self.details_open = false;
+                }
+            });
+        });
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
             .id_salt("details-scroll")
@@ -1616,7 +2375,8 @@ impl App {
         };
 
         // Текст с фото читается из БД один раз на файл, а не каждый кадр.
-        if !self.ocr_text.contains_key(&id) && !self.ocr_snippets.contains_key(&id)
+        if !self.ocr_text.contains_key(&id)
+            && !self.ocr_snippets.contains_key(&id)
             && let Ok(conn) = db::open(&self.db_path)
             && let Ok(text) = db::load_ocr(&conn, id)
         {
@@ -1635,8 +2395,13 @@ impl App {
             thumbs_dir: &self.thumbs_dir,
             selected: self.selected,
             clicked: None,
+            open_clicked: None,
             show_keep: false,
             keep_clicked: None,
+            trash_mode: false,
+            restore_clicked: None,
+            tile: self.tile_size,
+            budget: 4,
         };
         if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
             let txt = match f.kind.as_str() {
@@ -1652,6 +2417,31 @@ impl App {
             );
         }
         ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Открыть полный экран")
+                .on_hover_text("двойной клик по плитке делает то же")
+                .clicked()
+            {
+                self.open_viewer(id);
+            }
+            if ui
+                .button("В корзину")
+                .on_hover_text(
+                    "убрать из обычных видов в корзину приложения; на диске файл не меняется",
+                )
+                .clicked()
+            {
+                match db::mark_trashed(&self.db_path, id) {
+                    Ok(()) => {
+                        self.selected = None;
+                        self.reload();
+                        self.status = "файл в корзине приложения; на диске не тронут".into();
+                    }
+                    Err(e) => self.status = format!("файл не убран в корзину: {e}"),
+                }
+            }
+        });
 
         meta_row(ui, "Путь", &f.path);
         let date = format!(
@@ -1704,18 +2494,15 @@ impl App {
                             .size(11.0)
                             .color(DIM),
                     );
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui
-                                .small_button("убрать")
-                                .on_hover_text("убрать тег у этого фото; оригинал не меняется")
-                                .clicked()
-                            {
-                                hide = Some(tag.clone());
-                            }
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button("убрать")
+                            .on_hover_text("убрать тег у этого фото; оригинал не меняется")
+                            .clicked()
+                        {
+                            hide = Some(tag.clone());
+                        }
+                    });
                 });
             }
             ui.spacing_mut().item_spacing.y = spacing;
@@ -1739,7 +2526,11 @@ impl App {
             }
         }
         let hidden = self.hidden_tags.get(&id).copied().unwrap_or(0);
-        if hidden > 0 && ui.button(format!("вернуть скрытые теги ({hidden})")).clicked() {
+        if hidden > 0
+            && ui
+                .button(format!("вернуть скрытые теги ({hidden})"))
+                .clicked()
+        {
             match db::unhide_tags(&self.db_path, id) {
                 Ok(_) => {
                     self.reload();
@@ -1748,6 +2539,56 @@ impl App {
                 Err(e) => self.status = format!("теги не вернуть: {e}"),
             }
         }
+
+        section_label(ui, "Свои теги");
+        let own = self.user_tags.get(&id).cloned().unwrap_or_default();
+        if own.is_empty() {
+            ui.label(egui::RichText::new("пока нет").size(12.0).color(DIM));
+        }
+        let mut remove_own: Option<String> = None;
+        for tag in &own {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(tag).size(12.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("убрать").clicked() {
+                        remove_own = Some(tag.clone());
+                    }
+                });
+            });
+        }
+        if let Some(tag) = remove_own {
+            match db::remove_user_tag(&self.db_path, id, &tag) {
+                Ok(()) => {
+                    if let Some(tags) = self.user_tags.get_mut(&id) {
+                        tags.retain(|t| t != &tag);
+                    }
+                    self.status = format!("свой тег «{tag}» убран");
+                }
+                Err(e) => self.status = format!("тег не убран: {e}"),
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.user_tag_input)
+                    .hint_text("свой тег, например мебель")
+                    .desired_width(150.0),
+            );
+            if ui.button("Добавить тег").clicked() {
+                let tag = self.user_tag_input.trim().to_string();
+                if !tag.is_empty() {
+                    match db::add_user_tag(&self.db_path, id, &tag) {
+                        Ok(()) => {
+                            let tags = self.user_tags.entry(id).or_default();
+                            tags.push(tag.clone());
+                            tags.sort();
+                            self.user_tag_input.clear();
+                            self.status = format!("свой тег добавлен: «{tag}»");
+                        }
+                        Err(e) => self.status = format!("тег не добавлен: {e}"),
+                    }
+                }
+            }
+        });
 
         if f.kind == "image" {
             section_label(ui, "Текст на фото");
@@ -1777,14 +2618,723 @@ impl App {
                 .ocr_snippets
                 .get(&id)
                 .cloned()
-                .or_else(|| self.ocr_text.get(&id).map(|t| t.chars().take(400).collect()))
+                .or_else(|| self.ocr_text.get(&id).cloned())
                 .filter(|t| !t.trim().is_empty());
             if let Some(text) = shown {
                 ui.add_space(4.0);
                 block(ui, |ui| {
-                    ui.label(highlight_job(ui, &text));
+                    egui::ScrollArea::vertical()
+                        .id_salt("card-text")
+                        .max_height(220.0)
+                        .show(ui, |ui| {
+                            ui.label(highlight_job(ui, &text));
+                        });
                 });
+                if ui
+                    .button("Показать текст целиком")
+                    .on_hover_text("полный экран: кадр и весь распознанный текст")
+                    .clicked()
+                {
+                    self.open_viewer(id);
+                    if let Some(v) = &mut self.viewer {
+                        v.show_text = true;
+                    }
+                }
             }
+        }
+    }
+
+    /// Переход из лица к снимку: не в общую сетку, а в день календаря, где он лежит.
+    /// Если даты нет — общая сетка с выделением этого файла.
+    fn open_from_faces(&mut self, file_id: i64) {
+        self.selected = Some(file_id);
+        // Старый поиск/фильтр не должен прятать снимок в дне календаря.
+        self.reset_filters();
+        self.selected = Some(file_id);
+        let date = self
+            .items
+            .iter()
+            .find(|r| r.id == file_id)
+            .and_then(|r| r.taken_at.as_deref())
+            .and_then(parse_date);
+        match date {
+            Some(d) => {
+                self.cal_year = d.year();
+                self.cal_month = d.month();
+                self.cal_day = Some(d.format("%Y-%m-%d").to_string());
+                self.cal_week = monday_of(d);
+                self.cal_scale = CalScale::Month;
+                self.view = View::Calendar;
+                self.status = format!("снимок открыт в календаре: {}", d.format("%Y-%m-%d"));
+            }
+            None => {
+                self.view = View::Grid;
+                self.status = "у снимка нет даты — открыт в общих файлах с выделением".into();
+            }
+        }
+    }
+
+    /// Поставить кадр в очередь фонового декодирования. `front` — текущий кадр важнее соседей.
+    fn request_photo(&mut self, id: i64, front: bool) {
+        if self.photo_cache.contains_key(&id) || self.photo_loading.contains(&id) {
+            return;
+        }
+        let Some(f) = self
+            .items
+            .iter()
+            .chain(self.trash_items.iter())
+            .find(|r| r.id == id)
+        else {
+            return;
+        };
+        if f.kind != "image" {
+            return;
+        }
+        self.photo_loading.insert(id);
+        if front {
+            self.photo_jobs.push_front(id);
+        } else {
+            self.photo_jobs.push_back(id);
+        }
+        while self.photo_jobs.len() > 8 {
+            if let Some(old) = self.photo_jobs.pop_back() {
+                self.photo_loading.remove(&old);
+            }
+        }
+        self.pump_photo();
+    }
+
+    /// Один фоновый декодер за раз: очередь не даёт десяткам потоков съесть память.
+    fn pump_photo(&mut self) {
+        if self.photo_rx.is_some() {
+            return;
+        }
+        while let Some(id) = self.photo_jobs.pop_front() {
+            if self.photo_cache.contains_key(&id) {
+                self.photo_loading.remove(&id);
+                continue;
+            }
+            let Some(f) = self
+                .items
+                .iter()
+                .chain(self.trash_items.iter())
+                .find(|r| r.id == id)
+            else {
+                self.photo_loading.remove(&id);
+                continue;
+            };
+            let path = PathBuf::from(&f.path);
+            let (tx, rx) = mpsc::channel();
+            self.photo_rx = Some(rx);
+            std::thread::spawn(move || {
+                let res = derive::fast_view(&path, 1920);
+                let _ = tx.send((id, res));
+            });
+            return;
+        }
+    }
+
+    /// Текущий кадр, следующий, предыдущий и один за следующим — для листания и слайд-шоу.
+    fn request_around(&mut self, ids: &[i64], idx: usize) {
+        if ids.is_empty() {
+            return;
+        }
+        let n = ids.len();
+        self.request_photo(ids[idx], true);
+        if n > 1 {
+            self.request_photo(ids[(idx + 1) % n], false);
+        }
+        if n > 2 {
+            self.request_photo(ids[(idx + n - 1) % n], false);
+        }
+        if n > 3 {
+            self.request_photo(ids[(idx + 2) % n], false);
+        }
+    }
+
+    /// Предзагрузка выбранного файла (клик по плитке до двойного клика).
+    fn prefetch_photo(&mut self, id: i64) {
+        self.request_photo(id, true);
+    }
+
+    fn trim_photo_cache(&mut self) {
+        let current = self.viewer.as_ref().and_then(|v| v.ids.get(v.idx)).copied();
+        while self.photo_cache.len() > 4 {
+            let Some(k) = self
+                .photo_cache
+                .keys()
+                .find(|k| Some(**k) != current)
+                .copied()
+            else {
+                break;
+            };
+            self.photo_cache.remove(&k);
+        }
+    }
+
+    fn poll_photo(&mut self, ctx: &egui::Context) {
+        let res = {
+            let Some(rx) = &self.photo_rx else { return };
+            rx.try_recv()
+        };
+        match res {
+            Ok((id, Ok((w, h, raw)))) => {
+                self.photo_loading.remove(&id);
+                self.photo_rx = None;
+                let current = self.viewer.as_ref().and_then(|v| v.ids.get(v.idx)).copied();
+                if current == Some(id) {
+                    let color = egui::ColorImage::from_rgba_unmultiplied([w, h], &raw);
+                    let tex = ctx.load_texture(
+                        format!("viewer{id}"),
+                        color,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.viewer_tex = Some((id, tex));
+                } else {
+                    self.photo_cache.insert(id, (w, h, raw));
+                    self.trim_photo_cache();
+                }
+                if let Some(sel) = self.selected
+                    && sel != id
+                    && self.viewer.is_none()
+                {
+                    self.prefetch_photo(sel);
+                }
+                self.pump_photo();
+            }
+            Ok((id, Err(e))) => {
+                self.photo_loading.remove(&id);
+                self.photo_rx = None;
+                self.status = format!("кадр не декодирован: {e:#}");
+                self.pump_photo();
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(30));
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.photo_rx = None;
+                self.pump_photo();
+            }
+        }
+    }
+
+    /// Видео играет встроенный плеер: кадр в текстуру, звук через cpal.
+    /// Если файл ему не по зубам (кодек вне области, битый контейнер) —
+    /// честно уступаем внешнему `ffplay`, а не показываем чёрный экран.
+    fn start_video_playback(&mut self, f: &FileRow) {
+        self.stop_video();
+        self.video_lag_shown = false;
+        self.video_id = Some(f.id);
+        match player::Player::open(Path::new(&f.path), player::Options::default()) {
+            Ok(p) => {
+                self.status = format!(
+                    "видео: {}{}",
+                    f.path,
+                    if p.has_audio() { " (со звуком)" } else { " (без звука)" }
+                );
+                self.video = Some(p);
+            }
+            Err(e) => {
+                self.status = format!("встроенный плеер не взялся ({e:#}); открываю ffplay");
+                let tools = self.settings.tools.clone();
+                match tools::ffplay(&tools, Path::new(&f.path)) {
+                    Ok(child) => {
+                        self.video_child = Some(child);
+                    }
+                    Err(e2) => {
+                        self.status = format!("ffplay не запустился ({e2:#}); системный проигрыватель");
+                        match tools::open_path(Path::new(&f.path)) {
+                            Ok(()) => {
+                                self.status = format!("открываю системным плеером: {}", f.path)
+                            }
+                            Err(e3) => self.status = format!("видео не открыть: {e3:#}"),
+                        }
+                        self.video_id = None;
+                    }
+                }
+            }
+        }
+    }
+
+    fn stop_video(&mut self) {
+        self.video_lag_shown = false;
+        if let Some(mut p) = self.video.take() {
+            p.stop();
+        }
+        self.video_tex = None;
+        if let Some(mut child) = self.video_child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.video_id = None;
+    }
+
+    /// Кадр плеера → текстура. Пока видео играет, окно перерисовывается 30 раз в секунду.
+    fn poll_video(&mut self, ctx: &egui::Context) {
+        if let Some(child) = &mut self.video_child
+            && child.try_wait().ok().flatten().is_some()
+        {
+            self.video_child = None;
+            self.video_id = None;
+            self.status = "ffplay: видео закрыто".into();
+        }
+        let Some(p) = self.video.as_ref() else { return };
+        if let Some(frame) = p.take_frame() {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [frame.width, frame.height],
+                &frame.rgba,
+            );
+            match &mut self.video_tex {
+                Some(tex) => tex.set(image, egui::TextureOptions::LINEAR),
+                None => {
+                    self.video_tex = Some(ctx.load_texture(
+                        "photocat-video",
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ))
+                }
+            }
+        }
+        if p.audio_lag() && !self.video_lag_shown {
+            self.video_lag_shown = true;
+            self.status = "видео идёт медленнее звука: звук выключен, чтобы кадры шли".into();
+        }
+        if let Some(e) = p.error() {
+            self.status = format!("видео остановилось: {e}");
+            self.video = None;
+            self.video_id = None;
+            self.video_tex = None;
+            return;
+        }
+        if p.is_finished() {
+            self.status = "видео доиграло".into();
+            self.video = None;
+            self.video_id = None;
+            self.video_tex = None;
+            return;
+        }
+        if p.is_playing() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+    }
+
+    /// Список для листания в полноэкранном просмотре: текущий вид и текущий фильтр.
+    fn viewer_ids(&self) -> Vec<i64> {
+        match self.view {
+            View::Faces if self.face_together && self.face_picked_clusters.len() >= 2 => {
+                let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
+                for f in &self.face_views {
+                    if let Some(cid) = f.cluster_id
+                        && self.face_picked_clusters.contains(&cid)
+                    {
+                        per_file.entry(f.file_id).or_default().insert(cid);
+                    }
+                }
+                per_file
+                    .into_iter()
+                    .filter(|(_, set)| self.face_picked_clusters.iter().all(|c| set.contains(c)))
+                    .map(|(id, _)| id)
+                    .collect()
+            }
+            View::Faces => {
+                let mut seen = HashSet::new();
+                self.face_views
+                    .iter()
+                    .filter(|f| {
+                        self.face_selected_cluster.is_none()
+                            || f.cluster_id == self.face_selected_cluster
+                    })
+                    .filter(|f| seen.insert(f.file_id))
+                    .map(|f| f.file_id)
+                    .collect()
+            }
+            View::Trash => self.trash_items.iter().map(|r| r.id).collect(),
+            View::Calendar => {
+                let ids = self.filtered().into_iter().map(|i| self.items[i].id);
+                match &self.cal_day {
+                    Some(day) => ids
+                        .filter(|id| {
+                            self.items
+                                .iter()
+                                .find(|r| r.id == *id)
+                                .and_then(|r| r.taken_at.as_deref())
+                                .is_some_and(|d| d.starts_with(day.as_str()))
+                        })
+                        .collect(),
+                    None => ids.collect(),
+                }
+            }
+            _ => self
+                .filtered()
+                .into_iter()
+                .map(|i| self.items[i].id)
+                .collect(),
+        }
+    }
+
+    fn open_viewer(&mut self, file_id: i64) {
+        self.stop_video();
+        let mut ids = self.viewer_ids();
+        if !ids.contains(&file_id) {
+            ids.push(file_id);
+        }
+        let idx = ids.iter().position(|&id| id == file_id).unwrap_or(0);
+        self.request_around(&ids, idx);
+        self.viewer = Some(Viewer {
+            ids,
+            idx,
+            zoom: 1.0,
+            show_text: false,
+            slideshow: false,
+            interval_s: 3,
+            last_advance: std::time::Instant::now(),
+        });
+        self.viewer_tex = None;
+    }
+
+    fn viewer_modal(&mut self, ctx: &egui::Context) {
+        let Some(mut v) = self.viewer.take() else {
+            return;
+        };
+        if v.ids.is_empty() {
+            return;
+        }
+        v.idx = v.idx.min(v.ids.len() - 1);
+        let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut step = 0i32;
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+            step = 1;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+            step = -1;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+            v.slideshow = !v.slideshow;
+            v.last_advance = std::time::Instant::now();
+        }
+        if v.slideshow
+            && v.last_advance.elapsed() >= std::time::Duration::from_secs(v.interval_s)
+        {
+            let next = v.ids[(v.idx + 1) % v.ids.len()];
+            let ready = self.photo_cache.contains_key(&next)
+                || self.viewer_tex.as_ref().is_some_and(|(t, _)| *t == next);
+            if ready {
+                step = 1;
+                v.last_advance = std::time::Instant::now();
+            } else {
+                // Не показываем мыло: ждём готовый следующий кадр.
+                self.request_photo(next, true);
+            }
+        }
+        if step != 0 && v.ids.len() > 1 {
+            v.idx = (v.idx as i64 + step as i64).rem_euclid(v.ids.len() as i64) as usize;
+            v.last_advance = std::time::Instant::now();
+            self.stop_video();
+        }
+        let id = v.ids[v.idx];
+        let Some(f) = self
+            .items
+            .iter()
+            .chain(self.trash_items.iter())
+            .find(|r| r.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.request_around(&v.ids, v.idx);
+        if v.show_text
+            && !self.ocr_text.contains_key(&id)
+            && let Ok(conn) = db::open(&self.db_path)
+            && let Ok(text) = db::load_ocr(&conn, id)
+        {
+            self.ocr_text.insert(id, text.unwrap_or_default());
+        }
+        let need_full = self
+            .viewer_tex
+            .as_ref()
+            .map(|(t, _)| *t != id)
+            .unwrap_or(true);
+        if need_full
+            && let Some((w, h, raw)) = self.photo_cache.remove(&id)
+        {
+            let color = egui::ColorImage::from_rgba_unmultiplied([w, h], &raw);
+            let tex = ctx.load_texture(
+                format!("viewer{id}"),
+                color,
+                egui::TextureOptions::LINEAR,
+            );
+            self.viewer_tex = Some((id, tex));
+        }
+        if !self.textures.contains_key(&id)
+            && !self.missing.contains(&id)
+            && let Some(rel) = f.thumb.as_ref()
+            && let Some(t) = load_texture(
+                ctx,
+                &self.thumbs_dir.join(rel),
+                &format!("t{id}"),
+            )
+        {
+            self.textures.insert(id, t);
+        }
+        let preview = self.textures.get(&id);
+        let mut open_video = false;
+        let mut start_video = false;
+        let mut stop_video = false;
+        let mut toggle_video = false;
+        let mut seek_video: Option<f64> = None;
+        let mut volume_video: Option<f32> = None;
+        let video_active =
+            self.video_id == Some(id) && (self.video.is_some() || self.video_child.is_some());
+        if v.slideshow || video_active {
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
+        let current_full = self.viewer_tex.as_ref().filter(|(t, _)| *t == id);
+        let stale = self
+            .viewer_tex
+            .as_ref()
+            .filter(|(t, _)| *t != id)
+            .map(|(_, t)| t);
+        let mut new_idx = v.idx;
+        let mut new_zoom = v.zoom;
+        let mut new_text = v.show_text;
+        let mut new_slideshow = v.slideshow;
+        let mut new_interval = v.interval_s;
+
+        let screen = ctx.content_rect();
+        let resp = egui::Modal::new(egui::Id::unique("photocat-viewer")).show(ctx, |ui| {
+            ui.set_min_size(screen.size() - egui::vec2(48.0, 48.0));
+            ui.horizontal(|ui| {
+                let name = Path::new(&f.path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&f.path);
+                ui.label(egui::RichText::new(name).size(16.0));
+                let date = f
+                    .taken_at
+                    .as_deref()
+                    .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
+                    .unwrap_or_else(|| "без даты".into());
+                ui.label(egui::RichText::new(date).size(11.0).color(DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Закрыть").clicked() {
+                        close = true;
+                    }
+                    ui.label(
+                        egui::RichText::new(format!("{} из {}", v.idx + 1, v.ids.len()))
+                            .size(11.0)
+                            .color(DIM),
+                    );
+                });
+            });
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("←").on_hover_text("предыдущий").clicked() {
+                    new_idx = (v.idx + v.ids.len() - 1) % v.ids.len();
+                }
+                if ui.button("→").on_hover_text("следующий").clicked() {
+                    new_idx = (v.idx + 1) % v.ids.len();
+                }
+                if ui
+                    .selectable_label(
+                        v.slideshow,
+                        if v.slideshow {
+                            "Стоп слайд-шоу"
+                        } else {
+                            "Слайд-шоу"
+                        },
+                    )
+                    .on_hover_text("пробел — пуск/стоп; листает текущий список")
+                    .clicked()
+                {
+                    new_slideshow = !v.slideshow;
+                }
+                ui.label(egui::RichText::new("интервал:").size(11.0).color(DIM));
+                for secs in [3u64, 5, 10] {
+                    if ui
+                        .selectable_label(v.interval_s == secs, format!("{secs} с"))
+                        .clicked()
+                    {
+                        new_interval = secs;
+                    }
+                }
+                ui.separator();
+                if ui.button("−").on_hover_text("уменьшить").clicked() {
+                    new_zoom = (v.zoom - 0.25).max(0.5);
+                }
+                if ui.button("Вписать").clicked() {
+                    new_zoom = 1.0;
+                }
+                if ui.button("+").on_hover_text("увеличить").clicked() {
+                    new_zoom = (v.zoom + 0.25).min(4.0);
+                }
+                ui.label(
+                    egui::RichText::new(format!("масштаб {:.0}%", v.zoom * 100.0))
+                        .size(11.0)
+                        .color(DIM),
+                );
+                if ui
+                    .selectable_label(v.show_text, "Текст на фото")
+                    .clicked()
+                {
+                    new_text = !v.show_text;
+                }
+                if f.kind == "video" {
+                    if video_active {
+                        let playing = self.video.as_ref().is_some_and(|p| p.is_playing());
+                        if ui
+                            .button(if playing { "Пауза" } else { "Играть" })
+                            .on_hover_text("пробел — пауза и продолжение")
+                            .clicked()
+                        {
+                            toggle_video = true;
+                        }
+                        if ui
+                            .selectable_label(true, "Стоп видео")
+                            .on_hover_text("остановить и вернуться к кадру")
+                            .clicked()
+                        {
+                            stop_video = true;
+                        }
+                    } else if ui
+                        .button("Смотреть видео")
+                        .on_hover_text("в окне приложения, со звуком")
+                        .clicked()
+                    {
+                        start_video = true;
+                    }
+                }
+                if f.kind != "video" && ui.button("В системном просмотрщике").clicked() {
+                    open_video = true;
+                }
+            });
+            if f.kind == "video"
+                && video_active
+                && let Some(p) = self.video.as_ref()
+            {
+                    let dur = p.duration_s().max(0.001);
+                    let mut pos = p.position_s().min(dur);
+                    ui.horizontal(|ui| {
+                        let t0 = db::duration(pos);
+                        let t1 = db::duration(dur);
+                        ui.label(egui::RichText::new(format!("{t0} / {t1}")).size(11.0).color(DIM));
+                        let w = (ui.available_width() - 190.0).max(160.0);
+                        let resp = ui.add_sized(
+                            [w, 18.0],
+                            egui::Slider::new(&mut pos, 0.0..=dur)
+                                .show_value(false)
+                                .trailing_fill(true),
+                        );
+                        if resp.dragged() || resp.clicked() {
+                            seek_video = Some(pos);
+                        }
+                        ui.label(egui::RichText::new("звук").size(11.0).color(DIM));
+                        let mut vol = p.volume();
+                        if ui
+                            .add_sized([90.0, 18.0], egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
+                            .changed()
+                        {
+                            volume_video = Some(vol);
+                        }
+                        if !p.has_audio() {
+                            ui.label(egui::RichText::new("нет устройства").size(11.0).color(DIM));
+                        }
+                    });
+            }
+            ui.separator();
+            let avail = ui.available_size();
+            let content_h = (avail.y - 8.0).max(120.0);
+            if v.show_text {
+                ui.horizontal(|ui| {
+                    let img_w = (avail.x * 0.62).max(160.0);
+                    ui.allocate_ui(egui::vec2(img_w, content_h), |ui| {
+                        draw_viewer_image(
+                            ui,
+                            ViewerTextures {
+                                full: current_full,
+                                preview,
+                                stale,
+                                video: self.video_tex.as_ref(),
+                            },
+                            &f,
+                            v.zoom,
+                            img_w,
+                            content_h,
+                        );
+                    });
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .id_salt("viewer-text")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Текст на фото").size(11.0).color(DIM));
+                            let text = self.ocr_text.get(&id).cloned().unwrap_or_default();
+                            if text.trim().is_empty() {
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Текст не распознан. Кнопка «Распознать текст» — в карточке файла.",
+                                    )
+                                    .size(12.0)
+                                    .color(DIM),
+                                );
+                            } else {
+                                ui.add(egui::Label::new(text).wrap());
+                            }
+                        });
+                });
+            } else {
+                draw_viewer_image(
+                    ui,
+                    ViewerTextures {
+                        full: current_full,
+                        preview,
+                        stale,
+                        video: self.video_tex.as_ref(),
+                    },
+                    &f,
+                    v.zoom,
+                    avail.x,
+                    content_h,
+                );
+            }
+        });
+        if resp.backdrop_response.clicked() {
+            close = true;
+        }
+        v.idx = new_idx;
+        v.zoom = new_zoom;
+        v.show_text = new_text;
+        v.slideshow = new_slideshow;
+        v.interval_s = new_interval;
+        if open_video {
+            match tools::open_path(Path::new(&f.path)) {
+                Ok(()) => self.status = format!("открываю системным проигрывателем: {}", f.path),
+                Err(e) => self.status = format!("не открыть: {e:#}"),
+            }
+        }
+        if let Some(p) = self.video.as_ref() {
+            if toggle_video {
+                p.toggle();
+            }
+            if let Some(t) = seek_video {
+                p.seek(t);
+            }
+            if let Some(v) = volume_video {
+                p.set_volume(v);
+            }
+        }
+        if stop_video {
+            self.stop_video();
+        }
+        if start_video {
+            self.start_video_playback(&f);
+        }
+        if close {
+            self.stop_video();
+            self.viewer = None;
+            self.viewer_tex = None;
+        } else {
+            self.request_around(&v.ids, v.idx);
+            self.viewer = Some(v);
         }
     }
 
@@ -1867,27 +3417,20 @@ impl App {
             })
             .filter(|(_, r)| match &self.tag_filter {
                 None => true,
-                Some(want) => self
-                    .tags
-                    .get(&r.id)
-                    .and_then(|t| {
-                        embed::confident_tag_with(
-                            t,
-                            self.settings.tag_show,
-                            self.settings.tag_margin,
-                        )
-                    })
-                    .map(|(tag, _)| tag == want)
-                    .unwrap_or(false),
+                Some(want) => {
+                    self.user_tags
+                        .get(&r.id)
+                        .is_some_and(|tags| tags.iter().any(|t| t == want))
+                        || self.tags.get(&r.id).is_some_and(|t| {
+                            embed::tag_above(t, want, self.settings.tag_show)
+                        })
+                }
             })
             .map(|(i, _)| i)
             .collect();
         if let Some(hits) = &self.semantic_hits {
-            let rank: HashMap<i64, usize> = hits
-                .iter()
-                .enumerate()
-                .map(|(n, id)| (*id, n))
-                .collect();
+            let rank: HashMap<i64, usize> =
+                hits.iter().enumerate().map(|(n, id)| (*id, n)).collect();
             out.retain(|&i| rank.contains_key(&self.items[i].id));
             out.sort_by_key(|&i| rank.get(&self.items[i].id).copied().unwrap_or(usize::MAX));
         }
@@ -1905,10 +3448,12 @@ impl App {
         self.embed_rx = Some(rx);
         self.status = "CLIP: считаю эмбеддинги и теги…".into();
         std::thread::spawn(move || {
-            let r = embed::embed_missing(&db_path, 8, 8, Some(progress));
+            let r = embed::embed_and_retag(&db_path, 8, 8, Some(progress));
             let _ = tx.send(r);
         });
     }
+
+
 
     /// `Some(id)` — только этот снимок (главное действие), `None` — пакетный проход по кандидатам.
     fn start_ocr(&mut self, file: Option<i64>) {
@@ -2028,10 +3573,7 @@ impl App {
         self.face_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.face_rx = Some(rx);
-        self.status = format!(
-            "лица: моделей {}, порог {threshold:.2}…",
-            faces::MODEL_ID
-        );
+        self.status = format!("лица: моделей {}, порог {threshold:.2}…", faces::MODEL_ID);
         std::thread::spawn(move || {
             let jobs = std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -2074,21 +3616,78 @@ impl App {
     }
 
     fn start_index(&mut self) {
-        let root = PathBuf::from(self.path_input.trim());
-        if !root.is_dir() {
-            self.status = format!("не каталог: {}", root.display());
+        let mut roots: Vec<PathBuf> = self.roots.iter().map(PathBuf::from).collect();
+        let typed = self.path_input.trim();
+        if !typed.is_empty() && !roots.iter().any(|r| r == Path::new(typed)) {
+            roots.push(PathBuf::from(typed));
+        }
+        if roots.is_empty() {
+            self.status =
+                "укажите каталог в верхней панели или добавьте его кнопкой «Каталоги»".into();
+            return;
+        }
+        let missing: Vec<String> = roots
+            .iter()
+            .filter(|r| !r.is_dir())
+            .map(|r| r.display().to_string())
+            .collect();
+        roots.retain(|r| r.is_dir());
+        if roots.is_empty() {
+            self.status = format!("не каталог: {}", missing.join(", "));
             return;
         }
         let db_path = self.db_path.clone();
         let tools = self.settings.tools.clone();
+        let jobs = self.settings.index_jobs;
         let progress = Arc::new(Progress::default());
         self.progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
-        self.status = format!("индексация {}…", root.display());
+        self.status = if roots.len() == 1 {
+            format!("индексация {}…", roots[0].display())
+        } else {
+            format!("индексация {} каталогов…", roots.len())
+        };
+        if !missing.is_empty() {
+            self.status.push_str(&format!(" (пропущено: {})", missing.join(", ")));
+        }
         std::thread::spawn(move || {
-            let r = index::run(&root, 8, &db_path, &tools, Some(progress));
-            let _ = tx.send(r);
+            let t0 = std::time::Instant::now();
+            let mut total = 0usize;
+            let mut indexed = 0usize;
+            let mut skipped = 0usize;
+            let mut errors = missing.len();
+            let mut bytes = 0i64;
+            let mut cancelled = false;
+            for root in roots {
+                progress.reset();
+                match index::run(&root, jobs, &db_path, &tools, Some(progress.clone())) {
+                    Ok(st) => {
+                        total += st.total;
+                        indexed += st.indexed;
+                        skipped += st.skipped;
+                        errors += st.errors;
+                        bytes += st.bytes;
+                        cancelled |= st.cancelled;
+                        if st.cancelled {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        errors += 1;
+                        eprintln!("индексация {}: {e}", root.display());
+                    }
+                }
+            }
+            let _ = tx.send(Ok(index::Stats {
+                total,
+                indexed,
+                skipped,
+                errors,
+                bytes,
+                seconds: t0.elapsed().as_secs_f64(),
+                cancelled,
+            }));
         });
     }
 }
@@ -2102,12 +3701,17 @@ struct FaceCells {
     selected_file: Option<i64>,
     split_clicked: Option<i64>,
     open_clicked: Option<i64>,
+    viewer_clicked: Option<i64>,
+    /// Выбранные лица: имя можно назначить сразу нескольким.
+    picked: HashSet<i64>,
+    tile: f32,
 }
 
 fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f: &db::FaceView) {
-    const W: f32 = 150.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(W, W + 26.0), egui::Sense::click());
-    let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(W, W));
+    let w = cs.tile.clamp(100.0, 260.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, w + 26.0), egui::Sense::click());
+    let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
+    let mut button_clicked = false;
     if ui.is_rect_visible(rect) {
         ui.painter()
             .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
@@ -2171,6 +3775,41 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
             .clicked()
         {
             cs.split_clicked = Some(f.id);
+            button_clicked = true;
+        }
+        // Пакетное назначение: отметить несколько лиц и дать им одно имя.
+        let pick = egui::Rect::from_min_size(
+            egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
+            egui::vec2(66.0, 20.0),
+        );
+        let is_picked = cs.picked.contains(&f.id);
+        if ui
+            .place(
+                pick,
+                egui::Button::new(if is_picked {
+                    "выбрано"
+                } else {
+                    "выбрать"
+                })
+                .small(),
+            )
+            .on_hover_text("отметить это лицо для общего имени")
+            .clicked()
+        {
+            if is_picked {
+                cs.picked.remove(&f.id);
+            } else {
+                cs.picked.insert(f.id);
+            }
+            button_clicked = true;
+        }
+        if is_picked {
+            ui.painter().rect_stroke(
+                img_rect,
+                3.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
+                egui::StrokeKind::Inside,
+            );
         }
     }
     if cs.selected_file == Some(f.file_id) {
@@ -2181,8 +3820,15 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
             egui::StrokeKind::Inside,
         );
     }
-    if resp.clicked() {
+    let pointer_on_button = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| {
+        p.x > img_rect.right() - 70.0 && p.y < img_rect.top() + 28.0
+            || p.x < img_rect.left() + 74.0 && p.y < img_rect.top() + 28.0
+    });
+    if resp.clicked() && !button_clicked && !pointer_on_button {
         cs.open_clicked = Some(f.file_id);
+    }
+    if resp.double_clicked() {
+        cs.viewer_clicked = Some(f.file_id);
     }
     if resp.hovered()
         && let Some(t) = cs.textures.get(&f.id).cloned()
@@ -2197,7 +3843,10 @@ fn draw_face_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut FaceCells, f:
 
 /// Короткая подпись версии: первая строка и первые три слова («ffmpeg version 9.0.2»).
 fn short_version(line: &str) -> String {
-    line.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
+    line.split_whitespace()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 struct Cells<'a> {
@@ -2206,10 +3855,20 @@ struct Cells<'a> {
     thumbs_dir: &'a Path,
     selected: Option<i64>,
     clicked: Option<i64>,
+    /// Двойной клик — полноэкранный просмотр.
+    open_clicked: Option<i64>,
     /// Показать на плитке кнопку «оставить» (вид «Дубли»).
     show_keep: bool,
     /// Нажата «оставить» у файла — применить решение к его группе.
     keep_clicked: Option<i64>,
+    /// Вид «Корзина»: на плитке кнопка «вернуть» и пометка «в корзине».
+    trash_mode: bool,
+    restore_clicked: Option<i64>,
+    /// Размер плитки, px: задаётся ползунком в левой панели.
+    tile: f32,
+    /// Сколько новых текстур декодировать за кадр: остальное — следующим кадром,
+    /// иначе быстрая прокрутка упирается в декодирование JPEG в UI-потоке.
+    budget: usize,
 }
 
 fn load_texture(ctx: &egui::Context, path: &Path, name: &str) -> Option<egui::TextureHandle> {
@@ -2238,9 +3897,16 @@ fn paint_thumb(
     rect: egui::Rect,
 ) -> bool {
     if !cs.textures.contains_key(&f.id) && !cs.missing.contains(&f.id) {
-        match f.thumb.as_ref().and_then(|rel| {
-            load_texture(ctx, &cs.thumbs_dir.join(rel), &format!("t{}", f.id))
-        }) {
+        if cs.budget == 0 {
+            ctx.request_repaint();
+            return false;
+        }
+        cs.budget -= 1;
+        match f
+            .thumb
+            .as_ref()
+            .and_then(|rel| load_texture(ctx, &cs.thumbs_dir.join(rel), &format!("t{}", f.id)))
+        {
             Some(t) => {
                 cs.textures.insert(f.id, t);
             }
@@ -2263,8 +3929,18 @@ fn paint_thumb(
 }
 
 const MONTHS: [&str; 12] = [
-    "январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь",
-    "октябрь", "ноябрь", "декабрь",
+    "январь",
+    "февраль",
+    "март",
+    "апрель",
+    "май",
+    "июнь",
+    "июль",
+    "август",
+    "сентябрь",
+    "октябрь",
+    "ноябрь",
+    "декабрь",
 ];
 const WEEKDAYS: [&str; 7] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
@@ -2273,6 +3949,16 @@ fn shift_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
     let y = year + m.div_euclid(12);
     let m = m.rem_euclid(12) as u32 + 1;
     (y.clamp(1900, 2199), m)
+}
+
+/// Дата из `taken_at` (`ГГГГ-ММ-ДД[THH:MM]`) без паники на мусоре.
+fn parse_date(s: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s.get(0..10)?, "%Y-%m-%d").ok()
+}
+
+/// Понедельник недели, в которую попадает дата.
+fn monday_of(d: chrono::NaiveDate) -> chrono::NaiveDate {
+    d - chrono::Duration::days(d.weekday().num_days_from_monday() as i64)
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
@@ -2314,11 +4000,8 @@ fn shift_to_file_month(
 }
 
 /// Ближайший месяц с файлами к указанному (сначала назад, потом вперёд).
-fn nearest_file_month(
-    months: &BTreeSet<String>,
-    year: i32,
-    month: u32,
-) -> Option<(i32, u32)> {
+#[allow(dead_code)]
+fn nearest_file_month(months: &BTreeSet<String>, year: i32, month: u32) -> Option<(i32, u32)> {
     for d in 0..1200 {
         let back = shift_month(year, month, -d);
         if months.contains(&month_key(back.0, back.1)) {
@@ -2340,7 +4023,13 @@ fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     job.wrap.max_width = ui.available_width().max(120.0);
     let mut matched = false;
     let mut segment = String::new();
-    fn flush(segment: &mut String, matched: bool, normal: egui::Color32, accent: egui::Color32, job: &mut egui::text::LayoutJob) {
+    fn flush(
+        segment: &mut String,
+        matched: bool,
+        normal: egui::Color32,
+        accent: egui::Color32,
+        job: &mut egui::text::LayoutJob,
+    ) {
         if segment.is_empty() {
             return;
         }
@@ -2368,10 +4057,98 @@ fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     job
 }
 
+/// Один способ нарисовать кадр в полноэкранном просмотре: 100% = вписать,
+/// больше — увеличить и обрезать по области (прокрутка колесом не листает файл).
+fn draw_viewer_image(
+    ui: &mut egui::Ui,
+    tex: ViewerTextures<'_>,
+    f: &FileRow,
+    zoom: f32,
+    w: f32,
+    h: f32,
+) {
+    let (area, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(area, 4.0, ui.visuals().extreme_bg_color);
+    if let Some(t) = tex.video {
+        // Играющий кадр: вписываем в область, без «мыла» и без ожидания.
+        let p = ui.painter().with_clip_rect(area.shrink(1.0));
+        p.image(
+            t.id(),
+            fit_rect(area.shrink(1.0), t.size_vec2()),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        return;
+    }
+    if let Some((tid, t)) = tex.full
+        && *tid == f.id
+    {
+        let ts = t.size_vec2();
+        let fit = (area.width() / ts.x).min(area.height() / ts.y);
+        let size = ts * (fit * zoom);
+        let img = egui::Rect::from_center_size(area.center(), size);
+        let p = ui.painter().with_clip_rect(area.shrink(1.0));
+        p.image(
+            t.id(),
+            img,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    } else if let Some(t) = tex.stale {
+        // Пока следующий кадр декодируется, держим предыдущий резкий — без мыла.
+        let p = ui.painter().with_clip_rect(area.shrink(1.0));
+        p.image(
+            t.id(),
+            fit_rect(area.shrink(1.0), t.size_vec2()),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        ui.painter().text(
+            egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
+            egui::Align2::LEFT_BOTTOM,
+            "загрузка следующего кадра…",
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_gray(235),
+        );
+    } else if let Some(t) = tex.preview {
+        // Нативная 320 px миниатюра по центру, без растягивания на весь экран.
+        let size = t.size_vec2();
+        let scale = (area.width() / size.x).min(area.height() / size.y).min(1.0);
+        let rect = egui::Rect::from_center_size(area.center(), size * scale);
+        let p = ui.painter().with_clip_rect(area.shrink(1.0));
+        p.image(
+            t.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::from_gray(230),
+        );
+        ui.painter().text(
+            egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
+            egui::Align2::LEFT_BOTTOM,
+            "полный кадр загружается…",
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_gray(235),
+        );
+    } else {
+        ui.painter().text(
+            area.center(),
+            egui::Align2::CENTER_CENTER,
+            if f.kind == "video" {
+                "кадр-обложка не создана — нажмите «Смотреть видео» или проиндексируйте каталог"
+            } else {
+                "полный кадр загружается…"
+            },
+            egui::FontId::proportional(14.0),
+            DIM,
+        );
+    }
+}
+
 fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow) {
-    const W: f32 = 150.0;
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(W, W + 26.0), egui::Sense::click());
-    let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(W, W));
+    let w = cs.tile.clamp(100.0, 260.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, w + 26.0), egui::Sense::click());
+    let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
     if ui.is_rect_visible(rect) {
         ui.painter()
             .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
@@ -2427,11 +4204,8 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         // Решение по дублю видно на плитке в любом виде, а не только по наведению.
         match f.decision.as_deref() {
             Some("drop") => {
-                ui.painter().rect_filled(
-                    img_rect,
-                    3.0,
-                    egui::Color32::from_black_alpha(150),
-                );
+                ui.painter()
+                    .rect_filled(img_rect, 3.0, egui::Color32::from_black_alpha(150));
                 ui.painter().text(
                     img_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -2469,6 +4243,28 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 cs.keep_clicked = Some(f.id);
             }
         }
+        if cs.trash_mode {
+            ui.painter()
+                .rect_filled(img_rect, 3.0, egui::Color32::from_black_alpha(90));
+            ui.painter().text(
+                egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
+                egui::Align2::LEFT_TOP,
+                "в корзине",
+                egui::FontId::proportional(12.0),
+                egui::Color32::from_gray(235),
+            );
+            let btn = egui::Rect::from_min_size(
+                egui::pos2(img_rect.right() - 70.0, img_rect.bottom() - 26.0),
+                egui::vec2(66.0, 20.0),
+            );
+            if ui
+                .place(btn, egui::Button::new("вернуть").small())
+                .on_hover_text("вернуть файл в обычные виды; на диске он не менялся")
+                .clicked()
+            {
+                cs.restore_clicked = Some(f.id);
+            }
+        }
     }
     if cs.selected == Some(f.id) {
         ui.painter().rect_stroke(
@@ -2480,6 +4276,9 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
     }
     if resp.clicked() {
         cs.clicked = Some(f.id);
+    }
+    if resp.double_clicked() {
+        cs.open_clicked = Some(f.id);
     }
     if resp.hovered()
         && let Some(t) = cs.textures.get(&f.id).cloned()
@@ -2525,9 +4324,9 @@ impl eframe::App for App {
                     self.embed_rx = None;
                     self.embed_progress = None;
                     match res {
-                        Ok(stats) => {
+                        Ok((embed, tags)) => {
                             self.reload();
-                            self.status = stats.to_string();
+                            self.status = format!("{embed}; {tags}");
                         }
                         Err(e) => self.status = format!("CLIP не посчитан: {e}"),
                     }
@@ -2541,6 +4340,7 @@ impl eframe::App for App {
                 }
             }
         }
+
         if let Some(rx) = &self.search_rx {
             match rx.try_recv() {
                 Ok(res) => {
@@ -2548,12 +4348,9 @@ impl eframe::App for App {
                     match res {
                         Ok((model, hits, ms)) => {
                             self.ml_model = Some(model);
-                            self.status = format!(
-                                "смысловой поиск: {} файлов за {ms:.0} мс",
-                                hits.len()
-                            );
-                            self.semantic_hits =
-                                Some(hits.into_iter().map(|(id, _)| id).collect());
+                            self.status =
+                                format!("смысловой поиск: {} файлов за {ms:.0} мс", hits.len());
+                            self.semantic_hits = Some(hits.into_iter().map(|(id, _)| id).collect());
                         }
                         Err(e) => self.status = format!("поиск не удался: {e}"),
                     }
@@ -2657,6 +4454,29 @@ impl eframe::App for App {
             }
         }
 
+        if let Some(rx) = &self.trash_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.trash_rx = None;
+                    self.trash_progress = None;
+                    match res {
+                        Ok(report) => {
+                            self.reload();
+                            self.status = report.to_string();
+                        }
+                        Err(e) => self.status = format!("корзина не очищена: {e:#}"),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.trash_rx = None;
+                    self.trash_progress = None;
+                }
+            }
+        }
+
         if let Some(rx) = &self.face_download_rx {
             match rx.try_recv() {
                 Ok(res) => {
@@ -2689,11 +4509,12 @@ impl eframe::App for App {
 
         // Сведения живут в правой панели, пока в сетке остаются 4 колонки;
         // на узком окне карточка уходит в левую, а сетка не «съёживется».
-        let details = ui.available_width() >= DETAILS_MIN_W;
+        let details = self.details_open && ui.available_width() >= DETAILS_MIN_W;
+        let show_card = self.details_open && !details;
         egui::Panel::left("left")
             .exact_size(LEFT_W)
             .resizable(false)
-            .show(ui, |ui| self.left_panel(ui, !details));
+            .show(ui, |ui| self.left_panel(ui, show_card));
         if details {
             egui::Panel::right("details")
                 .exact_size(RIGHT_W)
@@ -2702,6 +4523,12 @@ impl eframe::App for App {
         }
 
         self.settings_modal(ctx);
+        self.roots_modal(ctx);
+        self.picker_modal(ctx);
+        self.storage_modal(ctx);
+        self.trash_modal(ctx);
+        self.poll_photo(ctx);
+        self.poll_video(ctx);
 
         let visible = self.filtered();
         let items = std::mem::take(&mut self.items);
@@ -2711,12 +4538,23 @@ impl eframe::App for App {
             thumbs_dir: &self.thumbs_dir,
             selected: self.selected,
             clicked: None,
+            open_clicked: None,
             show_keep: self.view == View::Dupes,
             keep_clicked: None,
+            trash_mode: self.view == View::Trash,
+            restore_clicked: None,
+            tile: self.tile_size,
+            budget: 8,
         };
         let groups = std::mem::take(&mut self.groups);
+        let trash_items = std::mem::take(&mut self.trash_items);
+        let mut trash_clear = false;
+        let mut trash_restore_all = false;
         let face_clusters = std::mem::take(&mut self.face_clusters);
         let face_views = std::mem::take(&mut self.face_views);
+        let mut face_picked = self.face_picked.clone();
+        let mut clear_picked = false;
+        let mut face_group_input = self.face_group_input.clone();
         let mut face_cells = FaceCells {
             textures: std::mem::take(&mut self.face_textures),
             missing: std::mem::take(&mut self.face_missing),
@@ -2724,17 +4562,25 @@ impl eframe::App for App {
             selected_file: self.selected,
             split_clicked: None,
             open_clicked: None,
+            viewer_clicked: None,
+            picked: face_picked.clone(),
+            tile: self.tile_size,
         };
         let face_selected = self.face_selected_cluster;
+        let face_together = self.face_together;
+        let face_picked_clusters = self.face_picked_clusters.clone();
         let mut face_label_input = self.face_label_input.clone();
         let face_total = self.face_faces;
         let face_photos = self.face_photos;
         let mut face_save_label: Option<String> = None;
+        let mut face_assign: Option<String> = None;
         let mut reset = false;
         let view = self.view;
         let mut cal_year = self.cal_year;
         let mut cal_month = self.cal_month;
         let mut cal_day = self.cal_day.clone();
+        let mut cal_scale = self.cal_scale;
+        let mut cal_week = self.cal_week;
 
         let (title, count) = match view {
             View::Grid => (
@@ -2764,6 +4610,14 @@ impl eframe::App for App {
                 "Лица".to_string(),
                 format!("· лиц {} на {} снимках", face_total, face_photos),
             ),
+            View::Trash => (
+                "Корзина".to_string(),
+                format!(
+                    "· файлов {}, {}",
+                    self.trash_items.len(),
+                    db::human(self.trash_items.iter().map(|r| r.size).sum())
+                ),
+            ),
         };
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -2778,7 +4632,10 @@ impl eframe::App for App {
             View::Grid => {
                 if items.is_empty() {
                     ui.add_space(12.0);
-                    ui.label("Введите каталог и нажмите «Индексировать».");
+                    ui.label(
+                        "Добавьте каталог кнопкой «Каталоги» или введите путь вверху, затем \
+                         нажмите «Индексировать».",
+                    );
                     return;
                 }
                 if visible.is_empty() {
@@ -2842,6 +4699,7 @@ impl eframe::App for App {
             }
             View::Calendar => {
                 egui::ScrollArea::vertical()
+                    .id_salt("calendar-scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let mut by_day: std::collections::BTreeMap<String, Vec<usize>> =
@@ -2859,197 +4717,472 @@ impl eframe::App for App {
                             .filter(|k| k.as_str() != "без даты")
                             .map(|d| d.chars().take(7).collect())
                             .collect();
-                        let prev_month = shift_to_file_month(&months, cal_year, cal_month, -1);
-                        let next_month = shift_to_file_month(&months, cal_year, cal_month, 1);
+
+                        // Градация: год → месяц → неделя. Один клик по месяцу/дню меняет масштаб.
+                        ui.horizontal(|ui| {
+                            for (scale, label) in [
+                                (CalScale::Year, "Год"),
+                                (CalScale::Month, "Месяц"),
+                                (CalScale::Week, "Неделя"),
+                            ] {
+                                if ui
+                                    .selectable_label(cal_scale == scale, label)
+                                    .clicked()
+                                {
+                                    cal_scale = scale;
+                                }
+                            }
+                            if ui.button("Сегодня").clicked() {
+                                let today = chrono::Local::now().date_naive();
+                                cal_year = today.year();
+                                cal_month = today.month();
+                                cal_week = monday_of(today);
+                                cal_day = None;
+                                if cal_scale == CalScale::Year {
+                                    cal_scale = CalScale::Month;
+                                }
+                            }
+                        });
 
                         let mut nav = 0i32;
                         ui.horizontal(|ui| {
+                            let prev_label = if cal_scale == CalScale::Year {
+                                "предыдущий год"
+                            } else if cal_scale == CalScale::Week {
+                                "предыдущая неделя"
+                            } else {
+                                "предыдущий месяц с файлами"
+                            };
+                            let next_label = if cal_scale == CalScale::Year {
+                                "следующий год"
+                            } else if cal_scale == CalScale::Week {
+                                "следующая неделя"
+                            } else {
+                                "следующий месяц с файлами"
+                            };
+                            let prev_enabled = match cal_scale {
+                                CalScale::Year => cal_year > 1900,
+                                CalScale::Week => true,
+                                CalScale::Month => {
+                                    shift_to_file_month(&months, cal_year, cal_month, -1).is_some()
+                                }
+                            };
+                            let next_enabled = match cal_scale {
+                                CalScale::Year => cal_year < 2199,
+                                CalScale::Week => true,
+                                CalScale::Month => {
+                                    shift_to_file_month(&months, cal_year, cal_month, 1).is_some()
+                                }
+                            };
                             if ui
-                                .add_enabled(prev_month.is_some(), egui::Button::new("←"))
-                                .on_hover_text("предыдущий месяц с файлами")
+                                .add_enabled(prev_enabled, egui::Button::new("←"))
+                                .on_hover_text(prev_label)
                                 .clicked()
                             {
                                 nav = -1;
                             }
-                            ui.heading(format!(
-                                "{} {}",
-                                MONTHS[(cal_month.clamp(1, 12) - 1) as usize],
-                                cal_year
-                            ));
+                            let title = match cal_scale {
+                                CalScale::Year => format!("{cal_year}"),
+                                CalScale::Month => format!(
+                                    "{} {}",
+                                    MONTHS[(cal_month.clamp(1, 12) - 1) as usize],
+                                    cal_year
+                                ),
+                                CalScale::Week => {
+                                    let end = cal_week + chrono::Duration::days(6);
+                                    format!(
+                                        "{} — {}",
+                                        cal_week.format("%d.%m"),
+                                        end.format("%d.%m.%Y")
+                                    )
+                                }
+                            };
+                            ui.heading(title);
                             if ui
-                                .add_enabled(next_month.is_some(), egui::Button::new("→"))
-                                .on_hover_text("следующий месяц с файлами")
+                                .add_enabled(next_enabled, egui::Button::new("→"))
+                                .on_hover_text(next_label)
                                 .clicked()
                             {
                                 nav = 1;
                             }
-                            if ui.button("Сегодня").clicked() {
-                                let today = chrono::Local::now().date_naive();
-                                let (y, m) = (today.year(), today.month());
-                                if months.contains(&month_key(y, m)) {
-                                    cal_year = y;
-                                    cal_month = m;
-                                } else if let Some((y, m)) =
-                                    nearest_file_month(&months, y, m)
-                                {
-                                    cal_year = y;
-                                    cal_month = m;
-                                } else {
-                                    cal_year = y;
-                                    cal_month = m;
-                                }
-                                cal_day = None;
-                            }
                         });
                         if nav != 0 {
-                            let target = if nav < 0 { prev_month } else { next_month };
-                            if let Some((y, m)) = target {
-                                cal_year = y;
-                                cal_month = m;
-                                cal_day = None;
+                            match cal_scale {
+                                CalScale::Year => {
+                                    cal_year = (cal_year + nav).clamp(1900, 2199);
+                                    cal_day = None;
+                                }
+                                CalScale::Month => {
+                                    let target = if nav < 0 {
+                                        shift_to_file_month(&months, cal_year, cal_month, -1)
+                                    } else {
+                                        shift_to_file_month(&months, cal_year, cal_month, 1)
+                                    };
+                                    if let Some((y, m)) = target {
+                                        cal_year = y;
+                                        cal_month = m;
+                                        cal_day = None;
+                                    }
+                                }
+                                CalScale::Week => {
+                                    cal_week += chrono::Duration::days(7 * nav as i64);
+                                    cal_year = cal_week.year();
+                                    cal_month = cal_week.month();
+                                    cal_day = None;
+                                }
                             }
                         }
-                        let key = month_key(cal_year, cal_month);
-                        let month_n: usize = by_day
-                            .iter()
-                            .filter(|(d, _)| d.starts_with(&key))
-                            .map(|(_, v)| v.len())
-                            .sum();
-                        let month_bytes: i64 = by_day
-                            .iter()
-                            .filter(|(d, _)| d.starts_with(&key))
-                            .flat_map(|(_, v)| v.iter())
-                            .map(|&i| items[i].size)
-                            .sum();
-                        ui.label(format!(
-                            "{month_n} файлов за месяц, {}",
-                            db::human(month_bytes)
-                        ));
 
-                        if month_n == 0 {
-                            ui.add_space(12.0);
-                            ui.label("В этом месяце файлов нет.");
-                            if let Some(last) = months.iter().next_back()
-                                && let (Some(y), Some(m)) =
-                                    (last.get(0..4), last.get(5..7))
-                                && let (Ok(y), Ok(m)) =
-                                    (y.parse::<i32>(), m.parse::<u32>())
-                                && ui.button(format!("Перейти к {last}")).clicked()
-                            {
-                                cal_year = y;
-                                cal_month = m;
-                                cal_day = None;
-                            }
-                            return;
-                        }
-
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            for wd in WEEKDAYS {
-                                ui.allocate_ui(egui::vec2(
-                                    (ui.available_width() - 12.0) / 7.0,
-                                    18.0,
-                                ), |ui| {
-                                    ui.label(
-                                        egui::RichText::new(wd)
-                                            .small()
-                                            .color(egui::Color32::from_gray(150)),
-                                    );
-                                });
-                            }
-                        });
-                        let cell_w = ((ui.available_width() - 6.0 * 4.0) / 7.0).max(82.0);
-                        let cell_h = 96.0;
-                        let first = first_weekday_monday(cal_year, cal_month);
-                        let n_days = days_in_month(cal_year, cal_month);
-                        let mut day = 1u32;
-                        for _week in 0..6 {
-                            if day > n_days {
-                                break;
-                            }
-                            ui.horizontal(|ui| {
-                                for wd in 0..7u32 {
-                                    if day > n_days {
-                                        ui.allocate_space(egui::vec2(cell_w, cell_h));
-                                        continue;
-                                    }
-                                    if wd < first && day == 1 {
-                                        ui.allocate_space(egui::vec2(cell_w, cell_h));
-                                        continue;
-                                    }
-                                    let date = format!("{cal_year:04}-{cal_month:02}-{day:02}");
-                                    let idxs = by_day.get(&date);
-                                    let (rect, resp) = ui.allocate_exact_size(
-                                        egui::vec2(cell_w, cell_h),
-                                        egui::Sense::click(),
-                                    );
-                                    if ui.is_rect_visible(rect) {
-                                        let selected = cal_day.as_deref() == Some(date.as_str());
-                                        let fill = if selected {
-                                            ui.visuals().selection.bg_fill.gamma_multiply(0.25)
-                                        } else {
-                                            ui.visuals().faint_bg_color
-                                        };
-                                        ui.painter().rect_filled(rect.shrink(1.0), 4.0, fill);
-                                        if selected {
-                                            ui.painter().rect_stroke(
-                                                rect.shrink(1.0),
-                                                4.0,
-                                                egui::Stroke::new(
-                                                    2.0,
-                                                    egui::Color32::from_rgb(90, 170, 255),
-                                                ),
-                                                egui::StrokeKind::Inside,
+                        match cal_scale {
+                            CalScale::Year => {
+                                let cell_w = ((ui.available_width() - 14.0) / 4.0).max(40.0);
+                                for row in 0..3u32 {
+                                    ui.horizontal(|ui| {
+                                        for col in 0..4u32 {
+                                            let m = row * 4 + col + 1;
+                                            let key = format!("{cal_year:04}-{m:02}");
+                                            let count: usize = by_day
+                                                .iter()
+                                                .filter(|(d, _)| d.starts_with(&key))
+                                                .map(|(_, v)| v.len())
+                                                .sum();
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                egui::vec2(cell_w, 92.0),
+                                                egui::Sense::click(),
                                             );
-                                        }
-                                        ui.painter().text(
-                                            rect.left_top() + egui::vec2(6.0, 4.0),
-                                            egui::Align2::LEFT_TOP,
-                                            day.to_string(),
-                                            egui::FontId::proportional(12.0),
-                                            egui::Color32::from_gray(190),
-                                        );
-                                        if let Some(ids) = idxs {
-                                            ui.painter().text(
-                                                rect.right_top() + egui::vec2(-6.0, 4.0),
-                                                egui::Align2::RIGHT_TOP,
-                                                ids.len().to_string(),
-                                                egui::FontId::proportional(11.0),
-                                                egui::Color32::from_gray(150),
-                                            );
-                                            let area = egui::Rect::from_min_max(
-                                                rect.left_top() + egui::vec2(4.0, 22.0),
-                                                rect.right_bottom() - egui::vec2(4.0, 4.0),
-                                            );
-                                            let n = ids.len().min(3);
-                                            let tw = ((area.width() - (n as f32 - 1.0) * 2.0)
-                                                / n as f32)
-                                                .max(8.0);
-                                            for (k, &i) in ids.iter().take(n).enumerate() {
-                                                let r = egui::Rect::from_min_size(
-                                                    egui::pos2(
-                                                        area.left()
-                                                            + k as f32 * (tw + 2.0),
-                                                        area.top(),
-                                                    ),
-                                                    egui::vec2(tw, area.height()),
-                                                );
+                                            if ui.is_rect_visible(rect) {
                                                 ui.painter().rect_filled(
-                                                    r,
-                                                    2.0,
-                                                    ui.visuals().extreme_bg_color,
+                                                    rect.shrink(1.0),
+                                                    4.0,
+                                                    ui.visuals().faint_bg_color,
                                                 );
-                                                paint_thumb(ui, ctx, &mut cells, &items[i], r);
+                                                ui.painter().text(
+                                                    rect.left_top() + egui::vec2(8.0, 6.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    MONTHS[(m - 1) as usize],
+                                                    egui::FontId::proportional(13.0),
+                                                    egui::Color32::from_gray(190),
+                                                );
+                                                ui.painter().text(
+                                                    rect.right_top() + egui::vec2(-8.0, 6.0),
+                                                    egui::Align2::RIGHT_TOP,
+                                                    format!("{count}"),
+                                                    egui::FontId::proportional(11.0),
+                                                    DIM,
+                                                );
+                                                let ids: Vec<usize> = by_day
+                                                    .iter()
+                                                    .filter(|(d, _)| d.starts_with(&key))
+                                                    .flat_map(|(_, v)| v.iter().copied())
+                                                    .take(4)
+                                                    .collect();
+                                                if !ids.is_empty() {
+                                                    let area = egui::Rect::from_min_max(
+                                                        rect.left_top() + egui::vec2(6.0, 26.0),
+                                                        rect.right_bottom() - egui::vec2(6.0, 6.0),
+                                                    );
+                                                    let tw = ((area.width() - 6.0) / 4.0)
+                                                        .max(8.0);
+                                                    for (k, &i) in ids.iter().enumerate() {
+                                                        let r = egui::Rect::from_min_size(
+                                                            egui::pos2(
+                                                                area.left()
+                                                                    + k as f32 * (tw + 2.0),
+                                                                area.top(),
+                                                            ),
+                                                            egui::vec2(tw, area.height()),
+                                                        );
+                                                        paint_thumb(
+                                                            ui, ctx, &mut cells, &items[i], r,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            if resp.clicked() {
+                                                cal_month = m;
+                                                cal_scale = CalScale::Month;
+                                                cal_day = None;
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(2.0);
+                                }
+                            }
+                            CalScale::Month => {
+                                let key = month_key(cal_year, cal_month);
+                                let month_n: usize = by_day
+                                    .iter()
+                                    .filter(|(d, _)| d.starts_with(&key))
+                                    .map(|(_, v)| v.len())
+                                    .sum();
+                                let month_bytes: i64 = by_day
+                                    .iter()
+                                    .filter(|(d, _)| d.starts_with(&key))
+                                    .flat_map(|(_, v)| v.iter())
+                                    .map(|&i| items[i].size)
+                                    .sum();
+                                ui.label(format!(
+                                    "{month_n} файлов за месяц, {}",
+                                    db::human(month_bytes)
+                                ));
+                                if month_n == 0 {
+                                    ui.add_space(12.0);
+                                    ui.label("В этом месяце файлов нет.");
+                                    if let Some(last) = months.iter().next_back()
+                                        && let (Some(y), Some(m)) =
+                                            (last.get(0..4), last.get(5..7))
+                                        && let (Ok(y), Ok(m)) =
+                                            (y.parse::<i32>(), m.parse::<u32>())
+                                        && ui.button(format!("Перейти к {last}")).clicked()
+                                    {
+                                        cal_year = y;
+                                        cal_month = m;
+                                        cal_day = None;
+                                    }
+                                    return;
+                                }
+
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    let wd_w = (ui.available_width() - 6.0 * 4.0) / 7.0;
+                                    for wd in WEEKDAYS {
+                                        ui.allocate_ui(
+                                            egui::vec2(wd_w, 18.0),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(wd)
+                                                        .small()
+                                                        .color(egui::Color32::from_gray(150)),
+                                                );
+                                            },
+                                        );
+                                    }
+                                });
+                                let cell_w = ((ui.available_width() - 6.0 * 4.0 - 2.0) / 7.0)
+                                    .max(32.0);
+                                let cell_h = 96.0;
+                                let first = first_weekday_monday(cal_year, cal_month);
+                                let n_days = days_in_month(cal_year, cal_month);
+                                let mut day = 1u32;
+                                for _week in 0..6 {
+                                    if day > n_days {
+                                        break;
+                                    }
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for wd in 0..7u32 {
+                                            if day > n_days {
+                                                ui.allocate_space(egui::vec2(cell_w, cell_h));
+                                                continue;
+                                            }
+                                            if wd < first && day == 1 {
+                                                ui.allocate_space(egui::vec2(cell_w, cell_h));
+                                                continue;
+                                            }
+                                            let date =
+                                                format!("{cal_year:04}-{cal_month:02}-{day:02}");
+                                            let idxs = by_day.get(&date);
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                egui::vec2(cell_w, cell_h),
+                                                egui::Sense::click(),
+                                            );
+                                            if ui.is_rect_visible(rect) {
+                                                let selected = cal_day.as_deref()
+                                                    == Some(date.as_str());
+                                                let fill = if selected {
+                                                    ui.visuals()
+                                                        .selection
+                                                        .bg_fill
+                                                        .gamma_multiply(0.25)
+                                                } else {
+                                                    ui.visuals().faint_bg_color
+                                                };
+                                                ui.painter().rect_filled(
+                                                    rect.shrink(1.0),
+                                                    4.0,
+                                                    fill,
+                                                );
+                                                if selected {
+                                                    ui.painter().rect_stroke(
+                                                        rect.shrink(1.0),
+                                                        4.0,
+                                                        egui::Stroke::new(
+                                                            2.0,
+                                                            egui::Color32::from_rgb(90, 170, 255),
+                                                        ),
+                                                        egui::StrokeKind::Inside,
+                                                    );
+                                                }
+                                                ui.painter().text(
+                                                    rect.left_top() + egui::vec2(6.0, 4.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    day.to_string(),
+                                                    egui::FontId::proportional(12.0),
+                                                    egui::Color32::from_gray(190),
+                                                );
+                                                if let Some(ids) = idxs {
+                                                    ui.painter().text(
+                                                        rect.right_top()
+                                                            + egui::vec2(-6.0, 4.0),
+                                                        egui::Align2::RIGHT_TOP,
+                                                        ids.len().to_string(),
+                                                        egui::FontId::proportional(11.0),
+                                                        DIM,
+                                                    );
+                                                    let area = egui::Rect::from_min_max(
+                                                        rect.left_top()
+                                                            + egui::vec2(4.0, 22.0),
+                                                        rect.right_bottom()
+                                                            - egui::vec2(4.0, 4.0),
+                                                    );
+                                                    let n = ids.len().min(3);
+                                                    let tw = ((area.width()
+                                                        - (n as f32 - 1.0) * 2.0)
+                                                        / n as f32)
+                                                        .max(8.0);
+                                                    for (k, &i) in
+                                                        ids.iter().take(n).enumerate()
+                                                    {
+                                                        let r = egui::Rect::from_min_size(
+                                                            egui::pos2(
+                                                                area.left()
+                                                                    + k as f32
+                                                                        * (tw + 2.0),
+                                                                area.top(),
+                                                            ),
+                                                            egui::vec2(tw, area.height()),
+                                                        );
+                                                        ui.painter().rect_filled(
+                                                            r,
+                                                            2.0,
+                                                            ui.visuals().extreme_bg_color,
+                                                        );
+                                                        paint_thumb(
+                                                            ui, ctx, &mut cells, &items[i], r,
+                                                        );
+                                                    }
+                                                }
                                             }
                                             if resp.clicked() {
                                                 cal_day = Some(date.clone());
+                                                if let Some(d) = parse_date(&date) {
+                                                    cal_week = monday_of(d);
+                                                }
+                                            }
+                                            day += 1;
+                                        }
+                                    });
+                                    ui.add_space(2.0);
+                                }
+                            }
+                            CalScale::Week => {
+                                let cell_w = ((ui.available_width() - 6.0 * 4.0 - 2.0) / 7.0)
+                                    .max(32.0);
+                                let cell_h = 190.0;
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    for d in 0..7i64 {
+                                        let date = cal_week + chrono::Duration::days(d);
+                                        let key = date.format("%Y-%m-%d").to_string();
+                                        let idxs = by_day.get(&key);
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(cell_w, cell_h),
+                                            egui::Sense::click(),
+                                        );
+                                        if ui.is_rect_visible(rect) {
+                                            let selected = cal_day.as_deref()
+                                                == Some(key.as_str());
+                                            let fill = if selected {
+                                                ui.visuals()
+                                                    .selection
+                                                    .bg_fill
+                                                    .gamma_multiply(0.25)
+                                            } else {
+                                                ui.visuals().faint_bg_color
+                                            };
+                                            ui.painter().rect_filled(
+                                                rect.shrink(1.0),
+                                                4.0,
+                                                fill,
+                                            );
+                                            if selected {
+                                                ui.painter().rect_stroke(
+                                                    rect.shrink(1.0),
+                                                    4.0,
+                                                    egui::Stroke::new(
+                                                        2.0,
+                                                        egui::Color32::from_rgb(90, 170, 255),
+                                                    ),
+                                                    egui::StrokeKind::Inside,
+                                                );
+                                            }
+                                            ui.painter().text(
+                                                rect.left_top() + egui::vec2(6.0, 4.0),
+                                                egui::Align2::LEFT_TOP,
+                                                format!(
+                                                    "{} {}",
+                                                    WEEKDAYS[d as usize],
+                                                    date.format("%d.%m")
+                                                ),
+                                                egui::FontId::proportional(12.0),
+                                                egui::Color32::from_gray(190),
+                                            );
+                                            if let Some(ids) = idxs {
+                                                ui.painter().text(
+                                                    rect.right_top()
+                                                        + egui::vec2(-6.0, 4.0),
+                                                    egui::Align2::RIGHT_TOP,
+                                                    ids.len().to_string(),
+                                                    egui::FontId::proportional(11.0),
+                                                    DIM,
+                                                );
+                                                let area = egui::Rect::from_min_max(
+                                                    rect.left_top() + egui::vec2(4.0, 24.0),
+                                                    rect.right_bottom()
+                                                        - egui::vec2(4.0, 4.0),
+                                                );
+                                                let rows = 3usize;
+                                                let cols = 2usize;
+                                                let tw = ((area.width()
+                                                    - (cols as f32 - 1.0) * 2.0)
+                                                    / cols as f32)
+                                                    .max(8.0);
+                                                let th = ((area.height()
+                                                    - (rows as f32 - 1.0) * 2.0)
+                                                    / rows as f32)
+                                                    .max(8.0);
+                                                for (k, &i) in ids
+                                                    .iter()
+                                                    .take(rows * cols)
+                                                    .enumerate()
+                                                {
+                                                    let r = egui::Rect::from_min_size(
+                                                        egui::pos2(
+                                                            area.left()
+                                                                + (k % cols) as f32
+                                                                    * (tw + 2.0),
+                                                            area.top()
+                                                                + (k / cols) as f32
+                                                                    * (th + 2.0),
+                                                        ),
+                                                        egui::vec2(tw, th),
+                                                    );
+                                                    paint_thumb(
+                                                        ui, ctx, &mut cells, &items[i], r,
+                                                    );
+                                                }
                                             }
                                         }
+                                        if resp.clicked() {
+                                            cal_day = Some(key.clone());
+                                            cal_year = date.year();
+                                            cal_month = date.month();
+                                        }
                                     }
-                                    day += 1;
-                                }
-                            });
-                            ui.add_space(2.0);
+                                });
+                            }
                         }
                         ui.separator();
                         if let Some(day) = &cal_day {
@@ -3093,6 +5226,55 @@ impl eframe::App for App {
                     });
             }
             View::Faces => {
+                if face_together && face_picked_clusters.len() >= 2 {
+                    let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
+                    for f in &face_views {
+                        if let Some(cid) = f.cluster_id
+                            && face_picked_clusters.contains(&cid)
+                        {
+                            per_file.entry(f.file_id).or_default().insert(cid);
+                        }
+                    }
+                    let ids: HashSet<i64> = per_file
+                        .into_iter()
+                        .filter(|(_, set)| face_picked_clusters.iter().all(|c| set.contains(c)))
+                        .map(|(id, _)| id)
+                        .collect();
+                    let names: Vec<String> = face_clusters
+                        .iter()
+                        .filter(|c| face_picked_clusters.contains(&c.id))
+                        .map(|c| {
+                            if c.label.is_empty() {
+                                "без имени".to_string()
+                            } else {
+                                c.label.clone()
+                            }
+                        })
+                        .collect();
+                    ui.horizontal(|ui| {
+                        ui.heading("Фото, где все вместе");
+                        ui.label(
+                            egui::RichText::new(names.join(" + "))
+                                .size(12.0)
+                                .color(DIM),
+                        );
+                    });
+                    ui.label(format!("снимков: {}", ids.len()));
+                    if ids.is_empty() {
+                        ui.label("Нет снимков, где есть лица из всех отмеченных групп.");
+                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for f in &items {
+                                    if ids.contains(&f.id) {
+                                        draw_cell(ui, ctx, &mut cells, f);
+                                    }
+                                }
+                            });
+                        });
+                } else {
                 let current = face_clusters
                     .iter()
                     .find(|c| Some(c.id) == face_selected)
@@ -3134,6 +5316,35 @@ impl eframe::App for App {
                     .iter()
                     .filter(|f| face_selected.is_none() || f.cluster_id == face_selected)
                     .collect();
+                // Пакетное назначение: отметить лица кнопкой «выбрать» и дать одно имя.
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("Выбрано лиц: {}", face_picked.len()));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut face_group_input)
+                            .hint_text("имя для выбранных")
+                            .desired_width(220.0),
+                    );
+                    if ui
+                        .add_enabled(
+                            !face_picked.is_empty(),
+                            egui::Button::new("Назначить имя выбранным"),
+                        )
+                        .on_hover_text(
+                            "отмеченные лица уедут в одну группу; пустое имя создаст группу без подписи",
+                        )
+                        .clicked()
+                    {
+                        face_assign = Some(face_group_input.trim().to_string());
+                    }
+                    if ui
+                        .add_enabled(!face_picked.is_empty(), egui::Button::new("Снять выбор"))
+                        .clicked()
+                    {
+                        face_picked.clear();
+                        clear_picked = true;
+                    }
+                });
                 if face_total == 0 {
                     ui.add_space(12.0);
                     ui.label("Лиц пока нет: нажмите «Найти лица» слева (нужна модель лиц).");
@@ -3149,26 +5360,114 @@ impl eframe::App for App {
                             }
                         });
                     });
+                }
+            }
+            View::Trash => {
+                ui.label(
+                    "Файлы в корзине приложения: на диске не тронуты. «Вернуть» — снова в архив,                      «Очистить корзину» — перенос в системную корзину только после подтверждения.",
+                );
+                if trash_items.is_empty() {
+                    ui.add_space(12.0);
+                    ui.label("Корзина пуста.");
+                } else {
+                    ui.horizontal(|ui| {
+                        let bytes: i64 = trash_items.iter().map(|r| r.size).sum();
+                        ui.label(format!(
+                            "файлов {}, {}",
+                            trash_items.len(),
+                            db::human(bytes)
+                        ));
+                        if ui.button("Вернуть всё").clicked() {
+                            trash_restore_all = true;
+                        }
+                        if ui
+                            .add(primary_button(&format!(
+                                "Очистить корзину ({})",
+                                trash_items.len()
+                            )))
+                            .on_hover_text(
+                                "перенос в системную корзину ОС; безвозвратного удаления нет",
+                            )
+                            .clicked()
+                        {
+                            trash_clear = true;
+                        }
+                    });
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for r in &trash_items {
+                                    draw_cell(ui, ctx, &mut cells, r);
+                                }
+                            });
+                        });
+                }
             }
             }
         });
 
         self.items = items;
         self.groups = groups;
+        self.trash_items = trash_items;
         self.face_clusters = face_clusters;
         self.face_views = face_views;
         let face_split = face_cells.split_clicked;
         let face_open = face_cells.open_clicked;
+        let face_viewer = face_cells.viewer_clicked;
         self.face_textures = std::mem::take(&mut face_cells.textures);
         self.face_missing = std::mem::take(&mut face_cells.missing);
         self.face_label_input = face_label_input;
+        self.face_picked = if clear_picked {
+            HashSet::new()
+        } else {
+            face_cells.picked.clone()
+        };
+        self.face_group_input = face_group_input;
         self.cal_year = cal_year;
         self.cal_month = cal_month;
         self.cal_day = cal_day;
-        if let Some(id) = cells.clicked {
+        self.cal_scale = cal_scale;
+        self.cal_week = cal_week;
+        let cell_open = cells.open_clicked;
+        let cell_click = cells.clicked;
+        let keep_click = cells.keep_clicked;
+        let restore_click = cells.restore_clicked;
+        // Освобождаем заимствования self.textures/missing до open_viewer/reload.
+        #[allow(clippy::drop_non_drop)]
+        drop(cells);
+        if let Some(id) = cell_open {
+            self.open_viewer(id);
+        } else if let Some(id) = cell_click {
             self.selected = Some(id);
+            self.prefetch_photo(id);
         }
-        if let Some(keep_id) = cells.keep_clicked {
+        if let Some(file_id) = face_viewer {
+            self.open_viewer(file_id);
+        }
+        if trash_restore_all {
+            let mut n = 0usize;
+            for r in &self.trash_items {
+                if db::untrash(&self.db_path, r.id).is_ok() {
+                    n += 1;
+                }
+            }
+            self.reload();
+            self.status = format!("возвращено из корзины: {n}");
+        }
+        if let Some(id) = restore_click {
+            match db::untrash(&self.db_path, id) {
+                Ok(()) => {
+                    self.reload();
+                    self.status = "файл возвращён из корзины".into();
+                }
+                Err(e) => self.status = format!("файл не вернуть: {e}"),
+            }
+        }
+        if trash_clear {
+            self.trash_confirm = true;
+        }
+        if let Some(keep_id) = keep_click {
             self.selected = Some(keep_id);
             if let Some(gi) = self
                 .groups
@@ -3194,10 +5493,7 @@ impl eframe::App for App {
                     .to_string();
                 match db::mark_keep(&self.db_path, keep_id, &drops) {
                     Ok(()) => {
-                        self.status = format!(
-                            "оставлен {name}, помечено лишними {}",
-                            drops.len()
-                        )
+                        self.status = format!("оставлен {name}, помечено лишними {}", drops.len())
                     }
                     Err(e) => self.status = format!("решение не сохранено: {e}"),
                 }
@@ -3229,13 +5525,35 @@ impl eframe::App for App {
             }
         }
         if face_split.is_none()
+            && face_viewer.is_none()
             && let Some(file_id) = face_open
         {
-            self.selected = Some(file_id);
-            self.view = View::Grid;
+            self.open_from_faces(file_id);
+        }
+        if let Some(label) = face_assign {
+            let ids: Vec<i64> = self.face_picked.iter().copied().collect();
+            if !ids.is_empty() {
+                match faces::group_picked(&self.db_path, &ids, &label) {
+                    Ok(cid) => {
+                        self.face_selected_cluster = Some(cid);
+                        self.face_picked.clear();
+                        self.reload();
+                        self.status = if label.trim().is_empty() {
+                            format!("{} лиц собраны в новую группу; дайте ей имя", ids.len())
+                        } else {
+                            format!("{} лиц назначены группе «{}»", ids.len(), label.trim())
+                        };
+                    }
+                    Err(e) => self.status = format!("лица не назначены: {e:#}"),
+                }
+            }
         }
         if reset {
             self.reset_filters();
+        }
+        self.viewer_modal(ctx);
+        if self.photo_rx.is_some() || !self.photo_jobs.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
     }
 }
@@ -3243,8 +5561,8 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        days_in_month, first_weekday_monday, fit_rect, nearest_file_month, shift_month,
-        shift_to_file_month,
+        days_in_month, first_weekday_monday, fit_rect, monday_of, nearest_file_month, parse_date,
+        shift_month, shift_to_file_month,
     };
     use std::collections::BTreeSet;
 
@@ -3316,6 +5634,15 @@ mod tests {
         assert_eq!(nearest_file_month(&m, 2024, 3), Some((2024, 1)));
         assert_eq!(nearest_file_month(&m, 2024, 6), Some((2024, 7)));
         assert_eq!(nearest_file_month(&months(&[]), 2024, 3), None);
+    }
+
+    #[test]
+    fn дата_из_строки_и_понедельник_недели() {
+        let d = parse_date("2024-05-15T12:30:00").unwrap();
+        assert_eq!(d.to_string(), "2024-05-15");
+        assert_eq!(monday_of(d).to_string(), "2024-05-13");
+        assert!(parse_date("без даты").is_none());
+        assert!(parse_date("2024-13-40").is_none());
     }
 
     #[test]

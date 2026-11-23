@@ -68,6 +68,60 @@ impl Tool {
     }
 }
 
+/// Плеер видео: `ffplay` рядом с настроенным `ffmpeg` или из `PATH`.
+/// ffplay сам декодирует и видео, и звук — второй поток и ручной звук не нужны.
+pub fn ffplay(tools: &Tools, path: &Path) -> Result<std::process::Child> {
+    let name = if cfg!(windows) { "ffplay.exe" } else { "ffplay" };
+    let program = tools
+        .locate(Tool::Ffmpeg)
+        .and_then(|p| p.parent().map(|d| d.join(name)))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| std::path::PathBuf::from("ffplay"));
+    let mut cmd = Command::new(&program);
+    cmd.args(["-autoexit", "-loglevel", "error", "-window_title", "photocat"])
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.spawn()
+        .with_context(|| format!("не запустить ffplay для {}", path.display()))
+}
+
+/// Открыть файл системным проигрывателем/просмотрщиком: приложение не декодирует видео сам.
+/// Процесс запускается и не ждёт завершения; ошибка запуска возвращается, а не глотается.
+pub fn open_path(path: &Path) -> Result<()> {
+    let mut cmd = {
+        #[cfg(target_os = "windows")]
+        {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "start", ""]);
+            c
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            Command::new("xdg-open")
+        }
+    };
+    cmd.arg(path);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.spawn()
+        .with_context(|| format!("не открыть {}", path.display()))?;
+    Ok(())
+}
+
 /// Явные пути к программам. Пустая строка = `PATH`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tools {
