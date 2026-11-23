@@ -94,6 +94,8 @@
 
 ```bash
 cargo build --release           # ~3 мин с нуля, дальше секунды
+cargo run                       # dev-профиль: зависимости с opt-level 3, свой код 1 —
+                                # видео играет и в `cargo run` (в чистом debug было 2.2 к/с)
 cargo clippy --all-targets      # перед коммитом
 bash .pi/skills/enforce-architecture/scripts/check.sh   # границы слоёв; архив не удаляется
 ./target/release/photocat index <каталог>    # индексация (пишет в кэш)
