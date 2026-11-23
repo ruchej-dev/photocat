@@ -402,6 +402,16 @@ pub struct Settings {
     pub grid_sort: GridSort,
     /// Каталоги, которые индексируются одной кнопкой; пусто — путь из верхней панели.
     pub roots: Vec<String>,
+    /// Напоминание о проверке целостности (M10): каталог и слепок, к которым относится
+    /// срок, интервал в днях (0 — напоминание выключено) и итог прошлого прохода.
+    pub verify_root: String,
+    pub verify_manifest: String,
+    pub verify_interval_days: u32,
+    /// RFC3339 UTC последнего полного прохода по архиву (слепок или проверка).
+    pub verify_last_at: String,
+    pub verify_last_ok: bool,
+    /// Тот же текст отчёта, что уходит в `<кэш>/photocat/verify-last.txt`.
+    pub verify_last_report: String,
 }
 
 impl Default for Settings {
@@ -425,6 +435,13 @@ impl Default for Settings {
             grid_layout: GridLayout::Months,
             grid_sort: GridSort::DateDesc,
             roots: Vec::new(),
+            verify_root: String::new(),
+            verify_manifest: String::new(),
+            // 30 дней — спокойный срок для семейного архива; 0 выключает напоминание.
+            verify_interval_days: 30,
+            verify_last_at: String::new(),
+            verify_last_ok: false,
+            verify_last_report: String::new(),
         }
     }
 }
@@ -470,6 +487,14 @@ pub fn load_settings(conn: &Connection) -> Settings {
                     .map(str::to_string)
                     .collect()
             }
+            "verify_root" => s.verify_root = v,
+            "verify_manifest" => s.verify_manifest = v,
+            "verify_interval_days" => {
+                s.verify_interval_days = v.parse().unwrap_or(s.verify_interval_days).min(3650)
+            }
+            "verify_last_at" => s.verify_last_at = v,
+            "verify_last_ok" => s.verify_last_ok = v == "1" || v == "true",
+            "verify_last_report" => s.verify_last_report = v,
             _ => {}
         }
     }
@@ -499,6 +524,15 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("grid_layout", s.grid_layout.as_str().to_string()),
         ("grid_sort", s.grid_sort.as_str().to_string()),
         ("roots", s.roots.join("\n")),
+        ("verify_root", s.verify_root.clone()),
+        ("verify_manifest", s.verify_manifest.clone()),
+        ("verify_interval_days", s.verify_interval_days.to_string()),
+        ("verify_last_at", s.verify_last_at.clone()),
+        (
+            "verify_last_ok",
+            if s.verify_last_ok { "1" } else { "0" }.to_string(),
+        ),
+        ("verify_last_report", s.verify_last_report.clone()),
     ];
     for tool in crate::tools::ALL {
         pairs.push((tool.setting_key(), s.tools.get(tool).to_string()));
@@ -511,6 +545,59 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// Пора ли проверять архив по слепку (M10). Считается по настройкам, а не по таймеру:
+/// приложение само ничего не запускает, только говорит «пора».
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VerifyDue {
+    /// Слепок не задан — напоминать не о чем.
+    NoManifest,
+    /// Интервал 0 — владелец выключил напоминание.
+    Disabled,
+    /// Срок ещё не вышел; `days_left` — сколько полных дней осталось.
+    NotYet { days_left: i64 },
+    /// Срок вышел; `days_over` — на сколько дней (0 — ровно срок).
+    Due { days_over: i64 },
+}
+
+/// RFC3339 → UTC. Пустое или испорченное значение — `None`.
+pub fn parse_stamp(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s.trim())
+        .ok()
+        .map(|d| d.with_timezone(&chrono::Utc))
+}
+
+/// Решение «пора / не пора» одной функцией: одинаково для баннера и для тестов.
+/// `now` передаётся явно, чтобы «ровно срок» и «часы назад» проверялись без ожидания.
+///
+/// * нет слепка → `NoManifest`;
+/// * интервал 0 → `Disabled`;
+/// * слепка ещё не проверяли (пусто или мусор в дате) → `Due`;
+/// * дата в будущем (часы перевели назад) → `NotYet`: срок не наступил, паники нет;
+/// * иначе — по календарным суткам.
+pub fn verify_due(s: &Settings, now: chrono::DateTime<chrono::Utc>) -> VerifyDue {
+    if s.verify_manifest.trim().is_empty() {
+        return VerifyDue::NoManifest;
+    }
+    if s.verify_interval_days == 0 {
+        return VerifyDue::Disabled;
+    }
+    let interval = chrono::Duration::days(i64::from(s.verify_interval_days));
+    let Some(last) = parse_stamp(&s.verify_last_at) else {
+        return VerifyDue::Due { days_over: 0 };
+    };
+    let elapsed = now.signed_duration_since(last);
+    if elapsed >= interval {
+        VerifyDue::Due {
+            days_over: (elapsed - interval).num_days(),
+        }
+    } else {
+        let left = (interval - elapsed).num_seconds();
+        VerifyDue::NotYet {
+            days_left: (left + 86_399) / 86_400,
+        }
+    }
 }
 
 /// Одно значение из `settings` — для служебных ключей вроде версии словаря тегов.
@@ -2408,6 +2495,89 @@ mod tests {
         assert_eq!(back.grid_sort, GridSort::DateDesc);
         assert_eq!(GridSort::parse("album"), GridSort::Album);
         assert_eq!(GridSort::Album.as_str(), "album");
+    }
+
+    /// «Пора / не пора» — все случаи из M10: нет слепка, выключено, ровно срок,
+    /// просрочено, ещё рано и часы назад.
+    #[test]
+    fn напоминание_считает_срок_по_слепку() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-24T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let base = Settings {
+            verify_root: "/tmp/архив".into(),
+            verify_manifest: "/tmp/архив.sha256".into(),
+            verify_interval_days: 30,
+            ..Default::default()
+        };
+        // Слепка нет — напоминать не о чем, даже если срок задан.
+        let no_manifest = Settings {
+            verify_manifest: String::new(),
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&no_manifest, now), VerifyDue::NoManifest);
+        // Интервал 0 — выключено владельцем.
+        let off = Settings {
+            verify_interval_days: 0,
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&off, now), VerifyDue::Disabled);
+        // Прошлого прохода не было — сразу пора.
+        assert_eq!(verify_due(&base, now), VerifyDue::Due { days_over: 0 });
+        // Испорченная дата — тот же ответ: лучше напомнить, чем молчать.
+        let broken = Settings {
+            verify_last_at: "вчера".into(),
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&broken, now), VerifyDue::Due { days_over: 0 });
+        // Ровно 30 дней — пора.
+        let exactly = Settings {
+            verify_last_at: (now - chrono::Duration::days(30)).to_rfc3339(),
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&exactly, now), VerifyDue::Due { days_over: 0 });
+        // Просрочено на 5 дней.
+        let overdue = Settings {
+            verify_last_at: (now - chrono::Duration::days(35)).to_rfc3339(),
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&overdue, now), VerifyDue::Due { days_over: 5 });
+        // Ещё рано: 29 дней и 12 часов из 30 — остался один день.
+        let early = Settings {
+            verify_last_at: (now - chrono::Duration::days(29) - chrono::Duration::hours(12))
+                .to_rfc3339(),
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&early, now), VerifyDue::NotYet { days_left: 1 });
+        // Часы перевели назад: дата в будущем — не пора и без паники.
+        let future = Settings {
+            verify_last_at: (now + chrono::Duration::days(5)).to_rfc3339(),
+            ..base.clone()
+        };
+        assert_eq!(verify_due(&future, now), VerifyDue::NotYet { days_left: 35 });
+    }
+
+    #[test]
+    fn напоминание_переживает_перезапуск() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let s = Settings {
+            verify_root: "/tmp/архив".into(),
+            verify_manifest: "/tmp/архив.sha256".into(),
+            verify_interval_days: 14,
+            verify_last_at: "2026-11-24T12:00:00+00:00".into(),
+            verify_last_ok: true,
+            verify_last_report: "сверка: всё совпало\n".into(),
+            ..Default::default()
+        };
+        save_settings(&c, &s).unwrap();
+        let back = load_settings(&c);
+        assert_eq!(back.verify_root, "/tmp/архив");
+        assert_eq!(back.verify_manifest, "/tmp/архив.sha256");
+        assert_eq!(back.verify_interval_days, 14);
+        assert_eq!(back.verify_last_at, "2026-11-24T12:00:00+00:00");
+        assert!(back.verify_last_ok);
+        assert_eq!(back.verify_last_report, "сверка: всё совпало\n");
     }
 
     #[test]

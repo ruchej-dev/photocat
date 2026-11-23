@@ -1071,6 +1071,10 @@ struct App {
     integrity_rx: Option<mpsc::Receiver<IntegrityReply>>,
     /// Файл слепка уже есть: перезапись только после второго нажатия.
     integrity_overwrite: bool,
+    /// Напоминание о проверке (M10): срок считается по `settings`, баннер ничего не
+    /// запускает сам. «Напомнить позже» — решение на эту сессию.
+    verify_due: db::VerifyDue,
+    verify_banner_hidden: bool,
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
@@ -1263,6 +1267,8 @@ impl App {
             integrity_progress: None,
             integrity_rx: None,
             integrity_overwrite: false,
+            verify_due: db::VerifyDue::NoManifest,
+            verify_banner_hidden: false,
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
@@ -1470,11 +1476,18 @@ impl App {
                     self.path_input = first.clone();
                 }
                 // Экран «Целостность» по умолчанию знает архив и место для слепка:
-                // одно нажатие, а не три поля, набранных руками.
+                // одно нажатие, а не три поля, набранных руками. Если владелец уже
+                // настроил напоминание (M10) — берём именно его каталог и слепок.
+                if !self.settings.verify_root.trim().is_empty() {
+                    self.integrity_a = self.settings.verify_root.clone();
+                }
                 if self.integrity_a.trim().is_empty()
                     && let Some(first) = self.roots.first()
                 {
                     self.integrity_a = first.clone();
+                }
+                if !self.settings.verify_manifest.trim().is_empty() {
+                    self.integrity_manifest = self.settings.verify_manifest.clone();
                 }
                 if self.integrity_manifest.trim().is_empty() {
                     self.integrity_manifest = db::cache_dir()
@@ -1482,6 +1495,9 @@ impl App {
                         .to_string_lossy()
                         .into_owned();
                 }
+                // «Пора проверить» пересчитывается при загрузке и после каждого прохода,
+                // а не на каждый кадр: срок меняется раз в сутки.
+                self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
                 self.items = rows;
                 self.trash_items = trashed;
                 self.tag_dists = embed::tag_distributions(&tags);
@@ -1951,6 +1967,23 @@ impl App {
                 return;
             }
         };
+        // Слепок и каталог запоминаем в настройках до запуска (M10): если проход
+        // упадёт, напоминание всё равно знает, что и где проверять.
+        let remembered = match &plan {
+            IntegrityPlan::Manifest(root, out) => Some((root.clone(), out.clone())),
+            IntegrityPlan::Check(root, file) => Some((root.clone(), file.clone())),
+            IntegrityPlan::Verify(..) => None,
+        };
+        if let Some((root, manifest)) = remembered {
+            self.settings.verify_root = root.to_string_lossy().into_owned();
+            self.settings.verify_manifest = manifest.to_string_lossy().into_owned();
+            if let Err(e) =
+                db::open(&self.db_path).and_then(|c| db::save_settings(&c, &self.settings))
+            {
+                self.integrity_error = format!("настройки напоминания не сохранены: {e}");
+            }
+            self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
+        }
         let jobs = self.settings.index_jobs;
         let progress = Arc::new(Progress::default());
         let worker = progress.clone();
@@ -1975,6 +2008,34 @@ impl App {
         self.integrity_result = None;
         self.integrity_error.clear();
         self.status = format!("{}: идёт в фоне", job.title());
+    }
+
+    /// Итог завершённого прохода для напоминания (M10): дата, «ок» и полный отчёт.
+    /// Пишутся только для слепка и проверки — сверка двух копий к сроку не относится;
+    /// отмена не считается проходом, и прошлый успешный отчёт остаётся цел.
+    /// Отчёт кладётся в `<кэш>/photocat/verify-last.txt` (в архив не пишется ничего).
+    fn note_integrity(&mut self, outcome: &IntegrityOutcome) -> Option<String> {
+        if outcome.job() == IntegrityJob::Verify || outcome.cancelled() {
+            return None;
+        }
+        let now = chrono::Utc::now();
+        let report = outcome.report(true);
+        self.settings.verify_root = self.integrity_a.trim().to_string();
+        self.settings.verify_manifest = self.integrity_manifest.trim().to_string();
+        self.settings.verify_last_at = now.to_rfc3339();
+        self.settings.verify_last_ok = outcome.identical();
+        self.settings.verify_last_report = report.clone();
+        self.verify_due = db::verify_due(&self.settings, now);
+        let mut warn = None;
+        if let Err(e) = db::open(&self.db_path).and_then(|c| db::save_settings(&c, &self.settings))
+        {
+            warn = Some(format!("итог не сохранён в настройках: {e}"));
+        }
+        let path = db::cache_dir().join("verify-last.txt");
+        if let Err(e) = std::fs::write(&path, &report) {
+            warn = Some(format!("отчёт не записан в {}: {e}", path.display()));
+        }
+        warn
     }
 
     /// Экран «Целостность»: поля, три кнопки, прогресс в верхней панели и отчёт.
@@ -2055,6 +2116,7 @@ impl App {
         let mut check_clicked = false;
         let mut cancel_overwrite = false;
         let mut copy = false;
+        let mut copy_last = false;
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(!running, primary_button("Сверить копии"))
@@ -2090,6 +2152,82 @@ impl App {
                     .size(11.0)
                     .color(DIM),
             );
+        }
+        // Напоминание (M10): срок живёт в настройках, проверка запускается только кнопкой
+        // или кнопкой «Проверить» у баннера. 0 дней — намеренно выключено.
+        ui.add_space(4.0);
+        let mut interval_changed = false;
+        ui.horizontal(|ui| {
+            ui.label("Напоминать о проверке каждые");
+            interval_changed = ui
+                .add(
+                    egui::DragValue::new(&mut self.settings.verify_interval_days)
+                        .range(0..=3650)
+                        .suffix(" дн."),
+                )
+                .on_hover_text("срок считается от последнего полного прохода по архиву")
+                .changed();
+            ui.label(egui::RichText::new("0 — не напоминать").size(11.0).color(DIM));
+        });
+        if interval_changed {
+            let value = self.settings.verify_interval_days.to_string();
+            if let Err(e) = db::open(&self.db_path)
+                .and_then(|c| db::set_setting(&c, "verify_interval_days", &value))
+            {
+                self.integrity_error = format!("интервал напоминания не сохранён: {e}");
+            }
+            self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
+        }
+        let last = if self.settings.verify_manifest.trim().is_empty() {
+            "слепок не задан — напоминание молчит".to_string()
+        } else if self.settings.verify_last_at.trim().is_empty() {
+            "последнего прохода ещё не было".to_string()
+        } else if let Some(t) = db::parse_stamp(&self.settings.verify_last_at) {
+            format!(
+                "последний проход: {} · {}",
+                t.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M"),
+                if self.settings.verify_last_ok {
+                    "совпало"
+                } else {
+                    "были расхождения"
+                }
+            )
+        } else {
+            "дата последнего прохода непонятна — напомним при запуске".to_string()
+        };
+        ui.label(egui::RichText::new(last).size(11.0).color(DIM));
+        let (next, urgent) = match self.verify_due {
+            db::VerifyDue::NoManifest => ("напоминание: слепок не задан".to_string(), false),
+            db::VerifyDue::Disabled => ("напоминание выключено (интервал 0)".to_string(), false),
+            db::VerifyDue::NotYet { days_left } => {
+                (format!("следующая проверка: через {days_left} дн."), false)
+            }
+            db::VerifyDue::Due { days_over: 0 } => ("пора проверить: срок вышел".to_string(), true),
+            db::VerifyDue::Due { days_over } => (
+                format!("пора проверить: срок вышел {days_over} дн. назад"),
+                true,
+            ),
+        };
+        ui.label(
+            egui::RichText::new(next)
+                .size(11.0)
+                .color(if urgent { ACCENT } else { DIM }),
+        );
+        if !self.settings.verify_last_report.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "отчёт прошлого прохода: {}",
+                        db::cache_dir().join("verify-last.txt").display()
+                    ))
+                    .size(11.0)
+                    .color(DIM),
+                );
+                if ui.button("Скопировать прошлый отчёт").clicked() {
+                    copy_last = true;
+                }
+            });
         }
         if !self.integrity_error.is_empty() {
             ui.label(
@@ -2154,6 +2292,10 @@ impl App {
                 ui.ctx().copy_text(r.report(self.integrity_show_all));
             }
             self.status = "отчёт скопирован в буфер обмена".into();
+        }
+        if copy_last && !self.settings.verify_last_report.is_empty() {
+            ui.ctx().copy_text(self.settings.verify_last_report.clone());
+            self.status = "отчёт прошлого прохода скопирован в буфер обмена".into();
         }
         if verify_clicked {
             self.integrity_start(IntegrityJob::Verify);
@@ -3962,7 +4104,78 @@ impl App {
                 p.cancel();
             }
         }
+        self.verify_banner(ui);
         ui.add_space(4.0);
+    }
+
+    /// Баннер «Пора проверить архив» (M10). Сам ничего не запускает: "Проверить" —
+    /// нажатие, после которого идёт обычная фоновая проверка по слепку.
+    fn verify_banner(&mut self, ui: &mut egui::Ui) {
+        if self.verify_banner_hidden {
+            return;
+        }
+        let db::VerifyDue::Due { days_over } = self.verify_due else {
+            return;
+        };
+        let manifest = std::path::Path::new(&self.settings.verify_manifest)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.settings.verify_manifest.clone());
+        let last = db::parse_stamp(&self.settings.verify_last_at)
+            .map(|t| t.with_timezone(&chrono::Local))
+            .map(|t| t.format("%Y-%m-%d").to_string());
+        let mut open = false;
+        let mut later = false;
+        ui.add_space(2.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Пора проверить архив")
+                    .size(13.0)
+                    .strong()
+                    .color(ACCENT),
+            );
+            let fact = match last {
+                Some(date) if days_over > 0 => format!(
+                    "слепок {manifest} · прошлый проход {date} · срок вышел {days_over} дн. назад"
+                ),
+                Some(date) => format!("слепок {manifest} · прошлый проход {date} · срок вышел"),
+                None => format!("слепок {manifest} · прохода ещё не было"),
+            };
+            ui.label(egui::RichText::new(fact).size(11.0).color(DIM));
+            if ui
+                .button("Проверить")
+                .on_hover_text("прочитать архив и сверить с сохранённым слепком")
+                .clicked()
+            {
+                open = true;
+            }
+            if ui
+                .button("Напомнить позже")
+                .on_hover_text("баннер скроется до следующего запуска")
+                .clicked()
+            {
+                later = true;
+            }
+        });
+        if open {
+            self.start_reminder_check();
+        }
+        if later {
+            self.verify_banner_hidden = true;
+            self.status = "напоминание отложено до следующего запуска".into();
+        }
+    }
+
+    /// Кнопка «Проверить» у баннера: тот же фон проверки по слепку, только поля
+    /// заполняются из настроек — владельцу не нужно искать экран «Целостность».
+    fn start_reminder_check(&mut self) {
+        if !self.settings.verify_root.trim().is_empty() {
+            self.integrity_a = self.settings.verify_root.clone();
+        }
+        self.integrity_manifest = self.settings.verify_manifest.clone();
+        self.view = View::Integrity;
+        self.integrity_start(IntegrityJob::Check);
     }
 
     /// Строка статуса: факт слева, выбранный файл справа.
@@ -7624,11 +7837,17 @@ impl eframe::App for App {
                     }
                     match res {
                         Ok(outcome) => {
-                            self.status = outcome.status();
                             self.integrity_error.clear();
+                            let warn = self.note_integrity(&outcome);
+                            self.status = match warn {
+                                Some(w) => format!("{}; {w}", outcome.status()),
+                                None => outcome.status(),
+                            };
                             self.integrity_result = Some(outcome);
                         }
                         Err(e) => {
+                            // Ошибка прохода не трогает прошлый успешный отчёт и дату:
+                            // напоминание продолжает считаться от него.
                             self.integrity_error = format!("{e:#}");
                             self.status = format!("{}: ошибка", job.title());
                         }
@@ -10307,5 +10526,186 @@ mod tests {
             texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
             "отчёт печатает ту же формулировку: {texts:?}"
         );
+    }
+
+    /// M10: срок вышел — есть баннер со словами и две кнопки, но сам проход не
+    /// запускается. «Напомнить позже» скрывает баннер до следующего запуска.
+    #[test]
+    fn баннер_напоминает_о_проверке_и_не_запускает_её() {
+        // Имя уникально, а не «поверх прошлой БД»: тесты не удаляют файлов.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-reminder-banner-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let c = db::open(&path).unwrap();
+            let s = db::Settings {
+                verify_root: "/tmp/архив".into(),
+                verify_manifest: "/tmp/архив.sha256".into(),
+                verify_interval_days: 30,
+                verify_last_at: (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339(),
+                verify_last_ok: true,
+                ..Default::default()
+            };
+            db::save_settings(&c, &s).unwrap();
+        }
+        let mut app = App::new(path);
+        assert!(
+            matches!(app.verify_due, db::VerifyDue::Due { days_over: 1 }),
+            "должно быть просрочено на день: {:?}",
+            app.verify_due
+        );
+        assert!(!app.settings.verify_manifest.is_empty(), "слепок потерян");
+        assert!(app.settings.verify_interval_days == 30);
+        // Панель запоминает высоту с прошлого кадра: баннер, добавленный в неё
+        // картинку, виден на втором кадре (как и окно на экране с 60 к/с).
+        let ctx = egui::Context::default();
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Пора проверить архив"),
+            "нет баннера: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "Проверить"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Напомнить позже"), "{texts:?}");
+        assert!(app.integrity_rx.is_none(), "баннер не запускает проход сам");
+        assert!(app.integrity_progress.is_none());
+        // «Напомнить позже» — сессионное решение: срок остаётся тем же, баннер скрыт.
+        app.verify_banner_hidden = true;
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            !texts.iter().any(|t| t == "Пора проверить архив"),
+            "баннер скрыт до перезапуска: {texts:?}"
+        );
+    }
+
+    /// Прогоняет фоновый проход до результата через кадры окна: так проверяется и
+    /// запись итога в настройки, а не только сам поток.
+    fn poll_integrity_to_end(app: &mut App) {
+        let ctx = egui::Context::default();
+        for _ in 0..300 {
+            let _ = window_frame(app, &ctx);
+            if app.integrity_rx.is_none() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("проход не завершился за 3 с");
+    }
+
+    /// M10: успешный слепок и проверка пишут дату, итог и отчёт в настройки и в
+    /// `<кэш>/photocat/verify-last.txt`; напоминание после этого не срабатывает.
+    #[test]
+    fn успешная_проверка_пишет_итог_и_снимает_напоминание() {
+        let base = std::env::temp_dir().join(format!(
+            "photocat-reminder-ok-{}",
+            std::process::id()
+        ));
+        let dir = base.join("archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("x.jpg"), b"data").unwrap();
+        let manifest = base.join("list.sha256");
+        let db_path = base.join("photocat.db");
+        {
+            let c = db::open(&db_path).unwrap();
+            let s = db::Settings {
+                verify_root: dir.to_string_lossy().into_owned(),
+                verify_manifest: manifest.to_string_lossy().into_owned(),
+                verify_interval_days: 30,
+                verify_last_at: (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339(),
+                ..Default::default()
+            };
+            db::save_settings(&c, &s).unwrap();
+        }
+        let mut app = App::new(db_path.clone());
+        assert!(matches!(app.verify_due, db::VerifyDue::Due { .. }));
+        app.integrity_a = dir.to_string_lossy().into_owned();
+        app.integrity_manifest = manifest.to_string_lossy().into_owned();
+        // Слепок — тоже полный проход по архиву: он ставит точку отсчёта срока.
+        app.integrity_start(IntegrityJob::Manifest);
+        poll_integrity_to_end(&mut app);
+        {
+            let c = db::open(&db_path).unwrap();
+            let s = db::load_settings(&c);
+            assert!(!s.verify_last_at.is_empty(), "дата прохода записана");
+            assert!(s.verify_last_ok);
+            assert!(s.verify_last_report.contains("слепок"), "{}", s.verify_last_report);
+        }
+        assert!(
+            matches!(app.verify_due, db::VerifyDue::NotYet { .. }),
+            "после записи слепка срок ещё не вышел: {:?}",
+            app.verify_due
+        );
+        // Проверка по этому слепку пишет свой итог и тот же файл отчёта.
+        app.integrity_start(IntegrityJob::Check);
+        poll_integrity_to_end(&mut app);
+        let c = db::open(&db_path).unwrap();
+        let s = db::load_settings(&c);
+        assert!(s.verify_last_ok);
+        assert!(
+            s.verify_last_report.contains("каталог:"),
+            "{}",
+            s.verify_last_report
+        );
+        let file = db::cache_dir().join("verify-last.txt");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(text, s.verify_last_report, "файл и настройки — один отчёт");
+        assert!(text.contains("совпал"), "{text}");
+    }
+
+    /// M10: ошибка проверки (битый слепок) не стирает прошлый успешный отчёт и дату.
+    #[test]
+    fn ошибка_проверки_не_стирает_прошлый_отчёт() {
+        let base = std::env::temp_dir().join(format!(
+            "photocat-reminder-error-{}",
+            std::process::id()
+        ));
+        let dir = base.join("archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("x.jpg"), b"data").unwrap();
+        let manifest = base.join("broken.sha256");
+        std::fs::write(&manifest, b"not a sha256 line\n").unwrap();
+        let db_path = base.join("photocat.db");
+        let old_at = "2026-10-01T10:00:00+00:00";
+        {
+            let c = db::open(&db_path).unwrap();
+            let s = db::Settings {
+                verify_root: dir.to_string_lossy().into_owned(),
+                verify_manifest: manifest.to_string_lossy().into_owned(),
+                verify_interval_days: 30,
+                verify_last_at: old_at.into(),
+                verify_last_ok: true,
+                verify_last_report: "старый успешный отчёт".into(),
+                ..Default::default()
+            };
+            db::save_settings(&c, &s).unwrap();
+        }
+        let mut app = App::new(db_path.clone());
+        app.integrity_a = dir.to_string_lossy().into_owned();
+        app.integrity_manifest = manifest.to_string_lossy().into_owned();
+        app.integrity_start(IntegrityJob::Check);
+        let ctx = egui::Context::default();
+        for _ in 0..200 {
+            let _ = window_frame(&mut app, &ctx);
+            if app.integrity_rx.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(app.integrity_rx.is_none(), "проход завершился");
+        assert!(
+            !app.integrity_error.is_empty(),
+            "битый слепок — ошибка в статусе"
+        );
+        let c = db::open(&db_path).unwrap();
+        let s = db::load_settings(&c);
+        assert_eq!(s.verify_last_report, "старый успешный отчёт");
+        assert_eq!(s.verify_last_at, old_at);
+        assert!(s.verify_last_ok);
     }
 }

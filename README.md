@@ -68,10 +68,46 @@ bash scripts/fetch-model.sh
 ./target/release/photocat verify ~/Фото ~/backup/Фото
 ./target/release/photocat manifest ~/Фото --out ~/Фото.sha256
 ./target/release/photocat verify --manifest ~/Фото.sha256 ~/backup/Фото
+# В GUI при сроке (по умолчанию 30 дней) появляется баннер «Пора проверить архив»;
+# срок и интервал — на экране «Целостность». Сам проход не запускается.
 
 # 10. GUI
 ./target/release/photocat gui
 ./target/release/photocat gui --db /путь/к/фотокат.db
+```
+
+## Проверка по расписанию (systemd, необязательно)
+
+Приложение не ставит таймеров и ничего не запускает само: GUI лишь напоминает. Если нужна
+проверка без человека, её делает ОС тем же CLI-путём, что и вручную (код 1 — есть расхождения):
+
+```ini
+# ~/.config/systemd/user/photocat-verify.service
+[Unit]
+Description=photocat: verify photo archive against its manifest
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/photocat verify --manifest %h/Фото.sha256 %h/Фото
+```
+
+```ini
+# ~/.config/systemd/user/photocat-verify.timer
+[Unit]
+Description=Weekly photocat archive check
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+Unit=photocat-verify.service
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now photocat-verify.timer
 ```
 
 ## Что уже есть
@@ -101,6 +137,7 @@ bash scripts/fetch-model.sh
 | Настройки: модель, пороги, пути к ffmpeg/ffprobe/tesseract/curl с проверкой; `doctor` | ✅ |
 | «Лучший кадр из серии»: совет по резкости/разрешению/размеру | ✅ |
 | Сверка двух копий архива (`verify`, размер → sha256) и слепок `sha256sum` (`manifest`) | ✅ |
+| Напоминание о проверке по сроку (интервал в `settings`, баннер в GUI) без автозапуска | ✅ |
 | Корзина приложения и очистка в системную корзину ОС по подтверждению; занятое место и очистка кэша | ✅ |
 | Альбомы: дерево с подальбомами и порядком файлов, только данные в БД; CLI и вид «Альбомы» | ✅ |
 
