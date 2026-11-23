@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces) → next:M21.4d (trash, then integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash) → next:M21.4e (integrity, then the left panel and settings panes), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1203,3 +1203,27 @@ Russian face label left); `cargo clippy --all-targets` clean; `check.sh` — 44 
 **Next.** M21.4d: the trash (screen, confirm dialog, restore and empty statuses), then the
 integrity screen. The left panel blocks (summary, model and tag filter, stats) and the settings
 dialog panes are recorded as M21.4f: they still speak Russian and are visible on every screen.
+
+## M21.4d — the trash in English (2026-11-24)
+
+The app trash was the fourth screen: the note about the OS trash, the buttons, the marks on the
+tiles and the confirmation dialog — the one place where a wrong word costs files.
+
+**What moved.** The screen note, `The trash is empty.`, the count (`1 file · 1 B`), `Restore all`,
+`Empty the trash (N)` with its hint, the tile marks `in trash` and `restore` (with the hint that the
+file on disk was untouched), the statuses `restored from the trash: N`, `file restored from the
+trash`, `file not restored`, `trash not emptied`, and the confirmation dialog: `Empty the trash?`,
+`Moved to the OS trash: 1 file, 1 B.`, the irreversible note, `Move to the OS trash`, `Cancel`.
+The Russian screen text had a doubled gap in the middle of the sentence (a broken literal) — it is a
+single sentence again. Sizes go through `db::human_in`.
+
+**Checks.** `cargo test` — 191 passed, 6 `#[ignore]` (new:
+`the_english_language_translates_the_trash` — a headless trash frame with an open confirmation
+dialog: `Restore all`, `Empty the trash (1)`, `in trash`, `restore`, `Empty the trash?`,
+`Move to the OS trash`, `Cancel`, `1 file · `, and no Russian trash label left; the modal needs two
+frames, as the viewer test does); `cargo clippy --all-targets` clean; `check.sh` — 44 checks,
+0 violations.
+
+**Next.** M21.4e: the integrity screen (three buttons, fields, verdict and report labels, statuses),
+then M21.4f — the left panel blocks and the settings dialog panes, still Russian and visible on
+every screen.

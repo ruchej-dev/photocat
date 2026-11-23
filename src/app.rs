@@ -3045,31 +3045,39 @@ impl App {
         let mut cancel = false;
         let n = self.trash_items.len();
         let bytes: i64 = self.trash_items.iter().map(|r| r.size).sum();
+        let lang = self.settings.lang;
         let resp = egui::Modal::new(egui::Id::unique("photocat-trash")).show(ctx, |ui| {
             ui.set_min_width(460.0);
-            ui.label(egui::RichText::new("Очистить корзину?").size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Очистить корзину?")).size(16.0));
             ui.add_space(4.0);
-            ui.label(format!(
-                "Будет перенесено в системную корзину ОС: файлов {n}, {}.",
-                db::human(bytes)
-            ));
+            let count = i18n::count(lang, n, ["файл", "файла", "файлов"], "file", "files");
+            ui.label(match lang {
+                i18n::Lang::En => format!(
+                    "Moved to the OS trash: {count}, {}.",
+                    db::human_in(lang, bytes)
+                ),
+                i18n::Lang::Ru => {
+                    format!("Будет перенесено в системную корзину ОС: файлов {n}, {}.", db::human(bytes))
+                }
+            });
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
+                    lang,
                     "Внутри приложения безвозвратного удаления нет: файлы остаются в системной \
                      корзине, пока вы сами её не очистите. Оригиналы в архиве исчезнут из своих \
                      каталогов — это необратимо средствами приложения.",
-                )
+                ))
                 .size(12.0),
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui
-                    .add(primary_button("Переместить в системную корзину"))
+                    .add(primary_button(t(lang, "Переместить в системную корзину")))
                     .clicked()
                 {
                     confirmed = true;
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(t(lang, "Отмена")).clicked() {
                     cancel = true;
                 }
             });
@@ -3103,10 +3111,17 @@ impl App {
         self.trash_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.trash_rx = Some(rx);
-        self.status = format!(
-            "корзина: переношу {} файлов в системную корзину…",
-            items.len()
-        );
+        let lang = self.settings.lang;
+        self.status = match lang {
+            i18n::Lang::En => format!(
+                "trash: moving {} to the OS trash…",
+                i18n::count(lang, items.len(), ["файл", "файла", "файлов"], "file", "files")
+            ),
+            i18n::Lang::Ru => format!(
+                "корзина: переношу {} файлов в системную корзину…",
+                items.len()
+            ),
+        };
         std::thread::spawn(move || {
             let r = recycle::empty(&db_path, &items, Some(progress));
             let _ = tx.send(r);
@@ -7690,7 +7705,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             ui.painter().text(
                 egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
                 egui::Align2::LEFT_TOP,
-                "в корзине",
+                t(cs.lang, "в корзине"),
                 egui::FontId::proportional(12.0),
                 egui::Color32::from_gray(235),
             );
@@ -7699,8 +7714,11 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 egui::vec2(66.0, 20.0),
             );
             if ui
-                .place(btn, egui::Button::new("вернуть").small())
-                .on_hover_text("вернуть файл в обычные виды; на диске он не менялся")
+                .place(btn, egui::Button::new(t(cs.lang, "вернуть")).small())
+                .on_hover_text(t(
+                    cs.lang,
+                    "вернуть файл в обычные виды; на диске он не менялся",
+                ))
                 .clicked()
             {
                 cs.restore_clicked = Some(f.id);
@@ -7956,7 +7974,11 @@ impl eframe::App for App {
                             self.reload();
                             self.status = report.to_string();
                         }
-                        Err(e) => self.status = format!("корзина не очищена: {e:#}"),
+                        Err(e) => {
+                            let lang = self.settings.lang;
+                            self.status =
+                                format!("{}: {e:#}", t(lang, "корзина не очищена"))
+                        }
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9582,31 +9604,35 @@ impl eframe::App for App {
                 }
             }
             View::Trash => {
-                ui.label(
-                    "Файлы в корзине приложения: на диске не тронуты. «Вернуть» — снова в архив,                      «Очистить корзину» — перенос в системную корзину только после подтверждения.",
-                );
+                ui.label(t(
+                    lang,
+                    "Файлы в корзине приложения: на диске не тронуты. «Вернуть» — снова в архив, \
+                     «Очистить корзину» — перенос в системную корзину только после подтверждения.",
+                ));
                 if trash_items.is_empty() {
                     ui.add_space(12.0);
-                    ui.label("Корзина пуста.");
+                    ui.label(t(lang, "Корзина пуста."));
                 } else {
                     ui.horizontal(|ui| {
                         let bytes: i64 = trash_items.iter().map(|r| r.size).sum();
                         ui.label(format!(
-                            "файлов {}, {}",
-                            trash_items.len(),
-                            db::human(bytes)
+                            "{} · {}",
+                            files_n(trash_items.len()),
+                            db::human_in(lang, bytes)
                         ));
-                        if ui.button("Вернуть всё").clicked() {
+                        if ui.button(t(lang, "Вернуть всё")).clicked() {
                             trash_restore_all = true;
                         }
                         if ui
                             .add(primary_button(&format!(
-                                "Очистить корзину ({})",
+                                "{} ({})",
+                                t(lang, "Очистить корзину"),
                                 trash_items.len()
                             )))
-                            .on_hover_text(
+                            .on_hover_text(t(
+                                lang,
                                 "перенос в системную корзину ОС; безвозвратного удаления нет",
-                            )
+                            ))
                             .clicked()
                         {
                             trash_clear = true;
@@ -9721,15 +9747,20 @@ impl eframe::App for App {
                 }
             }
             self.reload();
-            self.status = format!("возвращено из корзины: {n}");
+            let lang = self.settings.lang;
+            self.status = format!(
+                "{}: {n}",
+                t(lang, "возвращено из корзины")
+            );
         }
         if let Some(id) = restore_click {
+            let lang = self.settings.lang;
             match db::untrash(&self.db_path, id) {
                 Ok(()) => {
                     self.reload();
-                    self.status = "файл возвращён из корзины".into();
+                    self.status = t(lang, "файл возвращён из корзины").into();
                 }
-                Err(e) => self.status = format!("файл не вернуть: {e}"),
+                Err(e) => self.status = format!("{}: {e}", t(lang, "файл не вернуть")),
             }
         }
         if trash_clear {
@@ -10298,6 +10329,55 @@ mod tests {
             "не он",
             "выбрать",
             "нет кадра",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
+    }
+
+    /// M21.4d: корзина переводится целиком — экран, плитка и диалог подтверждения.
+    /// Модальное окно на первом кадре ещё не знает своего размера, поэтому кадров два.
+    #[test]
+    fn английский_язык_переводит_корзину() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-trash-i18n.db"));
+        let mut row = file_row(1, "image", "trashed.jpg");
+        row.trashed_at = Some(1_700_000_000);
+        app.trash_items = vec![row];
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Trash;
+        app.trash_confirm = true;
+        let ctx = egui::Context::default();
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        for needle in [
+            "Restore all",
+            "Empty the trash (1)",
+            "in trash",
+            "restore",
+            "Empty the trash?",
+            "Move to the OS trash",
+            "Cancel",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет «{needle}»: {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|t| t.contains("1 file · ")),
+            "счётчик корзины не переведён: {texts:?}"
+        );
+        for ru in [
+            "Корзина пуста.",
+            "Вернуть всё",
+            "Очистить корзину (1)",
+            "в корзине",
+            "вернуть",
+            "Очистить корзину?",
+            "Переместить в системную корзину",
+            "Отмена",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),

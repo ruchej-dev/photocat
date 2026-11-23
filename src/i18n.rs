@@ -519,6 +519,38 @@ const PAIRS: &[(&str, &str)] = &[
         "скачивание модели лиц: только веса, без фотографий",
         "downloading the face model: weights only, no photos",
     ),
+    // --- корзина ---------------------------------------------------------------
+    (
+        "Файлы в корзине приложения: на диске не тронуты. «Вернуть» — снова в архив, \
+         «Очистить корзину» — перенос в системную корзину только после подтверждения.",
+        "Files in the app trash: untouched on disk. “Restore” brings them back to the archive, \
+         “Empty the trash” moves them to the OS trash after a confirmation.",
+    ),
+    ("Корзина пуста.", "The trash is empty."),
+    ("Вернуть всё", "Restore all"),
+    ("Очистить корзину", "Empty the trash"),
+    (
+        "перенос в системную корзину ОС; безвозвратного удаления нет",
+        "moved to the OS trash; nothing is deleted for good",
+    ),
+    ("возвращено из корзины", "restored from the trash"),
+    ("файл возвращён из корзины", "file restored from the trash"),
+    ("файл не вернуть", "file not restored"),
+    ("корзина не очищена", "trash not emptied"),
+    ("в корзине", "in trash"),
+    ("вернуть", "restore"),
+    ("вернуть файл в обычные виды; на диске он не менялся", "bring the file back into the usual views; on disk it was untouched"),
+    ("Очистить корзину?", "Empty the trash?"),
+    (
+        "Внутри приложения безвозвратного удаления нет: файлы остаются в системной корзине, \
+         пока вы сами её не очистите. Оригиналы в архиве исчезнут из своих каталогов — это \
+         необратимо средствами приложения.",
+        "Nothing is deleted for good inside the app: the files stay in the OS trash until you \
+         empty it yourself. The originals will disappear from their folders in the archive — \
+         the app cannot undo that.",
+    ),
+    ("Переместить в системную корзину", "Move to the OS trash"),
+    ("Отмена", "Cancel"),
     // --- диалог «Настройки» ----------------------------------------------------
     ("Модель ИИ", "AI model"),
     ("Индексация и дубли", "Indexing & duplicates"),

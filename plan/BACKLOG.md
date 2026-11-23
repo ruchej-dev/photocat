@@ -781,3 +781,6 @@ include a headless English calendar frame and a weekday test; `check.sh` 44/0.
 M21.4c: the faces screen is translated (threshold, model note, counters, `Resume`/`Find faces`,
 `Rebuild groups`, group list, name and batch fields, tile labels `not him`/`pick`); `draw_face_cell`
 takes `lang` — `cargo test` 190 tests include a headless English faces frame; `check.sh` 44/0.
+M21.4d: the trash is translated (screen, count, `Restore all`, `Empty the trash`, tile marks, the
+confirmation dialog and the statuses) — `cargo test` 191 tests include a headless English trash
+frame with the open dialog; `check.sh` 44/0.
