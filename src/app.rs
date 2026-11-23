@@ -151,6 +151,40 @@ impl SettingsTab {
     }
 }
 
+/// Вид клика по плитке (M18): Ctrl — добавить/убрать, Shift — диапазон по порядку сетки.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PickClick {
+    Plain,
+    Toggle,
+    Range,
+}
+
+/// Какой клик означает какое действие. Ctrl и Cmd — одно и то же действие:
+/// владелец на Linux, но код не упирается в ОС.
+fn pick_kind(mods: &egui::Modifiers) -> PickClick {
+    if mods.shift {
+        PickClick::Range
+    } else if mods.command || mods.ctrl {
+        PickClick::Toggle
+    } else {
+        PickClick::Plain
+    }
+}
+
+/// Набор файлов, внутри которого сделано выделение: вид, фильтр, поиск, порядок.
+/// Пока он тот же, выделение живёт; смена любого поля снимает его (M18),
+/// чтобы действие не задело файлы, которых на экране уже нет.
+#[derive(Clone, PartialEq)]
+struct PickScope {
+    view: View,
+    query: String,
+    kind: KindFilter,
+    tag: Option<String>,
+    hits: Option<usize>,
+    sort: db::GridSort,
+    layout: db::GridLayout,
+}
+
 /// Акцент проекта: значит ровно «выбрано», «уверенный тег», «оставить» (docs/UI.md).
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(90, 170, 255);
 /// Второстепенный текст и служебные подписи; темнее 150 не опускаемся.
@@ -431,6 +465,10 @@ struct Chips {
     tag: Option<String>,
     kind: KindFilter,
     hits: Option<usize>,
+    /// Мультивыбор (M18): сколько отмечено, их объём и можно ли выбирать в этом виде.
+    picked: usize,
+    picked_bytes: i64,
+    pickable: bool,
 }
 
 /// Какие фильтры просят снять кликом по чипу.
@@ -440,6 +478,10 @@ struct FilterClear {
     tag: bool,
     kind: bool,
     hits: bool,
+    /// «Выбрать все (M)» — отметить видимое, не трогая скрытое фильтром.
+    pick_all: bool,
+    /// «Снять выделение» — пустое выделение, как по Esc.
+    clear_pick: bool,
 }
 
 /// Короткая подпись для чипа: длинный путь не распирает строку фильтров.
@@ -491,6 +533,44 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                 .size(11.0)
                 .color(DIM),
             );
+            // Мультивыбор (M18): счёт и две кнопки всегда на одном месте,
+            // чтобы строка чипов не прыгала при кликах.
+            if chips.pickable {
+                if chips.picked > 0
+                    && ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("Снять выделение").size(11.0))
+                                .small(),
+                        )
+                        .on_hover_text("выделение в этой сетке снимется; Esc делает то же")
+                        .clicked()
+                {
+                    clear.clear_pick = true;
+                }
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(format!("Выбрать все ({})", found.0)).size(11.0),
+                        )
+                        .small(),
+                    )
+                    .on_hover_text("отметить всё, что видно сейчас; Ctrl+A делает то же")
+                    .clicked()
+                {
+                    clear.pick_all = true;
+                }
+                if chips.picked > 0 {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "выбрано {} · {}",
+                            chips.picked,
+                            db::human(chips.picked_bytes)
+                        ))
+                        .size(11.0)
+                        .color(ACCENT),
+                    );
+                }
+            }
         });
     });
     clear
@@ -584,6 +664,13 @@ struct App {
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
+    /// Мультивыбор плиток (M18): отмеченные файлы. Только в памяти — после перезапуска пусто.
+    picked: BTreeSet<i64>,
+    /// Якорь Shift+клика: файл, от которого отсчитывается диапазон по `App::ordered`.
+    pick_anchor: Option<i64>,
+    /// Набор файлов, внутри которого сделано выделение: смена вида/фильтра/поиска/порядка
+    /// его снимает с причиной в статусе.
+    pick_scope: PickScope,
     view: View,
     groups: Vec<Group>,
     max_dist: u32,
@@ -726,6 +813,17 @@ impl App {
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
+            picked: BTreeSet::new(),
+            pick_anchor: None,
+            pick_scope: PickScope {
+                view: View::Grid,
+                query: String::new(),
+                kind: KindFilter::All,
+                tag: None,
+                hits: None,
+                sort: db::GridSort::DateDesc,
+                layout: db::GridLayout::Months,
+            },
             view: View::Grid,
             groups: Vec::new(),
             max_dist: 6,
@@ -933,6 +1031,15 @@ impl App {
                 }
                 self.groups.clear();
                 self.init_calendar();
+                // Выделение живёт в памяти: после перечитывания индекса в нём остаются
+                // только файлы, которые всё ещё есть, а набор для сравнения — свежий.
+                let alive: HashSet<i64> = self.items.iter().map(|r| r.id).collect();
+                self.picked.retain(|id| alive.contains(id));
+                self.pick_anchor = self.pick_anchor.filter(|id| alive.contains(id));
+                if self.selected.is_some_and(|id| !alive.contains(&id)) {
+                    self.selected = None;
+                }
+                self.pick_scope = self.pick_scope_now();
             }
             Err(e) => self.status = format!("ошибка чтения индекса: {e}"),
         }
@@ -2106,9 +2213,17 @@ impl App {
                         .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
                         .unwrap_or_else(|| "без даты".into());
                     ui.label(
-                        egui::RichText::new(format!("Выбрано: {} · {date}", file_name(&f.path)))
-                            .size(11.0)
-                            .color(DIM),
+                        egui::RichText::new(if self.picked.len() > 1 {
+                            format!(
+                                "Выбрано {} · последний: {} · {date}",
+                                self.picked.len(),
+                                file_name(&f.path)
+                            )
+                        } else {
+                            format!("Выбрано: {} · {date}", file_name(&f.path))
+                        })
+                        .size(11.0)
+                        .color(DIM),
                     );
                 }
             });
@@ -2123,6 +2238,15 @@ impl App {
             tag: self.tag_filter.clone(),
             kind: self.kind_filter,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
+            picked: self.picked.len(),
+            picked_bytes: self
+                .items
+                .iter()
+                .filter(|r| self.picked.contains(&r.id))
+                .map(|r| r.size)
+                .sum(),
+            // Выделение есть только в сетке: дубли, лица и корзина живут своим выбором.
+            pickable: self.view == View::Grid,
         }
     }
 
@@ -2778,6 +2902,7 @@ impl App {
             missing: &mut self.missing,
             thumbs_dir: &self.thumbs_dir,
             selected: self.selected,
+            picked: &self.picked,
             clicked: None,
             open_clicked: None,
             show_keep: false,
@@ -2804,6 +2929,23 @@ impl App {
         // Имя файла — главное, путь — подпись под ним (PhotoPrism-инспектор).
         ui.label(egui::RichText::new(file_name(&f.path)).size(14.0));
         ui.label(egui::RichText::new(&f.path).size(11.0).color(DIM));
+        if self.picked.len() > 1 {
+            let bytes: i64 = self
+                .items
+                .iter()
+                .filter(|r| self.picked.contains(&r.id))
+                .map(|r| r.size)
+                .sum();
+            ui.label(
+                egui::RichText::new(format!(
+                    "в выделении {} · {}",
+                    self.picked.len(),
+                    db::human(bytes)
+                ))
+                .size(11.0)
+                .color(ACCENT),
+            );
+        }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -3047,10 +3189,11 @@ impl App {
     /// Переход из лица к снимку: не в общую сетку, а в день календаря, где он лежит.
     /// Если даты нет — общая сетка с выделением этого файла.
     fn open_from_faces(&mut self, file_id: i64) {
-        self.selected = Some(file_id);
         // Старый поиск/фильтр не должен прятать снимок в дне календаря.
         self.reset_filters();
-        self.selected = Some(file_id);
+        self.select_one(file_id);
+        // Фильтры сняты нарочно: это не повод стирать только что сделанное выделение.
+        self.pick_scope = self.pick_scope_now();
         let date = self
             .items
             .iter()
@@ -3944,6 +4087,147 @@ impl App {
         out
     }
 
+    /// Текущий набор файлов, внутри которого живёт выделение (M18).
+    fn pick_scope_now(&self) -> PickScope {
+        PickScope {
+            view: self.view,
+            query: self.query.trim().to_lowercase(),
+            kind: self.kind_filter,
+            tag: self.tag_filter.clone(),
+            hits: self.semantic_hits.as_ref().map(|h| h.len()),
+            sort: self.settings.grid_sort,
+            layout: self.settings.grid_layout,
+        }
+    }
+
+    /// Смена вида, фильтра, запроса, поиска или порядка снимает выделение: действие
+    /// не должно задеть файлы, которых на экране уже нет. В статусе — почему (M18).
+    fn sync_pick_scope(&mut self) {
+        let now = self.pick_scope_now();
+        if now == self.pick_scope {
+            return;
+        }
+        let reason = if now.view != self.pick_scope.view {
+            "изменился вид"
+        } else if now.query != self.pick_scope.query {
+            "изменился фильтр по пути/дате"
+        } else if now.kind != self.pick_scope.kind {
+            "изменился фильтр фото/видео"
+        } else if now.tag != self.pick_scope.tag {
+            "изменился фильтр по тегу"
+        } else if now.hits != self.pick_scope.hits {
+            "изменился поиск"
+        } else {
+            "изменился порядок"
+        };
+        self.pick_scope = now;
+        self.clear_picked(&format!("выделение снято: {reason}"));
+    }
+
+    /// Снять выделение. Факт пишется в статус только если было что снимать:
+    /// иначе действие молчит и не затирает чужое сообщение.
+    fn clear_picked(&mut self, message: &str) {
+        if self.picked.is_empty() {
+            return;
+        }
+        self.picked.clear();
+        self.pick_anchor = None;
+        self.status = message.to_string();
+    }
+
+    /// Выбрать один файл: он же — последний выбранный для инспектора.
+    fn select_one(&mut self, id: i64) {
+        self.selected = Some(id);
+        self.picked.clear();
+        self.picked.insert(id);
+        self.pick_anchor = Some(id);
+    }
+
+    /// Клик по плитке: обычный — один, Ctrl — добавить/убрать, Shift — диапазон
+    /// по текущему порядку сетки (`order` — id в порядке `App::ordered`).
+    fn pick_clicked(&mut self, id: i64, click: PickClick, order: &[i64]) {
+        match click {
+            PickClick::Plain => self.select_one(id),
+            PickClick::Toggle => {
+                if !self.picked.remove(&id) {
+                    self.picked.insert(id);
+                }
+                self.pick_anchor = Some(id);
+                if self.picked.is_empty() {
+                    self.selected = None;
+                    self.status = "выделение снято".into();
+                } else {
+                    // Снятая плитка больше не «последняя выбранная»: берём оставшуюся.
+                    self.selected = if self.picked.contains(&id) {
+                        Some(id)
+                    } else {
+                        self.picked.iter().next_back().copied()
+                    };
+                }
+            }
+            PickClick::Range => {
+                let anchor = self.pick_anchor.unwrap_or(id);
+                match (
+                    order.iter().position(|&x| x == anchor),
+                    order.iter().position(|&x| x == id),
+                ) {
+                    (Some(a), Some(b)) => {
+                        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                        self.picked = order[lo..=hi].iter().copied().collect();
+                        self.selected = Some(id);
+                        // Якорь не двигаем: следующий Shift+клик продолжает от него.
+                    }
+                    // Якоря нет в текущем наборе (сменился фильтр) — обычный клик.
+                    _ => self.select_one(id),
+                }
+            }
+        }
+    }
+
+    /// «Выбрать все»: только то, что видно сейчас (фильтр, поиск и порядок — из `ordered`).
+    fn pick_all(&mut self) {
+        let order: Vec<i64> = self
+            .ordered(&self.filtered())
+            .iter()
+            .map(|&i| self.items[i].id)
+            .collect();
+        let Some(first) = order.first().copied() else {
+            return;
+        };
+        let bytes: i64 = self
+            .items
+            .iter()
+            .filter(|r| order.contains(&r.id))
+            .map(|r| r.size)
+            .sum();
+        self.picked = order.iter().copied().collect();
+        self.pick_anchor = Some(first);
+        if !self.selected.is_some_and(|id| self.picked.contains(&id)) {
+            self.selected = Some(first);
+        }
+        self.status = format!("выбрано {} · {}", self.picked.len(), db::human(bytes));
+    }
+
+    /// Esc снимает выделение, Ctrl+A берёт найденное — только в сетке, когда
+    /// клавиатура не занята полем ввода и не открыт диалог или полный экран.
+    fn pick_keys(&mut self, ctx: &egui::Context) {
+        let modal = self.viewer.is_some()
+            || self.settings_open
+            || self.roots_open
+            || self.picker_open
+            || self.storage_confirm.is_some()
+            || self.trash_confirm;
+        if modal || self.view != View::Grid || ctx.text_edit_focused() {
+            return;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.clear_picked("выделение снято");
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
+            self.pick_all();
+        }
+    }
+
     fn filtered(&self) -> Vec<usize> {
         let q = self.query.to_lowercase();
         let mut out: Vec<usize> = self
@@ -4532,7 +4816,10 @@ struct Cells<'a> {
     missing: &'a mut HashSet<i64>,
     thumbs_dir: &'a Path,
     selected: Option<i64>,
-    clicked: Option<i64>,
+    /// Мультивыбор (M18): отмеченные плитки — обводка и галочка без наведения.
+    picked: &'a BTreeSet<i64>,
+    /// Клик по плитке с видом клика (Ctrl/Shift) — решение принимает `App`.
+    clicked: Option<(i64, PickClick)>,
     /// Двойной клик — полноэкранный просмотр.
     open_clicked: Option<i64>,
     /// Показать на плитке кнопку «оставить» (вид «Дубли»).
@@ -5105,7 +5392,25 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             }
         }
     }
-    if cs.selected == Some(f.id) {
+    if cs.picked.contains(&f.id) {
+        // Выбранная плитка видна без наведения: обводка и галочка, а не только цвет.
+        ui.painter().rect_stroke(
+            rect,
+            4.0,
+            egui::Stroke::new(2.0, ACCENT),
+            egui::StrokeKind::Inside,
+        );
+        let badge = egui::pos2(img_rect.right() - 13.0, img_rect.top() + 13.0);
+        ui.painter()
+            .circle_filled(badge, 9.0, ACCENT);
+        ui.painter().text(
+            badge,
+            egui::Align2::CENTER_CENTER,
+            "✓",
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        );
+    } else if cs.selected == Some(f.id) {
         ui.painter().rect_stroke(
             rect,
             4.0,
@@ -5114,7 +5419,8 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         );
     }
     if resp.clicked() {
-        cs.clicked = Some(f.id);
+        let mods = ui.input(|i| i.modifiers);
+        cs.clicked = Some((f.id, pick_kind(&mods)));
     }
     if resp.double_clicked() {
         cs.open_clicked = Some(f.id);
@@ -5135,6 +5441,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
+        // M18: выделение живёт внутри одного набора файлов; смена вида/фильтра/
+        // поиска/порядка снимает его и говорит почему. Esc и Ctrl+A — та же сетка.
+        self.sync_pick_scope();
+        self.pick_keys(ctx);
         // завершение фоновой индексации
         if let Some(rx) = &self.rx {
             match rx.try_recv() {
@@ -5371,8 +5681,10 @@ impl eframe::App for App {
 
         let visible = self.filtered();
         // Порядок плиток считается здесь и больше нигде (M17): сетка, полный экран
-        // и будущее выделение берут один и тот же список.
+        // и выделение (M18) берут один и тот же список.
         let ordered = self.ordered(&visible);
+        // Порядок для Shift+клика — те же id в том же порядке, что и плитки.
+        let pick_order: Vec<i64> = ordered.iter().map(|&i| self.items[i].id).collect();
         // Снимок фильтров снимается до того, как сетка заберёт `&mut self.textures`.
         let chips = self.chips_snapshot();
         let tag_filter_now = self.tag_filter.clone();
@@ -5386,6 +5698,7 @@ impl eframe::App for App {
             missing: &mut self.missing,
             thumbs_dir: &self.thumbs_dir,
             selected: self.selected,
+            picked: &self.picked,
             clicked: None,
             open_clicked: None,
             show_keep: self.view == View::Dupes,
@@ -5424,6 +5737,7 @@ impl eframe::App for App {
         let mut face_save_label: Option<String> = None;
         let mut face_assign: Option<String> = None;
         let mut reset = false;
+        let mut empty_click = false;
         let mut tile_save = false;
         let mut view_save = false;
         let mut clear_chips = FilterClear::default();
@@ -5573,6 +5887,13 @@ impl eframe::App for App {
                     }
                     return;
                 }
+                // Клик по пустому месту снимает выделение: область регистрируется до
+                // плиток, поэтому клик по плитке остаётся кликом по плитке.
+                let bg = ui.interact(
+                    ui.available_rect_before_wrap(),
+                    egui::Id::unique("grid-empty"),
+                    egui::Sense::click(),
+                );
                 egui::ScrollArea::vertical()
                     .id_salt("grid")
                     .auto_shrink([false, false])
@@ -5610,6 +5931,9 @@ impl eframe::App for App {
                             ui.add_space(16.0);
                         }
                     });
+                if bg.clicked() && cells.clicked.is_none() {
+                    empty_click = true;
+                }
             }
             View::Dupes => {
                 if groups.is_empty() {
@@ -6534,11 +6858,19 @@ impl eframe::App for App {
             self.semantic_hits = None;
             self.ocr_snippets.clear();
         }
+        if clear_chips.pick_all {
+            self.pick_all();
+        } else if clear_chips.clear_pick {
+            self.clear_picked("выделение снято");
+        }
         if let Some(id) = cell_open {
             self.open_viewer(id);
-        } else if let Some(id) = cell_click {
-            self.selected = Some(id);
+        } else if let Some((id, kind)) = cell_click {
+            self.pick_clicked(id, kind, &pick_order);
             self.prefetch_photo(id);
+        }
+        if empty_click && cell_click.is_none() {
+            self.clear_picked("выделение снято");
         }
         if let Some(file_id) = face_viewer {
             self.open_viewer(file_id);
@@ -6566,7 +6898,7 @@ impl eframe::App for App {
             self.trash_confirm = true;
         }
         if let Some(keep_id) = keep_click {
-            self.selected = Some(keep_id);
+            self.select_one(keep_id);
             if let Some(gi) = self
                 .groups
                 .iter()
@@ -6659,9 +6991,9 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CalScale, Viewer, days_in_month, db, first_weekday_monday, fit_rect, monday_of,
-        month_groups, nearest_file_month, parse_date, score_percentile, shift_month,
-        shift_to_file_month,
+        App, CalScale, KindFilter, PickClick, Viewer, days_in_month, db, first_weekday_monday,
+        fit_rect, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
+        score_percentile, shift_month, shift_to_file_month,
     };
     use crate::embed;
     use std::collections::BTreeSet;
@@ -6769,12 +7101,22 @@ mod tests {
     /// Один кадр всего окна без окна: проверяет группы по месяцам и их порядок.
     /// `eframe::Frame::_new_kittest` — штатный тестовый кадр eframe, окно не открывается.
     fn window_frame(app: &mut App, ctx: &egui::Context) -> Vec<String> {
+        window_frame_with(app, ctx, Vec::new())
+    }
+
+    /// Тот же кадр с событиями клавиатуры: так проверяются Esc и Ctrl+A без GUI.
+    fn window_frame_with(
+        app: &mut App,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Vec<String> {
         super::style(ctx);
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(1240.0, 840.0),
             )),
+            events,
             ..Default::default()
         };
         let mut frame = eframe::Frame::_new_kittest();
@@ -6785,6 +7127,17 @@ mod tests {
         }
         out.drop_without_applying_deltas();
         texts
+    }
+
+    /// Нажатие клавиши без модификаторов — для headless-проверки Esc и Ctrl+A.
+    fn key_event(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
     }
 
     fn viewer_with(ids: Vec<i64>, idx: usize) -> Viewer {
@@ -7199,5 +7552,137 @@ mod tests {
             "в «Подряд» заголовков месяцев быть не должно: {texts:?}"
         );
         assert!(texts.iter().any(|t| t.contains("2024-05-09")), "{texts:?}");
+    }
+
+    /// M18: порядок сетки — тот же `App::ordered`, поэтому Shift+клик берёт
+    /// диапазон по экрану, а не по возрастанию id.
+    fn m18_order(app: &App) -> Vec<i64> {
+        let visible: Vec<usize> = (0..app.items.len()).collect();
+        app.ordered(&visible)
+            .iter()
+            .map(|&i| app.items[i].id)
+            .collect()
+    }
+
+    #[test]
+    fn ctrl_и_shift_клик_меняют_выделение() {
+        let mut app = m17_app();
+        let order = m18_order(&app);
+        assert_eq!(order, vec![2, 1, 3, 4], "порядок: свежие сверху, без даты в конце");
+
+        app.pick_clicked(2, PickClick::Plain, &order);
+        assert_eq!(app.picked, BTreeSet::from([2]));
+        assert_eq!(app.selected, Some(2));
+
+        app.pick_clicked(3, PickClick::Toggle, &order);
+        assert_eq!(app.picked, BTreeSet::from([2, 3]), "Ctrl+клик добавляет");
+        app.pick_clicked(3, PickClick::Toggle, &order);
+        assert_eq!(app.picked, BTreeSet::from([2]), "повторный Ctrl+клик убирает");
+
+        app.pick_anchor = Some(2);
+        app.pick_clicked(3, PickClick::Range, &order);
+        assert_eq!(
+            app.picked,
+            BTreeSet::from([2, 1, 3]),
+            "Shift+клик — диапазон по порядку сетки"
+        );
+        assert_eq!(app.selected, Some(3), "последний кликнутый — в инспекторе");
+
+        // Обратный диапазон даёт тот же набор, а якорь не двигается.
+        app.pick_anchor = Some(3);
+        app.pick_clicked(2, PickClick::Range, &order);
+        assert_eq!(app.picked, BTreeSet::from([2, 1, 3]));
+
+        // Модификаторы читаются в действие: Ctrl/Cmd и Shift — разные вещи.
+        let mut mods = egui::Modifiers::default();
+        assert_eq!(pick_kind(&mods), PickClick::Plain);
+        mods.command = true;
+        assert_eq!(pick_kind(&mods), PickClick::Toggle);
+        mods.shift = true;
+        assert_eq!(pick_kind(&mods), PickClick::Range);
+    }
+
+    #[test]
+    fn выбрать_всё_берёт_только_видимое() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-m18.db"));
+        let mut a = file_row(1, "image", "a.jpg");
+        a.size = 10;
+        let mut b = file_row(2, "video", "b.mp4");
+        b.size = 20;
+        let mut c = file_row(3, "image", "c.jpg");
+        c.size = 30;
+        app.items = vec![a, b, c];
+        app.kind_filter = KindFilter::Images;
+        app.pick_all();
+        assert_eq!(app.picked, BTreeSet::from([1, 3]), "видео скрыто фильтром");
+        assert_eq!(app.selected, Some(1), "в инспекторе — первый видимый");
+        assert!(app.status.starts_with("выбрано 2"), "{}", app.status);
+    }
+
+    #[test]
+    fn esc_снимает_выделение_и_пишет_в_статус() {
+        let mut app = m17_app();
+        app.pick_all();
+        assert_eq!(app.picked.len(), 4);
+        let ctx = egui::Context::default();
+        window_frame_with(&mut app, &ctx, vec![key_event(egui::Key::Escape)]);
+        assert!(app.picked.is_empty(), "Esc снимает выделение");
+        assert_eq!(app.status, "выделение снято");
+    }
+
+    #[test]
+    fn смена_фильтра_и_порядка_снимают_выделение_с_причиной() {
+        let mut app = m17_app();
+        app.pick_all();
+        app.query = "мая".into();
+        app.sync_pick_scope();
+        assert!(app.picked.is_empty());
+        assert!(
+            app.status.contains("изменился фильтр по пути/дате"),
+            "{}",
+            app.status
+        );
+
+        // Возвращаем набор файлов и сбрасываем сравнение, прежде чем менять порядок.
+        app.query.clear();
+        app.sync_pick_scope();
+        app.pick_all();
+        app.settings.grid_sort = db::GridSort::Name;
+        app.sync_pick_scope();
+        assert!(app.picked.is_empty());
+        assert!(app.status.contains("изменился порядок"), "{}", app.status);
+
+        // Смена вида — тоже другой набор файлов.
+        app.pick_all();
+        app.view = super::View::Dupes;
+        app.sync_pick_scope();
+        assert!(app.picked.is_empty());
+        assert!(app.status.contains("изменился вид"), "{}", app.status);
+    }
+
+    #[test]
+    fn строка_чипов_показывает_выбрано_и_кнопки() {
+        let mut app = m17_app();
+        app.picked = BTreeSet::from([1, 2]);
+        app.selected = Some(2);
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t.starts_with("выбрано 2 · ")),
+            "в строке чипов виден счёт и объём: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "Выбрать все (4)"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Снять выделение"), "{texts:?}");
+    }
+
+    #[test]
+    fn карточка_пишет_сколько_в_выделении() {
+        let mut app = m17_app();
+        app.picked = BTreeSet::from([1, 2]);
+        app.selected = Some(2);
+        let texts = card_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t.starts_with("в выделении 2")),
+            "инспектор показывает размер выделения: {texts:?}"
+        );
     }
 }
