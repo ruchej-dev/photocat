@@ -377,6 +377,35 @@ const PAIRS: &[(&str, &str)] = &[
         "полный экран: кадр и весь распознанный текст",
         "full screen: the frame and all recognized text",
     ),
+    // --- дубли и серии ----------------------------------------------------------
+    ("Найти группы", "Find groups"),
+    ("Экспорт плана", "Export the plan"),
+    (
+        "записать CSV в кэш приложения: group, keep_path, drop_path, reason, \
+         wasted_bytes; это список для проверки, а не удаление",
+        "write a CSV into the app cache: group, keep_path, drop_path, reason, \
+         wasted_bytes; a list to review, not a deletion",
+    ),
+    ("план не записан", "plan not written"),
+    ("Скопировать список", "Copy the list"),
+    ("весь план CSV в буфер обмена", "the whole CSV plan to the clipboard"),
+    ("план скопирован в буфер обмена", "plan copied to the clipboard"),
+    (
+        "«оставить» выбирает лучший кадр группы: он остаётся, остальные помечаются лишними. \
+         Файлы не удаляются; решение хранится в БД и попадает в план.",
+        "“keep” picks the best frame of the group: it stays, the rest are marked spare. \
+         No file is deleted; the decision lives in the DB and lands in the plan.",
+    ),
+    (
+        "«Экспорт плана» пишет CSV в кэш приложения — это отчёт для проверки, не удаление.",
+        "“Export the plan” writes a CSV into the app cache — a report to review, not a deletion.",
+    ),
+    ("Нажмите «Найти группы» слева.", "Press “Find groups” on the left."),
+    ("решение", "decision"),
+    ("совет", "advice"),
+    ("решение не сохранено", "decision not saved"),
+    ("лишний", "spare"),
+    ("оставить", "keep"),
     // --- диалог «Настройки» ----------------------------------------------------
     ("Модель ИИ", "AI model"),
     ("Индексация и дубли", "Indexing & duplicates"),

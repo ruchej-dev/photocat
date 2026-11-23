@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector) → next:M21.4 (duplicates, calendar, faces, trash, integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen) → next:M21.4b (calendar, then faces, trash, integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1127,3 +1127,28 @@ The three card tests that assert Russian now set `settings.lang = Ru` themselves
 does. `cargo clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.
 
 **Next.** M21.4: duplicates, calendar, faces, trash and integrity screens, their dialogs and statuses.
+
+## M21.4a — the duplicates screen in English (2026-11-24)
+
+The owner asked to continue the interface translation screen by screen: the duplicates view was the
+next one after the file card. The panel of the view, the group cards and the labels painted on the
+tiles no longer speak Russian under an English interface.
+
+**What moved.** `dupes_controls` takes `settings.lang`: the header, the threshold line
+(`Similarity threshold: 6 bits out of 64`), `Find groups` and its status
+(`2 groups · 1.2 MiB wasted · 0.0 s`), the summary line, `Export the plan` / `Copy the list` with
+their hints and their statuses, and the two explanatory paragraphs. The group card shows
+`#1 — <reason> · 2 files · 1 KiB wasted` and `<decision|advice>: keep b.jpg — <advice>`. The tile
+carries `spare`, `keep`, `no date`, `▶ video` and `no preview`: `Cells` got a `lang` field, so
+`draw_cell` needs no extra argument and every view that draws tiles is covered at once. Sizes go
+through `db::human_in(lang, n)`. Group reasons (`exact copies`, `similar`) and the advice text come
+from the `dupes` module: they are data of the report and move with the CLI reports in M21.6.
+
+**Checks.** `cargo test` — 187 passed, 6 `#[ignore]` (new:
+`the_english_language_translates_the_duplicates_screen` — a headless duplicates frame with
+`Duplicates & series`, `Find groups`, `Export the plan`, `Copy the list`, `#1 — … · 2 files`,
+`Similarity threshold: 6 bits`, and no `Find groups`/`оставить`/`без даты` left in Russian);
+`cargo clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.
+
+**Next.** M21.4b: the calendar (scale tabs, month and weekday names in `i18n`, day headers,
+navigation hints, the `no date` group).

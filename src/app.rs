@@ -4468,84 +4468,122 @@ impl App {
 
     /// Контекст вида «Дубли и серии»: порог, «Найти группы», сводка и выгрузка плана.
     fn dupes_controls(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         block(ui, |ui| {
-            ui.label(egui::RichText::new("Дубли и серии").size(11.0).color(DIM));
+            ui.label(
+                egui::RichText::new(t(lang, "Дубли и серии"))
+                    .size(11.0)
+                    .color(DIM),
+            );
             ui.add_space(4.0);
-            ui.label(egui::RichText::new(format!(
-                "Порог похожести: {} бит из 64",
-                self.max_dist
-            )));
+            let threshold = match lang {
+                i18n::Lang::En => format!("Similarity threshold: {} bits out of 64", self.max_dist),
+                i18n::Lang::Ru => format!("Порог похожести: {} бит из 64", self.max_dist),
+            };
+            ui.label(egui::RichText::new(threshold));
             let resp = ui.add(egui::Slider::new(&mut self.max_dist, 0..=16));
             if resp.changed() {
                 self.settings.max_dist = self.max_dist;
                 self.save_settings();
             }
-            if ui.add(primary_button("Найти группы")).clicked() {
-                let t = std::time::Instant::now();
+            if ui
+                .add(primary_button(t(lang, "Найти группы")))
+                .clicked()
+            {
+                let t0 = std::time::Instant::now();
                 self.groups = dupes::find_groups(&self.items, self.max_dist);
                 let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
-                self.status = format!(
-                    "групп: {}, дублей на {}, за {:.1} с",
-                    self.groups.len(),
-                    db::human(waste),
-                    t.elapsed().as_secs_f32()
-                );
+                self.status = match lang {
+                    i18n::Lang::En => format!(
+                        "{} · {} wasted · {:.1} s",
+                        i18n::count(
+                            lang,
+                            self.groups.len(),
+                            ["группа", "группы", "групп"],
+                            "group",
+                            "groups"
+                        ),
+                        db::human_in(lang, waste),
+                        t0.elapsed().as_secs_f32()
+                    ),
+                    i18n::Lang::Ru => format!(
+                        "групп: {}, дублей на {}, за {:.1} с",
+                        self.groups.len(),
+                        db::human(waste),
+                        t0.elapsed().as_secs_f32()
+                    ),
+                };
             }
             let sum = dupes::summary(&self.items, &self.groups);
-            ui.label(
-                egui::RichText::new(format!(
+            let summary = match lang {
+                i18n::Lang::En => format!(
+                    "{} in groups, {} marked spare, {} to free",
+                    i18n::count(lang, sum.groups, ["файл", "файла", "файлов"], "file", "files"),
+                    sum.marked_drop,
+                    db::human_in(lang, sum.freed)
+                ),
+                i18n::Lang::Ru => format!(
                     "в группах {}, помечено лишними {}, освободится {}",
                     sum.groups,
                     sum.marked_drop,
                     db::human(sum.freed)
-                ))
-                .size(11.0)
-                .color(DIM),
-            );
+                ),
+            };
+            ui.label(egui::RichText::new(summary).size(11.0).color(DIM));
             let has_groups = !self.groups.is_empty();
             ui.add_space(4.0);
             if ui
-                .add_enabled(has_groups, egui::Button::new("Экспорт плана"))
-                .on_hover_text(
-                    "записать CSV в кэш приложения: group, keep_path, drop_path, reason, wasted_bytes; \
-                     это список для проверки, а не удаление",
-                )
+                .add_enabled(has_groups, egui::Button::new(t(lang, "Экспорт плана")))
+                .on_hover_text(t(
+                    lang,
+                    "записать CSV в кэш приложения: group, keep_path, drop_path, reason, \
+                     wasted_bytes; это список для проверки, а не удаление",
+                ))
                 .clicked()
             {
                 let path = db::cache_dir().join("plan.csv");
                 let csv = dupes::plan_csv(&self.items, &self.groups);
+                let rows = csv.lines().count().saturating_sub(1);
                 match std::fs::write(&path, &csv) {
                     Ok(()) => {
-                        self.status = format!(
-                            "план записан: {} (строк {})",
-                            path.display(),
-                            csv.lines().count().saturating_sub(1)
-                        )
+                        self.status = match lang {
+                            i18n::Lang::En => {
+                                format!("plan written: {} ({rows} rows)", path.display())
+                            }
+                            i18n::Lang::Ru => {
+                                format!("план записан: {} (строк {rows})", path.display())
+                            }
+                        }
                     }
-                    Err(e) => self.status = format!("план не записан: {e}"),
+                    Err(e) => {
+                        self.status = format!("{}: {e}", t(lang, "план не записан"));
+                    }
                 }
             }
             if ui
-                .add_enabled(has_groups, egui::Button::new("Скопировать список"))
-                .on_hover_text("весь план CSV в буфер обмена")
+                .add_enabled(has_groups, egui::Button::new(t(lang, "Скопировать список")))
+                .on_hover_text(t(lang, "весь план CSV в буфер обмена"))
                 .clicked()
             {
                 ui.ctx()
                     .copy_text(dupes::plan_csv(&self.items, &self.groups));
-                self.status = "план скопирован в буфер обмена".into();
+                self.status = t(lang, "план скопирован в буфер обмена").into();
             }
             ui.label(
-                egui::RichText::new(
-                    "«оставить» выбирает лучший кадр группы: он остаётся, остальные помечаются лишними. \
-                     Файлы не удаляются; решение хранится в БД и попадает в план.",
-                )
+                egui::RichText::new(t(
+                    lang,
+                    "«оставить» выбирает лучший кадр группы: он остаётся, остальные помечаются \
+                     лишними. Файлы не удаляются; решение хранится в БД и попадает в план.",
+                ))
                 .size(11.0)
                 .color(DIM),
             );
             ui.label(
-                egui::RichText::new(
-                    "«Экспорт плана» пишет CSV в кэш приложения — это отчёт для проверки, не удаление.",
-                )
+                egui::RichText::new(t(
+                    lang,
+                    "«Экспорт плана» пишет CSV в кэш приложения — это отчёт для проверки, не \
+                     удаление.",
+                ))
                 .size(11.0)
                 .color(DIM),
             );
@@ -4555,13 +4593,16 @@ impl App {
                 .filter(|r| r.kind == "image" && r.sharpness.is_none())
                 .count();
             if no_sharp > 0 {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог"
-                    ))
-                    .size(11.0)
-                    .color(DIM),
-                );
+                let note = match lang {
+                    i18n::Lang::En => format!(
+                        "sharpness not measured on {} — index the folder",
+                        i18n::count(lang, no_sharp, ["снимок", "снимка", "снимков"], "photo", "photos")
+                    ),
+                    i18n::Lang::Ru => {
+                        format!("резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог")
+                    }
+                };
+                ui.label(egui::RichText::new(note).size(11.0).color(DIM));
             }
         });
     }
@@ -5027,6 +5068,7 @@ impl App {
             trash_mode: false,
             restore_clicked: None,
             tile: self.tile_size,
+            lang,
             budget: 4,
         };
         if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
@@ -7080,6 +7122,8 @@ struct Cells<'a> {
     restore_clicked: Option<i64>,
     /// Размер плитки, px: задаётся ползунком в левой панели.
     tile: f32,
+    /// Язык интерфейса: подписи на плитке («без даты», «лишний») идут через `t()`.
+    lang: i18n::Lang,
     /// Сколько новых текстур декодировать за кадр: остальное — следующим кадром,
     /// иначе быстрая прокрутка упирается в декодирование JPEG в UI-потоке.
     budget: usize,
@@ -7529,12 +7573,13 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             );
         }
         if !drawn {
+            let lang = cs.lang;
             let txt = match f.kind.as_str() {
                 "video" => match f.duration_s {
-                    Some(d) => format!("▶ видео · {}", db::duration(d)),
-                    None => "▶ видео".into(),
+                    Some(d) => format!("{} · {}", t(lang, "▶ видео"), db::duration(d)),
+                    None => t(lang, "▶ видео").to_string(),
                 },
-                _ => "нет превью".into(),
+                _ => t(lang, "нет превью").to_string(),
             };
             ui.painter().text(
                 img_rect.center(),
@@ -7554,7 +7599,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 .rect_filled(strip, 0.0, egui::Color32::from_black_alpha(130));
             let txt = match f.duration_s {
                 Some(d) => format!("▶ {}", db::duration(d)),
-                None => "▶ видео".into(),
+                None => t(cs.lang, "▶ видео").to_string(),
             };
             ui.painter().text(
                 egui::pos2(img_rect.left() + 4.0, img_rect.bottom() - 8.0),
@@ -7568,7 +7613,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             .taken_at
             .as_deref()
             .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-            .unwrap_or_else(|| "без даты".into());
+            .unwrap_or_else(|| t(cs.lang, "без даты").to_string());
         ui.painter().text(
             egui::pos2(rect.left() + 3.0, img_rect.bottom() + 3.0),
             egui::Align2::LEFT_TOP,
@@ -7584,7 +7629,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 ui.painter().text(
                     img_rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "лишний",
+                    t(cs.lang, "лишний"),
                     egui::FontId::proportional(16.0),
                     egui::Color32::from_gray(210),
                 );
@@ -7599,7 +7644,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 ui.painter().text(
                     egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
                     egui::Align2::LEFT_TOP,
-                    "оставить",
+                    t(cs.lang, "оставить"),
                     egui::FontId::proportional(12.0),
                     egui::Color32::from_rgb(90, 170, 255),
                 );
@@ -7612,7 +7657,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 egui::vec2(74.0, 20.0),
             );
             if ui
-                .place(btn, egui::Button::new("оставить").small())
+                .place(btn, egui::Button::new(t(cs.lang, "оставить")).small())
                 .clicked()
             {
                 cs.keep_clicked = Some(f.id);
@@ -8048,6 +8093,7 @@ impl eframe::App for App {
             trash_mode: self.view == View::Trash,
             restore_clicked: None,
             tile: self.tile_size,
+            lang: self.settings.lang,
             budget: 8,
         };
         let groups = std::mem::take(&mut self.groups);
@@ -8606,20 +8652,30 @@ impl eframe::App for App {
             }
             View::Dupes => {
                 if groups.is_empty() {
-                    ui.label("Нажмите «Найти группы» слева.");
+                    ui.label(t(lang, "Нажмите «Найти группы» слева."));
                 }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (n, g) in groups.iter().enumerate() {
                             ui.group(|ui| {
-                                ui.label(format!(
-                                    "#{} — {} · файлов {} · зря {}",
-                                    n + 1,
-                                    g.reason,
-                                    g.members.len(),
-                                    db::human(g.waste)
-                                ));
+                                let head = match lang {
+                                    i18n::Lang::En => format!(
+                                        "#{} — {} · {} · {} wasted",
+                                        n + 1,
+                                        g.reason,
+                                        files_n(g.members.len()),
+                                        db::human_in(lang, g.waste)
+                                    ),
+                                    i18n::Lang::Ru => format!(
+                                        "#{} — {} · файлов {} · зря {}",
+                                        n + 1,
+                                        g.reason,
+                                        g.members.len(),
+                                        db::human(g.waste)
+                                    ),
+                                };
+                                ui.label(head);
                                 let keep = dupes::keep_of(&items, g);
                                 let name = Path::new(&items[keep].path)
                                     .file_name()
@@ -8629,12 +8685,22 @@ impl eframe::App for App {
                                     .members
                                     .iter()
                                     .any(|&i| items[i].decision.as_deref() == Some("keep"));
-                                ui.label(format!(
-                                    "{}: оставить {} — {}",
-                                    if decided { "решение" } else { "совет" },
-                                    name,
-                                    g.advice
-                                ));
+                                let advice = match lang {
+                                    i18n::Lang::En => format!(
+                                        "{}: keep {name} — {}",
+                                        t(
+                                            lang,
+                                            if decided { "решение" } else { "совет" }
+                                        ),
+                                        g.advice
+                                    ),
+                                    i18n::Lang::Ru => format!(
+                                        "{}: оставить {name} — {}",
+                                        if decided { "решение" } else { "совет" },
+                                        g.advice
+                                    ),
+                                };
+                                ui.label(advice);
                                 ui.horizontal_wrapped(|ui| {
                                     for &i in &g.members {
                                         draw_cell(ui, ctx, &mut cells, &items[i]);
@@ -9611,9 +9677,17 @@ impl eframe::App for App {
                     .to_string();
                 match db::mark_keep(&self.db_path, keep_id, &drops) {
                     Ok(()) => {
-                        self.status = format!("оставлен {name}, помечено лишними {}", drops.len())
+                        self.status = match self.settings.lang {
+                            i18n::Lang::En => format!("kept {name}, {} marked spare", drops.len()),
+                            i18n::Lang::Ru => {
+                                format!("оставлен {name}, помечено лишними {}", drops.len())
+                            }
+                        }
                     }
-                    Err(e) => self.status = format!("решение не сохранено: {e}"),
+                    Err(e) => {
+                        self.status =
+                            format!("{}: {e}", t(self.settings.lang, "решение не сохранено"))
+                    }
                 }
             }
         }
@@ -9944,6 +10018,55 @@ mod tests {
             "Свои теги",
             "Текст на фото",
             "Открыть полный экран",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
+    }
+
+    /// M21.4: экран «Дубли и серии» переводится целиком — панель управления, подписи
+    /// плиток и строка группы; названия форматов дублей (`reason`, `advice`) — данные
+    /// модуля `dupes`, их переводит M21.6 вместе с отчётами CLI.
+    #[test]
+    fn английский_язык_переводит_экран_дублей() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-dupes-i18n.db"));
+        let mut a = file_row(1, "image", "a.jpg");
+        let mut b = file_row(2, "image", "b.jpg");
+        a.sha256 = "same".into();
+        b.sha256 = "same".into();
+        app.items = vec![a, b];
+        app.groups = crate::dupes::find_groups(&app.items, 6);
+        assert_eq!(app.groups.len(), 1, "одна группа точных копий");
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Dupes;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        for needle in [
+            "Duplicates & series",
+            "Find groups",
+            "Export the plan",
+            "Copy the list",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет «{needle}»: {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|t| t.starts_with("#1 — ") && t.contains("2 files")),
+            "строка группы не переведена: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("Similarity threshold: 6 bits")),
+            "порог не переведён: {texts:?}"
+        );
+        for ru in [
+            "Найти группы",
+            "Экспорт плана",
+            "Скопировать список",
+            "оставить",
+            "без даты",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),

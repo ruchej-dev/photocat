@@ -772,3 +772,6 @@ M21.3: the file card and the inspector are translated (panel title, empty state,
 selection line, `Open full screen`/`To trash` and statuses, `Date`/`Camera`/`Size`, date source,
 `Albums`, `AI tags` with hidden-tag restore, `My tags`, `Text on the photo`) — `cargo test` 186
 tests include a headless English card frame; `check.sh` 44/0.
+M21.4a: the duplicates screen is translated (threshold, `Find groups`, summary, plan export/copy,
+group header, `decision`/`advice`, tile labels `spare`/`keep`) — `cargo test` 187 tests include a
+headless English duplicates frame; `check.sh` 44/0.
