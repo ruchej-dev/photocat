@@ -2,10 +2,12 @@
 //! Оригиналы не удаляются и не переименовываются: витрина — новые файлы/ссылки рядом, а не поверх
 //! архива. Имена в витрине собираются из шаблона (по умолчанию — оригинальные).
 
-use crate::db::{self, FileRow};
+use crate::db::{self, FileRow, Progress};
+use crate::derive;
 use crate::{flag_str, has_flag};
 use anyhow::{Context, Result};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,6 +96,10 @@ pub struct Plan {
 
 /// Проверка шаблона: неизвестная подстановка — ошибка сразу, а не в середине раскладки.
 pub fn validate_template(tpl: &str) -> Result<()> {
+    validate_tokens(tpl, &PLACEHOLDERS)
+}
+
+fn validate_tokens(tpl: &str, allowed: &[&str]) -> Result<()> {
     let mut rest = tpl;
     while let Some(start) = rest.find('{') {
         let after = &rest[start..];
@@ -101,10 +107,10 @@ pub fn validate_template(tpl: &str) -> Result<()> {
             anyhow::bail!("в шаблоне имени не закрыта скобка: {after}");
         };
         let token = &after[..=end];
-        if !PLACEHOLDERS.contains(&token) {
+        if !allowed.contains(&token) {
             anyhow::bail!(
                 "неизвестная подстановка {token}; допустимы: {}",
-                PLACEHOLDERS.join(" ")
+                allowed.join(" ")
             );
         }
         rest = &after[end + 1..];
@@ -352,6 +358,937 @@ pub fn apply(plan: &[PlanItem], mode: LinkMode) -> Result<(usize, usize)> {
         }
     }
     Ok((ok, fail))
+}
+
+// ---------------------------------------------------------------- M20: выгрузка альбома
+
+/// Шаблон имени файла при выгрузке: позиция в альбоме и оригинальное имя.
+pub const EXPORT_TEMPLATE: &str = "{n}_{orig}";
+
+/// Подстановки выгрузки. `{n}` — позиция в альбоме, `{hash8}` — первые 8 знаков sha256.
+pub const EXPORT_PLACEHOLDERS: [&str; 8] = [
+    "{n}", "{date}", "{time}", "{camera}", "{tag}", "{orig}", "{ext}", "{hash8}",
+];
+
+/// Предел длины одного компонента пути и полного пути на диске (запас до 260 в Windows).
+pub const MAX_NAME: usize = 120;
+pub const MAX_PATH: usize = 240;
+
+/// Альбом, готовый к выгрузке: узел дерева и его файлы в порядке альбома.
+#[derive(Clone, Debug)]
+pub struct ExportAlbum {
+    pub id: i64,
+    pub parent_id: i64,
+    pub name: String,
+    pub files: Vec<FileRow>,
+}
+
+/// Данные из БД (`db::album_export_data`) в вид, который понимает `plan_album`.
+pub fn export_albums(data: Vec<(db::AlbumNode, Vec<FileRow>)>) -> Vec<ExportAlbum> {
+    data.into_iter()
+        .map(|(node, files)| ExportAlbum {
+            id: node.id,
+            parent_id: node.parent_id,
+            name: node.name,
+            files,
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug)]
+pub struct ExportOptions {
+    /// Каталог, внутри которого создаётся корневой каталог альбома.
+    pub out: PathBuf,
+    /// Шаблон имени файла; по умолчанию `{n}_{orig}`.
+    pub name: String,
+    pub tags: HashMap<i64, Vec<(String, f32)>>,
+    pub tag_show: f32,
+    pub tag_margin: f32,
+}
+
+impl ExportOptions {
+    pub fn new(out: impl Into<PathBuf>) -> Self {
+        Self {
+            out: out.into(),
+            name: EXPORT_TEMPLATE.to_string(),
+            tags: HashMap::new(),
+            tag_show: 0.22,
+            tag_margin: 0.01,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ExportDir {
+    pub album_id: i64,
+    /// Путь относительно `out`; включает имя корневого каталога альбома.
+    pub rel: PathBuf,
+    pub depth: usize,
+    pub files: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExportItem {
+    pub album_id: i64,
+    pub src: PathBuf,
+    pub rel: PathBuf,
+    pub sha256: String,
+    pub size: i64,
+}
+
+/// План выгрузки: дерево каталогов и копии файлов. На диск ничего не пишется.
+#[derive(Clone, Debug, Default)]
+pub struct ExportPlan {
+    pub root_id: i64,
+    pub out: PathBuf,
+    /// Имя корневого каталога альбома (относительно `out`).
+    pub root: PathBuf,
+    pub dirs: Vec<ExportDir>,
+    pub items: Vec<ExportItem>,
+    /// Файлы в корзине приложения: остаются в альбоме, но на диск не выгружаются.
+    pub trashed: usize,
+    /// Файлы, чей полный путь длиннее `MAX_PATH`: пропущены с причиной.
+    pub too_long: usize,
+    /// Имена, которым коллизия добавила `-2` уже на этапе плана.
+    pub renamed: usize,
+    pub bytes: i64,
+}
+
+impl ExportPlan {
+    pub fn files(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Строка сводки для GUI и CLI; числа с единицами — через `db::human`.
+    pub fn summary(&self) -> String {
+        let mut s = format!(
+            "каталогов {} · файлов {} · {}; в корзине и не выгружаются: {}; \
+             имён с коллизией: {}; слишком длинных путей: {}",
+            self.dirs.len(),
+            self.items.len(),
+            db::human(self.bytes),
+            self.trashed,
+            self.renamed,
+            self.too_long
+        );
+        let empty = self.dirs.iter().filter(|d| d.files == 0).count();
+        if empty > 0 {
+            s.push_str(&format!("; пустых каталогов: {empty}"));
+        }
+        if self.too_long > 0 {
+            s.push_str("; такие файлы пропущены");
+        }
+        s
+    }
+
+    /// План-дерево: каталоги с отступами и имена файлов. `limit` строк —
+    /// для окна; CLI печатает всё.
+    pub fn outline(&self, limit: usize) -> String {
+        let mut by_album: HashMap<i64, Vec<&ExportItem>> = HashMap::new();
+        for item in &self.items {
+            by_album.entry(item.album_id).or_default().push(item);
+        }
+        let mut s = String::new();
+        let mut used = 0usize;
+        for dir in &self.dirs {
+            if used >= limit {
+                s.push_str("  …\n");
+                break;
+            }
+            let name = dir
+                .rel
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| dir.rel.to_string_lossy().to_string());
+            let indent = "  ".repeat(dir.depth + 1);
+            s.push_str(&format!("{indent}{name}/\n"));
+            used += 1;
+            if let Some(items) = by_album.get(&dir.album_id) {
+                for item in items {
+                    if used >= limit {
+                        s.push_str(&format!("{indent}  …\n"));
+                        break;
+                    }
+                    let file = item
+                        .rel
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    s.push_str(&format!("{indent}  {file}\n"));
+                    used += 1;
+                }
+            }
+        }
+        s
+    }
+}
+
+/// Отчёт выгрузки. Ни один файл в цели не перезаписан и не удалён.
+#[derive(Clone, Debug, Default)]
+pub struct ExportReport {
+    pub copied: usize,
+    /// Уже выгруженные файлы, в том числе под старым номером (`stale`).
+    pub skipped: usize,
+    /// Сколько пропущенных лежит в цели под другим именем: порядок устарел.
+    pub stale: usize,
+    /// Скопировано под именем с `-2` из-за занятого имени.
+    pub renamed: usize,
+    pub failed: usize,
+    pub bytes: u64,
+    pub dirs_created: usize,
+    pub cancelled: bool,
+    /// Что именно создано — для отчёта и теста «отмена в середине».
+    pub created: Vec<PathBuf>,
+    pub errors: Vec<String>,
+}
+
+impl fmt::Display for ExportReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "выгружено {} файлов · {}; пропущено уже выгруженных {} (порядок в цели \
+             устарел {}); переименовано из-за коллизии {}; каталогов создано {}; ошибок {}",
+            self.copied,
+            db::human(self.bytes as i64),
+            self.skipped,
+            self.stale,
+            self.renamed,
+            self.dirs_created,
+            self.failed
+        )?;
+        if self.cancelled {
+            write!(f, "; остановлено")?;
+        }
+        Ok(())
+    }
+}
+
+/// Проверка шаблона выгрузки: `{n}` и `{hash8}` здесь есть, а в витрине их нет.
+pub fn validate_export_template(tpl: &str) -> Result<()> {
+    validate_tokens(tpl, &EXPORT_PLACEHOLDERS)
+}
+
+/// `--out` должен существовать, быть каталогом и не лежать внутри каталога архива.
+pub fn check_out_dir(out: &Path, roots: &[String]) -> Result<()> {
+    if !out.exists() {
+        anyhow::bail!(
+            "каталог назначения не существует: {} — создайте его сами",
+            out.display()
+        );
+    }
+    if !out.is_dir() {
+        anyhow::bail!("каталог назначения — не каталог: {}", out.display());
+    }
+    let canon = out.canonicalize().unwrap_or_else(|_| out.to_path_buf());
+    for root in roots {
+        if let Ok(root_canon) = Path::new(root).canonicalize()
+            && (canon == root_canon || canon.starts_with(&root_canon))
+        {
+            anyhow::bail!(
+                "выгрузка внутри каталога архива запрещена: {} — выберите каталог вне {}",
+                out.display(),
+                root
+            );
+        }
+    }
+    Ok(())
+}
+
+/// План выгрузки: дерево каталогов альбома и копии файлов. Ничего не создаёт.
+pub fn plan_album(albums: &[ExportAlbum], opts: &ExportOptions) -> Result<ExportPlan> {
+    let Some(root) = albums.first() else {
+        anyhow::bail!("альбом пуст — выгружать нечего");
+    };
+    let root_name = dir_component(&root.name, root.id);
+    let root_rel = PathBuf::from(&root_name);
+    let root_path = opts.out.join(&root_rel);
+    if root_path.exists() && !root_path.is_dir() {
+        anyhow::bail!(
+            "в {} уже лежит файл «{root_name}», а нужен каталог",
+            opts.out.display()
+        );
+    }
+    let mut plan = ExportPlan {
+        root_id: root.id,
+        out: opts.out.clone(),
+        root: root_rel.clone(),
+        ..Default::default()
+    };
+    let mut dir_rel: HashMap<i64, PathBuf> = HashMap::new();
+    dir_rel.insert(root.id, root_rel.clone());
+    // Имена среди соседей: сравнение без учёта регистра везде, а не только на
+    // Windows/macOS. Альбомы в БД уже не различаются регистром, поэтому
+    // строже — значит предсказуемее.
+    let mut used: HashMap<i64, HashSet<String>> = HashMap::new();
+    used.entry(root.id)
+        .or_default()
+        .insert(name_key(&root_name));
+
+    for album in albums {
+        let rel = if album.id == root.id {
+            root_rel.clone()
+        } else {
+            let Some(parent) = dir_rel.get(&album.parent_id).cloned() else {
+                continue;
+            };
+            let base = dir_component(&album.name, album.id);
+            let taken = used.entry(album.parent_id).or_default();
+            let mut name = base.clone();
+            let mut k = 2;
+            while taken.contains(&name_key(&name)) {
+                name = format!("{base}-{k}");
+                k += 1;
+                plan.renamed += 1;
+            }
+            taken.insert(name_key(&name));
+            parent.join(name)
+        };
+        dir_rel.insert(album.id, rel.clone());
+        let live: Vec<&FileRow> = album
+            .files
+            .iter()
+            .filter(|r| r.trashed_at.is_none())
+            .collect();
+        plan.trashed += album.files.len() - live.len();
+        let depth = rel.components().count().saturating_sub(1);
+        plan.dirs.push(ExportDir {
+            album_id: album.id,
+            rel: rel.clone(),
+            depth,
+            files: live.len(),
+        });
+        let width = number_width(live.len());
+        let mut used_names: HashSet<String> = HashSet::new();
+        for (position, row) in live.iter().enumerate() {
+            let mut name = export_name(&opts.name, row, opts, position + 1, width);
+            let (stem, ext) = split_name(&name);
+            let mut k = 2;
+            while used_names.contains(&name_key(&name)) {
+                name = if ext.is_empty() {
+                    format!("{stem}-{k}")
+                } else {
+                    format!("{stem}-{k}.{ext}")
+                };
+                k += 1;
+                plan.renamed += 1;
+            }
+            used_names.insert(name_key(&name));
+            let file_rel = rel.join(&name);
+            let full = opts.out.join(&file_rel);
+            if full.as_os_str().len() > MAX_PATH {
+                plan.too_long += 1;
+                continue;
+            }
+            plan.items.push(ExportItem {
+                album_id: album.id,
+                src: PathBuf::from(&row.path),
+                rel: file_rel,
+                sha256: row.sha256.clone(),
+                size: row.size,
+            });
+            plan.bytes += row.size;
+        }
+    }
+    Ok(plan)
+}
+
+/// Выгрузка плана на диск: только копии, ничего не перезаписывается.
+/// Существующий файл с тем же sha256 — пропуск (прогон идемпотентен);
+/// с другим содержимым — новое имя `-2`; файл с тем же содержимым под старым
+/// номером — «порядок в цели устарел».
+pub fn apply_export(plan: &ExportPlan, progress: Option<&Progress>) -> ExportReport {
+    apply_export_in(plan, progress, &db::cache_dir().join("exports"))
+}
+
+/// То же, но с явным каталогом кэша: тесты не пишут в кэш владельца.
+fn apply_export_in(
+    plan: &ExportPlan,
+    progress: Option<&Progress>,
+    cache_dir: &Path,
+) -> ExportReport {
+    let mut report = ExportReport::default();
+    if let Some(p) = progress {
+        p.set_total(plan.items.len());
+        p.set_msg("выгрузка альбома");
+    }
+    let cache_key = format!("{}-{:08x}", plan.root_id, path_hash(&plan.out));
+    let mut cache = load_export_cache(cache_dir, &cache_key);
+    let mut hashes: HashMap<PathBuf, String> = HashMap::new();
+    let mut created: HashSet<PathBuf> = HashSet::new();
+    let mut entries: HashMap<PathBuf, Vec<(String, u64)>> = HashMap::new();
+
+    // Структура важнее содержимого: пустой альбом тоже даёт пустой каталог.
+    for dir in &plan.dirs {
+        let path = plan.out.join(&dir.rel);
+        if path.is_dir() {
+            continue;
+        }
+        match std::fs::create_dir_all(&path) {
+            Ok(()) => report.dirs_created += 1,
+            Err(e) => note_export_error(
+                &mut report,
+                format!("каталог {}: {e}", path.display()),
+            ),
+        }
+    }
+
+    for item in &plan.items {
+        if progress.is_some_and(|p| p.cancelled()) {
+            report.cancelled = true;
+            break;
+        }
+        let failed_before = report.failed;
+        'item: {
+            let Ok(meta) = std::fs::metadata(&item.src) else {
+                note_export_error(
+                    &mut report,
+                    format!("нет файла: {}", item.src.display()),
+                );
+                break 'item;
+            };
+            if !meta.is_file() {
+                note_export_error(
+                    &mut report,
+                    format!("не обычный файл: {}", item.src.display()),
+                );
+                break 'item;
+            }
+            let parent_rel = item
+                .rel
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default();
+            let parent = plan.out.join(&parent_rel);
+            let planned = plan.out.join(&item.rel);
+            let outcome = {
+                let list = entries
+                    .entry(parent.clone())
+                    .or_insert_with(|| read_entries(&parent));
+                decide_export(item, &planned, list, &plan.out, &mut cache, &mut hashes, &created)
+            };
+            match outcome {
+                ExportOutcome::Skip => report.skipped += 1,
+                ExportOutcome::Stale => {
+                    report.skipped += 1;
+                    report.stale += 1;
+                }
+                ExportOutcome::Copy { dst, renamed } => match std::fs::copy(&item.src, &dst) {
+                    Ok(bytes) => {
+                        report.copied += 1;
+                        report.bytes += bytes;
+                        if renamed {
+                            report.renamed += 1;
+                        }
+                        report.created.push(dst.clone());
+                        created.insert(dst.clone());
+                        let name = dst
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        if let Some(list) = entries.get_mut(&parent) {
+                            list.push((name, bytes));
+                        }
+                        if let Ok(rel) = dst.strip_prefix(&plan.out) {
+                            cache.insert(
+                                rel.to_string_lossy().to_string(),
+                                (bytes, mtime_ms(&dst), item.sha256.clone()),
+                            );
+                        }
+                    }
+                    Err(e) => note_export_error(
+                        &mut report,
+                        format!("копия {}: {e}", dst.display()),
+                    ),
+                },
+                ExportOutcome::Fail(msg) => note_export_error(&mut report, msg),
+            }
+        }
+        if let Some(p) = progress {
+            p.tick();
+            if report.failed > failed_before {
+                p.error();
+            }
+        }
+    }
+
+    // Кэш «что уже выгружено» — в кэше приложения, не в `--out`: цель остаётся чистой.
+    cache.retain(|rel, _| plan.out.join(rel).is_file());
+    save_export_cache(cache_dir, &cache_key, &cache);
+    if let Some(p) = progress {
+        p.finish();
+    }
+    report
+}
+
+/// Решение по одному файлу: что делать с уже существующим именем в цели.
+enum ExportOutcome {
+    Skip,
+    Stale,
+    Copy { dst: PathBuf, renamed: bool },
+    Fail(String),
+}
+
+fn decide_export(
+    item: &ExportItem,
+    planned: &Path,
+    list: &[(String, u64)],
+    out: &Path,
+    cache: &mut ExportCache,
+    hashes: &mut HashMap<PathBuf, String>,
+    created: &HashSet<PathBuf>,
+) -> ExportOutcome {
+    let name = item
+        .rel
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let exact = list.iter().find(|(n, _)| same_name(n, &name));
+    if let Some((_, size)) = exact
+        && *size == item.size as u64
+    {
+        match target_sha(planned, *size, out, cache, hashes) {
+            Some(sha) if sha == item.sha256 => return ExportOutcome::Skip,
+            Some(_) => {}
+            None => {
+                return ExportOutcome::Fail(format!(
+                    "не прочитать содержимое цели: {}",
+                    planned.display()
+                ));
+            }
+        }
+    }
+    // Тот же снимок лежит в каталоге под другим номером: порядок в цели устарел.
+    if find_same_content(item, &name, planned, list, out, cache, hashes, created) {
+        return ExportOutcome::Stale;
+    }
+    if exact.is_some() {
+        return ExportOutcome::Copy {
+            dst: free_numbered(planned, list),
+            renamed: true,
+        };
+    }
+    ExportOutcome::Copy {
+        dst: planned.to_path_buf(),
+        renamed: false,
+    }
+}
+
+/// Есть ли в этом каталоге тот же sha256 под другим именем (и это не файл,
+/// созданный в этом же прогоне: две одинаковые копии в альбоме — две строки).
+#[allow(clippy::too_many_arguments)]
+fn find_same_content(
+    item: &ExportItem,
+    own_name: &str,
+    planned: &Path,
+    list: &[(String, u64)],
+    out: &Path,
+    cache: &mut ExportCache,
+    hashes: &mut HashMap<PathBuf, String>,
+    created: &HashSet<PathBuf>,
+) -> bool {
+    let parent = planned.parent().unwrap_or(Path::new(""));
+    for (name, size) in list {
+        if same_name(name, own_name) || *size != item.size as u64 {
+            continue;
+        }
+        let path = parent.join(name);
+        if created.contains(&path) {
+            continue;
+        }
+        if target_sha(&path, *size, out, cache, hashes).as_deref() == Some(item.sha256.as_str()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Кэш выгрузки: относительный путь → (размер, mtime мс, sha256).
+type ExportCache = HashMap<String, (u64, u64, String)>;
+
+/// sha256 файла в цели: сначала кэш выгрузки (если совпали размер и mtime),
+/// иначе честное чтение. Подмена содержимого с сохранением mtime — та же цена,
+/// что у индексации (AGENTS §8).
+fn target_sha(
+    path: &Path,
+    size: u64,
+    out: &Path,
+    cache: &mut ExportCache,
+    hashes: &mut HashMap<PathBuf, String>,
+) -> Option<String> {
+    if let Some(sha) = hashes.get(path) {
+        return Some(sha.clone());
+    }
+    let mtime = mtime_ms(path);
+    let rel = path.strip_prefix(out).ok()?.to_string_lossy().to_string();
+    if let Some((cached_size, cached_mtime, sha)) = cache.get(&rel)
+        && *cached_size == size
+        && (*cached_mtime == mtime || mtime == 0)
+    {
+        hashes.insert(path.to_path_buf(), sha.clone());
+        return Some(sha.clone());
+    }
+    let sha = derive::sha256_file(path).ok()?;
+    hashes.insert(path.to_path_buf(), sha.clone());
+    cache.insert(rel, (size, mtime, sha.clone()));
+    Some(sha)
+}
+
+fn mtime_ms(path: &Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn read_entries(dir: &Path) -> Vec<(String, u64)> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    rd.filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some((e.file_name().to_string_lossy().to_string(), meta.len()))
+        })
+        .collect()
+}
+
+/// Первое свободное `name-2.ext`, `name-3.ext`, … в этом каталоге.
+fn free_numbered(planned: &Path, list: &[(String, u64)]) -> PathBuf {
+    let name = planned
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let (stem, ext) = split_name(&name);
+    for k in 2..10_000 {
+        let candidate = if ext.is_empty() {
+            format!("{stem}-{k}")
+        } else {
+            format!("{stem}-{k}.{ext}")
+        };
+        if !list.iter().any(|(n, _)| same_name(n, &candidate)) {
+            return planned.with_file_name(candidate);
+        }
+    }
+    planned.to_path_buf()
+}
+
+fn note_export_error(report: &mut ExportReport, msg: String) {
+    report.failed += 1;
+    if report.errors.len() < 20 {
+        report.errors.push(msg);
+    }
+}
+
+/// `stem` и `ext` без точки; расширение — последняя точка, как у `Path`.
+fn split_name(name: &str) -> (String, String) {
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.to_string());
+    let ext = path
+        .extension()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    (stem, ext)
+}
+
+/// Ширина номера позиции: 2 знака до 99, 3 до 999, дальше по числу знаков.
+fn number_width(count: usize) -> usize {
+    if count <= 99 {
+        2
+    } else if count <= 999 {
+        3
+    } else {
+        count.to_string().len()
+    }
+}
+
+/// Имя файла по шаблону выгрузки. Пустое имя заменяется на `{hash8}`
+/// (а без хеша — на `file`), длина компонента — не больше `MAX_NAME`.
+fn export_name(tpl: &str, r: &FileRow, opts: &ExportOptions, n: usize, width: usize) -> String {
+    let src = Path::new(&r.path);
+    let ext = src
+        .extension()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let camera = r.camera.as_deref().map(component).unwrap_or_default();
+    let tag = opts
+        .tags
+        .get(&r.id)
+        .and_then(|list| confident_tag(list, opts.tag_show, opts.tag_margin))
+        .map(|(tag, _)| component(tag))
+        .unwrap_or_default();
+    let (date, time) = taken_parts(r.taken_at.as_deref());
+    let hash8: String = r.sha256.chars().take(8).collect();
+    let mut name = tpl
+        .replace("{n}", &format!("{n:0width$}"))
+        .replace("{date}", &date)
+        .replace("{time}", &time)
+        .replace("{camera}", &camera)
+        .replace("{tag}", &tag)
+        .replace("{orig}", &component(&stem))
+        .replace("{ext}", &ext)
+        .replace("{hash8}", &hash8);
+    name = tidy(&name);
+    if name.is_empty() {
+        name = if hash8.is_empty() {
+            "file".to_string()
+        } else {
+            hash8
+        };
+    }
+    let explicit_ext = tpl.contains("{ext}") || ext.is_empty();
+    if explicit_ext {
+        return name.chars().take(MAX_NAME).collect();
+    }
+    let suffix = format!(".{ext}");
+    let keep = MAX_NAME.saturating_sub(suffix.chars().count());
+    let base: String = name.chars().take(keep).collect();
+    format!("{}{suffix}", base.trim_end_matches(['_', '-', '.']))
+}
+
+/// Дата и время из `taken_at` для подстановок: `20240517` и `144243`.
+fn taken_parts(taken: Option<&str>) -> (String, String) {
+    let Some(taken) = taken else {
+        return (String::new(), String::new());
+    };
+    let (date, time) = taken.split_once('T').unwrap_or((taken, ""));
+    let date: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
+    let time: String = time
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(6)
+        .collect();
+    (date, time)
+}
+
+/// Имя каталога альбома: безопасные символы, ≤ `MAX_NAME`, пустое — `album-<id>`.
+fn dir_component(name: &str, id: i64) -> String {
+    let clean = safe_component(name, MAX_NAME);
+    if clean.is_empty() {
+        format!("album-{id}")
+    } else {
+        clean
+    }
+}
+
+fn safe_component(s: &str, max: usize) -> String {
+    let name: String = tidy_sep(s).chars().take(max).collect();
+    let name = name.trim_end_matches(['_', '-', '.']).to_string();
+    if is_windows_reserved(&name) {
+        format!("_{name}")
+    } else {
+        name
+    }
+}
+
+/// Как `tidy`, но запрещённый символ становится разделителем, а не исчезает:
+/// «Дача/2024» и «Дача:2024» дают одно имя `Дача_2024`, и коллизия видна, а не
+/// превращается в другое имя без следа.
+fn tidy_sep(s: &str) -> String {
+    let mut out = String::new();
+    let mut sep = false;
+    for c in s.chars() {
+        let c = if c.is_alphanumeric() || "-_.()[]".contains(c) {
+            c
+        } else {
+            '_'
+        };
+        if c == '_' || c == '-' {
+            if sep || out.is_empty() {
+                continue;
+            }
+            sep = true;
+        } else {
+            sep = false;
+        }
+        out.push(c);
+    }
+    out.trim_end_matches(['_', '-', '.']).to_string()
+}
+
+/// Имена устройств Windows нельзя использовать как имя файла или каталога.
+fn is_windows_reserved(name: &str) -> bool {
+    let upper = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim()
+        .to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.as_bytes()[3].is_ascii_digit())
+}
+
+/// Ключ сравнения имён: без учёта регистра на всех ОС.
+fn name_key(s: &str) -> String {
+    s.to_lowercase()
+}
+
+/// Сравнение имени с записью в цели: на Windows и macOS файловая система
+/// не различает регистр, на Linux — различает.
+fn same_name(a: &str, b: &str) -> bool {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        name_key(a) == name_key(b)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        a == b
+    }
+}
+
+/// Кэш привязан к альбому и каталогу цели: другой `--out` — другой кэш.
+fn export_cache_path(cache_dir: &Path, key: &str) -> PathBuf {
+    cache_dir.join(format!("{key}.txt"))
+}
+
+fn path_hash(path: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut h);
+    h.finish()
+}
+
+fn load_export_cache(cache_dir: &Path, key: &str) -> ExportCache {
+    let mut out = HashMap::new();
+    let Ok(text) = std::fs::read_to_string(export_cache_path(cache_dir, key)) else {
+        return out;
+    };
+    for line in text.lines() {
+        let mut it = line.splitn(4, '\t');
+        let (Some(sha), Some(size), Some(mtime), Some(rel)) =
+            (it.next(), it.next(), it.next(), it.next())
+        else {
+            // Старый формат (sha, size, rel) не доверяем: файл перечитается один раз.
+            continue;
+        };
+        if sha.len() != 64 {
+            continue;
+        }
+        if let (Ok(size), Ok(mtime)) = (size.parse::<u64>(), mtime.parse::<u64>()) {
+            out.insert(rel.to_string(), (size, mtime, sha.to_string()));
+        }
+    }
+    out
+}
+
+/// Кэш ускоряет повтор: известный sha256 не читается с диска, если размер совпал.
+/// Ошибка записи кэша не валит выгрузку — цель уже создана.
+fn save_export_cache(cache_dir: &Path, key: &str, cache: &ExportCache) {
+    let path = export_cache_path(cache_dir, key);
+    if let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_err()
+    {
+        return;
+    }
+    let mut lines: Vec<String> = cache
+        .iter()
+        .map(|(rel, (size, mtime, sha))| format!("{sha}\t{size}\t{mtime}\t{rel}"))
+        .collect();
+    lines.sort();
+    let _ = std::fs::write(&path, lines.join("\n"));
+}
+
+/// CLI: `photocat export --album N --out DIR [--name ШАБЛОН] [--apply]`.
+/// Без `--apply` — только план-дерево; на диске не создаётся ничего.
+pub fn export_cli(args: &[String]) -> Result<()> {
+    let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
+    let album = match flag_str(args, "--album").and_then(|v| v.parse::<i64>().ok()) {
+        Some(id) if id > 0 => id,
+        _ => {
+            eprintln!("нужен номер альбома: export --album N --out DIR [--name ШАБЛОН] [--apply]");
+            std::process::exit(2);
+        }
+    };
+    let out = match flag_str(args, "--out") {
+        Some(o) => PathBuf::from(o),
+        None => {
+            eprintln!("нужен каталог назначения: export --album N --out DIR [--apply]");
+            std::process::exit(2);
+        }
+    };
+    let name = flag_str(args, "--name").unwrap_or_else(|| EXPORT_TEMPLATE.to_string());
+    if let Err(e) = validate_export_template(&name) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
+    let conn = db::open(&db_path)?;
+    let settings = db::load_settings(&conn);
+    if let Err(e) = check_out_dir(&out, &settings.roots) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
+    let data = match db::album_export_data(&conn, album) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    };
+    let tags = if name.contains("{tag}") {
+        db::load_visible_tags(&conn)?
+    } else {
+        HashMap::new()
+    };
+    let mut opts = ExportOptions::new(&out);
+    opts.name = name;
+    opts.tags = tags;
+    opts.tag_show = settings.tag_show;
+    opts.tag_margin = settings.tag_margin;
+    let plan = match plan_album(&export_albums(data), &opts) {
+        Ok(plan) => plan,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(2);
+        }
+    };
+    let root_name = plan.root.display();
+    println!("выгрузка альбома: {} → {}", root_name, plan.out.join(&plan.root).display());
+    println!("{}", plan.summary());
+    print!("{}", plan.outline(usize::MAX));
+    if !has_flag(args, "--apply") {
+        println!("\nэто план (dry-run). Добавьте --apply, чтобы скопировать файлы (не ссылки).");
+        return Ok(());
+    }
+    let progress = std::sync::Arc::new(Progress::default());
+    let show = progress.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        loop {
+            let (d, t, e) = (show.done(), show.total(), show.errors());
+            if t > 0 {
+                eprint!("\rвыгрузка: {d}/{t}, ошибок {e}");
+            } else {
+                eprint!("\r{}", show.msg());
+            }
+            if show.finished() {
+                eprintln!();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+    let report = apply_export(&plan, Some(&progress));
+    println!("{report}");
+    for line in &report.errors {
+        println!("  {line}");
+    }
+    if report.failed > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 pub fn cli(args: &[String]) -> Result<()> {
@@ -632,5 +1569,342 @@ mod tests {
         assert_eq!(numbered(&dst, 2), PathBuf::from("/out/2024/2024-05-17/file-2"));
         let dst = PathBuf::from("/out/file.jpg");
         assert_eq!(numbered(&dst, 3), PathBuf::from("/out/file-3.jpg"));
+    }
+
+    // ------------------------------------------------------------ M20: выгрузка
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-export-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn export_row(id: i64, path: &str, taken: Option<&str>) -> FileRow {
+        let mut r = row(id, path, taken);
+        r.size = 100 + id;
+        r
+    }
+
+    fn album(id: i64, parent: i64, name: &str, files: Vec<FileRow>) -> ExportAlbum {
+        ExportAlbum {
+            id,
+            parent_id: parent,
+            name: name.into(),
+            files,
+        }
+    }
+
+    #[test]
+    fn выгрузка_повторяет_дерево_и_нумерует_файлы() {
+        let albums = [
+            album(
+                1,
+                0,
+                "Дача 2024",
+                vec![export_row(1, "/a/IMG_1.jpg", Some("2024-05-17T10:00:00"))],
+            ),
+            album(
+                2,
+                1,
+                "Май",
+                vec![
+                    export_row(2, "/a/IMG_2.jpg", Some("2024-05-01T10:00:00")),
+                    export_row(3, "/a/IMG_3.jpg", Some("2024-05-02T10:00:00")),
+                ],
+            ),
+            album(3, 1, "Июнь", Vec::new()),
+        ];
+        let plan = plan_album(&albums, &ExportOptions::new("/out")).unwrap();
+        assert_eq!(plan.root, PathBuf::from("Дача_2024"));
+        let rels: Vec<String> = plan
+            .dirs
+            .iter()
+            .map(|d| d.rel.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            rels,
+            ["Дача_2024", "Дача_2024/Май", "Дача_2024/Июнь"]
+        );
+        assert_eq!(plan.dirs[1].depth, 1);
+        assert_eq!(plan.dirs[2].files, 0, "пустой альбом остаётся в плане");
+        assert_eq!(plan.files(), 3);
+        assert!(plan.items.iter().any(|i| i.rel.ends_with("01_IMG_2.jpg")));
+        assert!(plan.items.iter().any(|i| i.rel.ends_with("02_IMG_3.jpg")));
+        assert!(plan.items.iter().any(|i| i.rel.ends_with("Дача_2024/01_IMG_1.jpg")));
+        assert!(plan.summary().contains("файлов 3"));
+    }
+
+    #[test]
+    fn ширина_номера_растёт_с_числом_файлов() {
+        assert_eq!(number_width(1), 2);
+        assert_eq!(number_width(99), 2);
+        assert_eq!(number_width(100), 3);
+        assert_eq!(number_width(1000), 4);
+    }
+
+    #[test]
+    fn имена_каталогов_чистятся_и_не_совпадают_у_соседей() {
+        let albums = [
+            album(1, 0, "Дача/2024", Vec::new()),
+            album(2, 1, "Дача:2024", Vec::new()),
+            album(3, 1, "CON", Vec::new()),
+            album(4, 1, "", Vec::new()),
+        ];
+        let plan = plan_album(&albums, &ExportOptions::new("/out")).unwrap();
+        let names: Vec<String> = plan
+            .dirs
+            .iter()
+            .map(|d| d.rel.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, ["Дача_2024", "Дача_2024-2", "_CON", "album-4"]);
+        assert_eq!(plan.renamed, 1);
+    }
+
+    #[test]
+    fn коллизия_имён_файлов_разводится_номером() {
+        let albums = [album(
+            1,
+            0,
+            "На печать",
+            vec![
+                export_row(1, "/a/x.jpg", None),
+                export_row(2, "/b/x.jpg", None),
+            ],
+        )];
+        let mut opts = ExportOptions::new("/out");
+        opts.name = "{orig}".into();
+        let plan = plan_album(&albums, &opts).unwrap();
+        assert_eq!(plan.items[0].rel, PathBuf::from("На_печать/x.jpg"));
+        assert_eq!(plan.items[1].rel, PathBuf::from("На_печать/x-2.jpg"));
+        assert_eq!(plan.renamed, 1);
+    }
+
+    #[test]
+    fn шаблон_выгрузки_знает_n_и_hash8() {
+        assert!(validate_export_template(EXPORT_TEMPLATE).is_ok());
+        assert!(validate_export_template("{n}_{date}_{time}_{camera}_{tag}_{orig}_{ext}").is_ok());
+        assert!(validate_export_template("{hash8}").is_ok());
+        assert!(validate_export_template("{foo}").is_err());
+        // Шаблон витрины `{n}` не знает, и наоборот.
+        assert!(validate_template("{n}_{orig}").is_err());
+        assert!(validate_export_template("{date}_{orig}").is_ok());
+    }
+
+    #[test]
+    fn имя_из_шаблона_несёт_позицию_дату_и_хеш() {
+        let r = export_row(1, "/a/IMG 1.jpg", Some("2024-05-17T14:42:43"));
+        let opts = ExportOptions::new("/out");
+        let name = export_name("{n}_{date}_{time}_{orig}_{hash8}", &r, &opts, 7, 2);
+        assert_eq!(name, "07_20240517_144243_IMG_1_00000000.jpg");
+    }
+
+    #[test]
+    fn корзина_и_длинный_путь_считаются_и_не_выгружаются() {
+        let mut trashed = export_row(2, "/a/b.jpg", Some("2024-05-17T10:00:00"));
+        trashed.trashed_at = Some(1_716_000_000);
+        let albums = [album(
+            1,
+            0,
+            "Архив",
+            vec![export_row(1, "/a/a.jpg", Some("2024-05-17T09:00:00")), trashed],
+        )];
+        let plan = plan_album(&albums, &ExportOptions::new("/out")).unwrap();
+        assert_eq!(plan.files(), 1);
+        assert_eq!(plan.trashed, 1);
+
+        // 240 символов пути: 120 у корня + 120 у файла — уже за пределом.
+        let long_out = PathBuf::from(format!("/{}", "o".repeat(150)));
+        let albums = [album(
+            1,
+            0,
+            &"к".repeat(80),
+            vec![export_row(1, &format!("/a/{}.jpg", "x".repeat(80)), None)],
+        )];
+        let plan = plan_album(&albums, &ExportOptions::new(&long_out)).unwrap();
+        assert_eq!(plan.too_long, 1);
+        assert_eq!(plan.files(), 0);
+    }
+
+    #[test]
+    fn выгрузка_копирует_а_не_ссылается_и_повтор_идемпотентен() {
+        let dir = tmp_dir("copy");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let src = dir.join("src.jpg");
+        std::fs::write(&src, b"photocat export").unwrap();
+        let sha = derive::sha256_file(&src).unwrap();
+        let mut r = export_row(1, src.to_string_lossy().as_ref(), None);
+        r.size = 15;
+        r.sha256 = sha;
+        let albums = [album(1, 0, "На печать", vec![r])];
+        let plan = plan_album(&albums, &ExportOptions::new(&out)).unwrap();
+        let first = apply_export_in(&plan, None, &dir.join("cache"));
+        assert_eq!(first.copied, 1);
+        assert_eq!(first.failed, 0, "{:?}", first.errors);
+        let dst = out.join("На_печать/01_src.jpg");
+        assert!(dst.is_file());
+        assert_eq!(std::fs::read(&dst).unwrap(), b"photocat export");
+        assert!(!std::fs::symlink_metadata(&dst).unwrap().file_type().is_symlink());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_ne!(
+                std::fs::metadata(&src).unwrap().ino(),
+                std::fs::metadata(&dst).unwrap().ino(),
+                "выгрузка — копия, а не hardlink"
+            );
+        }
+        let second = apply_export_in(&plan, None, &dir.join("cache"));
+        assert_eq!(second.copied, 0);
+        assert_eq!(second.skipped, 1);
+        assert_eq!(second.failed, 0);
+    }
+
+    #[test]
+    fn занятое_другим_содержимым_имя_получает_два_и_не_перезаписывается() {
+        let dir = tmp_dir("collision");
+        let out = dir.join("out");
+        std::fs::create_dir_all(out.join("На_печать")).unwrap();
+        let taken = out.join("На_печать/01_src.jpg");
+        std::fs::write(&taken, b"someone else").unwrap();
+        let src = dir.join("src.jpg");
+        std::fs::write(&src, b"photocat export").unwrap();
+        let mut r = export_row(1, src.to_string_lossy().as_ref(), None);
+        r.size = 15;
+        r.sha256 = derive::sha256_file(&src).unwrap();
+        let albums = [album(1, 0, "На печать", vec![r])];
+        let plan = plan_album(&albums, &ExportOptions::new(&out)).unwrap();
+        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        assert_eq!(report.copied, 1);
+        assert_eq!(report.renamed, 1);
+        assert_eq!(std::fs::read(&taken).unwrap(), b"someone else");
+        assert_eq!(
+            std::fs::read(out.join("На_печать/01_src-2.jpg")).unwrap(),
+            b"photocat export"
+        );
+    }
+
+    #[test]
+    fn перестановка_порядка_даёт_устаревший_порядок_а_не_дубли() {
+        let dir = tmp_dir("stale");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let a = dir.join("a.jpg");
+        let b = dir.join("b.jpg");
+        std::fs::write(&a, b"aaaa").unwrap();
+        std::fs::write(&b, b"bbbb").unwrap();
+        let mut ra = export_row(1, a.to_string_lossy().as_ref(), None);
+        ra.size = 4;
+        ra.sha256 = derive::sha256_file(&a).unwrap();
+        let mut rb = export_row(2, b.to_string_lossy().as_ref(), None);
+        rb.size = 4;
+        rb.sha256 = derive::sha256_file(&b).unwrap();
+        let first = plan_album(
+            &[album(1, 0, "Порядок", vec![ra.clone(), rb.clone()])],
+            &ExportOptions::new(&out),
+        )
+        .unwrap();
+        assert_eq!(apply_export_in(&first, None, &dir.join("cache")).copied, 2);
+        // Меняем порядок: имена с номерами другие, но содержимое уже лежит в цели.
+        let second = plan_album(
+            &[album(1, 0, "Порядок", vec![rb, ra])],
+            &ExportOptions::new(&out),
+        )
+        .unwrap();
+        let report = apply_export_in(&second, None, &dir.join("cache"));
+        assert_eq!(report.copied, 0);
+        assert_eq!(report.stale, 2);
+        assert_eq!(report.renamed, 0);
+        let files = std::fs::read_dir(out.join("Порядок")).unwrap().count();
+        assert_eq!(files, 2, "дублей в цели не появилось");
+    }
+
+    #[test]
+    fn пустой_альбом_создаёт_пустой_каталог() {
+        let dir = tmp_dir("empty");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let planets = [album(1, 0, "Пустой", Vec::new())];
+        let plan = plan_album(&planets, &ExportOptions::new(&out)).unwrap();
+        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        assert_eq!(report.copied, 0);
+        assert!(out.join("Пустой").is_dir());
+        assert_eq!(std::fs::read_dir(out.join("Пустой")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn отсутствующий_файл_не_валит_проход() {
+        let dir = tmp_dir("missing");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let src = dir.join("ok.jpg");
+        std::fs::write(&src, b"ok").unwrap();
+        let mut good = export_row(1, src.to_string_lossy().as_ref(), None);
+        good.size = 2;
+        good.sha256 = derive::sha256_file(&src).unwrap();
+        let gone = export_row(2, dir.join("gone.jpg").to_string_lossy().as_ref(), None);
+        let albums = [album(1, 0, "Смесь", vec![good, gone])];
+        let plan = plan_album(&albums, &ExportOptions::new(&out)).unwrap();
+        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        assert_eq!(report.copied, 1);
+        assert_eq!(report.failed, 1);
+        assert!(report.errors.iter().any(|e| e.contains("нет файла")));
+    }
+
+    #[test]
+    fn отмена_до_старта_ничего_не_создаёт_и_помнит_созданное() {
+        let dir = tmp_dir("cancel");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let src = dir.join("a.jpg");
+        std::fs::write(&src, b"a").unwrap();
+        let mut r = export_row(1, src.to_string_lossy().as_ref(), None);
+        r.size = 1;
+        r.sha256 = derive::sha256_file(&src).unwrap();
+        let plan = plan_album(&[album(1, 0, "Стоп", vec![r])], &ExportOptions::new(&out)).unwrap();
+        let progress = Progress::default();
+        progress.cancel();
+        let report = apply_export_in(&plan, Some(&progress), &dir.join("cache"));
+        assert!(report.cancelled);
+        assert_eq!(report.created.len(), 0);
+        assert!(!out.join("Стоп/01_a.jpg").exists());
+
+        // Обычный прогон перечисляет созданные файлы (для отчёта и теста).
+        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        assert_eq!(report.created, vec![out.join("Стоп/01_a.jpg")]);
+    }
+
+    #[test]
+    fn out_внутри_архива_отвергается() {
+        let root = tmp_dir("roots");
+        let inside = root.join("photos");
+        std::fs::create_dir_all(&inside).unwrap();
+        let roots = vec![root.to_string_lossy().to_string()];
+        assert!(check_out_dir(&inside, &roots).is_err());
+        assert!(check_out_dir(&root, &roots).is_err());
+        let outside = tmp_dir("outside");
+        assert!(check_out_dir(&outside, &roots).is_ok());
+        assert!(check_out_dir(&root.join("nope"), &roots).is_err());
+    }
+
+    #[test]
+    fn глубина_три_и_порядок_соседей_сохраняются() {
+        let albums = [
+            album(1, 0, "Дача 2024", Vec::new()),
+            album(2, 1, "Май", Vec::new()),
+            album(3, 2, "Неделя 1", Vec::new()),
+            album(4, 1, "Июнь", Vec::new()),
+        ];
+        let plan = plan_album(&albums, &ExportOptions::new("/out")).unwrap();
+        assert_eq!(plan.dirs[2].rel, PathBuf::from("Дача_2024/Май/Неделя_1"));
+        assert_eq!(plan.dirs[2].depth, 2);
+        assert_eq!(plan.dirs[3].rel, PathBuf::from("Дача_2024/Июнь"));
+        assert_eq!(plan.dirs.len(), 4);
     }
 }

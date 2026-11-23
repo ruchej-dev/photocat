@@ -30,6 +30,11 @@ cargo build --release      # первый раз ~3 минуты
 ./target/release/photocat albums list --tree
 ./target/release/photocat albums show --id 2 --tree
 
+# 4b. Выгрузка альбома настоящими копиями: структура и порядок как в альбоме
+./target/release/photocat export --album 1 --out /mnt/disk/выгрузка            # план-дерево
+./target/release/photocat export --album 1 --out /mnt/disk/выгрузка --apply    # копии
+./target/release/photocat export --album 1 --out /mnt/disk/выгрузка --name '{n}_{date}_{orig}'
+
 # 5. Витрина (по умолчанию только план, ничего не меняет и не переименовывает)
 ./target/release/photocat organize --out ~/Фото-витрина
 ./target/release/photocat organize --out ~/Фото-витрина --by month     # ГГГГ/ГГГГ-ММ

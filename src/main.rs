@@ -13,6 +13,7 @@
 //!   photocat search <запрос> [--top N] [--text]
 //!   photocat clusters [--k N] [--out FILE]
 //!   photocat albums list|new|rename|move|add|remove|delete|show
+//!   photocat export --album N --out DIR [--name ШАБЛОН] [--apply]
 //!   photocat            (без аргументов — GUI)
 
 mod app;
@@ -64,6 +65,9 @@ fn usage() {
          | rename --id N --name ИМЯ | move --id N --parent ID [--position K]
          | add|remove --id N PATH... | delete --id N [--yes] | show --id N [--tree]
                                             альбомы: дерево и порядок файлов; только строки БД
+  export --album N --out DIR [--name ШАБЛОН] [--apply]
+                                            выгрузить альбом копиями файлов;
+                                            структура и порядок как в альбоме, {{n}}_{{orig}}
   models [list|check|download --id ID --yes]
                                             каталог моделей, проверка и загрузка весов
   settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L]
@@ -514,6 +518,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         "albums" => albums_cli(&args[1..]),
+        "export" => organize::export_cli(&args[1..]),
         "clusters" => {            let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let k = flag_num(&args, "--k", 30);
             let out = flag_str(&args, "--out")

@@ -7,6 +7,7 @@ use crate::embed;
 use crate::faces;
 use crate::index;
 use crate::ocr;
+use crate::organize;
 use crate::player;
 use crate::recycle;
 use crate::storage;
@@ -885,6 +886,18 @@ struct App {
     /// Альбомы выбранного файла для карточки: кэш на один файл.
     file_albums: Vec<(i64, String)>,
     file_albums_for: Option<i64>,
+    /// Выгрузка альбома на диск (M20): диалог, план-дерево и фоновый проход.
+    export_open: bool,
+    export_album: Option<i64>,
+    export_out: String,
+    export_name: String,
+    export_error: String,
+    export_plan: Option<organize::ExportPlan>,
+    /// Для какого альбома, каталога и шаблона построен план: правка поля его устаревает.
+    export_plan_for: Option<(i64, String, String)>,
+    export_report: Option<organize::ExportReport>,
+    export_progress: Option<Arc<Progress>>,
+    export_rx: Option<mpsc::Receiver<organize::ExportReport>>,
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
@@ -1047,6 +1060,16 @@ impl App {
             album_delete_text: String::new(),
             file_albums: Vec::new(),
             file_albums_for: None,
+            export_open: false,
+            export_album: None,
+            export_out: String::new(),
+            export_name: organize::EXPORT_TEMPLATE.to_string(),
+            export_error: String::new(),
+            export_plan: None,
+            export_plan_for: None,
+            export_report: None,
+            export_progress: None,
+            export_rx: None,
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
@@ -1517,6 +1540,105 @@ impl App {
             }
             Err(e) => self.status = format!("альбом не изменён: {e}"),
         }
+    }
+
+    /// Диалог выгрузки альбома (M20). План строится по кнопке, копирование —
+    /// в фоновом потоке; в каталог архива и в `--out` мимо копий ничего не пишется.
+    fn export_dialog_open(&mut self, album_id: i64) {
+        self.export_open = true;
+        self.export_album = Some(album_id);
+        self.export_error.clear();
+        self.export_plan = None;
+        self.export_plan_for = None;
+        self.export_report = None;
+        if self.export_name.trim().is_empty() {
+            self.export_name = organize::EXPORT_TEMPLATE.to_string();
+        }
+    }
+
+    /// Собрать план по текущим полям. Только чтение БД и проверка `--out`.
+    fn export_build(&self) -> Result<organize::ExportPlan> {
+        let album = self.export_album.context("альбом не выбран")?;
+        let out = self.export_out.trim();
+        if out.is_empty() {
+            anyhow::bail!("укажите каталог назначения — он должен уже существовать");
+        }
+        let out = PathBuf::from(out);
+        organize::check_out_dir(&out, &self.settings.roots)?;
+        let template = {
+            let t = self.export_name.trim();
+            if t.is_empty() {
+                organize::EXPORT_TEMPLATE.to_string()
+            } else {
+                t.to_string()
+            }
+        };
+        organize::validate_export_template(&template)?;
+        let conn = db::open(&self.db_path)?;
+        let data = db::album_export_data(&conn, album)?;
+        let tags = if template.contains("{tag}") {
+            db::load_visible_tags(&conn)?
+        } else {
+            HashMap::new()
+        };
+        let mut opts = organize::ExportOptions::new(&out);
+        opts.name = template;
+        opts.tags = tags;
+        opts.tag_show = self.settings.tag_show;
+        opts.tag_margin = self.settings.tag_margin;
+        organize::plan_album(&organize::export_albums(data), &opts)
+    }
+
+    fn export_plan_key(&self) -> (i64, String, String) {
+        (
+            self.export_album.unwrap_or(0),
+            self.export_out.trim().to_string(),
+            self.export_name.trim().to_string(),
+        )
+    }
+
+    fn export_show_plan(&mut self) {
+        match self.export_build() {
+            Ok(plan) => {
+                self.export_plan = Some(plan);
+                self.export_plan_for = Some(self.export_plan_key());
+                self.export_error.clear();
+            }
+            Err(e) => {
+                self.export_plan = None;
+                self.export_plan_for = None;
+                self.export_error = format!("{e:#}");
+            }
+        }
+    }
+
+    /// Запуск копирования: план пересобирается, если поля изменились после него.
+    fn export_start(&mut self) {
+        if self.export_rx.is_some() {
+            return;
+        }
+        if self.export_plan.is_none() || self.export_plan_for.as_ref() != Some(&self.export_plan_key())
+        {
+            self.export_show_plan();
+        }
+        let Some(plan) = self.export_plan.clone() else {
+            if self.export_error.is_empty() {
+                self.export_error = "сначала постройте план".into();
+            }
+            return;
+        };
+        let progress = Arc::new(Progress::default());
+        let worker = progress.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let report = organize::apply_export(&plan, Some(&worker));
+            let _ = tx.send(report);
+        });
+        self.export_progress = Some(progress);
+        self.export_rx = Some(rx);
+        self.export_report = None;
+        self.export_error.clear();
+        self.status = "выгрузка альбома идёт в фоне".into();
     }
 
     /// Действия панели вида «Альбомы». Ошибки — в статус, данные не теряются.
@@ -2060,6 +2182,160 @@ impl App {
         }
         if confirm {
             self.album_commit_dialog(dialog);
+        }
+    }
+
+    /// Диалог выгрузки альбома (M20): каталог, шаблон, план-дерево и отчёт.
+    /// Закрытие окна не отменяет уже запущенный проход — «Стоп» в верхней панели.
+    fn export_modal(&mut self, ctx: &egui::Context) {
+        if !self.export_open {
+            return;
+        }
+        let mut out = self.export_out.clone();
+        let mut name = self.export_name.clone();
+        let mut show_plan = false;
+        let mut start = false;
+        let mut close = false;
+        let mut copy = false;
+        let title = self
+            .export_album
+            .map(|id| album_label(&self.albums, id))
+            .unwrap_or_else(|| "альбом не выбран".into());
+        let plan = self.export_plan.clone();
+        let report_text = self
+            .export_report
+            .as_ref()
+            .map(|r| r.to_string())
+            .unwrap_or_default();
+        let errors: Vec<String> = self
+            .export_report
+            .as_ref()
+            .map(|r| r.errors.clone())
+            .unwrap_or_default();
+        let running = self.export_rx.is_some();
+        let progress_text = self.export_progress.as_ref().map(|p| {
+            let (d, t) = (p.done(), p.total());
+            if t > 0 {
+                format!("выгрузка: {d}/{t}")
+            } else {
+                "выгрузка…".to_string()
+            }
+        });
+        let error = self.export_error.clone();
+        let files = plan.as_ref().map(|p| p.files()).unwrap_or(0);
+        let resp = egui::Modal::new(egui::Id::unique("photocat-export")).show(ctx, |ui| {
+            ui.set_min_width(640.0);
+            ui.label(egui::RichText::new("Выгрузить альбом на диск").size(16.0));
+            ui.label(format!("Альбом «{title}»"));
+            ui.label(
+                egui::RichText::new(
+                    "Копии файлов: структура и порядок повторяют альбом. Оригиналы и каталог \
+                     архива не меняются; в цели ничего не перезаписывается и не удаляется.",
+                )
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.add_space(6.0);
+            egui::Grid::new("export-fields")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Каталог:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut out)
+                            .hint_text("/mnt/disk/выгрузка — каталог уже существует")
+                            .desired_width(440.0),
+                    );
+                    ui.end_row();
+                    ui.label("Имя файла:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text(organize::EXPORT_TEMPLATE)
+                            .desired_width(440.0),
+                    );
+                    ui.end_row();
+                });
+            ui.label(
+                egui::RichText::new(
+                    "Подстановки: {n} {date} {time} {camera} {tag} {orig} {ext} {hash8}. \
+                     {n} — позиция в альбоме; каталоги подальбомов без номеров.",
+                )
+                .size(11.0)
+                .color(DIM),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Показать план").clicked() {
+                    show_plan = true;
+                }
+                if ui
+                    .add_enabled(
+                        !running,
+                        egui::Button::new(format!("Выгрузить {files} файлов")),
+                    )
+                    .on_hover_text("копии, не ссылки; повторный прогон ничего не дублирует")
+                    .clicked()
+                {
+                    start = true;
+                }
+                if ui.button("Закрыть").clicked() {
+                    close = true;
+                }
+            });
+            if let Some(text) = &progress_text {
+                ui.label(egui::RichText::new(text).size(11.0).color(DIM));
+            }
+            if !error.is_empty() {
+                ui.label(
+                    egui::RichText::new(&error)
+                        .size(11.0)
+                        .color(ui.visuals().error_fg_color),
+                );
+            }
+            if let Some(plan) = &plan {
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new(plan.summary()).size(11.0).color(DIM));
+                egui::ScrollArea::both()
+                    .id_salt("export-plan")
+                    .max_height(240.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(plan.outline(160))
+                                .monospace()
+                                .size(11.0),
+                        );
+                    });
+            }
+            if !report_text.is_empty() {
+                ui.add_space(6.0);
+                ui.separator();
+                ui.label(&report_text);
+                for line in errors.iter().take(5) {
+                    ui.label(egui::RichText::new(line).size(11.0).color(DIM));
+                }
+                if ui.button("Скопировать отчёт").clicked() {
+                    copy = true;
+                }
+            }
+        });
+        if resp.backdrop_response.clicked() {
+            close = true;
+        }
+        self.export_out = out;
+        self.export_name = name;
+        if show_plan {
+            self.export_show_plan();
+        }
+        if start {
+            self.export_start();
+        }
+        if copy {
+            ctx.copy_text(report_text.clone());
+            self.status = "отчёт выгрузки скопирован в буфер обмена".into();
+        }
+        if close {
+            self.export_open = false;
         }
     }
 
@@ -2822,6 +3098,12 @@ impl App {
         if let Some(p) = &self.trash_progress {
             let running = self.trash_rx.is_some();
             if progress_row(ui, "Корзина", p, running) {
+                p.cancel();
+            }
+        }
+        if let Some(p) = &self.export_progress {
+            let running = self.export_rx.is_some();
+            if progress_row(ui, "Выгрузка", p, running) {
                 p.cancel();
             }
         }
@@ -6402,6 +6684,25 @@ impl eframe::App for App {
             }
         }
 
+        if let Some(rx) = &self.export_rx {
+            match rx.try_recv() {
+                Ok(report) => {
+                    self.export_rx = None;
+                    self.export_progress = None;
+                    self.status = report.to_string();
+                    self.export_report = Some(report);
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.export_rx = None;
+                    self.export_progress = None;
+                    self.status = "выгрузка прервана без отчёта".into();
+                }
+            }
+        }
+
         egui::Panel::top("top")
             .resizable(false)
             .show(ui, |ui| self.top_bar(ui));
@@ -6429,6 +6730,7 @@ impl eframe::App for App {
         self.picker_modal(ctx);
         self.storage_modal(ctx);
         self.album_modal(ctx);
+        self.export_modal(ctx);
         self.trash_modal(ctx);
         self.poll_photo(ctx);
         self.poll_video(ctx);
@@ -6470,6 +6772,7 @@ impl eframe::App for App {
         let mut album_browse = self.album_browse_all;
         let mut album_action: Option<AlbumAction> = None;
         let mut album_dialog_request: Option<AlbumDialog> = None;
+        let mut album_export_request: Option<i64> = None;
         let mut trash_clear = false;
         let mut trash_restore_all = false;
         let face_clusters = std::mem::take(&mut self.face_clusters);
@@ -6891,10 +7194,15 @@ impl eframe::App for App {
                         album_action = Some(AlbumAction::FileDown);
                     }
                     if ui
-                        .add_enabled(false, egui::Button::new("Выгрузить на диск…"))
-                        .on_hover_text("появится вместе с выгрузкой альбома (M20)")
+                        .button("Выгрузить на диск…")
+                        .on_hover_text(
+                            "копии файлов в каталог: структура и порядок как в альбоме; \
+                             в цели ничего не перезаписывается",
+                        )
                         .clicked()
-                    {}
+                    {
+                        album_export_request = Some(node.id);
+                    }
                 });
                 if album_browse {
                     ui.label(
@@ -7860,6 +8168,9 @@ impl eframe::App for App {
         if let Some(action) = album_action {
             self.album_apply(action);
         }
+        if let Some(id) = album_export_request {
+            self.export_dialog_open(id);
+        }
         // Чип снимает ровно свой фильтр; сетка пересчитается следующим кадром.
         if clear_chips.query {
             self.query.clear();
@@ -8797,6 +9108,51 @@ mod tests {
         );
         // На диске ничего не создано: альбом — только строки БД.
         assert!(!std::path::Path::new("/tmp/album.jpg").exists());
+    }
+
+    #[test]
+    fn диалог_выгрузки_строит_план_и_не_выгружает_в_архив() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-export-frame-{}.db",
+            std::process::id()
+        ));
+        let out = std::env::temp_dir().join(format!(
+            "photocat-export-out-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&out).unwrap();
+        let album;
+        {
+            let conn = db::open(&path).unwrap();
+            db::insert(&conn, &file_row(0, "image", "export.jpg")).unwrap();
+            let file = conn
+                .query_row("SELECT id FROM files WHERE path=?1", ["/tmp/export.jpg"], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap();
+            album = db::create_album(&conn, 0, "На печать", "").unwrap();
+            db::add_to_album(&conn, album, &[file]).unwrap();
+        }
+        let mut app = App::new(path);
+        app.export_dialog_open(album);
+        app.export_out = out.to_string_lossy().to_string();
+        app.export_name = "{n}_{orig}".into();
+        let plan = app.export_build().expect("план строится по строке БД");
+        assert_eq!(plan.files(), 1);
+        assert!(
+            plan.items[0].rel.ends_with("01_export.jpg"),
+            "{:?}",
+            plan.items[0].rel
+        );
+        assert!(!out.join("На_печать").exists(), "план ничего не создаёт");
+
+        // Каталог внутри архива — отказ с понятным текстом, а не выгрузка в оригиналы.
+        let archive = out.join("archive");
+        std::fs::create_dir_all(archive.join("sub")).unwrap();
+        app.settings.roots = vec![archive.to_string_lossy().to_string()];
+        app.export_out = archive.join("sub").to_string_lossy().to_string();
+        let err = app.export_build().unwrap_err().to_string();
+        assert!(err.contains("внутри каталога архива"), "{err}");
     }
 
 }

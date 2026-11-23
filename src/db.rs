@@ -1800,6 +1800,43 @@ pub fn album_items(conn: &Connection, album_id: i64) -> Result<Vec<FileRow>> {
     Ok(out)
 }
 
+/// Поддерево альбома в порядке дерева: корень, затем его подальбомы.
+/// Нужно выгрузке (M20): структура на диске повторяет это дерево.
+pub fn album_subtree(conn: &Connection, id: i64) -> Result<Vec<AlbumNode>> {
+    let tree = albums_tree(conn)?;
+    if !tree.iter().any(|n| n.id == id) {
+        anyhow::bail!("альбома {id} нет");
+    }
+    let mut ids = vec![id];
+    loop {
+        let mut grown = false;
+        for node in &tree {
+            if ids.contains(&node.parent_id) && !ids.contains(&node.id) {
+                ids.push(node.id);
+                grown = true;
+            }
+        }
+        if !grown {
+            break;
+        }
+    }
+    Ok(tree.into_iter().filter(|n| ids.contains(&n.id)).collect())
+}
+
+/// Данные для выгрузки альбома (M20): узлы поддерева и их файлы в порядке
+/// альбома. Только чтение; ни один файл на диске не открывается.
+pub fn album_export_data(
+    conn: &Connection,
+    id: i64,
+) -> Result<Vec<(AlbumNode, Vec<FileRow>)>> {
+    let mut out = Vec::new();
+    for node in album_subtree(conn, id)? {
+        let files = album_items(conn, node.id)?;
+        out.push((node, files));
+    }
+    Ok(out)
+}
+
 /// Альбомы, в которых лежит файл: id и путь в дереве. Для инспектора и карточки.
 pub fn album_refs_of_file(conn: &Connection, file_id: i64) -> Result<Vec<(i64, String)>> {
     let map = album_rows(conn)?;
