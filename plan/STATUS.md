@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid) → next:M21.3 (file card and inspector), then M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector) → next:M21.4 (duplicates, calendar, faces, trash, integrity), then M21.5/M21.6 and M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; CLI reports follow it from M21.6. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1100,3 +1100,30 @@ and the first-launch detection checked on fresh DBs: `LANG=ru_RU.UTF-8` → `ru`
 **Next.** M21.3: file card and inspector (labels, date source, tags, OCR excerpt, decisions), then
 M21.4 (duplicates, calendar, faces, trash, integrity) and M21.6 (CLI reports take `lang` in the
 structs).
+
+## M21.3 — the file card and the inspector in English (2026-11-24)
+
+The owner asked for the next step of the interface translation: the right-panel inspector and the
+file card are now fully translated, and the grid no longer has a Russian island beside it.
+
+**What moved.** `details_panel` and `file_card` take `settings.lang` and pass it to `t()`. Translated:
+the panel title `File details` and `Hide` with its hint; the empty state; the `▶ video` / `no preview`
+placeholder; the `selected N · size` line; `Open full screen`, `To trash` and their hints; the status
+messages after those actions; the metadata labels `Date`, `Camera`, `Size`; the date source
+(`file name`, `file time`, `source not set`; `EXIF` stays a token); the `Albums` section with its
+remove hint and status; `AI tags` with `tag: <name>`, `tag: not sure — the top weights are close`,
+`all tags (N)`, `tag: not computed`, the `remove` button and the hidden-tag restore; `My tags` with
+`none yet`, the input hint, `Add tag` and its statuses; `Text on the photo` with
+`Recognize text`/`Recognize again`, the disabled-button note, `Show the full text` and hints.
+Data stays as data: file names, paths, tag labels and OCR text are never translated; `GPS`/`SHA256`/
+`EXIF` are tokens, not labels. `date_source(src, lang)` gained the language argument; `tag_row` does
+the same for its `remove` button. Status strings are translated as a fixed part plus the dynamic
+value, so the CLI screens that still speak Russian (M21.4) are untouched.
+
+**Checks.** `cargo test` — 186 passed, 6 `#[ignore]` (new: `english_language_translates_the_file_card`
+— a headless card frame with `File details`, `Date`, `Camera`, `Size`, `AI tags`, `My tags`, `Text on
+the photo`, `Open full screen`, `To trash`, `tag: …`, `file name`, and no Russian card label left).
+The three card tests that assert Russian now set `settings.lang = Ru` themselves, as the scope test
+does. `cargo clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.
+
+**Next.** M21.4: duplicates, calendar, faces, trash and integrity screens, their dialogs and statuses.

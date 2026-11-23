@@ -768,3 +768,7 @@ shell (55 labels); ADR 0040; `plan/I18N.md`; tests for translation, persistence 
 M21.2: language detected from the system locale on the first launch (`db::ensure_lang`, English when
 unknown); the grid is translated (title, counts, month headers, sort/layout, chips, empty state,
 `db::human_in` units, `i18n::count` plurals) — `cargo test` 185 passed.
+M21.3: the file card and the inspector are translated (panel title, empty state, preview placeholder,
+selection line, `Open full screen`/`To trash` and statuses, `Date`/`Camera`/`Size`, date source,
+`Albums`, `AI tags` with hidden-tag restore, `My tags`, `Text on the photo`) — `cargo test` 186
+tests include a headless English card frame; `check.sh` 44/0.

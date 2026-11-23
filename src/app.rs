@@ -481,13 +481,13 @@ fn selected_fill() -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(90, 170, 255, 40)
 }
 
-/// Источник даты съёмки: в БД латиницей, на экране по-русски.
-fn date_source(src: &str) -> &'static str {
+/// Источник даты съёмки: в БД латиницей, на экране на языке интерфейса.
+fn date_source(src: &str, lang: i18n::Lang) -> &'static str {
     match src {
         "exif" => "EXIF",
-        "filename" => "имя файла",
-        "mtime" => "время файла",
-        _ => "источник не указан",
+        "filename" => t(lang, "имя файла"),
+        "mtime" => t(lang, "время файла"),
+        _ => t(lang, "источник не указан"),
     }
 }
 
@@ -4959,13 +4959,14 @@ impl App {
 
     /// Правая панель: сведения и действия по выбранному файлу.
     fn details_panel(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Сведения о файле").size(14.0));
+            ui.label(egui::RichText::new(t(lang, "Сведения о файле")).size(14.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .small_button("Скрыть")
-                    .on_hover_text("освободить место сетке и календарю")
+                    .small_button(t(lang, "Скрыть"))
+                    .on_hover_text(t(lang, "освободить место сетке и календарю"))
                     .clicked()
                 {
                     self.details_open = false;
@@ -4981,12 +4982,14 @@ impl App {
 
     /// Карточка файла: превью, метаданные, теги и текст. Одна на весь интерфейс.
     fn file_card(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         let Some(id) = self.selected else {
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
+                    lang,
                     "Выберите снимок в сетке — здесь появятся дата, камера, теги и текст.",
-                )
+                ))
                 .size(12.0)
                 .color(DIM),
             );
@@ -5028,8 +5031,8 @@ impl App {
         };
         if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
             let txt = match f.kind.as_str() {
-                "video" => "▶ видео".to_string(),
-                _ => "нет превью".to_string(),
+                "video" => t(lang, "▶ видео").to_string(),
+                _ => t(lang, "нет превью").to_string(),
             };
             ui.painter().text(
                 rect.center(),
@@ -5052,9 +5055,10 @@ impl App {
                 .sum();
             ui.label(
                 egui::RichText::new(format!(
-                    "в выделении {} · {}",
+                    "{} {} · {}",
+                    t(lang, "в выделении"),
                     self.picked.len(),
-                    db::human(bytes)
+                    db::human_in(lang, bytes)
                 ))
                 .size(11.0)
                 .color(ACCENT),
@@ -5063,26 +5067,30 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             if ui
-                .button("Открыть полный экран")
-                .on_hover_text("двойной клик по плитке делает то же")
+                .button(t(lang, "Открыть полный экран"))
+                .on_hover_text(t(lang, "двойной клик по плитке делает то же"))
                 .clicked()
             {
                 self.open_viewer(id);
             }
             if ui
-                .button("В корзину")
-                .on_hover_text(
+                .button(t(lang, "В корзину"))
+                .on_hover_text(t(
+                    lang,
                     "убрать из обычных видов в корзину приложения; на диске файл не меняется",
-                )
+                ))
                 .clicked()
             {
                 match db::mark_trashed(&self.db_path, id) {
                     Ok(()) => {
                         self.selected = None;
                         self.reload();
-                        self.status = "файл в корзине приложения; на диске не тронут".into();
+                        self.status =
+                            t(lang, "файл в корзине приложения; на диске не тронут").into();
                     }
-                    Err(e) => self.status = format!("файл не убран в корзину: {e}"),
+                    Err(e) => {
+                        self.status = format!("{}: {e}", t(lang, "файл не убран в корзину"))
+                    }
                 }
             }
         });
@@ -5094,22 +5102,22 @@ impl App {
                 .as_deref()
                 .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
                 .unwrap_or_else(|| "—".into()),
-            date_source(&f.taken_src)
+            date_source(&f.taken_src, lang)
         );
-        meta_row(ui, "Дата", &date);
+        meta_row(ui, t(lang, "Дата"), &date);
         if let Some(c) = &f.camera {
-            meta_row(ui, "Камера", c);
+            meta_row(ui, t(lang, "Камера"), c);
         }
         if let (Some(a), Some(b)) = (f.lat, f.lon) {
             meta_row(ui, "GPS", &format!("{a:.5}, {b:.5}"));
         }
-        let mut size = format!("{}×{} · {}", f.width, f.height, db::human(f.size));
+        let mut size = format!("{}×{} · {}", f.width, f.height, db::human_in(lang, f.size));
         if f.kind == "video"
             && let Some(d) = f.duration_s
         {
             size.push_str(&format!(" · ▶ {}", db::duration(d)));
         }
-        meta_row(ui, "Размер", &size);
+        meta_row(ui, t(lang, "Размер"), &size);
         meta_row(
             ui,
             "SHA256",
@@ -5125,14 +5133,17 @@ impl App {
                 .unwrap_or_default();
         }
         if !self.file_albums.is_empty() {
-            section_label(ui, "Альбомы");
+            section_label(ui, t(lang, "Альбомы"));
             let list = self.file_albums.clone();
             let mut remove_from: Option<i64> = None;
             for (album_id, path) in &list {
                 ui.horizontal(|ui| {
                     if ui
                         .small_button("×")
-                        .on_hover_text("убрать снимок из этого альбома; файл на диске не меняется")
+                        .on_hover_text(t(
+                            lang,
+                            "убрать снимок из этого альбома; файл на диске не меняется",
+                        ))
                         .clicked()
                     {
                         remove_from = Some(*album_id);
@@ -5147,14 +5158,17 @@ impl App {
                     Ok(n) => {
                         self.file_albums_for = None;
                         self.refresh_albums();
-                        self.status = format!("снимок убран из альбома: строк {n}");
+                        self.status =
+                            format!("{}: {n}", t(lang, "снимок убран из альбома"));
                     }
-                    Err(e) => self.status = format!("из альбома не убрать: {e}"),
+                    Err(e) => {
+                        self.status = format!("{}: {e}", t(lang, "из альбома не убрать"))
+                    }
                 }
             }
         }
 
-        section_label(ui, "Теги ИИ");
+        section_label(ui, t(lang, "Теги ИИ"));
         // Уверенность — по отрыву первого тега от второго (порог и отрыв в настройках).
         // Если отрыва нет, «документ» не подсвечивается: честное «не уверен» и топ-3,
         // остальные веса — под раскрывающейся строкой, чтобы не выдавать шум за ответ.
@@ -5167,14 +5181,14 @@ impl App {
             match &confident {
                 Some(tag) => {
                     ui.label(
-                        egui::RichText::new(format!("тег: {tag}"))
+                        egui::RichText::new(format!("{} {tag}", t(lang, "тег:")))
                             .size(12.0)
                             .color(ACCENT),
                     );
                 }
                 None if !tags.is_empty() => {
                     ui.label(
-                        egui::RichText::new("тег: не уверен — первые веса близки")
+                        egui::RichText::new(t(lang, "тег: не уверен — первые веса близки"))
                             .size(12.0)
                             .color(DIM),
                     );
@@ -5187,22 +5201,22 @@ impl App {
             let top = if confident.is_some() { tags.len() } else { 3.min(tags.len()) };
             for (tag, score) in tags.iter().take(top) {
                 let pct = self.tag_percentile(tag, *score);
-                tag_row(ui, tag, *score, pct, confident.as_deref(), &mut hide);
+                tag_row(ui, tag, *score, pct, confident.as_deref(), &mut hide, lang);
             }
             if confident.is_none() && tags.len() > top {
-                egui::CollapsingHeader::new(format!("все теги ({})", tags.len()))
+                egui::CollapsingHeader::new(format!("{} ({})", t(lang, "все теги"), tags.len()))
                     .id_salt(("card_tags", id))
                     .show(ui, |ui| {
                         for (tag, score) in tags.iter().skip(top) {
                             let pct = self.tag_percentile(tag, *score);
-                            tag_row(ui, tag, *score, pct, None, &mut hide);
+                            tag_row(ui, tag, *score, pct, None, &mut hide, lang);
                         }
                     });
             }
             ui.spacing_mut().item_spacing.y = spacing;
         } else {
             ui.label(
-                egui::RichText::new("тег: не посчитан")
+                egui::RichText::new(t(lang, "тег: не посчитан"))
                     .size(12.0)
                     .color(DIM),
             );
@@ -5214,37 +5228,45 @@ impl App {
                         tags.retain(|(t, _)| t != &tag);
                     }
                     *self.hidden_tags.entry(id).or_insert(0) += 1;
-                    self.status = format!("тег «{tag}» убран у этого фото");
+                    self.status =
+                        format!("{}: «{tag}»", t(lang, "тег убран у этого фото"));
                 }
-                Err(e) => self.status = format!("тег не убран: {e}"),
+                Err(e) => self.status = format!("{}: {e}", t(lang, "тег не убран")),
             }
         }
         let hidden = self.hidden_tags.get(&id).copied().unwrap_or(0);
         if hidden > 0
             && ui
-                .button(format!("вернуть скрытые теги ({hidden})"))
+                .button(format!(
+                    "{} ({hidden})",
+                    t(lang, "вернуть скрытые теги")
+                ))
                 .clicked()
         {
             match db::unhide_tags(&self.db_path, id) {
                 Ok(_) => {
                     self.reload();
-                    self.status = "скрытые теги возвращены".into();
+                    self.status = t(lang, "скрытые теги возвращены").into();
                 }
-                Err(e) => self.status = format!("теги не вернуть: {e}"),
+                Err(e) => self.status = format!("{}: {e}", t(lang, "теги не вернуть")),
             }
         }
 
-        section_label(ui, "Свои теги");
+        section_label(ui, t(lang, "Свои теги"));
         let own = self.user_tags.get(&id).cloned().unwrap_or_default();
         if own.is_empty() {
-            ui.label(egui::RichText::new("пока нет").size(12.0).color(DIM));
+            ui.label(
+                egui::RichText::new(t(lang, "пока нет"))
+                    .size(12.0)
+                    .color(DIM),
+            );
         }
         let mut remove_own: Option<String> = None;
         for tag in &own {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tag).size(12.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("убрать").clicked() {
+                    if ui.small_button(t(lang, "убрать")).clicked() {
                         remove_own = Some(tag.clone());
                     }
                 });
@@ -5256,18 +5278,18 @@ impl App {
                     if let Some(tags) = self.user_tags.get_mut(&id) {
                         tags.retain(|t| t != &tag);
                     }
-                    self.status = format!("свой тег «{tag}» убран");
+                    self.status = format!("{}: «{tag}»", t(lang, "свой тег убран"));
                 }
-                Err(e) => self.status = format!("тег не убран: {e}"),
+                Err(e) => self.status = format!("{}: {e}", t(lang, "тег не убран")),
             }
         }
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.user_tag_input)
-                    .hint_text("свой тег, например мебель")
+                    .hint_text(t(lang, "свой тег, например мебель"))
                     .desired_width(150.0),
             );
-            if ui.button("Добавить тег").clicked() {
+            if ui.button(t(lang, "Добавить тег")).clicked() {
                 let tag = self.user_tag_input.trim().to_string();
                 if !tag.is_empty() {
                     match db::add_user_tag(&self.db_path, id, &tag) {
@@ -5276,34 +5298,37 @@ impl App {
                             tags.push(tag.clone());
                             tags.sort();
                             self.user_tag_input.clear();
-                            self.status = format!("свой тег добавлен: «{tag}»");
+                            self.status =
+                                format!("{}: «{tag}»", t(lang, "свой тег добавлен"));
                         }
-                        Err(e) => self.status = format!("тег не добавлен: {e}"),
+                        Err(e) => {
+                            self.status = format!("{}: {e}", t(lang, "тег не добавлен"))
+                        }
                     }
                 }
             }
         });
 
         if f.kind == "image" {
-            section_label(ui, "Текст на фото");
+            section_label(ui, t(lang, "Текст на фото"));
             let label = if self.ocr_text.get(&id).is_some_and(|t| !t.trim().is_empty()) {
-                "Распознать заново"
+                t(lang, "Распознать заново")
             } else {
-                "Распознать текст"
+                t(lang, "Распознать текст")
             };
             if ui
                 .add_enabled(
                     self.tesseract.is_some() && self.ocr_rx.is_none(),
                     egui::Button::new(label),
                 )
-                .on_hover_text("только для этого снимка; оригинал не меняется")
+                .on_hover_text(t(lang, "только для этого снимка; оригинал не меняется"))
                 .clicked()
             {
                 self.start_ocr(Some(id));
             }
             if self.tesseract.is_none() {
                 ui.label(
-                    egui::RichText::new("кнопка погашена: tesseract не запускается")
+                    egui::RichText::new(t(lang, "кнопка погашена: tesseract не запускается"))
                         .size(11.0)
                         .color(DIM),
                 );
@@ -5325,8 +5350,8 @@ impl App {
                         });
                 });
                 if ui
-                    .button("Показать текст целиком")
-                    .on_hover_text("полный экран: кадр и весь распознанный текст")
+                    .button(t(lang, "Показать текст целиком"))
+                    .on_hover_text(t(lang, "полный экран: кадр и весь распознанный текст"))
                     .clicked()
                 {
                     self.open_viewer(id);
@@ -7006,6 +7031,7 @@ fn tag_row(
     pct: Option<u32>,
     confident: Option<&str>,
     hide: &mut Option<String>,
+    lang: i18n::Lang,
 ) {
     ui.horizontal(|ui| {
         let color = if confident == Some(tag) {
@@ -7024,8 +7050,8 @@ fn tag_row(
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .small_button("убрать")
-                .on_hover_text("убрать тег у этого фото; оригинал не меняется")
+                .small_button(t(lang, "убрать"))
+                .on_hover_text(t(lang, "убрать тег у этого фото; оригинал не меняется"))
                 .clicked()
             {
                 *hide = Some(tag.to_string());
@@ -9835,6 +9861,8 @@ mod tests {
             ],
         );
         app.tag_dists = embed::tag_distributions(&app.tags);
+        // Русский текст проверяется явно: язык — поле настроек, а не глобальная переменная.
+        app.settings.lang = i18n::Lang::Ru;
         let texts = card_frame(&mut app, &egui::Context::default());
         assert!(
             texts.iter().any(|t| t.contains("тег: не уверен")),
@@ -9861,9 +9889,67 @@ mod tests {
             ],
         );
         app.tag_dists = embed::tag_distributions(&app.tags);
+        app.settings.lang = i18n::Lang::Ru;
         let texts = card_frame(&mut app, &egui::Context::default());
         assert!(texts.iter().any(|t| t == "тег: мебель"), "{texts:?}");
         assert!(!texts.iter().any(|t| t.contains("не уверен")), "{texts:?}");
+    }
+
+    /// M21.3: карточка и инспектор переводятся целиком — заголовок, подписи, источник
+    /// даты, теги, свои теги и блок распознавания. Данные (имя файла, сами теги) не трогаем.
+    #[test]
+    fn английский_язык_переводит_карточку_файла() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-card-i18n.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.items[0].camera = Some("Canon".into());
+        app.items[0].taken_src = "filename".into();
+        app.selected = Some(1);
+        app.tags.insert(
+            1,
+            vec![
+                ("furniture".to_string(), 0.30),
+                ("interior".to_string(), 0.25),
+            ],
+        );
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        app.settings.lang = i18n::Lang::En;
+        let texts = card_frame(&mut app, &egui::Context::default());
+        for needle in [
+            "File details",
+            "Date",
+            "Camera",
+            "Size",
+            "AI tags",
+            "My tags",
+            "Text on the photo",
+            "Open full screen",
+            "To trash",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет «{needle}»: {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|t| t.starts_with("tag: ")),
+            "тег без английской подписи: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("file name")),
+            "источник даты не переведён: {texts:?}"
+        );
+        for ru in [
+            "Сведения о файле",
+            "Теги ИИ",
+            "Свои теги",
+            "Текст на фото",
+            "Открыть полный экран",
+        ] {
+            assert!(
+                !texts.iter().any(|t| t == ru),
+                "русская подпись «{ru}» осталась: {texts:?}"
+            );
+        }
     }
 
     #[test]
@@ -10396,6 +10482,7 @@ mod tests {
         let mut app = m17_app();
         app.picked = BTreeSet::from([1, 2]);
         app.selected = Some(2);
+        app.settings.lang = i18n::Lang::Ru;
         let texts = card_frame(&mut app, &egui::Context::default());
         assert!(
             texts.iter().any(|t| t.starts_with("в выделении 2")),
