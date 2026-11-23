@@ -853,3 +853,39 @@ CLIP-модели остались с прежним ансамблем из д�
 Контрольные красный/синий квадраты: правильный порядок с отрывом. `cargo test` — каталог,
 ошибка размерности, отказ без согласия, миграция 6→7 и сохранение тегов двух моделей; старые
 CLIP-векторы и теги остались на месте, `user_version` 7.
+
+## 0040. Language of the project: English first, Russian second; UI translated by lookup
+
+**Decision.** The repository speaks English: documentation, commit messages and new code comments.
+The existing Russian documentation is kept as the second variant (`*.ru.md` next to the English main
+file) and linked from it — nothing is deleted. Communication with the owner stays Russian.
+
+The interface is bilingual: `src/i18n.rs` holds `Lang` (`En` default, `Ru`) and a table of
+Russian→English pairs. The source text in the code stays Russian, and `i18n::t(lang, "…")` returns
+the English translation when English is chosen; a string that is not in the table yet is shown in
+Russian instead of disappearing. The choice lives in `settings.lang` (`en`/`ru`), is made in
+"Settings → Interface" and is written to the DB immediately.
+
+**Why a lookup table and not keys + resource files.** Keys (`grid.all_files`) make the code
+unreadable for the owner, who reads Russian, and require every label to be renamed at once — a
+mechanical rewrite of `app.rs` with no behaviour change. A table keyed by the Russian source means a
+screen can be translated in one commit, the diff shows exactly which labels are covered, and a
+missing translation degrades to a readable Russian label.
+
+**Why the language is passed explicitly and not kept in a global.** Tests render frames headlessly
+and assert text; a global would make those tests depend on each other's order. The `Lang` value
+travels from `Settings` into the drawing functions.
+
+**Why not gettext/fluent/rust-i18n.** A new dependency for a two-language personal app is a cost
+with no benefit; the table is ~1 reference file, edited by hand. Revisit only if a third language
+with plural rules appears.
+
+**Consequences.** `t()` takes `&'static str`, so dynamic fragments are translated as parts, and
+screens with numbers are translated piecewise. Coverage is tracked in `plan/I18N.md`; an untranslated
+screen shows Russian — a visible state, not a bug. `db::human()` units (`КиБ/МиБ`) and month names
+are content, not labels: they move to the table when the content panes are translated.
+
+**Checks (M21).** `cargo test` — the English shell test renders the window headlessly and asserts
+`All files`, `Settings`, `LIBRARY`, `FILTER`; the persistence test reopens the DB and finds
+`settings.lang = ru`; the i18n table test rejects empty, duplicate or non-Cyrillic keys.
+`clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.

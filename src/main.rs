@@ -23,6 +23,7 @@ mod derive;
 mod dupes;
 mod embed;
 mod faces;
+mod i18n;
 mod index;
 mod ocr;
 mod organize;
@@ -74,7 +75,7 @@ fn usage() {
                                             структура и порядок как в альбоме, {{n}}_{{orig}}
   models [list|check|download --id ID --yes]
                                             каталог моделей, проверка и загрузка весов
-  settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L]
+  settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L] [--lang en|ru]
            [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH] [--curl PATH]
                                             показать или изменить настройки
   doctor                                   что есть на машине: программы, языки OCR, модель
@@ -469,6 +470,20 @@ fn main() -> Result<()> {
                 settings.ocr_lang = lang;
                 changed = true;
             }
+            // Язык интерфейса (M21, ADR 0040): только коды из списка, иначе — ошибка,
+            // чтобы опечатка не превращалась молча в английский.
+            if let Some(lang) = flag_str(&args, "--lang") {
+                match lang.trim().to_ascii_lowercase().as_str() {
+                    "en" | "ru" => {
+                        settings.lang = i18n::Lang::parse(&lang);
+                        changed = true;
+                    }
+                    other => {
+                        eprintln!("нет такого языка интерфейса: {other} (en, ru)");
+                        std::process::exit(2);
+                    }
+                }
+            }
             if let Some(n) = flag_str(&args, "--max-model-mb") {
                 settings.max_model_mb = n.parse().unwrap_or(settings.max_model_mb);
                 changed = true;
@@ -515,6 +530,7 @@ fn main() -> Result<()> {
             println!("тег: уверенный ≥ {:.2}, отрыв {:.2}", settings.tag_show, settings.tag_margin);
             println!("фильтр по тегу: порог {}% (процентиль)", settings.tag_show_pct);
             println!("языки OCR: {}", settings.ocr_lang);
+            println!("язык интерфейса: {}", settings.lang.code());
             println!("порог лиц: {:.2}", settings.face_threshold);
             for tool in tools::ALL {
                 println!(

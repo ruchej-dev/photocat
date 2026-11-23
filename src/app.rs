@@ -5,6 +5,7 @@ use crate::derive;
 use crate::dupes::{self, Group};
 use crate::embed;
 use crate::faces;
+use crate::i18n::{self, t};
 use crate::index;
 use crate::ocr;
 use crate::organize;
@@ -211,20 +212,23 @@ enum KindFilter {
 }
 
 impl KindFilter {
-    fn label(self) -> &'static str {
-        match self {
-            KindFilter::All => "Все",
-            KindFilter::Images => "Фото",
-            KindFilter::Videos => "Видео",
-        }
+    fn label(self, lang: i18n::Lang) -> &'static str {
+        t(
+            lang,
+            match self {
+                KindFilter::All => "Все",
+                KindFilter::Images => "Фото",
+                KindFilter::Videos => "Видео",
+            },
+        )
     }
 
     /// Подпись чипа над сеткой; `None` — фильтра нет.
-    fn chip(self) -> Option<&'static str> {
+    fn chip(self, lang: i18n::Lang) -> Option<&'static str> {
         match self {
             KindFilter::All => None,
-            KindFilter::Images => Some("только фото"),
-            KindFilter::Videos => Some("только видео"),
+            KindFilter::Images => Some(t(lang, "только фото")),
+            KindFilter::Videos => Some(t(lang, "только видео")),
         }
     }
 }
@@ -284,6 +288,7 @@ struct Viewer {
 /// Раздел диалога «Настройки»: редкие настройки не отнимают экран у сетки.
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
+    Interface,
     Model,
     Index,
     Tags,
@@ -293,7 +298,8 @@ enum SettingsTab {
 }
 
 impl SettingsTab {
-    const ALL: [SettingsTab; 6] = [
+    const ALL: [SettingsTab; 7] = [
+        SettingsTab::Interface,
         SettingsTab::Model,
         SettingsTab::Index,
         SettingsTab::Tags,
@@ -302,15 +308,19 @@ impl SettingsTab {
         SettingsTab::Tools,
     ];
 
-    fn label(self) -> &'static str {
-        match self {
-            SettingsTab::Model => "Модель ИИ",
-            SettingsTab::Index => "Индексация и дубли",
-            SettingsTab::Tags => "Теги",
-            SettingsTab::Faces => "Лица",
-            SettingsTab::Storage => "Хранилище",
-            SettingsTab::Tools => "Внешние программы",
-        }
+    fn label(self, lang: i18n::Lang) -> &'static str {
+        t(
+            lang,
+            match self {
+                SettingsTab::Interface => "Интерфейс",
+                SettingsTab::Model => "Модель ИИ",
+                SettingsTab::Index => "Индексация и дубли",
+                SettingsTab::Tags => "Теги",
+                SettingsTab::Faces => "Лица",
+                SettingsTab::Storage => "Хранилище",
+                SettingsTab::Tools => "Внешние программы",
+            },
+        )
     }
 }
 
@@ -668,6 +678,8 @@ struct Chips {
     query: String,
     tag: Option<String>,
     kind: KindFilter,
+    /// Язык, на котором подписаны чипы; снимок делается один раз за кадр.
+    lang: i18n::Lang,
     hits: Option<usize>,
     /// Открытый альбом (M19): чип «Альбом «Имя»» с «×».
     album: Option<String>,
@@ -725,7 +737,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                 clear.album = true;
             }
         }
-        if let Some(label) = chips.kind.chip() {
+        if let Some(label) = chips.kind.chip(chips.lang) {
             any = true;
             if filter_chip(ui, label) {
                 clear.kind = true;
@@ -1348,7 +1360,7 @@ impl App {
             tools_input: tools::Tools::default(),
             tool_states: std::array::from_fn(|_| String::new()),
             settings_open: false,
-            settings_tab: SettingsTab::Model,
+            settings_tab: SettingsTab::Interface,
             details_open: true,
             tile_size: 150.0,
             viewer: None,
@@ -2408,15 +2420,17 @@ impl App {
     }
 
     fn save_settings(&mut self) {
+        let lang = self.settings.lang;
         let res = db::open(&self.db_path).and_then(|c| db::save_settings(&c, &self.settings));
         match res {
-            Ok(()) => self.status = "настройки сохранены".into(),
-            Err(e) => self.status = format!("настройки не сохранены: {e}"),
+            Ok(()) => self.status = t(lang, "настройки сохранены").into(),
+            Err(e) => self.status = format!("{}: {e}", t(lang, "настройки не сохранены")),
         }
     }
 
     /// Диалог «Настройки»: редко нужное, но всегда в один клик с верхней панели.
     fn settings_modal(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.lang;
         if !self.settings_open {
             return;
         }
@@ -2431,7 +2445,7 @@ impl App {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
-                        ui.label(egui::RichText::new("Настройки").size(16.0));
+                        ui.label(egui::RichText::new(t(lang, "Настройки")).size(16.0));
                     });
                     ui.add_space(8.0);
                     egui::Panel::bottom("settings-footer").show(ui, |ui| {
@@ -2439,9 +2453,10 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.add_space(12.0);
                             ui.label(
-                                egui::RichText::new(
+                                egui::RichText::new(t(
+                                    lang,
                                     "Изменения сохраняются сразу; оригиналы не меняются.",
-                                )
+                                ))
                                 .size(11.0)
                                 .color(DIM),
                             );
@@ -2449,7 +2464,7 @@ impl App {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.add_space(12.0);
-                                    if ui.button("Закрыть").clicked() {
+                                    if ui.button(t(lang, "Закрыть")).clicked() {
                                         close = true;
                                     }
                                 },
@@ -2463,7 +2478,7 @@ impl App {
                         .show(ui, |ui| {
                             ui.add_space(8.0);
                             for t in SettingsTab::ALL {
-                                if settings_nav_item(ui, tab == t, t.label()) {
+                                if settings_nav_item(ui, tab == t, t.label(lang)) {
                                     tab = t;
                                 }
                             }
@@ -3084,17 +3099,55 @@ impl App {
     }
 
     fn settings_section(&mut self, ui: &mut egui::Ui, tab: SettingsTab) {
-        ui.label(egui::RichText::new(tab.label()).size(16.0));
+        let lang = self.settings.lang;
+        ui.label(egui::RichText::new(tab.label(lang)).size(16.0));
         ui.add_space(4.0);
         ui.separator();
         ui.add_space(8.0);
         match tab {
+            SettingsTab::Interface => self.settings_interface(ui),
             SettingsTab::Model => self.settings_model(ui),
             SettingsTab::Index => self.settings_index(ui),
             SettingsTab::Tags => self.settings_tags(ui),
             SettingsTab::Faces => self.settings_faces(ui),
             SettingsTab::Storage => self.settings_storage(ui),
             SettingsTab::Tools => self.settings_tools(ui),
+        }
+    }
+
+    /// Раздел «Интерфейс»: единственное место, где выбирается язык (M21, ADR 0040).
+    /// Выбор применяется сразу и сохраняется в `settings.lang`, без кнопки «Применить»:
+    /// чтобы передумать, достаточно выбрать другой язык в том же списке.
+    fn settings_interface(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        ui.label(
+            egui::RichText::new(t(lang, "Язык интерфейса"))
+                .size(12.0)
+                .color(DIM),
+        );
+        ui.add_space(2.0);
+        let mut chosen = self.settings.lang;
+        egui::ComboBox::from_id_salt("lang_pick")
+            .width(240.0)
+            .selected_text(chosen.label())
+            .show_ui(ui, |ui| {
+                for l in i18n::Lang::ALL {
+                    ui.selectable_value(&mut chosen, l, l.label());
+                }
+            });
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(t(
+                lang,
+                "Выбор сохраняется сразу. Английский — основной язык проекта, русский остаётся \
+                 вторым; экраны, ещё не переведённые, показываются по-русски.",
+            ))
+            .size(11.0)
+            .color(DIM),
+        );
+        if chosen != self.settings.lang {
+            self.settings.lang = chosen;
+            self.save_settings();
         }
     }
 
@@ -3959,40 +4012,47 @@ impl App {
 
     /// Верхняя панель: две строки управления, дальше — только прогресс прохода.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Каталог").size(11.0).color(DIM));
+            ui.label(egui::RichText::new(t(lang, "Каталог")).size(11.0).color(DIM));
             let w = (ui.available_width() - 470.0).clamp(240.0, 520.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.path_input)
-                    .hint_text("путь к каталогу; несколько — кнопкой «Каталоги»")
+                    .hint_text(t(lang, "путь к каталогу; несколько — кнопкой «Каталоги»"))
                     .desired_width(w),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add(primary_button("Индексировать")).clicked() || enter {
+            if ui.add(primary_button(t(lang, "Индексировать"))).clicked() || enter {
                 self.start_index();
             }
-            if ui.button("Обновить").clicked() {
+            if ui.button(t(lang, "Обновить")).clicked() {
                 self.reload();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Настройки").clicked() {
+                if ui.button(t(lang, "Настройки")).clicked() {
                     self.settings_open = true;
                 }
                 if ui
-                    .button(format!("Каталоги ({})", self.roots.len()))
-                    .on_hover_text("добавить несколько каталогов и убрать каталог из индекса")
+                    .button(format!("{} ({})", t(lang, "Каталоги"), self.roots.len()))
+                    .on_hover_text(t(
+                        lang,
+                        "добавить несколько каталогов и убрать каталог из индекса",
+                    ))
                     .clicked()
                 {
                     self.roots_open = true;
                 }
                 if ui
                     .button(if self.details_open {
-                        "Скрыть сведения"
+                        t(lang, "Скрыть сведения")
                     } else {
-                        "Сведения"
+                        t(lang, "Сведения")
                     })
-                    .on_hover_text("правая панель с датой, камерой, тегами и текстом")
+                    .on_hover_text(t(
+                        lang,
+                        "правая панель с датой, камерой, тегами и текстом",
+                    ))
                     .clicked()
                 {
                     self.details_open = !self.details_open;
@@ -4005,13 +4065,13 @@ impl App {
             // Режим поиска — сегментированный переключатель перед полем (PhotoPrism).
             let mut text_mode = self.search_ocr;
             if ui
-                .selectable_label(!text_mode, egui::RichText::new("Смысловой").size(12.0))
+                .selectable_label(!text_mode, egui::RichText::new(t(lang, "Смысловой")).size(12.0))
                 .clicked()
             {
                 text_mode = false;
             }
             if ui
-                .selectable_label(text_mode, egui::RichText::new("По тексту").size(12.0))
+                .selectable_label(text_mode, egui::RichText::new(t(lang, "По тексту")).size(12.0))
                 .clicked()
             {
                 text_mode = true;
@@ -4021,9 +4081,9 @@ impl App {
                 self.semantic_hits = None;
                 self.ocr_snippets.clear();
                 self.status = if text_mode {
-                    "поиск по тексту, распознанному на снимках".into()
+                    t(lang, "поиск по тексту, распознанному на снимках").into()
                 } else {
-                    "смысловой поиск по содержимому снимков".into()
+                    t(lang, "смысловой поиск по содержимому снимков").into()
                 };
             }
             let ready = if self.search_ocr {
@@ -4034,37 +4094,37 @@ impl App {
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.semantic_query)
                     .hint_text(if self.search_ocr {
-                        "справка, квитанция, 2024"
+                        t(lang, "справка, квитанция, 2024")
                     } else {
-                        "торт, море, мебель, документ"
+                        t(lang, "торт, море, мебель, документ")
                     })
                     .desired_width(340.0),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add_enabled(ready, egui::Button::new("Найти")).clicked() || (enter && ready)
+            if ui.add_enabled(ready, egui::Button::new(t(lang, "Найти"))).clicked() || (enter && ready)
             {
                 self.start_search();
             }
             if ui
-                .add_enabled(self.semantic_hits.is_some(), egui::Button::new("Сбросить"))
+                .add_enabled(self.semantic_hits.is_some(), egui::Button::new(t(lang, "Сбросить")))
                 .clicked()
             {
                 self.semantic_hits = None;
                 self.ocr_snippets.clear();
-                self.status = "поиск сброшен".into();
+                self.status = t(lang, "поиск сброшен").into();
             }
             if self.search_rx.is_some() {
                 ui.label(
-                    egui::RichText::new("загрузка модели…")
+                    egui::RichText::new(t(lang, "загрузка модели…"))
                         .size(11.0)
                         .color(DIM),
                 );
             } else if !ready {
                 ui.label(
                     egui::RichText::new(if self.search_ocr {
-                        "нет распознанного текста"
+                        t(lang, "нет распознанного текста")
                     } else {
-                        "модель не скачана"
+                        t(lang, "модель не скачана")
                     })
                     .size(11.0)
                     .color(DIM),
@@ -4074,7 +4134,7 @@ impl App {
 
         if let Some(p) = &self.progress {
             let running = self.rx.is_some();
-            if progress_row(ui, "Индексация", p, running) {
+            if progress_row(ui, t(lang, "Индексация"), p, running) {
                 p.cancel();
             }
         }
@@ -4092,25 +4152,25 @@ impl App {
         }
         if let Some(p) = &self.face_progress {
             let running = self.face_rx.is_some();
-            if progress_row(ui, "Лица", p, running) {
+            if progress_row(ui, t(lang, "Лица"), p, running) {
                 p.cancel();
             }
         }
         if let Some(p) = &self.trash_progress {
             let running = self.trash_rx.is_some();
-            if progress_row(ui, "Корзина", p, running) {
+            if progress_row(ui, t(lang, "Корзина"), p, running) {
                 p.cancel();
             }
         }
         if let Some(p) = &self.export_progress {
             let running = self.export_rx.is_some();
-            if progress_row(ui, "Выгрузка", p, running) {
+            if progress_row(ui, t(lang, "Выгрузка"), p, running) {
                 p.cancel();
             }
         }
         if let Some(p) = &self.integrity_progress {
             let running = self.integrity_rx.is_some();
-            if progress_row(ui, "Целостность", p, running) {
+            if progress_row(ui, t(lang, "Целостность"), p, running) {
                 p.cancel();
             }
         }
@@ -4121,6 +4181,7 @@ impl App {
     /// Баннер «Пора проверить архив» (M10). Сам ничего не запускает: "Проверить" —
     /// нажатие, после которого идёт обычная фоновая проверка по слепку.
     fn verify_banner(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         if self.verify_banner_hidden {
             return;
         }
@@ -4140,7 +4201,7 @@ impl App {
         ui.separator();
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Пора проверить архив")
+                egui::RichText::new(t(lang, "Пора проверить архив"))
                     .size(13.0)
                     .strong()
                     .color(ACCENT),
@@ -4154,15 +4215,15 @@ impl App {
             };
             ui.label(egui::RichText::new(fact).size(11.0).color(DIM));
             if ui
-                .button("Проверить")
-                .on_hover_text("прочитать архив и сверить с сохранённым слепком")
+                .button(t(lang, "Проверить"))
+                .on_hover_text(t(lang, "прочитать архив и сверить с сохранённым слепком"))
                 .clicked()
             {
                 open = true;
             }
             if ui
-                .button("Напомнить позже")
-                .on_hover_text("баннер скроется до следующего запуска")
+                .button(t(lang, "Напомнить позже"))
+                .on_hover_text(t(lang, "баннер скроется до следующего запуска"))
                 .clicked()
             {
                 later = true;
@@ -4173,7 +4234,7 @@ impl App {
         }
         if later {
             self.verify_banner_hidden = true;
-            self.status = "напоминание отложено до следующего запуска".into();
+            self.status = t(lang, "напоминание отложено до следующего запуска").into();
         }
     }
 
@@ -4190,6 +4251,7 @@ impl App {
 
     /// Строка статуса: факт слева, выбранный файл справа.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(if self.status.is_empty() {
@@ -4208,7 +4270,7 @@ impl App {
                         .taken_at
                         .as_deref()
                         .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-                        .unwrap_or_else(|| "без даты".into());
+                        .unwrap_or_else(|| t(lang, "без даты").into());
                     ui.label(
                         egui::RichText::new(if self.picked.len() > 1 {
                             format!(
@@ -4246,6 +4308,7 @@ impl App {
             query: self.query.trim().to_string(),
             tag: self.tag_filter.clone(),
             kind: self.kind_filter,
+            lang: self.settings.lang,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
             album,
             picked: self.picked.len(),
@@ -4263,52 +4326,53 @@ impl App {
 
     /// Левая панель: карта приложения. Навигация и фильтр закреплены, контекст вида — в прокрутке.
     fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool) {
+        let lang = self.settings.lang;
         ui.add_space(6.0);
         ui.label(egui::RichText::new("photocat").size(16.0));
-        ui.label(egui::RichText::new("семейный архив").size(11.0).color(DIM));
+        ui.label(egui::RichText::new(t(lang, "семейный архив")).size(11.0).color(DIM));
         ui.add_space(8.0);
         ui.separator();
 
         // Карта приложения — две группы с числами справа (PhotoPrism: Library / Tools).
         // Число объясняет цену пункта до клика: 103 группы, 617 лиц, 3 в корзине.
-        nav_section(ui, "БИБЛИОТЕКА");
+        nav_section(ui, t(lang, "БИБЛИОТЕКА"));
         let was_albums = self.view == View::Albums;
         nav_item(
             ui,
             &mut self.view,
             View::Grid,
-            "Все файлы",
+            t(lang, "Все файлы"),
             Some(self.items.len().to_string()),
         );
         nav_item(
             ui,
             &mut self.view,
             View::Albums,
-            "Альбомы",
+            t(lang, "Альбомы"),
             Some(self.albums.len().to_string()),
         );
-        nav_item(ui, &mut self.view, View::Calendar, "Календарь", None);
+        nav_item(ui, &mut self.view, View::Calendar, t(lang, "Календарь"), None);
         nav_item(
             ui,
             &mut self.view,
             View::Faces,
-            "Лица",
+            t(lang, "Лица"),
             Some(self.face_clusters.len().to_string()),
         );
-        nav_section(ui, "ИНСТРУМЕНТЫ");
+        nav_section(ui, t(lang, "ИНСТРУМЕНТЫ"));
         nav_item(
             ui,
             &mut self.view,
             View::Dupes,
-            "Дубли и серии",
+            t(lang, "Дубли и серии"),
             Some(self.groups.len().to_string()),
         );
-        nav_item(ui, &mut self.view, View::Integrity, "Целостность", None);
+        nav_item(ui, &mut self.view, View::Integrity, t(lang, "Целостность"), None);
         nav_item(
             ui,
             &mut self.view,
             View::Trash,
-            "Корзина",
+            t(lang, "Корзина"),
             Some(self.trash_items.len().to_string()),
         );
         // «Порядок альбома» живёт только внутри открытого альбома: вне его
@@ -4326,15 +4390,15 @@ impl App {
 
         ui.add_space(8.0);
         ui.separator();
-        nav_section(ui, "ФИЛЬТР");
+        nav_section(ui, t(lang, "ФИЛЬТР"));
         ui.label(
-            egui::RichText::new("Поиск по пути или дате")
+            egui::RichText::new(t(lang, "Поиск по пути или дате"))
                 .size(11.0)
                 .color(DIM),
         );
         ui.add(
             egui::TextEdit::singleline(&mut self.query)
-                .hint_text("2024-05, отпуск")
+                .hint_text(t(lang, "2024-05, отпуск"))
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(4.0);
@@ -4344,7 +4408,7 @@ impl App {
                 if ui
                     .selectable_label(
                         self.kind_filter == kind,
-                        egui::RichText::new(kind.label()).size(12.0),
+                        egui::RichText::new(kind.label(lang)).size(12.0),
                     )
                     .clicked()
                 {
@@ -9517,6 +9581,7 @@ mod tests {
         shift_to_file_month,
     };
     use crate::embed;
+    use crate::i18n;
     use std::collections::BTreeSet;
 
     fn file_row(id: i64, kind: &str, name: &str) -> db::FileRow {
@@ -10574,6 +10639,8 @@ mod tests {
         // Панель запоминает высоту с прошлого кадра: баннер, добавленный в неё
         // картинку, виден на втором кадре (как и окно на экране с 60 к/с).
         let ctx = egui::Context::default();
+        // Текст баннера проверяется по-русски: язык — поле настроек, тест его задаёт сам.
+        app.settings.lang = i18n::Lang::Ru;
         let _ = window_frame(&mut app, &ctx);
         let texts = window_frame(&mut app, &ctx);
         assert!(
@@ -10592,6 +10659,57 @@ mod tests {
             !texts.iter().any(|t| t == "Пора проверить архив"),
             "баннер скрыт до перезапуска: {texts:?}"
         );
+    }
+
+    /// M21, ADR 0040: язык — поле настроек, а не глобальная переменная, поэтому тест
+    /// задаёт его сам. Остов окна (навигация, верхняя панель, фильтр) переводится целиком.
+    #[test]
+    fn английский_язык_переводит_остов_окна() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-i18n.db"));
+        app.settings.lang = i18n::Lang::En;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        for needle in [
+            "All files", "Albums", "Settings", "LIBRARY", "FILTER", "All", "Photos", "Videos",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "нет «{needle}»: {texts:?}"
+            );
+        }
+        // Содержимое экранов (заголовок вида, чипы, карточка) переводится следующими
+        // шагами M21: здесь проверяется остов — навигация, верхняя панель, фильтр.
+        assert!(
+            texts.iter().any(|t| t == "family archive"),
+            "нет английского подзаголовка: {texts:?}"
+        );
+        app.settings.lang = i18n::Lang::Ru;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(texts.iter().any(|t| t == "Все файлы"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Настройки"), "{texts:?}");
+    }
+
+    /// Выбор языка живёт в БД (`settings.lang`), а не в памяти процесса: после
+    /// перезапуска окно открывается на том языке, который выбрал владелец.
+    #[test]
+    fn язык_интерфейса_сохраняется_в_бд() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "photocat-i18n-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let c = db::open(&path).unwrap();
+            let s = db::Settings {
+                lang: i18n::Lang::Ru,
+                ..Default::default()
+            };
+            db::save_settings(&c, &s).unwrap();
+        }
+        let app = App::new(path);
+        assert_eq!(app.settings.lang, i18n::Lang::Ru, "язык потерян при перезапуске");
     }
 
     /// Прогоняет фоновый проход до результата через кадры окна: так проверяется и

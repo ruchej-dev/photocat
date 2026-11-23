@@ -19,8 +19,9 @@ echo "photocat: проверка границ ($ROOT)"
 # ---------------------------------------------------------------- 1. слои
 declare -A ALLOWED=(
   [derive]="tools"
-  [db]="tools"
+  [db]="tools i18n"
   [tools]=""
+  [i18n]=""
   [index]="derive db tools"
   [dupes]="db derive"
   [organize]="db derive"
@@ -31,8 +32,8 @@ declare -A ALLOWED=(
   [ocr]="derive db tools"
   [faces]="derive db embed"
   [player]=""
-  [app]="derive db index dupes organize verify embed ocr faces player tools recycle storage"
-  [main]="derive db index dupes organize verify embed ocr faces player app tools"
+  [app]="i18n derive db index dupes organize verify embed ocr faces player tools recycle storage"
+  [main]="i18n derive db index dupes organize verify embed ocr faces player app tools"
 )
 
 echo "1. зависимости между модулями"

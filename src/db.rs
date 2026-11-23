@@ -449,6 +449,8 @@ pub struct Settings {
     pub verify_last_ok: bool,
     /// Тот же текст отчёта, что уходит в `<кэш>/photocat/verify-last.txt`.
     pub verify_last_report: String,
+    /// Язык интерфейса (M21, ADR 0040): `en` — основной, `ru` — второй.
+    pub lang: crate::i18n::Lang,
 }
 
 impl Default for Settings {
@@ -479,6 +481,8 @@ impl Default for Settings {
             verify_last_at: String::new(),
             verify_last_ok: false,
             verify_last_report: String::new(),
+            // Проект продолжается на английском; русский остаётся выбором в настройках.
+            lang: crate::i18n::Lang::En,
         }
     }
 }
@@ -532,6 +536,7 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "verify_last_at" => s.verify_last_at = v,
             "verify_last_ok" => s.verify_last_ok = v == "1" || v == "true",
             "verify_last_report" => s.verify_last_report = v,
+            "lang" => s.lang = crate::i18n::Lang::parse(&v),
             _ => {}
         }
     }
@@ -570,6 +575,7 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
             if s.verify_last_ok { "1" } else { "0" }.to_string(),
         ),
         ("verify_last_report", s.verify_last_report.clone()),
+        ("lang", s.lang.code().to_string()),
     ];
     for tool in crate::tools::ALL {
         pairs.push((tool.setting_key(), s.tools.get(tool).to_string()));
@@ -2532,6 +2538,7 @@ mod tests {
             tile_size: 210.0,
             grid_layout: GridLayout::Flat,
             grid_sort: GridSort::Name,
+            lang: crate::i18n::Lang::Ru,
             ocr_lang: "rus".into(),
             tools: crate::tools::Tools {
                 ffmpeg: "/opt/ffmpeg".into(),
@@ -2550,6 +2557,7 @@ mod tests {
         assert!((back.tile_size - 210.0).abs() < 1e-6);
         assert_eq!(back.grid_layout, GridLayout::Flat);
         assert_eq!(back.grid_sort, GridSort::Name);
+        assert_eq!(back.lang, crate::i18n::Lang::Ru);
         assert!((back.tag_margin - 0.02).abs() < 1e-6);
         assert_eq!(back.ocr_lang, "rus");
         assert_eq!(back.tools.ffmpeg, "/opt/ffmpeg");

@@ -6,14 +6,15 @@
 L3  main.rs ── app.rs            CLI и GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   ocr.rs   faces.rs   recycle.rs   player.rs
 L1  db.rs   storage.rs
-L0  derive.rs   tools.rs
+L0  i18n.rs   derive.rs   tools.rs
 ```
 
 | Слой | Знает про | Не знает про |
 |---|---|---|
+| L0 `i18n` | только `std`; `Lang` и таблица «русская строка → английская» | БД, UI, декодирование |
 | L0 `derive` | файлы, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | БД, UI, параллелизм |
 | L0 `tools` | `std::process`, `PATH`, `anyhow` | БД, UI, декодирование |
-| L1 `db` | `rusqlite`, `anyhow`, `tools` (тип настроек) | декодирование, egui |
+| L1 `db` | `rusqlite`, `anyhow`, `tools` (тип настроек), `i18n` (тип языка) | декодирование, egui |
 | L2 `index` / `dupes` / `organize` / `verify` | L0/L1 + `rayon`, `walkdir`, `tools` | egui |
 | L2 `embed` | L0/L1 + `ort`, `tokenizers`, `serde_json`, `tools` | egui, SQL-строки |
 | L2 `ocr` | L0/L1 + `rayon`, `tools`; процесс `tesseract` | egui, SQL-строки |
