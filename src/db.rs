@@ -513,6 +513,21 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
     Ok(())
 }
 
+/// Одно значение из `settings` — для служебных ключей вроде версии словаря тегов.
+pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0))
+        .ok()
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO settings(key,value) VALUES(?1,?2)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
 pub fn hide_tag(db: &Path, file_id: i64, tag: &str) -> Result<()> {
     let conn = open(db)?;
     conn.execute(

@@ -3017,12 +3017,11 @@ impl App {
 
     fn reset_tag_defs(&mut self) {
         let entry = embed::active_entry(&self.settings);
-        let defs = embed::default_defs(entry.id, entry.kind);
-        let r = db::open(&self.db_path)
-            .and_then(|c| db::replace_tag_defs(&c, entry.id, &defs));
+        let r = embed::reset_to_defaults(&self.db_path, entry).map(|defs| {
+            self.tag_defs = defs;
+        });
         match r {
             Ok(()) => {
-                self.tag_defs = defs;
                 self.tag_dict_dirty = true;
                 self.status =
                     "словарь возвращён к стандартному — нажмите «Пересчитать теги»".into();
@@ -3059,7 +3058,7 @@ impl App {
             .map_err(|e| anyhow::anyhow!("не прочитать {}: {e}", path.display()))
             .and_then(|text| embed::tag_defs_from_json(&model, &text))
             .and_then(|defs| {
-                db::open(&self.db_path).and_then(|c| db::replace_tag_defs(&c, &model, &defs))?;
+                embed::import_defs(&self.db_path, &model, &defs)?;
                 Ok(defs)
             });
         match r {

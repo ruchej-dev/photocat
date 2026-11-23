@@ -37,94 +37,94 @@ pub struct TagDefault {
 
 /// Версия дефолтного набора: пишется в `settings.tag_defs_version`.
 /// Обновление дефолта не перезатирает правки владельца — только фиксирует, что засеяно.
-pub const DEFAULT_TAG_VERSION: i64 = 1;
+pub const DEFAULT_TAG_VERSION: i64 = 2;
 
-/// 14 общих подсказок. Никаких слов из конкретного архива: набор обязан работать
-/// на любом каталоге (M15.4, plan/M15-tags.md §4).
+/// 14 общих подсказок по 2–3 шаблона. Никаких слов из конкретного архива: набор обязан
+/// работать на любом каталоге (M15.4/M15.5, plan/M15-tags.md §4).
 pub const DEFAULT_TAGS: [TagDefault; 14] = [
     TagDefault {
         id: "beach",
         label: "пляж",
-        prompts_ru: &["фотография пляжа и моря"],
-        prompts_en: &["a photo of a beach and the sea"],
+        prompts_ru: &["фотография пляжа и моря", "на снимке песчаный пляж и вода", "пляж, море и песок"],
+        prompts_en: &["a photo of a beach and the sea", "a sandy beach by the water", "beach, sea and sand"],
     },
     TagDefault {
         id: "document",
         label: "документ",
-        prompts_ru: &["фотография документа, лист бумаги с текстом"],
-        prompts_en: &["a photo of a document, a sheet of paper with text"],
+        prompts_ru: &["фотография документа, лист бумаги с текстом", "на снимке лист бумаги с напечатанным текстом", "страница документа крупным планом"],
+        prompts_en: &["a photo of a document, a sheet of paper with text", "a sheet of paper with printed text", "a close-up of a document page"],
     },
     TagDefault {
         id: "screenshot",
         label: "скриншот",
-        prompts_ru: &["снимок экрана, интерфейс программы"],
-        prompts_en: &["a screenshot of a computer screen"],
+        prompts_ru: &["снимок экрана, интерфейс программы", "на снимке экран компьютера или телефона", "скриншот интерфейса приложения"],
+        prompts_en: &["a screenshot of a computer screen", "a screen of a computer or a phone", "a screenshot of an app interface"],
     },
     TagDefault {
         id: "food",
         label: "еда",
-        prompts_ru: &["фотография еды, тарелка с едой"],
-        prompts_en: &["a photo of food, a plate with food"],
+        prompts_ru: &["фотография еды, тарелка с едой", "на снимке еда на тарелке", "блюдо на столе крупным планом"],
+        prompts_en: &["a photo of food, a plate with food", "food on a plate", "a close-up of a dish on the table"],
     },
     TagDefault {
         id: "animals",
         label: "животные",
-        prompts_ru: &["фотография животного, кошка или собака"],
-        prompts_en: &["a photo of an animal, a cat or a dog"],
+        prompts_ru: &["фотография животного, кошка или собака", "на снимке домашнее животное", "кошка или собака крупным планом"],
+        prompts_en: &["a photo of an animal, a cat or a dog", "a pet at home", "a close-up of a cat or a dog"],
     },
     TagDefault {
         id: "children",
         label: "дети",
-        prompts_ru: &["фотография детей, ребёнок"],
-        prompts_en: &["a photo of children, a child"],
+        prompts_ru: &["фотография детей, ребёнок", "на снимке ребёнок", "дети на фотографии"],
+        prompts_en: &["a photo of children, a child", "a child in the picture", "children on a photo"],
     },
     TagDefault {
         id: "holiday",
         label: "праздник",
-        prompts_ru: &["праздник, торт со свечами, вечеринка"],
-        prompts_en: &["a party, a birthday cake with candles"],
+        prompts_ru: &["праздник, торт со свечами, вечеринка", "на снимке праздник и торт", "люди празднуют день рождения"],
+        prompts_en: &["a party, a birthday cake with candles", "a celebration with a cake", "people celebrating a birthday"],
     },
     TagDefault {
         id: "furniture",
         label: "мебель",
-        prompts_ru: &["фотография мебели, шкаф, стол, диван"],
-        prompts_en: &["a photo of furniture, a cupboard, table or sofa"],
+        prompts_ru: &["фотография мебели, шкаф, стол, диван", "на снимке мебель в комнате", "шкаф, стол или диван крупным планом"],
+        prompts_en: &["a photo of furniture, a cupboard, table or sofa", "furniture inside a room", "a close-up of a cupboard, table or sofa"],
     },
     TagDefault {
         id: "interior",
         label: "интерьер",
-        prompts_ru: &["фотография комнаты, интерьер квартиры"],
-        prompts_en: &["a photo of a room interior"],
+        prompts_ru: &["фотография комнаты, интерьер квартиры", "на снимке интерьер комнаты", "вид комнаты внутри"],
+        prompts_en: &["a photo of a room interior", "the interior of a room", "a view inside a room"],
     },
     TagDefault {
         id: "clothes",
         label: "одежда",
-        prompts_ru: &["фотография одежды, куртка, платье"],
-        prompts_en: &["a photo of clothes, a jacket or a dress"],
+        prompts_ru: &["фотография одежды, куртка, платье", "на снимке одежда", "куртка или платье крупным планом"],
+        prompts_en: &["a photo of clothes, a jacket or a dress", "clothes in the picture", "a close-up of a jacket or a dress"],
     },
     TagDefault {
         id: "nature",
         label: "природа",
-        prompts_ru: &["фотография природы, лес, поле, небо"],
-        prompts_en: &["a photo of nature, forest, field or sky"],
+        prompts_ru: &["фотография природы, лес, поле, небо", "на снимке лес, поле или небо", "пейзаж с лесом и полем"],
+        prompts_en: &["a photo of nature, forest, field or sky", "forest, field or sky", "a landscape with forest and field"],
     },
     TagDefault {
         id: "city",
         label: "город",
-        prompts_ru: &["фотография улицы и домов, город"],
-        prompts_en: &["a photo of a city street and buildings"],
+        prompts_ru: &["фотография улицы и домов, город", "на снимке городская улица", "дома и улица города"],
+        prompts_en: &["a photo of a city street and buildings", "a city street", "buildings and a street in a city"],
     },
     TagDefault {
         id: "transport",
         label: "транспорт",
-        prompts_ru: &["фотография транспорта, автомобиль, автобус"],
-        prompts_en: &["a photo of a vehicle, car or bus"],
+        prompts_ru: &["фотография транспорта, автомобиль, автобус", "на снимке автомобиль или автобус", "транспорт на дороге"],
+        prompts_en: &["a photo of a vehicle, car or bus", "a car or a bus", "vehicles on the road"],
     },
     TagDefault {
         id: "plants",
         label: "растения",
-        prompts_ru: &["фотография растений, цветы и деревья"],
-        prompts_en: &["a photo of plants, flowers and trees"],
+        prompts_ru: &["фотография растений, цветы и деревья", "на снимке цветы и деревья", "растения крупным планом"],
+        prompts_en: &["a photo of plants, flowers and trees", "flowers and trees", "a close-up of plants"],
     },
 ];
 
@@ -277,21 +277,67 @@ pub fn default_defs(model: &str, kind: TextKind) -> Vec<db::TagDef> {
 }
 
 /// Словарь модели из БД; пустой засевается дефолтом один раз.
-/// Правки владельца не перезатираются: дефолт добавляется только в пустую таблицу.
+/// Правки владельца не перезатираются: дефолт добавляется в пустую таблицу и
+/// обновляется с новой версией только если словарь с момента засева не правили
+/// (отпечаток `tag_defs_sig` совпадает).
 pub fn ensure_tag_defs(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDef>> {
     let conn = db::open(db_path)?;
     let defs = db::load_tag_defs(&conn, e.id)?;
-    if !defs.is_empty() {
+    let version = db::get_setting(&conn, "tag_defs_version")
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    let sig = db::get_setting(&conn, "tag_defs_sig").unwrap_or_default();
+    let untouched = !defs.is_empty()
+        && version > 0
+        && version < DEFAULT_TAG_VERSION
+        && !sig.is_empty()
+        && sig == defs_signature(&defs);
+    if !defs.is_empty() && !untouched {
         return Ok(defs);
     }
     let defs = default_defs(e.id, e.kind);
     db::replace_tag_defs(&conn, e.id, &defs)?;
-    conn.execute(
-        "INSERT INTO settings(key,value) VALUES('tag_defs_version',?1)
-         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        [DEFAULT_TAG_VERSION.to_string()],
-    )?;
+    write_defs_meta(db_path, DEFAULT_TAG_VERSION, &defs)?;
     Ok(defs)
+}
+
+/// Отпечаток словаря: им отличаем «стандартный набор, никто не правил» от правок.
+/// Не криптография, а детектор изменений: FNV-1a по отсортированным строкам.
+fn defs_signature(defs: &[db::TagDef]) -> String {
+    let mut rows: Vec<String> = defs
+        .iter()
+        .map(|d| format!("{}\t{}\t{}", d.id, d.label, d.prompts.join("|")))
+        .collect();
+    rows.sort();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in rows.join("\n").as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+fn write_defs_meta(db_path: &Path, version: i64, defs: &[db::TagDef]) -> Result<()> {
+    let conn = db::open(db_path)?;
+    db::set_setting(&conn, "tag_defs_version", &version.to_string())?;
+    db::set_setting(&conn, "tag_defs_sig", &defs_signature(defs))?;
+    Ok(())
+}
+
+/// Вернуть стандартный словарь модели (явное действие владельца).
+pub fn reset_to_defaults(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDef>> {
+    let conn = db::open(db_path)?;
+    let defs = default_defs(e.id, e.kind);
+    db::replace_tag_defs(&conn, e.id, &defs)?;
+    write_defs_meta(db_path, DEFAULT_TAG_VERSION, &defs)?;
+    Ok(defs)
+}
+
+/// Заменить словарь импортом: это правка владельца, автообновление дефолта её не трогает.
+pub fn import_defs(db_path: &Path, model: &str, defs: &[db::TagDef]) -> Result<()> {
+    let conn = db::open(db_path)?;
+    db::replace_tag_defs(&conn, model, defs)?;
+    write_defs_meta(db_path, 0, defs)
 }
 
 /// Словарь в JSON — для обмена между машинами и резервной копии. Без путей архива.
@@ -459,7 +505,7 @@ pub struct Model {
     text: Session,
     tokenizer: Tokenizer,
     dense: Vec<f32>,
-    /// Метка → усреднённый вектор её промптов; только включённые теги.
+    /// Метка → векторы её промптов (по одному на шаблон); только включённые теги.
     tag_vectors: Vec<(String, Vec<f32>)>,
     pub entry: &'static ModelEntry,
 }
@@ -500,7 +546,9 @@ impl Model {
         Ok(me)
     }
 
-    /// Подготовить векторы промптов из словаря: 2–3 шаблона на метку усредняются.
+    /// Подготовить векторы промптов из словаря: 2–3 шаблона на метку.
+    /// Вес тега — лучший из его шаблонов, а не среднее: описание предмета может
+    /// совпасть только с одной формулировкой, и среднее такую догадку размывает.
     /// Векторы фото не пересчитываются — правка словаря стоит один прогон текстовой башни.
     pub fn set_tag_defs(&mut self, defs: &[db::TagDef]) -> Result<()> {
         let mut out: Vec<(String, Vec<f32>)> = Vec::new();
@@ -515,14 +563,9 @@ impl Model {
                 continue;
             }
             let vectors = self.encode_texts(&prompts)?;
-            let mut mean = vec![0f32; DIM];
-            for v in &vectors {
-                for (a, b) in mean.iter_mut().zip(v) {
-                    *a += *b;
-                }
+            for v in vectors {
+                out.push((d.label.clone(), v));
             }
-            normalize(&mut mean);
-            out.push((d.label.clone(), mean));
         }
         self.tag_vectors = out;
         Ok(())
@@ -674,19 +717,26 @@ impl Model {
     }
 
     /// Теги для одного вектора: все включённые теги словаря с весом по убыванию.
+    /// У метки несколько шаблонов — берётся её лучший вес.
     pub fn tag_scores(&self, image: &[f32]) -> Vec<(String, f32)> {
-        let mut out: Vec<(String, f32)> = self
-            .tag_vectors
-            .iter()
-            .map(|(label, v)| (label.clone(), cosine(image, v)))
-            .collect();
-        out.sort_by(|a, b| b.1.total_cmp(&a.1));
-        out
+        let mut best: Vec<(String, f32)> = Vec::new();
+        for (label, v) in &self.tag_vectors {
+            let c = cosine(image, v);
+            match best.iter_mut().find(|(l, _)| l == label) {
+                Some((_, s)) => *s = s.max(c),
+                None => best.push((label.clone(), c)),
+            }
+        }
+        best.sort_by(|a, b| b.1.total_cmp(&a.1));
+        best
     }
 
     /// Сколько включённых тегов сейчас в словаре.
     pub fn tag_count(&self) -> usize {
-        self.tag_vectors.len()
+        let mut labels: Vec<&str> = self.tag_vectors.iter().map(|(l, _)| l.as_str()).collect();
+        labels.sort_unstable();
+        labels.dedup();
+        labels.len()
     }
 }
 
@@ -1518,6 +1568,44 @@ mod tests {
         let again = ensure_tag_defs(&path, e).unwrap();
         assert!(again.iter().any(|x| x.label == "пляж и море"));
         assert_eq!(again.len(), DEFAULT_TAGS.len());
+    }
+
+    /// Дефолт обновляется только в нетронутом словаре: правки владельца и импорт не трогаются.
+    #[test]
+    fn обновление_дефолта_не_затирает_правки_и_импорт() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-tagup-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let e = &catalog()[0];
+        let defs = ensure_tag_defs(&path, e).unwrap();
+        let conn = db::open(&path).unwrap();
+        // Старый засев: отпечаток совпадает с содержимым, версия ниже — набор догоняется.
+        db::set_setting(&conn, "tag_defs_version", "1").unwrap();
+        db::set_setting(&conn, "tag_defs_sig", &defs_signature(&defs)).unwrap();
+        assert_eq!(ensure_tag_defs(&path, e).unwrap(), defs);
+        // Правка владельца: метка другая, отпечаток остался от засева — не трогаем.
+        let mut d = defs[0].clone();
+        d.label = "море и берег".into();
+        db::save_tag_def(&conn, &d).unwrap();
+        db::set_setting(&conn, "tag_defs_version", "1").unwrap();
+        let kept = ensure_tag_defs(&path, e).unwrap();
+        assert!(kept.iter().any(|x| x.label == "море и берег"));
+        // Импорт помечается как правка (версия 0) и автообновлением не затирается.
+        let mut custom = defs.clone();
+        custom[1].label = "бумага".into();
+        import_defs(&path, e.id, &custom).unwrap();
+        let after = ensure_tag_defs(&path, e).unwrap();
+        assert!(after.iter().any(|x| x.label == "бумага"));
+        // Сброс возвращает стандарт и снова разрешает обновления.
+        let reset = reset_to_defaults(&path, e).unwrap();
+        assert_eq!(reset, defs);
+        db::set_setting(&conn, "tag_defs_version", "1").unwrap();
+        assert_eq!(ensure_tag_defs(&path, e).unwrap(), defs);
     }
 
     #[test]

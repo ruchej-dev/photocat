@@ -1031,8 +1031,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("не прочитать {path}"))?;
         let defs = embed::tag_defs_from_json(entry.id, &text)?;
-        let conn = db::open(&db_path)?;
-        db::replace_tag_defs(&conn, entry.id, &defs)?;
+        embed::import_defs(&db_path, entry.id, &defs)?;
         println!(
             "словарь загружен: {} тегов — пересчитайте веса: photocat embed --retag",
             defs.len()
@@ -1041,9 +1040,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
     }
 
     if has_flag(args, "--reset") {
-        let defs = embed::default_defs(entry.id, entry.kind);
-        let conn = db::open(&db_path)?;
-        db::replace_tag_defs(&conn, entry.id, &defs)?;
+        let defs = embed::reset_to_defaults(&db_path, entry)?;
         println!(
             "словарь возвращён к стандартному ({} тегов) — photocat embed --retag",
             defs.len()
