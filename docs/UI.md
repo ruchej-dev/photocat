@@ -166,6 +166,13 @@ The full rules are in `.pi/skills/ui-design/references/vzaimodeystvie.md`. In sh
 - **Response:** selection and filters within 100 ms; duplicate recomputation, face group rebuild and
   semantic search within 1 s with the result in the status; longer — background, `done/total`
   progress, "Stop". An action is never performed silently.
+- **Scrolling (M22.2b):** one profile for every scrollable region — the grid, the left panel, the
+  card, dialogs; no view overrides it. One wheel notch moves a third of the window height (280 px
+  for the 840 px default window); a two-finger trackpad swipe follows the fingers one to one and,
+  once they lift, coasts with an exponential decay of 0.35 s: a short flick glides 270–290 px, a
+  long one keeps going until it dies out (≈1.3 s). A new touch, the opposite direction or a wheel
+  notch stops the coast in the same frame, so a direction change never jumps; in idle nothing
+  requests a frame. `Scroll` in `src/app.rs` holds these numbers and `apply_theme` the rest.
 - **Reversibility:** hidden tags come back, a duplicate decision is replayed, a group name is
   cleared, a file comes back from the trash. The only confirmations are "Empty the trash" (the OS
   trash) and cleaning the cache/index: there the state on disk changes or the index is lost.

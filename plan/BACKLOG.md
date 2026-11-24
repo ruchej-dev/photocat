@@ -1016,7 +1016,8 @@ map, the rules for an unsupported screen, the disputed questions and the full ta
 
 **Done so far.** M22.1 (two themes, the token palette, ADR 0044), M22.2 (the main screen after the
 mock-up, three cell views) — 2026-11-24; M22.2a (the list view scales with the size slider, the slider
-is always visible) — 2026-11-24.
+is always visible) — 2026-11-24; M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad
+swipe coasts after the fingers lift) — 2026-11-24.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
@@ -1036,7 +1037,8 @@ is always visible) — 2026-11-24.
 6. The sticky month heading (the former M13e) is closed in M22.4.
 7. The list view keeps the size slider and scales with it (row, thumbnail, name); the header never
    jumps when the cell view changes — M22.2a ✅. Trackpad and wheel scrolling is smooth and fast in
-   every region (M22.2b in the spec).
+   every region — M22.2b ✅ (one profile in `apply_theme` + `Scroll`, 280 px per wheel notch, a
+   274 px coast after a 1200 px/s flick, 145–152 fps at p95 on the corpus).
 8. Every task ends with a measurement or a look at the result, `cargo test`, `clippy`, `check.sh`;
    `docs/UI.md` § Layout, § Metrics and § "What the interface will not have" follow the code.
 

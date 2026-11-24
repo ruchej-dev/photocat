@@ -559,6 +559,19 @@ const RADIUS_CARD: f32 = 8.0;
 /// Ниже этой ширины окна сведения уходят в левую панель: сетке нужны 4 колонки.
 const DETAILS_MIN_W: f32 = 1200.0;
 
+// Прокрутка (M22.2b). Ниже — единственное место, где задан её профиль: колесо,
+// тачпад и выбег после отрыва пальцев. Ни один `ScrollArea` своих значений не ставит.
+/// Один щелчок колеса — треть высоты окна по умолчанию (840 px): 280 px.
+const WHEEL_NOTCH_PTS: f32 = 280.0;
+/// Выбег тачпада: постоянная времени затухания скорости, с (пройденный путь = v·τ).
+const COAST_DECAY_S: f32 = 0.35;
+/// Короткий выбег не начинается: случайное касание не должно двигать сетку.
+const COAST_STOP_PTS: f32 = 6.0;
+/// Пауза без событий тачпада, после которой жест считается законченным, с.
+const GESTURE_END_S: f64 = 0.08;
+/// Сглаживание оценки скорости жеста: постоянная времени, с.
+const VEL_SMOOTH_S: f32 = 0.05;
+
 /// Варианты порядка плиток и их слова на экране (M17). «Порядок альбома» — M19.
 const GRID_SORTS: [(db::GridSort, &str); 4] = [
     (db::GridSort::DateDesc, "Дата: новые сверху"),
@@ -733,7 +746,102 @@ fn apply_theme(ctx: &egui::Context, mode: db::ThemeMode) {
         s.text_styles.insert(TextStyle::Small, FontId::new(11.0, Proportional));
         s.text_styles
             .insert(TextStyle::Monospace, FontId::new(11.0, egui::FontFamily::Monospace));
+        // Прокрутка (M22.2b): прыжок к элементу (месяц, файл, фокус) — быстро и без рывка,
+        // выбег тачпада — одним профилем затухания на все области.
+        s.scroll_animation.points_per_second = 2400.0;
+        s.scroll_animation.duration = egui::Rangef::new(0.10, 0.30);
+        s.spacing.scroll.kinetic.decay_time = COAST_DECAY_S;
+        s.spacing.scroll.kinetic.stop_distance = 0.5;
     });
+    // Щелчок колеса: winit отдаёт `Line`, egui умножает его на это число.
+    ctx.options_mut(|o| o.input_options.line_scroll_speed = WHEEL_NOTCH_PTS);
+}
+
+/// Прокрутка колесом и тачпадом (M22.2b).
+///
+/// Колесо: один щелчок — `WHEEL_NOTCH_PTS` (egui конвертирует `Line` в points сам,
+/// профиль один на всё окно). Тачпад: winit на Linux и Windows не говорит, чем
+/// прокручивают (`MouseWheelSource::Unknown`), поэтому egui не даёт ни инерции, ни
+/// «резинки» — жест доходит один к одному и обрывается на отрыве пальцев. Здесь он
+/// доводится: скорость последних событий удерживается, и после паузы жест
+/// продолжается выбегом с затуханием `COAST_DECAY_S`, пока путь не станет короче
+/// `COAST_STOP_PTS`. Новое событие (в любую сторону) выбег отменяет — без скачка.
+#[derive(Default)]
+struct Scroll {
+    /// Скорость жеста, points/s.
+    vel: egui::Vec2,
+    /// Время последнего события тачпада, с (часы egui).
+    last_event: f64,
+    /// Пальцы на тачпаде: жест идёт.
+    touched: bool,
+    /// Жест кончился, идёт выбег: пока `true`, нужен следующий кадр.
+    coasting: bool,
+}
+
+impl Scroll {
+    /// События кадра → добавка к прокрутке этого кадра. Возвращает `true`, если
+    /// выбег ещё идёт и нужен следующий кадр (в покое кадры не запрашиваются).
+    fn pump(&mut self, ctx: &egui::Context) -> bool {
+        let mut gesture = egui::Vec2::ZERO;
+        let mut wheel = false;
+        // Ctrl/Cmd + прокрутка — это зум (жест масштаба), а не жест тачпада:
+        // выбег после него не нужен.
+        let zoom_modifier = ctx.options(|o| o.input_options.zoom_modifier);
+        let (time, dt) = ctx.input(|i| {
+            let zooming = i.modifiers.matches_any(zoom_modifier);
+            for e in &i.events {
+                if let egui::Event::MouseWheel {
+                    unit, delta, source, ..
+                } = e
+                {
+                    // Точные (пиксельные) дельты без источника — тачпад или колесо
+                    // высокого разрешения; строчные — обычное колесо.
+                    if !zooming
+                        && *unit == egui::MouseWheelUnit::Point
+                        && *source == egui::MouseWheelSource::Unknown
+                    {
+                        gesture += *delta;
+                    } else {
+                        wheel = true;
+                    }
+                }
+            }
+            (i.time, i.stable_dt.clamp(1.0 / 240.0, 0.1))
+        });
+
+        if gesture != egui::Vec2::ZERO {
+            // Пальцы на тачпаде: кадр идёт один к одному с жестом, выбег снят.
+            let a = 1.0 - (-dt / VEL_SMOOTH_S).exp();
+            self.vel = self.vel * (1.0 - a) + gesture / dt * a;
+            self.last_event = time;
+            self.touched = true;
+            self.coasting = false;
+        } else if wheel {
+            // Колесо шагает само (egui сглаживает щелчок); выбег тачпада отменяется.
+            self.touched = false;
+            self.coasting = false;
+            self.vel = egui::Vec2::ZERO;
+        } else if self.touched && time - self.last_event > GESTURE_END_S {
+            // Пальцы оторвались: скорость гасится за паузу и превращается в выбег.
+            self.touched = false;
+            self.vel *= (-(time - self.last_event) as f32 / COAST_DECAY_S).exp();
+            self.coasting = self.vel.length() * COAST_DECAY_S >= COAST_STOP_PTS;
+            if !self.coasting {
+                self.vel = egui::Vec2::ZERO;
+            }
+        }
+
+        if !self.coasting {
+            return false;
+        }
+        ctx.input_mut(|i| i.smooth_scroll_delta += self.vel * dt);
+        self.vel *= (-dt / COAST_DECAY_S).exp();
+        if self.vel.length() * COAST_DECAY_S < COAST_STOP_PTS {
+            self.vel = egui::Vec2::ZERO;
+            self.coasting = false;
+        }
+        self.coasting
+    }
 }
 
 /// Моноширинные цифры: размеры, счётчики, даты, размеры кадра (макет: mono-numeric).
@@ -1337,12 +1445,7 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
         "photocat",
         opts,
         Box::new(move |cc| {
-            // Один стиль на всё GUI (docs/UI.md §Вёрстка) и плавная прокрутка:
-            // колесо не «шагает» на строку, а догоняет позицию.
-            cc.egui_ctx.all_styles_mut(|s| {
-                s.scroll_animation.points_per_second = 1400.0;
-                s.scroll_animation.duration = egui::Rangef::new(0.08, 0.24);
-            });
+            // Один стиль на всё GUI (docs/UI.md § Layout) вместе с профилем прокрутки.
             style(&cc.egui_ctx);
             Ok(Box::new(App::new(db_path.clone())))
         }),
@@ -1554,6 +1657,8 @@ struct App {
     /// Разрешённая тема последнего кадра: палитра пересобирается только когда она
     /// меняется (настройка или тема ОС), а не каждый кадр.
     theme_key: Option<egui::Theme>,
+    /// Прокрутка колесом и тачпадом: скорость, выбег, пауза (M22.2b).
+    scroll: Scroll,
 }
 
 impl App {
@@ -1716,6 +1821,7 @@ impl App {
             storage_confirm: None,
             status: String::new(),
             theme_key: None,
+            scroll: Scroll::default(),
         };
         me.reload();
         me
@@ -8985,6 +9091,11 @@ impl eframe::App for App {
             apply_theme(ctx, self.settings.theme);
             self.theme_key = Some(resolved);
         }
+        // M22.2b: прокрутка доводится до всех областей сразу — до того, как их нарисует кадр.
+        // Пока идёт выбег тачпада, кадры просятся сами; в покое — нет.
+        if self.scroll.pump(ctx) {
+            ctx.request_repaint();
+        }
         // M18: выделение живёт внутри одного набора файлов; смена вида/фильтра/
         // поиска/порядка снимает его и говорит почему. Esc и Ctrl+A — та же сетка.
         self.sync_pick_scope();
@@ -11151,11 +11262,11 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick,
-        SettingsTab, StorageAction, View, Viewer, clamp_pan, days_in_month, db, first_weekday_monday,
-        fit_rect, list_meta_px, list_name_px, list_row_height, monday_of, month_groups,
-        nearest_file_month, parse_date, pick_kind, score_percentile, shift_month,
-        shift_to_file_month,
+        App, COAST_DECAY_S, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter,
+        PickClick, Scroll, SettingsTab, StorageAction, View, Viewer, WHEEL_NOTCH_PTS, clamp_pan,
+        days_in_month, db, first_weekday_monday, fit_rect, list_meta_px, list_name_px,
+        list_row_height, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
+        score_percentile, shift_month, shift_to_file_month,
     };
     use crate::embed;
     use crate::i18n;
@@ -11360,6 +11471,399 @@ mod tests {
             repeat: false,
             modifiers: Default::default(),
         }
+    }
+
+    // ---- M22.2b: прокрутка колесом и тачпадом -------------------------------------------
+
+    /// Событие тачпада: winit на Linux и Windows отдаёт точные дельты без источника.
+    fn trackpad_event(dy: f32) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dy),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Событие тачпада с модификатором (Ctrl/Cmd — жест масштаба, а не прокрутки).
+    fn trackpad_event_mod(dy: f32, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dy),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers,
+        }
+    }
+
+    /// Событие колеса: один «щелчок» — одна строка (winit), egui сам переводит её в points.
+    fn wheel_event(dy: f32) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, dy),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Один кадр профиля прокрутки: подать события, прогнать `Scroll::pump` и вернуть,
+    /// сколько points он добавил к прокрутке кадра и просит ли следующий кадр.
+    fn scroll_frame(
+        scroll: &mut Scroll,
+        ctx: &egui::Context,
+        t: f64,
+        events: Vec<egui::Event>,
+    ) -> (bool, egui::Vec2) {
+        scroll_frame_mod(scroll, ctx, t, events, Default::default())
+    }
+
+    /// То же с нажатым модификатором: так проверяется «Ctrl + прокрутка — это зум».
+    fn scroll_frame_mod(
+        scroll: &mut Scroll,
+        ctx: &egui::Context,
+        t: f64,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> (bool, egui::Vec2) {
+        let mut events = events;
+        if modifiers != egui::Modifiers::NONE {
+            events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        }
+        let raw = egui::RawInput {
+            time: Some(t),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut wants = false;
+        let mut added = egui::Vec2::ZERO;
+        let out = ctx.run_ui(raw, |ui| {
+            let ctx = ui.ctx().clone();
+            let before = ctx.input(|i| i.smooth_scroll_delta);
+            wants = scroll.pump(&ctx);
+            added = ctx.input(|i| i.smooth_scroll_delta) - before;
+        });
+        out.drop_without_applying_deltas();
+        (wants, added)
+    }
+
+    /// Жест тачпада на шесть кадров и выбег до остановки: возвращает пройденный выбег
+    /// и число кадров, которые он потребовал.
+    fn swipe_and_coast(scroll: &mut Scroll, ctx: &egui::Context) -> (f32, usize) {
+        let dt = 1.0 / 60.0;
+        let mut t = 0.0;
+        // Жест: 6 кадров по 20 px — 1200 px/s, обычная скорость короткого броска.
+        for _ in 0..6 {
+            let (wants, _) = scroll_frame(scroll, ctx, t, vec![trackpad_event(-20.0)]);
+            assert!(!wants, "во время жеста выбег не начинается");
+            t += dt;
+        }
+        // Пауза между отрывом пальцев и началом выбега — не прокрутка.
+        let mut waited = 0;
+        while waited < 20 {
+            let (wants, _) = scroll_frame(scroll, ctx, t, Vec::new());
+            t += dt;
+            waited += 1;
+            if wants {
+                break;
+            }
+        }
+        assert!(waited < 20, "выбег не начался после отрыва пальцев");
+        let mut coasted = 0.0;
+        let mut frames = 0;
+        loop {
+            let (wants, added) = scroll_frame(scroll, ctx, t, Vec::new());
+            t += dt;
+            frames += 1;
+            coasted -= added.y;
+            if !wants {
+                break;
+            }
+            assert!(frames < 600, "выбег не кончается");
+        }
+        (coasted, frames)
+    }
+
+    /// Щелчок колеса по умолчанию был 40 px на сетке в 2000 строк — 50 щелчков до месяца.
+    /// Теперь один щелчок — треть окна по умолчанию, и профиль один на обе темы.
+    #[test]
+    fn колесо_шагает_треть_экрана() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let fallback_h = 840.0;
+        let speed = ctx.options(|o| o.input_options.line_scroll_speed);
+        assert!((speed - WHEEL_NOTCH_PTS).abs() < 0.01, "щелчок не из профиля: {speed}");
+        assert!(
+            (speed - fallback_h / 3.0).abs() < 0.01,
+            "щелчок {speed} — не треть окна {fallback_h}"
+        );
+        super::apply_theme(&ctx, db::ThemeMode::Light);
+        assert_eq!(ctx.options(|o| o.input_options.line_scroll_speed), WHEEL_NOTCH_PTS);
+        let decay = ctx
+            .style_of(egui::Theme::Light)
+            .spacing
+            .scroll
+            .kinetic
+            .decay_time;
+        assert!((decay - COAST_DECAY_S).abs() < 1e-6, "выбег не из профиля: {decay}");
+    }
+
+    /// Тачпад: после отрыва пальцев жест продолжается выбегом и останавливается сам.
+    /// Короткий жест — 200–300 px, а не «полстроки» и не полэкрана.
+    #[test]
+    fn тачпад_катится_после_отрыва_пальцев() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut scroll = Scroll::default();
+        let (coasted, frames) = swipe_and_coast(&mut scroll, &ctx);
+        assert!(
+            (200.0..=340.0).contains(&coasted),
+            "выбег короткого жеста {coasted} px — не 200–300"
+        );
+        assert!(frames > 5, "выбег оборвался за {frames} кадров");
+    }
+
+    /// Сквозная проверка на настоящем кадре окна: колесо и тачпад двигают саму сетку.
+    /// Профиль прокрутки проверен выше по числам; здесь важно, что добавка не пропадает
+    /// по дороге к `ScrollArea`, а выбег идёт уже без событий тачпада и сам затихает.
+    #[test]
+    fn колесо_и_тачпад_двигают_сетку() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-scroll.db"));
+        app.settings.grid_layout = db::GridLayout::Flat;
+        app.settings.lang = i18n::Lang::En;
+        app.items = (0..60)
+            .map(|i| file_row(i as i64 + 1, "image", &format!("f{i}.jpg")))
+            .collect();
+        let ctx = egui::Context::default();
+        // Курсор в центре сетки: без него `ScrollArea` не забирает прокрутку.
+        let at_grid = vec![egui::Event::PointerMoved(egui::pos2(700.0, 400.0))];
+        // Первая видимая плитка: меньшее имя на экране.
+        let first_shown = |texts: &[String]| {
+            texts
+                .iter()
+                .filter_map(|t| t.strip_prefix('f')?.strip_suffix(".jpg")?.parse::<usize>().ok())
+                .min()
+                .unwrap_or(usize::MAX)
+        };
+        window_frame_with(&mut app, &ctx, at_grid.clone());
+        let top = window_frame_with(&mut app, &ctx, at_grid.clone());
+        assert_eq!(first_shown(&top), 0, "сетка не с начала: {:?}", top.len());
+
+        // Колесо: два щелчка (по трети экрана) — первые плитки уходят вверх.
+        let mut after_wheel = top.clone();
+        for _ in 0..2 {
+            after_wheel = window_frame_with(&mut app, &ctx, vec![wheel_event(-1.0)]);
+        }
+        for _ in 0..20 {
+            after_wheel = window_frame_with(&mut app, &ctx, Vec::new());
+        }
+        let wheel_top = first_shown(&after_wheel);
+        assert!(wheel_top > 0, "колесо не подвинуло сетку");
+
+        // Тачпад: жест, а после отрыва пальцев — кадры без событий.
+        for _ in 0..6 {
+            let mut events = vec![trackpad_event(-20.0)];
+            events.extend(at_grid.clone());
+            window_frame_with(&mut app, &ctx, events);
+        }
+        // Ждём начало выбега (состояние самого профиля, а не «кадр подвинулся»:
+        // сглаживание последних дельт двигает сетку и без инерции).
+        let mut coast_from = None;
+        let mut settled_at = None;
+        for _ in 0..300 {
+            let texts = window_frame_with(&mut app, &ctx, Vec::new());
+            if coast_from.is_none() && app.scroll.coasting {
+                coast_from = Some(first_shown(&texts));
+            } else if coast_from.is_some() && !app.scroll.coasting {
+                settled_at = Some(first_shown(&texts));
+                break;
+            }
+        }
+        let coast_from = coast_from.expect("выбег не начался после отрыва пальцев");
+        let settled_at = settled_at.expect("выбег не затих за 300 кадров");
+        assert!(
+            settled_at > coast_from,
+            "выбег не двигает сетку: было {coast_from}, стало {settled_at}"
+        );
+        // В покое профиль молчит и сетка стоит.
+        let mut settled = Vec::new();
+        for _ in 0..40 {
+            settled = window_frame_with(&mut app, &ctx, Vec::new());
+        }
+        assert_eq!(
+            first_shown(&settled),
+            settled_at,
+            "после выбега сетка продолжает ехать"
+        );
+    }
+
+    /// Смена направления не даёт скачка: новое касание гасит выбег в тот же кадр.
+    #[test]
+    fn новый_жест_отменяет_выбег() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut scroll = Scroll::default();
+        let dt = 1.0 / 60.0;
+        let mut t = 0.0;
+        for _ in 0..4 {
+            scroll_frame(&mut scroll, &ctx, t, vec![trackpad_event(-12.0)]);
+            t += dt;
+        }
+        // Первый кадр после паузы начинает выбег.
+        let mut started = false;
+        for _ in 0..10 {
+            let (wants, _) = scroll_frame(&mut scroll, &ctx, t, Vec::new());
+            t += dt;
+            if wants {
+                started = true;
+                break;
+            }
+        }
+        assert!(started, "выбег так и не начался");
+        // Обратный жест: в этом кадре профиль ничего не добавляет — скачка нет,
+        // дальше колесо ведёт уже сама egui.
+        let (wants, added) = scroll_frame(&mut scroll, &ctx, t, vec![trackpad_event(30.0)]);
+        assert!(!wants, "выбег не прерван новым жестом");
+        assert_eq!(added, egui::Vec2::ZERO, "скачок на смене направления: {added:?}");
+    }
+
+    /// Колесо и любой другой способ прокрутки тоже обрывают выбег тачпада.
+    #[test]
+    fn колесо_отменяет_выбег_тачпада() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut scroll = Scroll::default();
+        let (coasted, _) = swipe_and_coast(&mut scroll, &ctx);
+        assert!(coasted > 0.0);
+        let (wants, added) = scroll_frame(&mut scroll, &ctx, 10.0, vec![wheel_event(-1.0)]);
+        assert!(!wants, "колесо не отменило выбег");
+        assert_eq!(added, egui::Vec2::ZERO);
+    }
+
+    /// Ctrl/Cmd + жест — это зум, а не прокрутка: после него сетка не должна катиться.
+    #[test]
+    fn жест_с_ctrl_не_выбегает() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut scroll = Scroll::default();
+        let dt = 1.0 / 60.0;
+        let mut t = 0.0;
+        for _ in 0..6 {
+            let (wants, added) = scroll_frame_mod(
+                &mut scroll,
+                &ctx,
+                t,
+                vec![trackpad_event_mod(-20.0, egui::Modifiers::COMMAND)],
+                egui::Modifiers::COMMAND,
+            );
+            assert!(!wants);
+            assert_eq!(added, egui::Vec2::ZERO, "жест масштаба подвинул сетку");
+            t += dt;
+        }
+        for i in 0..30 {
+            let (wants, added) = scroll_frame_mod(
+                &mut scroll,
+                &ctx,
+                t + i as f64 * dt,
+                Vec::new(),
+                egui::Modifiers::NONE,
+            );
+            assert!(!wants, "после жеста масштаба пошёл выбег");
+            assert_eq!(added, egui::Vec2::ZERO);
+        }
+    }
+
+    /// В покое профиль молчит: idle-кадры не запрашиваются, окно не перерисовывается зря.
+    #[test]
+    fn в_покое_кадры_не_просятся() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut scroll = Scroll::default();
+        for i in 0..30 {
+            let (wants, added) = scroll_frame(&mut scroll, &ctx, i as f64 / 60.0, Vec::new());
+            assert!(!wants, "кадр запрошен без прокрутки");
+            assert_eq!(added, egui::Vec2::ZERO);
+        }
+    }
+
+    /// Правило «один профиль на все области»: ни один `ScrollArea` не ставит свои
+    /// множители колеса и не включает/выключает источники прокрутки.
+    #[test]
+    fn области_прокрутки_не_ставят_свои_множители() {
+        let src = include_str!("app.rs");
+        for needle in [concat!("wheel_scroll", "_multiplier"), concat!(".scroll_", "source(")] {
+            assert!(!src.contains(needle), "найдено своё правило прокрутки: {needle}");
+        }
+        assert!(src.contains("ScrollArea"), "в файле нет ни одной области прокрутки");
+    }
+
+    /// Замер M22.2b на реальном корпусе: кадры сетки во время прокрутки колесом и тачпадом.
+    /// Не в обычном прогоне: `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
+    /// cargo test --release -- --ignored замер_прокрутки --nocapture`.
+    #[test]
+    #[ignore]
+    fn замер_прокрутки_сетки() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB не задан — замер пропущен");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "в индексе {n} файлов — корпус не тот");
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let size = egui::vec2(1240.0, 840.0);
+        let mut drive = |events: Vec<egui::Event>, t: f64| {
+            let raw = egui::RawInput {
+                time: Some(t),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(&mut app, ui, &mut frame));
+            out.drop_without_applying_deltas();
+        };
+        let dt = 1.0 / 240.0;
+        let mut t: f64 = 0.0;
+        let run = |drive: &mut dyn FnMut(Vec<egui::Event>, f64),
+                       t: &mut f64,
+                       events: Vec<egui::Event>| {
+            let start = Instant::now();
+            drive(events, *t);
+            *t += dt;
+            start.elapsed().as_secs_f32() * 1000.0
+        };
+        let mut times = Vec::new();
+        for _ in 0..20 {
+            run(&mut drive, &mut t, Vec::new());
+        }
+        // Щелчки колеса вниз — сетка едет от свежих месяцев к старым: один кадр —
+        // один щелчок, 240 «щелчков в секунду», вместе с подгрузкой превью.
+        for _ in 0..80 {
+            times.push(run(&mut drive, &mut t, vec![wheel_event(-1.0)]));
+        }
+        // Тачпад: непрерывный жест с выбегом (профиль добавляет инерцию сам).
+        for _ in 0..80 {
+            times.push(run(&mut drive, &mut t, vec![trackpad_event(-14.0)]));
+        }
+        times.sort_by(|a, b| a.total_cmp(b));
+        let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+        println!(
+            "корпус: {n} файлов; кадров: {}; p50 {:.2} ms ({:.0} fps), p95 {:.2} ms ({:.0} fps), p99 {:.2} ms",
+            times.len(),
+            p(0.50),
+            1000.0 / p(0.50),
+            p(0.95),
+            1000.0 / p(0.95),
+            p(0.99)
+        );
     }
 
     fn viewer_with(ids: Vec<i64>, idx: usize) -> Viewer {
@@ -13391,4 +13895,3 @@ mod tests {
         assert!(s.verify_last_ok);
     }
 }
-

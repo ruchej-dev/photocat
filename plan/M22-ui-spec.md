@@ -108,7 +108,7 @@ reason is written in ADR 0044.
 
 | Screen | Mock-up | What is adopted | Task |
 |---|---|---|---|
-| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band | M22.2 ✅, M22.2a ✅ |
+| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 |
@@ -251,7 +251,7 @@ asserts the label "Плитки 200" is drawn in the tile, rows and list views.
 
 **Files.** `src/app.rs` (`draw_list`, the header), `docs/UI.md`, `plan/STATUS.md`.
 
-### M22.2b — scrolling with a trackpad and the wheel
+### M22.2b — scrolling with a trackpad and the wheel ✅ (this change)
 
 The owner's remark: on a trackpad the grid is heavy to scroll, and the wheel is slow. Today the scroll
 animation is `1400 pts/s`, `0.08–0.24 s`, and the wheel delta is applied as-is; a precision trackpad
@@ -272,7 +272,22 @@ dozen pixels in a 2000-row grid.
 5. `docs/UI.md` § Interaction gets the numbers; the debt entry about progress blinking (item 2) is
    unaffected.
 
-**Files.** `src/app.rs` (`run`/`apply_theme` scroll options), `docs/UI.md`, `plan/STATUS.md`.
+**Result.** One profile, in two places: `apply_theme` sets `line_scroll_speed` = 280 px (a third of
+the 840 px default window), `scroll_animation` 2400 pts/s (0.10–0.30 s) and `kinetic.decay_time` =
+0.35 s; `Scroll` (`src/app.rs`) does the trackpad half. winit reports `MouseWheelSource::Unknown` on
+Linux and Windows, so egui gives a precision trackpad no inertia at all: the profile estimates the
+gesture velocity from point deltas (60 Hz bound, smoothed by 50 ms), and once the fingers are gone for
+80 ms it keeps adding `v · dt` to `smooth_scroll_delta` with exponential decay until the remaining
+path is under 6 px. A new touch, the opposite direction or a wheel notch drops the coast in the same
+frame. No `ScrollArea` sets its own multiplier or scroll source (a source-scan test forbids it), so
+the grid, the left panel, the card and the dialogs move the same way.
+
+**Measured** (a copy of the real DB, 2232 files, release): a trackpad flick of 1200 px/s coasts
+274 px in 81 frames (≈1.35 s); a wheel notch is 280 px; 160 frames of continuous scrolling over the
+grid — p50 6.4–6.7 ms (149–157 fps), p95 6.6–6.9 ms (145–152 fps), p99 6.7–7.4 ms over six runs;
+idle frames request nothing.
+
+**Files.** `src/app.rs` (`apply_theme`, `Scroll`, `App::ui`), `docs/UI.md`, `plan/STATUS.md`.
 
 ### M22.3 — left panel: years and tag chips
 

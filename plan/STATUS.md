@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears) → next:M22.2b (trackpad and wheel scrolling), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → next:M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -1897,6 +1897,48 @@ the pointer table describe the drag.
 
 **Not done, deliberately.** No wheel zoom, no double-click "fit ↔ 100 %", no panning of the video
 frame: the video is fitted by design, and no gesture is promised that the code does not do.
+
+## M22.2b — scrolling with a trackpad and the wheel (2026-11-24) ✅
+
+The owner's remark after the main screen: on a trackpad the grid was heavy to scroll, and the wheel
+was slow. Both were true and both had the same cause — nobody had ever set the profile: egui's default
+wheel line is 40 px (50 notches to cross a month on a 2000-row grid), and on Linux and Windows winit
+reports `MouseWheelSource::Unknown`, so a precision trackpad got no inertia at all and every swipe
+died the moment the fingers lifted.
+
+**What appeared.** One profile, in two places. `apply_theme` sets `line_scroll_speed = 280 px` — a
+third of the 840 px default window per wheel notch — raises the scroll-to animation to 2400 pts/s over
+0.10–0.30 s and puts `kinetic.decay_time` at 0.35 s, so the same numbers drive egui's own coasting on
+macOS. `Scroll` (`src/app.rs`) does the trackpad half that egui cannot: it estimates the gesture
+velocity from point deltas (smoothed over 50 ms), and once no gesture event has arrived for 80 ms it
+keeps adding `v · dt` to `smooth_scroll_delta` with exponential decay until the remaining path is
+under 6 px. A new touch, the opposite direction or a wheel notch drops the coast in the same frame, so
+a direction change never jumps. Idle frames request nothing (`pump` returns `false`). The model
+deltas on Wayland (physical pixels ÷ pixels-per-point) are one-to-one with the fingers, so only the
+coast is added on top. A source-scan test forbids `wheel_scroll_multiplier` and per-view
+`scroll_source`, so the grid, the left panel, the card and the dialogs move the same way.
+
+**Measured** (a copy of the real DB, 2232 files, release, 2026-11-24). Trackpad flick of 1200 px/s
+(6 frames × 20 px): the coast carries the grid 274 px in 81 frames (≈1.35 s) and stops on its own; a
+wheel notch is 280 px (a third of the window), so a full-height screen is three notches. 160 headless
+frames of continuous scrolling over the grid (80 wheel notches, then an 80-frame gesture with the
+coast), 1240×840: p50 6.4–6.7 ms (149–157 fps), p95 6.6–6.9 ms (145–152 fps), p99 6.7–7.4 ms over
+six runs — the 16.7 ms budget of 60 fps is never touched, and the preview decode (8 textures per
+frame) is included. The full table row is in `docs/ARCHITECTURE.md` § Measurements.
+
+**Checks.** `cargo test` — 233 passed, 7 `#[ignore]` (new: the wheel notch is a third of the window
+and the profile is the same in both themes; a flick coasts 200–340 px and stops; a new gesture and a
+wheel notch cancel the coast without a jump; Ctrl/Cmd + gesture is a zoom and never coasts; nothing is
+requested in idle; no `ScrollArea` sets its own multiplier; an end-to-end frame test proves the grid
+itself moves — with the injection removed it fails, and with the default 40 px notch it fails too, so
+both halves are really checked; the `#[ignore]` `замер_прокрутки_сетки` reproduces the frame numbers
+from `PHOTOCAT_BENCH_DB`).
+`cargo clippy --all-targets` clean; `check.sh` — 52 checks, 0 violations; `timeout 6
+./target/release/photocat gui --db /tmp/m222b.db` — code 124, no panic. `docs/UI.md` § Interaction
+carries the numbers.
+
+**Not done, deliberately.** No smooth zoom with the wheel, no page-key scrolling, no per-region
+speed: the profile is one for the window, as `docs/UI.md` requires.
 
 ## M22.2a — the list view scales with the size slider (2026-11-24) ✅
 
