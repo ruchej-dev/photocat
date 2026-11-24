@@ -16,7 +16,7 @@ use crate::tools::{self, Tool};
 use crate::verify;
 use anyhow::{Context, Result};
 use chrono::Datelike;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -904,11 +904,16 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
 
 /// A "caption on the left — number on the right" row: numbers always at the right edge of the column.
 fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(label).size(11.0).color(dim(ui)));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // The number always has its unit and is always monospaced: the column does not twitch.
-            ui.label(num(ui, value, 11.0));
+    // A pair of 11 px labels is not a button: `horizontal` assumes a 26 px interactive row, which
+    // costs 12 px of air per line and 48 px in the four rows of the left panel summary (M22.3).
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 16.0;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(label).size(11.0).color(dim(ui)));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // The number always has its unit and is always monospaced: the column does not twitch.
+                ui.label(num(ui, value, 11.0));
+            });
         });
     });
 }
@@ -996,6 +1001,55 @@ fn nav_section(ui: &mut egui::Ui, text: &str) {
     ui.add_space(2.0);
 }
 
+/// A cell of the year list: 20 px high and a fixed share of the panel width, the year in
+/// monospace on the left, the number of files in mono 10 at the right edge, the picked year in the
+/// accent. The geometry does not depend on the state, so the list does not twitch on a click
+/// (M22.3).
+fn year_row(ui: &mut egui::Ui, width: f32, text: &str, count: Option<usize>, selected: bool) -> bool {
+    let th = theme(ui);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let fill = if selected {
+            th.accent_soft
+        } else if resp.hovered() {
+            th.card
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        if fill != egui::Color32::TRANSPARENT {
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(RADIUS_CTRL as u8), fill);
+        }
+        let color = if selected {
+            th.accent
+        } else if resp.hovered() {
+            th.text
+        } else {
+            th.text_med
+        };
+        ui.painter().text(
+            rect.left_center() + egui::vec2(6.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::FontId::monospace(11.0),
+            color,
+        );
+        if let Some(n) = count {
+            ui.painter().text(
+                rect.right_center() + egui::vec2(-6.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                n.to_string(),
+                egui::FontId::monospace(10.0),
+                th.text_dim,
+            );
+        }
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
 /// An item of the left list in the "Settings" dialog: the same geometry as the navigation.
 fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
     let (rect, resp) =
@@ -1055,6 +1109,42 @@ fn filter_chip(ui: &mut egui::Ui, text: &str, lang: Lang) -> bool {
     )
     .on_hover_text(t(lang, "remove the filter"))
     .clicked()
+}
+
+/// A tag chip: 20 px high, mono 11, the word and its count after a middle dot, the picked chip in
+/// the accent. The width comes from the text and not from the state, so a click never moves the
+/// row (M22.3).
+fn tag_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> bool {
+    let th = theme(ui);
+    let font = egui::FontId::monospace(11.0);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), th.text_med);
+    let size = egui::vec2(galley.size().x + 14.0, 20.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (fill, border, color) = if selected {
+            (th.accent_soft, th.accent, th.accent)
+        } else if resp.hovered() {
+            (th.card, th.border_strong, th.text)
+        } else {
+            (th.field, th.border, th.text_med)
+        };
+        let radius = egui::CornerRadius::same(RADIUS_CTRL as u8);
+        ui.painter().rect_filled(rect, radius, fill);
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter()
+            .galley(rect.center() - galley.size() / 2.0, galley, color);
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
 }
 
 /// A snapshot of the active filters for the row of chips.
@@ -5176,6 +5266,18 @@ impl App {
             .id_salt("left-scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // The years are the fast road into the archive: the five newest with their counts,
+                // a click narrows the date filter to one year (M22.3). They open the scrolling part
+                // and are the first thing under the pinned filter, so they need no scroll of their
+                // own; the model block follows a wheel notch lower, as before.
+                // The date filter drives the grid and the calendar; other screens have a context of
+                // their own (groups, faces, the trash), so the years are not drawn there.
+                let years = self.year_counts();
+                if matches!(self.view, View::Grid | View::Calendar) && !years.is_empty() {
+                    nav_section(ui, t(lang, "YEARS"));
+                    self.years_block(ui, &years);
+                    hairline(ui);
+                }
                 match self.view {
                     View::Dupes => self.dupes_controls(ui),
                     View::Faces => self.faces_controls(ui),
@@ -5193,6 +5295,75 @@ impl App {
                 }
             });
         panel_edge(ui, false);
+    }
+
+    /// The years of the archive: the five newest with the number of files, the picked one in the
+    /// accent. "All years" is the way back and is drawn only while a year is picked, so the panel
+    /// does not spend a row on a filter that is already empty (M22.3).
+    fn years_block(&mut self, ui: &mut egui::Ui, years: &[(String, usize)]) {
+        let lang = self.settings.lang;
+        let picked = self.picked_year();
+        // Two columns of three rows: a single column of five years costs 130 px and pushes the
+        // model block out of the panel on the default 840 px window. Six cells are three rows
+        // whether or not a year is picked, so the block never changes height on a click.
+        // text, count, selected, the year the click sets (None — "All years", an empty filter)
+        let mut cells: Vec<(String, Option<usize>, bool, Option<String>)> = Vec::new();
+        if picked.is_some() {
+            cells.push((t(lang, "All years").to_string(), None, false, None));
+        }
+        for (year, count) in years {
+            let selected = picked.as_deref() == Some(year.as_str());
+            cells.push((year.clone(), Some(*count), selected, Some(year.clone())));
+        }
+        let gap = 4.0;
+        let w = ((ui.available_width() - gap) / 2.0).max(60.0);
+        let mut set: Option<Option<String>> = None;
+        for row in cells.chunks(2) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (text, count, selected, year) in row {
+                    if year_row(ui, w, text, *count, *selected) {
+                        // A second click on the picked year clears it: a toggle, as a chip behaves.
+                        set = Some(if *selected { None } else { year.clone() });
+                    }
+                }
+            });
+        }
+        if let Some(year) = set {
+            self.pick_year(year.as_deref());
+        }
+    }
+
+    /// The years of the index with the number of files: the newest first, five at most. A file
+    /// without a date belongs to no year and is not counted (M22.3).
+    fn year_counts(&self) -> Vec<(String, usize)> {
+        let mut map: BTreeMap<String, usize> = BTreeMap::new();
+        for r in &self.items {
+            let Some(year) = r.taken_at.as_deref().and_then(|d| d.get(0..4)) else {
+                continue;
+            };
+            if year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit()) {
+                *map.entry(year.to_string()).or_default() += 1;
+            }
+        }
+        let mut out: Vec<(String, usize)> = map.into_iter().collect();
+        out.sort_by(|a, b| b.0.cmp(&a.0));
+        out.truncate(5);
+        out
+    }
+
+    /// The year the date filter holds, if it holds exactly a year.
+    fn picked_year(&self) -> Option<String> {
+        let q = self.query.trim();
+        (q.len() == 4 && q.bytes().all(|b| b.is_ascii_digit())).then(|| q.to_string())
+    }
+
+    /// A year clicked in the panel: the date filter is the query field, so the year goes there.
+    /// A semantic search and the text snippets are dropped — a year is a date, not words.
+    fn pick_year(&mut self, year: Option<&str>) {
+        self.query = year.unwrap_or_default().to_string();
+        self.semantic_hits = None;
+        self.ocr_snippets.clear();
     }
 
     /// The context of the "Duplicates and series" view: the threshold, "Find groups", the summary and the plan export.
@@ -5539,58 +5710,8 @@ impl App {
                 ui.label(
                     egui::RichText::new(free).size(11.0).color(dim(ui)),
                 );
-                let mut own_tags: Vec<String> =
-                    self.user_tags.values().flatten().cloned().collect();
-                own_tags.sort();
-                own_tags.dedup();
                 // The number next to a tag is how many photos carry it at the current threshold.
-                let counts = self.tag_counts();
-                let labels = self.tag_labels();
-                egui::ComboBox::from_id_salt("tag_filter")
-                    .width(ui.available_width())
-                    .selected_text(
-                        self.tag_filter
-                            .clone()
-                            .map(|tag| format!("{}: {}", t(lang, "tag"), i18n::word(lang, &tag)))
-                            .unwrap_or_else(|| t(lang, "all tags").into()),
-                    )
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_value(&mut self.tag_filter, None, t(lang, "all tags"))
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                        for (label, n) in labels.iter().zip(&counts) {
-                            if ui
-                                .selectable_value(
-                                    &mut self.tag_filter,
-                                    Some(label.clone()),
-                                    format!("{} · {n}", i18n::word(lang, label)),
-                                )
-                                .clicked()
-                            {
-                                ui.close();
-                            }
-                        }
-                        for label in &own_tags {
-                            let n = self
-                                .user_tags
-                                .values()
-                                .filter(|tags| tags.iter().any(|t| t == label))
-                                .count();
-                            if ui
-                                .selectable_value(
-                                    &mut self.tag_filter,
-                                    Some(label.clone()),
-                                    format!("{}: {label} · {n}", t(lang, "mine")),
-                                )
-                                .clicked()
-                            {
-                                ui.close();
-                            }
-                        }
-                    });
+                let counts = self.tag_chips(ui);
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new(t(lang, "Filter threshold"))
@@ -7362,6 +7483,49 @@ impl App {
         out
     }
 
+    /// The tags as chips (M22.3): the word with the count of photos after a middle dot, the
+    /// picked one in the accent, a click on the picked one clears it. The dictionary does not need
+    /// a menu; the count next to a word honestly says "zero" before a click. Returns the counts,
+    /// so the model block can warn that no tag passes the threshold.
+    fn tag_chips(&mut self, ui: &mut egui::Ui) -> Vec<usize> {
+        let lang = self.settings.lang;
+        let labels = self.tag_labels();
+        let counts = self.tag_counts();
+        let mut own_tags: Vec<String> = self.user_tags.values().flatten().cloned().collect();
+        own_tags.sort();
+        own_tags.dedup();
+        let mut picked: Option<Option<String>> = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            if tag_chip(ui, t(lang, "all tags"), self.tag_filter.is_none()) {
+                picked = Some(None);
+            }
+            for (label, n) in labels.iter().zip(&counts) {
+                let chosen = self.tag_filter.as_deref() == Some(label.as_str());
+                let text = format!("{} · {n}", i18n::word(lang, label));
+                if tag_chip(ui, &text, chosen) {
+                    picked = Some(if chosen { None } else { Some(label.clone()) });
+                }
+            }
+            for label in &own_tags {
+                let chosen = self.tag_filter.as_deref() == Some(label.as_str());
+                let n = self
+                    .user_tags
+                    .values()
+                    .filter(|tags| tags.iter().any(|t| t == label))
+                    .count();
+                let text = format!("{}: {label} · {n}", t(lang, "mine"));
+                if tag_chip(ui, &text, chosen) {
+                    picked = Some(if chosen { None } else { Some(label.clone()) });
+                }
+            }
+        });
+        if let Some(tag) = picked {
+            self.tag_filter = tag;
+        }
+        counts
+    }
+
     /// The cut-off threshold in the filter is a percentile over the chosen tag (ADR 0032).
     /// 100% is the strongest photo of this tag, 0% all of them, 70% the top 30%.
     fn tag_filter_slider(&mut self, ui: &mut egui::Ui) {
@@ -8667,6 +8831,36 @@ fn draw_flow(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
     }
 }
 
+/// The file name of a tile caption on one line: the band is 22 px, so a long name is cut with an
+/// ellipsis instead of wrapping its first line over the preview (found while checking M22.3).
+fn caption_name(
+    ui: &egui::Ui,
+    name: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    max_width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping {
+            max_width,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        },
+        ..Default::default()
+    };
+    job.append(
+        name,
+        0.0,
+        egui::TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    ui.painter().layout_job(job)
+}
+
 /// A file tile: the card = the frame (w×h) + a 22 px caption strip (mock-up: thumbnail
 /// card). The frame fills the tile completely: the tile proportion equals the photo proportion.
 fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow, w: f32, h: f32) {
@@ -8720,7 +8914,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         // not drawn at all rather than overlapping the date.
         let name_max = (cap_rect.width() - date_galley.size().x - 3.0 * cap_pad).max(0.0);
         if name_max > 4.0 {
-            let name_galley = ui.painter().layout(name.clone(), font, name_col, name_max);
+            let name_galley = caption_name(ui, &name, font, name_col, name_max);
             let name_right =
                 (cap_rect.right() - date_galley.size().x - 2.0 * cap_pad).max(cap_rect.left());
             let clip = cap_rect.intersect(egui::Rect::from_min_max(
@@ -11065,6 +11259,66 @@ mod tests {
         }
     }
 
+    /// The drawn text with where it landed: a panel budget is checked by places, not by words.
+    fn collect_text_pos(shape: &egui::Shape, out: &mut Vec<(String, egui::Pos2)>) {
+        match shape {
+            egui::Shape::Text(t) => out.push((t.galley.text().to_owned(), t.pos)),
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_text_pos(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// One frame of the whole window at a given size with the position of every word: that is how
+    /// the panel budget (M22.3) is checked without a window.
+    fn window_layout(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::Pos2)> {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text_pos(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// The tag chips of the left panel drawn in a frame without a window: the size of the row and
+    /// the place of every chip. Two runs compare the row before and after a click.
+    fn chips_layout(app: &mut App, width: f32) -> (egui::Vec2, Vec<(String, egui::Pos2)>) {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width, 400.0),
+            )),
+            ..Default::default()
+        };
+        let mut used = egui::Vec2::ZERO;
+        let out = ctx.run_ui(raw, |ui| {
+            app.tag_chips(ui);
+            used = ui.min_rect().size();
+        });
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text_pos(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        (used, texts)
+    }
+
     /// One frame of the full-screen viewer without a window: returns all the drawn text.
     /// The only way to check that "paging shows the next file" without a GUI.
     fn viewer_frame(
@@ -13070,6 +13324,252 @@ mod tests {
                 "the size slider is gone in the {style:?} view: {texts:?}"
             );
         }
+    }
+
+    /// M22.3: the year block of the left panel is a filter, not a decoration. The counts come
+    /// from the dates of the index, a click writes the year into the date filter and a second
+    /// click (or "all years") clears it. A year without files is not in the list at all.
+    #[test]
+    fn a_year_click_narrows_the_date_filter() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-years.db"));
+        let dated = |id: i64, name: &str, at: &str| {
+            let mut r = file_row(id, "image", name);
+            r.taken_at = Some(at.into());
+            r
+        };
+        let undated = |id: i64, name: &str| {
+            let mut r = file_row(id, "image", name);
+            r.taken_at = None;
+            r
+        };
+        app.items = vec![
+            dated(1, "a.jpg", "2024-05-01T08:00"),
+            dated(2, "b.jpg", "2024-09-09T10:00"),
+            dated(3, "c.jpg", "2023-01-01T09:00"),
+            dated(4, "d.jpg", "2020-12-31T23:00"),
+            undated(5, "undated.jpg"),
+        ];
+        let years = app.year_counts();
+        let list: Vec<&str> = years.iter().map(|(y, _)| y.as_str()).collect();
+        assert_eq!(list, ["2024", "2023", "2020"], "the newest first: {list:?}");
+        assert_eq!(years[0].1, 2, "two files in 2024");
+        // At most five rows, however deep the archive is.
+        app.items = (0..9)
+            .map(|i| dated(i + 1, "x.jpg", &format!("{}-05-01T08:00", 2010 + i)))
+            .collect();
+        assert_eq!(app.year_counts().len(), 5);
+        assert_eq!(app.year_counts()[0].0, "2018");
+
+        app.items = vec![
+            dated(1, "a.jpg", "2024-05-01T08:00"),
+            dated(2, "b.jpg", "2024-09-09T10:00"),
+            dated(3, "c.jpg", "2023-01-01T09:00"),
+            undated(5, "undated.jpg"),
+        ];
+        // A semantic search plus a year is a contradiction: the click drops the words.
+        app.semantic_hits = Some(vec![1]);
+        app.ocr_snippets.insert(1, "text".into());
+        app.pick_year(Some("2024"));
+        assert_eq!(app.query, "2024");
+        assert_eq!(app.picked_year().as_deref(), Some("2024"));
+        assert!(app.semantic_hits.is_none(), "the words are gone with the year");
+        assert!(app.ocr_snippets.is_empty());
+        let visible: Vec<String> = app
+            .filtered()
+            .iter()
+            .map(|&i| super::file_name(&app.items[i].path))
+            .collect();
+        assert_eq!(visible, ["a.jpg", "b.jpg"], "only 2024: {visible:?}");
+        // The way back: the filter is empty again and every file is visible.
+        app.pick_year(None);
+        assert!(app.query.is_empty());
+        assert!(app.picked_year().is_none());
+        assert_eq!(app.filtered().len(), 4, "all years are back");
+    }
+
+    /// M22.3: the year rows are drawn with their counts, and a year with zero files is not drawn.
+    #[test]
+    fn the_years_block_draws_the_newest_five_with_counts() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-years-frame.db"));
+        let dated = |id: i64, name: &str, at: &str| {
+            let mut r = file_row(id, "image", name);
+            r.taken_at = Some(at.into());
+            r
+        };
+        app.items = vec![
+            dated(1, "a.jpg", "2024-05-01T08:00"),
+            dated(2, "b.jpg", "2024-09-09T10:00"),
+            dated(3, "c.jpg", "2023-01-01T09:00"),
+            dated(4, "d.jpg", "2020-12-31T23:00"),
+        ];
+        app.settings.lang = i18n::Lang::Ru;
+        let ctx = egui::Context::default();
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(texts.iter().any(|t| t == "ГОДЫ"), "no year block: {texts:?}");
+        for year in ["2024", "2023", "2020"] {
+            assert!(texts.iter().any(|t| t == year), "no row “{year}”: {texts:?}");
+        }
+        for empty in ["2022", "2021", "2019"] {
+            assert!(!texts.iter().any(|t| t == empty), "an empty year is drawn: {texts:?}");
+        }
+        // "All years" appears only while a year is picked: a way back, not a permanent row.
+        assert!(!texts.iter().any(|t| t == "Все годы"), "{texts:?}");
+        app.pick_year(Some("2024"));
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(texts.iter().any(|t| t == "Все годы"), "{texts:?}");
+    }
+
+    /// M22.3: the panel budget. At 840 px the folder block, two navigation groups and the filter are
+    /// pinned, and the year rows open the scrolling part — so all five are seen without a scroll, and
+    /// they stand above the summary, which is pinned at the bottom.
+    #[test]
+    fn the_left_panel_fits_the_years_above_the_summary() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-budget.db"));
+        app.items = (0..5)
+            .map(|i| {
+                let mut r = file_row(i + 1, "image", "y.jpg");
+                r.taken_at = Some(format!("{}-05-01T08:00", 2020 + i));
+                r
+            })
+            .collect();
+        app.settings.lang = i18n::Lang::Ru;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_layout(&mut app, &ctx, size);
+        let drawn = window_layout(&mut app, &ctx, size);
+        let at = |needle: &str| {
+            drawn
+                .iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, pos)| *pos)
+                .unwrap_or_else(|| panic!("“{needle}” is not drawn: {drawn:?}"))
+        };
+        // Every year row is drawn: the guard inside `year_row` skips a row that is out of the
+        // viewport, so a drawn oldest row means the whole block is seen without a scroll.
+        for year in ["2024", "2023", "2022", "2021", "2020"] {
+            at(year);
+        }
+        // The oldest row is the last one of the block; it must stand above the summary, which is
+        // pinned at the bottom of the panel, and above the bottom strip.
+        let oldest = at("2020");
+        let summary = at("Сводка");
+        assert!(
+            oldest.y + 20.0 <= summary.y,
+            "the year rows are cut off by the summary: {oldest:?} vs {summary:?}"
+        );
+        assert!(
+            oldest.y + 20.0 <= 840.0 - 28.0,
+            "a year row is under the bottom strip: {oldest:?}"
+        );
+        // Picking a year adds "All years" without growing the block: six cells are still three
+        // rows, so the summary does not move and nothing below the years is pushed off.
+        app.pick_year(Some("2024"));
+        let _ = window_layout(&mut app, &ctx, size);
+        let picked = window_layout(&mut app, &ctx, size);
+        // The picked year is also written in the query field above (and in the chip of the grid),
+        // so the last match inside the left panel is the year row itself.
+        let at_picked = |needle: &str| {
+            picked
+                .iter()
+                .rfind(|(text, pos)| text == needle && pos.x < super::LEFT_W)
+                .map(|(_, pos)| *pos)
+                .unwrap_or_else(|| panic!("“{needle}” is not drawn after a pick: {picked:?}"))
+        };
+        assert_eq!(at_picked("Все годы").y, at_picked("2024").y, "All years on the same row");
+        assert_eq!(
+            at_picked("Сводка").y,
+            summary.y,
+            "the summary stays put when a year is picked"
+        );
+        at_picked("2020");
+    }
+
+    /// M22.3: a tag chip only changes colour, never its place — so the panel does not jump when a
+    /// tag is picked. The frame draws the chips twice and compares every word and its position.
+    #[test]
+    fn the_tag_chips_do_not_jump_when_a_tag_is_picked() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-chips.db"));
+        app.items = m17_rows();
+        app.tags.insert(
+            1,
+            vec![("beach".into(), 0.9), ("mountains".into(), 0.4)],
+        );
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        app.settings.lang = i18n::Lang::En;
+        app.tag_filter = None;
+        let _ = chips_layout(&mut app, 236.0);
+        let (plain_size, plain) = chips_layout(&mut app, 236.0);
+        app.tag_filter = Some("beach".into());
+        let _ = chips_layout(&mut app, 236.0);
+        let (picked_size, picked) = chips_layout(&mut app, 236.0);
+        assert_eq!(
+            plain.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            picked.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            "the same chips in the same order"
+        );
+        assert_eq!(plain_size, picked_size, "the row keeps its size");
+        for (a, b) in plain.iter().zip(&picked) {
+            assert_eq!(a.1, b.1, "“{}” moved after the click", a.0);
+        }
+        // The picked chip is there with the count of photos after a middle dot.
+        assert!(
+            picked.iter().any(|(t, _)| t == "beach · 1"),
+            "no chip with a count: {picked:?}"
+        );
+        assert!(
+            picked.iter().any(|(t, _)| t == "all tags"),
+            "no way back to all tags: {picked:?}"
+        );
+    }
+
+    /// The caption band is 22 px: a long name must be cut with an ellipsis, not wrapped — a wrapped
+    /// first line went over the preview (found while checking M22.3 on the owner's archive).
+    #[test]
+    fn a_long_caption_name_is_cut_to_one_line() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 200.0),
+            )),
+            ..Default::default()
+        };
+        let mut galleys = Vec::new();
+        let out = ctx.run_ui(raw, |ui| {
+            for (name, width) in [
+                ("creeper_logotip_2026-10-16_18-38-13.png", 80.0),
+                ("a.jpg", 80.0),
+                ("очень_длинное_имя_снимка_на_русском.jpg", 40.0),
+            ] {
+                galleys.push(super::caption_name(
+                    ui,
+                    name,
+                    egui::FontId::monospace(10.0),
+                    egui::Color32::WHITE,
+                    width,
+                ));
+            }
+        });
+        out.drop_without_applying_deltas();
+        for g in &galleys {
+            assert_eq!(g.rows.len(), 1, "a caption name must stay on one line: {g:?}");
+        }
+        // egui keeps `text()` as it was given and cuts the row visually; the cut is the width.
+        assert!(
+            galleys[0].size().x <= 80.5,
+            "a long name must not run past its place: {}",
+            galleys[0].size().x
+        );
+        assert!(
+            galleys[2].size().x <= 40.5,
+            "a narrow tile keeps the name inside: {}",
+            galleys[2].size().x
+        );
+        assert_eq!(galleys[1].text(), "a.jpg", "a short name is untouched");
+        assert_eq!(galleys[1].rows.len(), 1);
     }
 
     #[test]

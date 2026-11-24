@@ -392,6 +392,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("LIBRARY", "БИБЛИОТЕКА"),
     ("TOOLS", "ИНСТРУМЕНТЫ"),
     ("FILTER", "ФИЛЬТР"),
+    ("YEARS", "ГОДЫ"),
+    ("All years", "Все годы"),
     ("family archive", "семейный архив"),
     ("Photos", "Фото"),
     ("Videos", "Видео"),

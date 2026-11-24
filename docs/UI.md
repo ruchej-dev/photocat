@@ -121,8 +121,11 @@ the interface rules at the end of the file.
   columns (window ≥ 1200 px); below that the card moves into the left panel, so that the grid does
   not shrink to 2 columns.
 - **The left panel:** navigation and search are pinned on top and do not scroll; "Summary" is
-  pinned at the bottom; between them scroll the view context, the model and text blocks, and the
-  file card (in a narrow window).
+  pinned at the bottom; between them scroll the years, the view context, the model and text blocks,
+  and the file card (in a narrow window). The years open that scrolling part, so they are the first
+  thing under the pinned filter and need no scroll of their own; they are a filter of the grid and
+  of the calendar only — the duplicates, faces, trash and integrity screens have a context of their
+  own.
 - **The right panel:** "File details" is pinned on top, the rest scrolls. Nothing is selected by
   itself: while there is no file, the panel says "Pick a snapshot in the grid".
 - **Forms:** input fields 380–420 px, long paths 520 px, a line no longer than 80 characters.
@@ -205,6 +208,7 @@ a rare one.
 | Six views | left panel, two groups with numbers | 1 |
 | Copy comparison and manifest | "Integrity" → fields and buttons on the screen | 1 |
 | Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section | 0–1 |
+| One year of the archive | left panel, the "Years" block: the five newest with counts; the picked year in the accent, "All years" is the way back | 1 |
 | Active filters and reset | above the grid, chips with "×" | 1 |
 | Selecting several files | Ctrl/Shift+click on tiles, "Select all (M)" above the grid | 1 |
 | Albums: tree, subalbums, order | left panel "Albums (N)" → the tree in the content panel; "+ New album", "+ Subalbum" | 1–2 |
@@ -219,10 +223,12 @@ a rare one.
 - **One main action per screen**: "All files" → "Index"/"Find"; "Duplicates" → "Find groups";
   "Faces" → "Find faces (N)"; "Integrity" → "Compare the copies"; in the "Settings" dialog →
   "Download model" (if not downloaded).
-- **Left panel budget:** the brand, two navigation groups (6 views) and 2 filter rows (path/date,
-  "All / Photos / Videos") fit into 840 px without scrolling. A new function is not added to the
-  panel if it already scrolls when nothing is selected: move it into the view screen, into
-  "Settings", or replace an existing one.
+- **Left panel budget:** the folder block, two navigation groups (7 views) and 2 filter rows
+  (path/date, "All / Photos / Videos") are pinned, and the year block opens the scrolling part: at
+  840 px all five years are seen without a scroll and stand above the pinned "Summary" (checked by
+  `app::tests::the_left_panel_fits_the_years_above_the_summary`; the years end at 680 px, the
+  summary starts at 692 px). A new function is not added to the panel if it already scrolls when
+  nothing is selected: move it into the view screen, into "Settings", or replace an existing one.
 - **A number next to an action** explains the cost before the press: "435 candidates", "still
   without faces: 0 of 1972", "135 marked spare, 214.1 MiB will be freed".
 - **The keyboard is an addition**, not an entrance: no action is available only on the keyboard and
@@ -250,13 +256,16 @@ a rare one.
 | Preview in the cache | 320 px on the long side, JPEG q≈80 | `index.rs` → `derive::analyze_image` |
 | Tooltip preview | up to 400 px on the long side, proportions kept | `draw_cell` |
 | Left panel | 260 px, width not draggable | `Panel::left(...).exact_size` |
+| Year row | 20 px, two columns of three rows (`All years` included, so the block never grows): the year in mono 11 on the left, the count of files in mono 10 at the right edge; the picked year has the accent fill and the accent text; "All years" appears only while a year is picked | `app.rs::year_row`, `years_block` |
+| Summary row | 16 px: an 11 px caption on the left, an 11 px mono number at the right edge; four rows fit under the pinned "Summary" of the left panel | `app.rs::stat_row` |
+| Tag chip | 20 px high, mono 11, the word and the count of snapshots after a middle dot ("furniture · 669"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — accent fill, accent 1 px border and accent text; the width follows the text and never the state, so a click does not move the row | `app.rs::tag_chip` |
 | Right panel | 280 px; closed by "Hide" and by "Details" in the top bar; hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right` |
 | Preview in the card | the panel width, 4:3, no higher than 210 px, the frame fitted entirely; below the file name 14 px and the path 11 px | `App::file_card` |
 | "Settings" dialog | 760×620 px, a 200 px section list on the left, fields up to 520 px | `App::settings_modal` |
-| Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name is clipped, never written over the date | `draw_cell` |
+| Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |
 | Top strip | 32 px, one row, `panel` tone, 1 px bottom line | `App::top_bar` |
 | Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters | `App::status_bar` |
-| Selection | a 2 px `rgb(90,170,255)` outline on the selected tile and a tick in a circle of the same colour; "N selected · size" at 11 px in the chips row | `draw_cell`, `draw_filter_chips` |
+| Selection | a 2 px accent outline on the selected tile and a square accent check flag; "N selected · size" at 11 px in the chips row | `draw_cell`, `draw_filter_chips` |
 | Album tree | a row 26 px, a 14 px indent per level, a 22 px triangle, a 14 px label; "N files · M subalbums · size" at 11 px next to it; the tree area no higher than 190 px | `draw_album_tree` |
 | Subalbum tile | 100–260 px (like a grid tile) × 96 px; the name 13 px, "N files" and the size 11 px; a click opens it | `draw_album_cell` |
 | "Integrity" screen | the "Folder A/B" and "Manifest file" fields 460 px wide with labels on the left; the "Show all paths" tick; the verdict at 14 px in the accent / red / grey; the report monospaced at 11 px in a scroll area; the reminder row "Remind me to check every [30] days" (0 — off), the date and result of the last pass, the `verify-last.txt` path and "Copy the last report" at 11 px | `App::integrity_panel` |
@@ -269,7 +278,7 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
 
 | Screen | What is on it | Main action |
 |---|---|---|
-| Grid (`View::Grid`) | the top strip: brand, the "Semantic / By text" switch, the query field, "Find", "Reset", the archive state, "Folders (N)", "Details", "Settings"; the left panel, top down: the "Catalog" block (the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos"), the model and text blocks, the summary pinned at the bottom; above the grid — the view title at 18 px, the facts at 12 px in the numeric family, "Tiles" with a slider, "By months / Flat", the "Sort" menu and the filter chips with "×"; in the model block — a tag filter with the snapshot count next to each tag ("furniture · 669") and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; in the chips row — "N selected · size", "Select all (M)", "Clear the selection"; on the right — the details of the selected file; the bottom strip: the last fact and the counters | find and open |
+| Grid (`View::Grid`) | the top strip: brand, the "Semantic / By text" switch, the query field, "Find", "Reset", the archive state, "Folders (N)", "Details", "Settings"; the left panel, top down: the "Catalog" block (the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos"), then, in the scrolling part, the "Years" block (the five newest years with counts, two columns), the model and text blocks, with the summary pinned at the bottom; above the grid — the view title at 18 px, the facts at 12 px in the numeric family, "Tiles" with a slider, "By months / Flat", the "Sort" menu and the filter chips with "×"; in the model block — the tags as 20 px chips with the snapshot count after a middle dot ("furniture · 669"), the picked chip in the accent, and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; in the chips row — "N selected · size", "Select all (M)", "Clear the selection"; on the right — the details of the selected file; the bottom strip: the last fact and the counters | find and open |
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed", groups as pictures with the caption "N files · X wasted" and the advice "keep <name> — sharper than the rest"; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 months, a month — a grid of weeks Mon–Sun with thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects; on the "Day" layer — the snapshots in a `draw_cell` grid; on the upper layers below — the selected day and "No date" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups", the group list with names, photo counts and a "together" tick, the face crops of the selected group, "not him", "pick" and "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" button | name a person, split off strangers and find photos where people are together |
@@ -421,8 +430,9 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
   top-3, and the same 0.22 / 0.01 rule decides "not sure" and "confident". A change of the card's tag
   logic must be checked against the labelled sample (`docs/ARCHITECTURE.md` § "Labelled check of the
   tags"), not by eye on one photo.
-- Every tag in the filter shows the snapshot count at its percentile threshold ("furniture · 669"):
-  zero is visible before the press, not after. A tag is selected and there are zero snapshots →
+- Every tag chip in the left panel shows the snapshot count at its percentile threshold
+  ("furniture · 669"): zero is visible before the press, not after. A tag is picked and there are
+  zero snapshots →
   "no snapshots with the tag "furniture" above the 70% threshold (0.23) — lower the threshold slider
   in the left panel" and "Reset the filter".
 - The filter threshold is a percentile of **its own** tag, not of the whole index: 100% is its

@@ -108,7 +108,7 @@ reason is written in ADR 0044.
 
 | Screen | Mock-up | What is adopted | Task |
 |---|---|---|---|
-| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅ |
+| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 |
@@ -289,7 +289,7 @@ idle frames request nothing.
 
 **Files.** `src/app.rs` (`apply_theme`, `Scroll`, `App::ui`), `docs/UI.md`, `plan/STATUS.md`.
 
-### M22.3 — left panel: years and tag chips
+### M22.3 — left panel: years and tag chips ✅ (this change)
 
 1. A `YEARS` block: the five newest years with counts, a click sets the path/date filter, "all years"
    clears it; mono counts; a year with zero files is not drawn.
@@ -299,7 +299,31 @@ idle frames request nothing.
    scrolling when nothing is selected. Verified with a headless frame at 840 px.
 4. "Summary" stays pinned at the bottom.
 
-**Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`.
+**Result.** The years open the scrolling part of the panel, right under the pinned filter block: a
+20 px cell in **two columns of three rows** — mono 11 on the left, the count in mono 10 at the right
+edge, the picked year on the accent fill and in the accent text — and "All years" as the first cell
+only while a year is picked, so the panel does not spend a row on a filter that is already empty and
+six cells are still three rows: the block never changes height, not even on a click. A single column
+of five rows costs 130 px and pushed the model block out of the panel on the default 840 px window,
+which is why the list is two columns wide. A click writes the year into the date filter (`query`, the
+same field the filter block shows), which also drops a semantic search and the text snippets: a year
+is a date, not words; a second click on the picked year clears it. The block is drawn on the grid and
+the calendar only — the duplicates, faces, trash and integrity screens have a context of their own
+and the date filter does not drive them. Counts come from `taken_at`; five rows at most, a year with
+zero files does not exist. The rows of the pinned "Summary" went from 26 to 16 px (`stat_row` has no
+button, and `horizontal` otherwise assumes an interactive row): four rows cost 48 px less, which is
+where the years live. Measured with a headless frame at 1240×840: the scrolling part starts at 560 px,
+the years end at 680 px and the pinned "Summary" starts at 692 px — every year is seen without a
+scroll and stands 12 px above the summary, and the same frame proves the summary does not move when a
+year is picked (`the_left_panel_fits_the_years_above_the_summary`).
+The tag menu became chips: the word with the count of snapshots after a middle dot, 4 px apart,
+wrapping, idle `field` with `text_med`, picked — accent fill, accent 1 px border and accent text, the
+width following the text and never the state (`tag_chip`). The row therefore keeps every position
+when a tag is picked (`the_tag_chips_do_not_jump_when_a_tag_is_picked` compares the words and their
+places of two frames); the percent slider sits right under it and the model block warns "no tag
+passes the threshold" as before.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
 
 ### M22.4 — month headings pinned while scrolling (folds in M13e)
 

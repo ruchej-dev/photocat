@@ -1017,7 +1017,8 @@ map, the rules for an unsupported screen, the disputed questions and the full ta
 **Done so far.** M22.1 (two themes, the token palette, ADR 0044), M22.2 (the main screen after the
 mock-up, three cell views) — 2026-11-24; M22.2a (the list view scales with the size slider, the slider
 is always visible) — 2026-11-24; M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad
-swipe coasts after the fingers lift) — 2026-11-24.
+swipe coasts after the fingers lift) — 2026-11-24; M22.3 (the left panel: the five newest years and the
+tag chips, the panel budget measured at 840 px) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

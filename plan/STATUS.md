@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.3 (the left panel: years and tag chips), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.4 (the month heading pinned while scrolling, which folds in M13e), then M22.5 (calendar), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -68,6 +68,20 @@ with "Check" and "Remind later", but the heavy pass starts only on a click; the 
 the report of the last pass live in `settings` and `<cache>/photocat/verify-last.txt`. Since M11
 similar shots are searched above 20 thousand through a block index of dHash: on the corpus the same
 103 groups in 0.017–0.025 s, 50 thousand synthetic — in 0.446 s.
+Since M22.3 the left panel says where the files are, not only how to filter them: the five newest
+years with their counts open the scrolling part right under the pinned filter (a 20 px cell in two
+columns of three rows, mono 11 on the left, mono 10 at the right edge, the picked year on the accent
+fill), a click writes the year into the date filter and a second click — or "All years", drawn only
+while a year is picked — clears it. The block is drawn on the grid and the calendar only: the
+duplicates, faces, trash and integrity screens have a context of their own. The tag menu became
+chips: 20 px, mono 11, the word with the count of snapshots after a middle dot, the picked chip in
+the accent, the width following the text and never the state, so a click never moves the row. The
+rows of the pinned "Summary" went from 26 to 16 px, which is where the years live. Measured with a
+headless frame at 1240×840: the scrolling part starts at 560 px, the years end at 680 px, the pinned
+"Summary" starts at 692 px — every year is seen without a scroll, and a pick moves nothing. Four
+tests: the year click narrows the filter (and drops a semantic search), the drawn rows carry the
+counts while an empty year is absent, all five rows stand above the summary in a frame at 840 px, and
+two chip frames hold the same words in the same places.
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
@@ -1938,6 +1952,58 @@ the pointer table describe the drag.
 
 **Not done, deliberately.** No wheel zoom, no double-click "fit ↔ 100 %", no panning of the video
 frame: the video is fitted by design, and no gesture is promised that the code does not do.
+
+## M22.3 — the left panel: the years and the tag chips (2026-11-25) ✅
+
+`plan/M22-ui-spec.md` §5 question 9 decided the panel budget: the year list and the tag chips come in,
+the folder tree and the storage quota do not. This change adds both and measures the budget.
+
+**What appeared.** The years open the scrolling part of the panel, right under the pinned filter
+block: a 20 px cell in two columns of three rows, mono 11 on the left and the count of files in mono
+10 at the right edge, the picked year on the accent fill and in the accent text, and "All years" as
+the first cell only while a year is picked — a way back, not a permanent row, and six cells are still
+three rows, so the block never changes height. A single column of five years (130 px) pushed the
+model block out of the default 840 px window, which is why the list is two columns wide. A click
+writes the year into the date filter (the `query` field the filter block shows, so the owner sees
+what happened) and drops a semantic search and the text snippets, because a year is a date and not
+words; a second click on the picked year clears it. The block is drawn on the grid and the calendar
+only: the duplicates, faces, trash and integrity screens have a context of their own and the date
+filter does not drive them — drawing it there took room from the duplicates screen and pushed "Copy
+the list" out of the panel, which an existing test caught. Counts come from `taken_at`, five rows at
+most, and a year with zero files does not exist. The rows of the pinned "Summary" went from 26 to
+16 px (`stat_row` is a pair of labels, while `horizontal` assumes an interactive row): four rows cost
+48 px less, and that is the room the years took.
+The tag menu of the model block became chips: the word with the count of snapshots after a middle
+dot, 4 px apart, wrapping, idle `field` with `text_med`, picked — accent fill, accent 1 px border and
+accent text. The width follows the text and never the state, so a click moves no chip
+(`tag_chip`); the percent slider sits right under the row and the model block still warns "no tag
+passes the threshold". Two new strings, "YEARS" and "All years", went through `i18n::PAIRS`.
+
+**Measured** (a headless frame of the whole window, 1240×840, 2026-11-25): the scrolling part starts
+at 560 px, the year block ends at 680 px and the pinned "Summary" starts at 692 px — every year is
+seen without a scroll and stands 12 px above the summary; a picked year adds "All years" without
+moving either.
+
+**Found while looking at the result.** A tile caption wrapped a long file name onto a second line
+inside a 22 px band, so the first line was painted over the preview: `draw_cell` laid the name out
+with `layout`, which wraps, and clipped only the sides. `caption_name` now lays the name out as one
+row with an ellipsis at the edge of the date (the rule `docs/UI.md` already stated), and
+`a_long_caption_name_is_cut_to_one_line` holds one row and the width of the place for three names.
+The owner's archive has such names by the dozen, so it was visible on the very first screen.
+
+**Checks.** `cargo test` — 244 passed, 7 `#[ignore]` (new: `a_year_click_narrows_the_date_filter` —
+counts, the five-row cap, the year written into the filter, the semantic search dropped, the way
+back; `the_years_block_draws_the_newest_five_with_counts` — the rows and their counts are drawn, an
+empty year and "All years" are not, "All years" appears once a year is picked;
+`the_left_panel_fits_the_years_above_the_summary` — the place of every word in a frame at 840 px;
+`the_tag_chips_do_not_jump_when_a_tag_is_picked` — two chip frames hold the same words in the same
+places and the row keeps its size). and `a_long_caption_name_is_cut_to_one_line` — a caption name stays on
+one row and inside its place). `cargo clippy --all-targets` — clean; `check.sh` — 55 checks, 0
+violations; `cargo test --test source_language` — 3 passed. `docs/UI.md` § Layout, § Interaction, §
+Metrics and § Screens carry the new rows.
+
+**Not done, deliberately.** No folder tree and no storage quota in the panel (question 9), no
+per-folder years, no year list on the screens whose context is not time.
 
 ## M22.2b — scrolling with a trackpad and the wheel (2026-11-24) ✅
 
