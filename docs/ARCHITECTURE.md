@@ -14,7 +14,7 @@ L0  i18n.rs   derive.rs   tools.rs
 
 | Layer | Knows about | Must not know about |
 |---|---|---|
-| L0 `i18n` | `std` only; `Lang`, the "Russian string → English" table, `t(lang, …)`, `fill(lang, template, values)` | DB, UI, decoding |
+| L0 `i18n` | `std` only; `Lang`, the "English source → Russian" table, `t(lang, …)`, `fill(lang, template, values)`, `count(lang, n, noun)` | DB, UI, decoding |
 | L0 `derive` | files, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | DB, UI, parallelism |
 | L0 `tools` | `std::process`, `PATH`, `anyhow` | DB, UI, decoding |
 | L1 `db` | `rusqlite`, `anyhow`, `tools` (the settings type), `i18n` (the language type) | decoding, egui |

@@ -21,8 +21,8 @@ impl Reason {
         i18n::t(
             lang,
             match self {
-                Reason::Exact => "точная копия",
-                Reason::Similar => "похожий снимок",
+                Reason::Exact => "exact copy",
+                Reason::Similar => "similar shot",
             },
         )
     }
@@ -49,22 +49,22 @@ impl Advice {
     /// Совет словами на языке отчёта: части соединяются точкой-разделителем.
     pub fn label(&self, lang: Lang) -> String {
         if self.same_content {
-            return i18n::t(lang, "точные копии — разницы нет").to_string();
+            return i18n::t(lang, "exact copies — no difference").to_string();
         }
         if self.parts.is_empty() {
-            return i18n::t(lang, "отличия небольшие — выбирайте глазами").to_string();
+            return i18n::t(lang, "the differences are small — choose by eye").to_string();
         }
         self.parts
             .iter()
             .map(|p| match p {
                 AdvicePart::SharperBy(pct) => i18n::fill(
                     lang,
-                    "резче остальных на {}%",
+                    "sharper than the rest by {}%",
                     &[format!("{pct:.0}")],
                 ),
-                AdvicePart::Sharper => i18n::t(lang, "резче остальных").to_string(),
-                AdvicePart::MorePixels => i18n::t(lang, "больше по разрешению").to_string(),
-                AdvicePart::BiggerFile => i18n::t(lang, "крупнее файл").to_string(),
+                AdvicePart::Sharper => i18n::t(lang, "sharper than the rest").to_string(),
+                AdvicePart::MorePixels => i18n::t(lang, "more pixels").to_string(),
+                AdvicePart::BiggerFile => i18n::t(lang, "larger file").to_string(),
             })
             .collect::<Vec<_>>()
             .join(" · ")
@@ -429,7 +429,7 @@ pub fn cli(args: &[String]) -> Result<()> {
         "{}",
         i18n::fill(
             lang,
-            "групп: {}, файлов в них: {}, потенциально лишнего: {}",
+            "groups: {}, files in them: {}, potentially spare: {}",
             &[
                 groups.len().to_string(),
                 files.to_string(),
@@ -444,7 +444,7 @@ pub fn cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "помечено лишними: {}, освободится {}",
+                    "marked spare: {}, would free {}",
                     &[sum.marked_drop.to_string(), db::human_in(lang, sum.freed)]
                 )
             );
@@ -452,7 +452,7 @@ pub fn cli(args: &[String]) -> Result<()> {
         for (n, g) in groups.iter().enumerate().take(200) {
             let header = i18n::fill(
                 lang,
-                "#{} [{}] файлов: {}, дублей на {} · совет: {} — {}",
+                "#{} [{}] files: {}, duplicates worth {} · advice: {} — {}",
                 &[
                     (n + 1).to_string(),
                     g.reason.label(lang).to_string(),
@@ -477,9 +477,9 @@ pub fn cli(args: &[String]) -> Result<()> {
                     r.taken_at.clone().unwrap_or_else(|| "-".into()),
                     dist,
                     match r.decision.as_deref() {
-                        Some("keep") => i18n::t(lang, "оставить"),
-                        Some("drop") => i18n::t(lang, "лишний"),
-                        _ if i == keep => i18n::t(lang, "оставить"),
+                        Some("keep") => i18n::t(lang, "keep"),
+                        Some("drop") => i18n::t(lang, "spare"),
+                        _ if i == keep => i18n::t(lang, "keep"),
                         _ => "",
                     },
                     r.path
@@ -491,7 +491,7 @@ pub fn cli(args: &[String]) -> Result<()> {
                 "\n{}",
                 i18n::fill(
                     lang,
-                    "… и ещё {} групп (полный список: --csv)",
+                    "… and {} more groups (full list: --csv)",
                     &[(groups.len() - 200).to_string()]
                 )
             );
@@ -524,14 +524,14 @@ pub fn cli(args: &[String]) -> Result<()> {
         std::fs::write(&path, s)?;
         println!(
             "{}",
-            i18n::fill(lang, "полный список: {}", std::slice::from_ref(&path))
+            i18n::fill(lang, "full list: {}", std::slice::from_ref(&path))
         );
     }
     if let Some(path) = plan {
         std::fs::write(&path, plan_csv(&rows, &groups, lang))?;
         println!(
             "{}",
-            i18n::fill(lang, "план решения: {}", std::slice::from_ref(&path))
+            i18n::fill(lang, "decision plan: {}", std::slice::from_ref(&path))
         );
     }
     Ok(())

@@ -14,7 +14,7 @@ L0  i18n.rs   derive.rs   tools.rs
 
 | Слой | Знает про | Не знает про |
 |---|---|---|
-| L0 `i18n` | только `std`; `Lang`, таблица «русская строка → английская», `t(lang, …)`, `fill(lang, шаблон, значения)` | БД, UI, декодирование |
+| L0 `i18n` | только `std`; `Lang`, таблица «английский исходник → русский перевод», `t(lang, …)`, `fill(lang, шаблон, значения)`, `count(lang, n, noun)` | БД, UI, декодирование |
 | L0 `derive` | файлы, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | БД, UI, параллелизм |
 | L0 `tools` | `std::process`, `PATH`, `anyhow` | БД, UI, декодирование |
 | L1 `db` | `rusqlite`, `anyhow`, `tools` (тип настроек), `i18n` (тип языка) | декодирование, egui |

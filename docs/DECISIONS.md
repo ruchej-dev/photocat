@@ -888,6 +888,10 @@ stayed in place, `user_version` 7.
 
 ## 0040. Language of the project: English first, Russian second; UI translated by lookup
 
+> **Superseded by ADR 0046** — the direction only: the source of the code and of the interface is
+> English now and Russian is the translation. The mechanism decided here (one lookup table,
+> `Lang` passed explicitly, `settings.lang`, CLI reports carrying `lang`) stands.
+
 **Decision.** The repository speaks English: documentation, commit messages and new code comments.
 The existing Russian documentation is kept as the second variant (`*.ru.md` next to the English main
 file) and linked from it — nothing is deleted. Communication with the owner stays Russian.
@@ -1155,3 +1159,54 @@ untouched files are not rewritten: the dimensions match and the write is skipped
 the preview is rotated; writing a preview "because the code changed" without checking its own
 dimensions; deleting or renaming a cache file anywhere outside `src/storage.rs`; touching the
 archive to "fix" a preview.
+
+## 0046. English is the source of the code and of the interface; Russian is a translation
+
+**Decision (the owner, 2026-11-24).** The repository speaks English everywhere: identifiers,
+comments and doc comments, log and error text, the source text of the interface, and the defaults
+the code writes into the DB. Cyrillic exists only as a translation — the Russian column of `PAIRS`
+in `src/i18n.rs`, the `*.ru.md` documents, and the prompts of the multilingual model (`embed.rs`).
+`tests/source_language.rs` enforces it.
+
+This reverses ADR 0040, which kept the Russian source and translated to English. What 0040 decided
+stays: one lookup table instead of keys and resource files, no new dependency, `Lang` passed
+explicitly rather than kept in a global, `settings.lang` chosen in "Settings → Interface" and
+detected from the locale on the first launch, CLI reports carrying `lang` in their structs.
+
+**What the reversal changes.** `PAIRS` is `(English, Russian)`; `i18n::russian(en)` replaces
+`english(ru)`; `t(lang, en)` returns the English source for `Lang::En` and the Russian text for
+`Lang::Ru`, and a string missing from the table falls back to **English** — the source is always
+readable. `i18n::count(lang, n, noun)` takes a noun key (`file`, `photo`, `shot`, `person`, `group`,
+`tag`, `album`, `sub_album`) with both plural sets inside `i18n.rs`, so no screen holds a Russian
+word. `i18n::USAGE` is `(English, Russian)`; `.0` is the English key.
+
+**Why the owner reversed it.** The code is read and written in English; a Russian source made the
+repository bilingual for no gain, and it hid the gaps: an untranslated label looked translated
+because it was Russian either way. With an English source a missing translation is visible at once,
+the code matches the documentation, the commit messages and the error text, and a checker can ban
+Cyrillic outside the table instead of guessing which strings are labels.
+
+**The price and the order.** 206 identifiers with Cyrillic (all of them test names, plus the album
+helpers of the `db` tests) were renamed first (M23.1), then the table was inverted mechanically by
+swapping the two literals of every pair, so the window did not change for a single commit and the
+whole table stayed translated. The rest goes module by module: the 479 Russian literals that remain
+in non-test code are error messages, report fragments and data, and `PENDING` in
+`tests/source_language.rs` shrinks as each module is converted. The list only shrinks; adding a
+module back is forbidden.
+
+**Consequences for the user's data.** The owner's own words are never translated: album names, face
+group names, user tags and the `labels.csv` stay in the language he typed. Defaults produced by the
+code (tag labels, model titles and notes) are English in the source and reach the Russian interface
+through the table. An old DB keeps its rows; a converted default written earlier stays Russian until
+the dictionary is re-seeded by `tags --reset`, which is a documented, explicit action.
+
+**Check (M23.1).** `cargo test` — 234 passed, 7 ignored; `cargo test --test source_language` — 2
+passed; `cargo clippy --all-targets` clean; `rust-analyzer diagnostics .` — no errors (25 "inactive
+code" weak warnings, all from `#[cfg]` branches); `check.sh` — 54 checks, 0 violations. A fresh
+cache with `LC_ALL=C photocat settings` prints English; the owner's DB (`lang=ru`) still prints
+Russian. Behaviour is unchanged: the inverted table reproduces the same two languages.
+
+**What it forbids.** A Cyrillic identifier, comment or string outside `src/i18n.rs` (and the model
+prompts in `embed.rs`); a Russian word in a screen or a report built by `format!` instead of `t()`
+or `fill()`; a translated string in the code; growing `PENDING`; translating the owner's own
+names, album titles or tags.

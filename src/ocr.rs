@@ -35,20 +35,20 @@ impl std::fmt::Display for Stats {
         if self.candidates == 0 {
             return f.write_str(i18n::t(
                 self.lang,
-                "кандидатов на текст нет: все снимки с камерой и без тега документа",
+                "no text candidates: every photo has a camera and no document tag",
             ));
         }
         let prefix = i18n::t(
             self.lang,
             if self.cancelled {
-                "остановлено: "
+                "stopped: "
             } else {
                 ""
             },
         );
         let body = i18n::fill(
             self.lang,
-            "распознано {} из {} файлов, знаков {}, ошибок {}, за {} с",
+            "recognised {} of {} files, {} characters, {} errors, {} s",
             &[
                 self.done.to_string(),
                 self.candidates.to_string(),
@@ -61,7 +61,7 @@ impl std::fmt::Display for Stats {
         if self.skipped > 0 {
             let note = i18n::fill(
                 self.lang,
-                " (пропущено {}, текст уже есть)",
+                " ({} skipped, text already there)",
                 &[self.skipped.to_string()],
             );
             write!(f, "{note}")?;

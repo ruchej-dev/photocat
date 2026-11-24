@@ -62,7 +62,7 @@ source of truth (see `plan/I18N.md` for the order).
 
 | File | Layer | Responsible for | Must not know about |
 |---|---|---|---|
-| `src/i18n.rs` | L0 | UI and CLI language: `Lang`, `t(lang, text)`, `fill(lang, template, values)`, the ru→en table | DB, UI, decoding |
+| `src/i18n.rs` | L0 | UI and CLI language: `Lang`, `t(lang, text)`, `fill(lang, template, values)`, `count(lang, n, noun)`, the en→ru table | DB, UI, decoding |
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (date/GPS/camera), previews, date from the name | DB, UI, indexer |
 | `src/tools.rs` | L0 | paths to `ffmpeg`/`ffprobe`/`tesseract`/`curl`, `PATH` lookup, version probing | DB, UI, decoding |
 | `src/db.rs` | L1 | SQLite schema, inserts/queries, albums (tree and order), `Progress`, `human()` | egui, image decoding |

@@ -72,7 +72,7 @@ fn main() -> Result<()> {
                 _ => {
                     eprintln!(
                         "{}",
-                        i18n::t(lang, "нужен каталог: photocat index <каталог>")
+                        i18n::t(lang, "a folder is needed: photocat index <folder>")
                     );
                     std::process::exit(2);
                 }
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
                     if t > 0 {
                         let line = i18n::fill(
                             lang,
-                            "индексация: {}/{} файлов, ошибок {}",
+                            "indexing: {}/{} files, {} errors",
                             &[d.to_string(), t.to_string(), e.to_string()],
                         );
                         eprint!("\r{line}");
@@ -132,7 +132,7 @@ fn main() -> Result<()> {
                     if t > 0 {
                         let line = i18n::fill(
                             lang,
-                            "CLIP: {}/{} файлов, ошибок {} — {}",
+                            "CLIP: {}/{} files, {} errors — {}",
                             &[d.to_string(), t.to_string(), e.to_string(), show.msg()],
                         );
                         eprint!("\r{line}");
@@ -182,14 +182,14 @@ fn main() -> Result<()> {
                     if id == 0 || label.trim().is_empty() {
                         eprintln!(
                             "{}",
-                            i18n::t(lang, "нужны номер группы и имя: faces label --id N --name ИМЯ")
+                            i18n::t(lang, "a group number and a name are needed: faces label --id N --name NAME")
                         );
                         std::process::exit(2);
                     }
                     faces::label(&db_path, id, &label)?;
                     println!(
                         "{}",
-                        i18n::fill(lang, "группа {}: «{}»", &[id.to_string(), label.trim().to_string()])
+                        i18n::fill(lang, "group {}: “{}”", &[id.to_string(), label.trim().to_string()])
                     );
                     return Ok(());
                 }
@@ -200,7 +200,7 @@ fn main() -> Result<()> {
                     if id == 0 {
                         eprintln!(
                             "{}",
-                            i18n::t(lang, "нужен номер лица: faces split --id N")
+                            i18n::t(lang, "a face number is needed: faces split --id N")
                         );
                         std::process::exit(2);
                     }
@@ -209,7 +209,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "лицо {} отделено в группу {}",
+                            "face {} split into group {}",
                             &[id.to_string(), cid.to_string()]
                         )
                     );
@@ -223,15 +223,15 @@ fn main() -> Result<()> {
             if has_flag(&args, "--dry-run") {
                 let plan = faces::plan(&db_path)?;
                 let model = if faces::model_present(&settings) {
-                    i18n::t(lang, "на месте")
+                    i18n::t(lang, "in place")
                 } else {
-                    i18n::t(lang, "не скачана — «Настройки» или faces download --yes")
+                    i18n::t(lang, "not downloaded — “Settings” or faces download --yes")
                 };
                 println!(
                     "{}",
                     i18n::fill(
                         lang,
-                        "снимков: {}, ещё без лиц: {}; модель лиц: {}",
+                        "photos: {}, still without faces: {}; face model: {}",
                         &[plan.images.to_string(), plan.todo.to_string(), model.to_string()]
                     )
                 );
@@ -243,7 +243,7 @@ fn main() -> Result<()> {
                 if clusters.is_empty() {
                     println!(
                         "{}",
-                        i18n::t(lang, "групп лиц нет: запустите photocat faces")
+                        i18n::t(lang, "no face groups yet: run photocat faces")
                     );
                 }
                 for c in clusters {
@@ -251,13 +251,13 @@ fn main() -> Result<()> {
                         "{} {:<24} {}",
                         c.id,
                         if c.label.is_empty() {
-                            i18n::t(lang, "(без имени)")
+                            i18n::t(lang, "(no name)")
                         } else {
                             c.label.as_str()
                         },
                         i18n::fill(
                             lang,
-                            "лиц {}, фото {}",
+                            "{} faces, {} photos",
                             &[c.faces.to_string(), c.photos.to_string()]
                         )
                     );
@@ -279,7 +279,7 @@ fn main() -> Result<()> {
                     if t > 0 {
                         let line = i18n::fill(
                             lang,
-                            "лица: {}/{} снимков, ошибок {} — {}",
+                            "people: {}/{} photos, {} errors — {}",
                             &[d.to_string(), t.to_string(), e.to_string(), show.msg()],
                         );
                         eprint!("\r{line}");
@@ -312,7 +312,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "кандидатов: {} из {} снимков; tesseract ({}): {}",
+                        "candidates: {} of {} photos; tesseract ({}): {}",
                         &[
                             plan.candidates.to_string(),
                             plan.images.to_string(),
@@ -321,7 +321,7 @@ fn main() -> Result<()> {
                                 .tools
                                 .probe(tools::Tool::Tesseract)
                                 .map(|v| short_version(&v))
-                                .unwrap_or_else(|| i18n::t(lang, "не найден").into()),
+                                .unwrap_or_else(|| i18n::t(lang, "not found").into()),
                         ]
                     )
                 );
@@ -336,7 +336,7 @@ fn main() -> Result<()> {
                     if t > 0 {
                         let line = i18n::fill(
                             lang,
-                            "OCR: {}/{} файлов, ошибок {} — {}",
+                            "OCR: {}/{} files, {} errors — {}",
                             &[d.to_string(), t.to_string(), e.to_string(), show.msg()],
                         );
                         eprint!("\r{line}");
@@ -374,7 +374,7 @@ fn main() -> Result<()> {
                 _ => {
                     eprintln!(
                         "{}",
-                        i18n::t(lang, "нужен запрос: photocat search \"торт\"")
+                        i18n::t(lang, "a query is needed: photocat search \"cake\"")
                     );
                     std::process::exit(2);
                 }
@@ -390,7 +390,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "текст на фото, запрос «{}»: файлов {} за {} мс",
+                        "text on photos, query “{}”: {} files in {} ms",
                         &[query.clone(), hits.len().to_string(), format!("{ms:.0}")]
                     )
                 );
@@ -405,7 +405,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             let repeat = flag_num(&args, "--repeat", 1).max(1);
-            eprintln!("{}", i18n::t(lang, "загрузка модели CLIP…"));
+            eprintln!("{}", i18n::t(lang, "loading the CLIP model…"));
             let settings = {
                 let conn = db::open(&db_path)?;
                 db::load_settings(&conn)
@@ -423,7 +423,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "запрос «{}»: результатов {} за {} мс",
+                            "query “{}”: {} results in {} ms",
                             &[query.clone(), hits.len().to_string(), format!("{ms:.0}")]
                         )
                     );
@@ -433,7 +433,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "повтор {}: {} мс",
+                            "repeat {}: {} ms",
                             &[n.to_string(), format!("{ms:.0}")]
                         )
                     );
@@ -444,7 +444,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "в среднем: {} мс",
+                        "on average: {} ms",
                         &[format!("{:.0}", total / repeat as f32)]
                     )
                 );
@@ -475,18 +475,18 @@ fn main() -> Result<()> {
                         let present = embed::model_present_in(&settings.models_dir, e);
                         let fits = e.fits(settings.max_model_mb);
                         let state = if present {
-                            i18n::t(lang, "на месте")
+                            i18n::t(lang, "in place")
                         } else if fits {
-                            i18n::t(lang, "не скачана")
+                            i18n::t(lang, "not downloaded")
                         } else {
-                            i18n::t(lang, "сверх лимита")
+                            i18n::t(lang, "over the limit")
                         };
                         println!(
                             "{} {:<22} {} {} · {} · {} · {} · {}",
                             if std::ptr::eq(e, active) { "*" } else { " " },
                             e.id,
                             e.dim,
-                            i18n::t(lang, "призн."),
+                            i18n::t(lang, "dims"),
                             db::human_in(lang, e.bytes() as i64),
                             e.license,
                             state,
@@ -497,7 +497,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "папка моделей: {}",
+                            "model folder: {}",
                             &[settings.models_dir.display().to_string()]
                         )
                     );
@@ -505,7 +505,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "лимит: {} МиБ",
+                            "limit: {} MiB",
                             &[settings.max_model_mb.to_string()]
                         )
                     );
@@ -516,7 +516,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "модель в порядке: {}",
+                            "the model is in order: {}",
                             &[i18n::t(lang, embed::active_entry(&settings).title).to_string()]
                         )
                     );
@@ -541,7 +541,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "неизвестная подкоманда models: {} (models list|check|download)",
+                            "unknown models subcommand: {} (models list|check|download)",
                             &[other.to_string()]
                         )
                     );
@@ -568,7 +568,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "нет такой модели: {} (см. models list)",
+                            "no such model: {} (see models list)",
                             std::slice::from_ref(&id)
                         )
                     );
@@ -596,7 +596,7 @@ fn main() -> Result<()> {
                             "{}",
                             i18n::fill(
                                 lang,
-                                "нет такого языка интерфейса: {} (en, ru)",
+                                "no such interface language: {} (en, ru)",
                                 &[other.to_string()]
                             )
                         );
@@ -642,7 +642,7 @@ fn main() -> Result<()> {
                     Err(e) => {
                         eprintln!(
                             "{}",
-                            i18n::fill(lang, "не сохранён: {}", &[format!("{e:#}")])
+                            i18n::fill(lang, "not saved: {}", &[format!("{e:#}")])
                         );
                         std::process::exit(2);
                     }
@@ -650,13 +650,13 @@ fn main() -> Result<()> {
             }
             if changed {
                 db::save_settings(&conn, &settings)?;
-                println!("{}", i18n::t(lang, "настройки сохранены"));
+                println!("{}", i18n::t(lang, "settings saved"));
             }
             println!(
                 "{}",
                 i18n::fill(
                     lang,
-                    "модель: {}",
+                    "model: {}",
                     &[embed::active_entry(&settings).id.to_string()]
                 )
             );
@@ -664,27 +664,27 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "папка моделей: {}",
+                    "model folder: {}",
                     &[settings.models_dir.display().to_string()]
                 )
             );
             println!(
                 "{}",
-                i18n::fill(lang, "лимит: {} МиБ", &[settings.max_model_mb.to_string()])
+                i18n::fill(lang, "limit: {} MiB", &[settings.max_model_mb.to_string()])
             );
             println!(
                 "{}",
-                i18n::fill(lang, "потоков: {}", &[settings.index_jobs.to_string()])
+                i18n::fill(lang, "threads: {}", &[settings.index_jobs.to_string()])
             );
             println!(
                 "{}",
-                i18n::fill(lang, "порог дублей: {}", &[settings.max_dist.to_string()])
+                i18n::fill(lang, "duplicate threshold: {}", &[settings.max_dist.to_string()])
             );
             println!(
                 "{}",
                 i18n::fill(
                     lang,
-                    "тег: уверенный ≥ {}, отрыв {}",
+                    "tag: confident ≥ {}, margin {}",
                     &[
                         format!("{:.2}", settings.tag_show),
                         format!("{:.2}", settings.tag_margin)
@@ -695,23 +695,23 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "фильтр по тегу: порог {}% (процентиль)",
+                    "tag filter: threshold {}% (percentile)",
                     &[settings.tag_show_pct.to_string()]
                 )
             );
             println!(
                 "{}",
-                i18n::fill(lang, "языки OCR: {}", std::slice::from_ref(&settings.ocr_lang))
+                i18n::fill(lang, "OCR languages: {}", std::slice::from_ref(&settings.ocr_lang))
             );
             println!(
                 "{}",
-                i18n::fill(lang, "язык интерфейса: {}", &[settings.lang.code().to_string()])
+                i18n::fill(lang, "interface language: {}", &[settings.lang.code().to_string()])
             );
             println!(
                 "{}",
                 i18n::fill(
                     lang,
-                    "порог лиц: {}",
+                    "face threshold: {}",
                     &[format!("{:.2}", settings.face_threshold)]
                 )
             );
@@ -723,7 +723,7 @@ fn main() -> Result<()> {
                         .tools
                         .probe(tool)
                         .map(|v| short_version(&v))
-                        .unwrap_or_else(|| i18n::t(lang, "не найден").to_string()),
+                        .unwrap_or_else(|| i18n::t(lang, "not found").to_string()),
                     settings.tools.source(tool, lang)
                 );
             }
@@ -746,7 +746,7 @@ fn main() -> Result<()> {
                 if labels.is_empty() {
                     println!(
                         "{}",
-                        i18n::fill(lang, "разметки нет: заполните {} и повторите", &[file])
+                        i18n::fill(lang, "no labels yet: fill in {} and run again", &[file])
                     );
                     return Ok(());
                 }
@@ -776,7 +776,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "строк в разметке: {} · размечено {} · «другое» {} · пропущено {} · не размечено {} · нет в индексе {}",
+                        "rows in the labels: {} · labelled {} · “other” {} · skipped {} · not labelled {} · missing from the index {}",
                         &[
                             s.rows.to_string(),
                             s.labelled.to_string(),
@@ -791,7 +791,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "словарь покрывает {} % снимков; у {} допустима не одна метка",
+                        "a dictionary label fits {} % of the shots; {} of them allow a second label",
                         &[
                             format!(
                                 "{:.1}",
@@ -809,7 +809,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "top-1: {} из {} = {} % · top-3: {} из {} = {} %",
+                        "top-1: {} of {} = {} % · top-3: {} of {} = {} %",
                         &[
                             s.top1.to_string(),
                             s.labelled.to_string(),
@@ -824,7 +824,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "уверенный тег: {} снимков, точность {} %; уверенно мимо («другое») {}",
+                        "confident tag: {} shots, accuracy {} %; confidently wrong (“other”) {}",
                         &[
                             (s.confident_ok + s.confident_other).to_string(),
                             format!("{:.1}", s.confident_precision() * 100.0),
@@ -843,7 +843,7 @@ fn main() -> Result<()> {
                         "{}",
                         i18n::fill(
                             lang,
-                            "мебель: при {} % найдено {} из {} (порог {})",
+                            "furniture: at {} % found {} of {} (threshold {})",
                             &[
                                 f.pct.to_string(),
                                 f.found.to_string(),
@@ -857,7 +857,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "проверка {} · модель {}",
+                        "check {} · model {}",
                         &[
                             chrono::Local::now().format("%Y-%m-%d").to_string(),
                             entry.id.to_string(),
@@ -871,7 +871,7 @@ fn main() -> Result<()> {
                 _ => {
                     eprintln!(
                         "{}",
-                        i18n::t(lang, "нужен каталог: photocat eval --folder DIR --out DIR")
+                        i18n::t(lang, "a folder is needed: photocat eval --folder DIR --out DIR")
                     );
                     std::process::exit(2);
                 }
@@ -887,7 +887,7 @@ fn main() -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "в {} нет снимков с тегами: проиндексируйте каталог и посчитайте теги",
+                        "no shots with tags in {}: index the folder and compute the tags",
                         &[dir.display().to_string()]
                     )
                 ));
@@ -905,7 +905,7 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "выборка: {} снимков из {} годных в {} · метки: {} · подсказки: {} · листов: {}",
+                    "sample: {} shots of {} eligible in {} · labels: {} · guesses: {} · sheets: {}",
                     &[
                         report.rows.to_string(),
                         cand.len().to_string(),
@@ -920,13 +920,13 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "заполните столбец label в {} (other / skip / метки через |) и повторите с --labels",
+                    "fill the label column in {} (other / skip / labels joined by |) and run again with --labels",
                     &[report.labels.display().to_string()]
                 )
             );
             println!(
                 "{}",
-                i18n::fill(lang, "модель {} · {}", &[entry.id.to_string(), source])
+                i18n::fill(lang, "model {} · {}", &[entry.id.to_string(), source])
             );
             Ok(())
         }
@@ -942,7 +942,7 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "кластеров: {} на {} фото, за {} с → {}",
+                    "clusters: {} over {} photos, {} s → {}",
                     &[
                         stats.clusters.to_string(),
                         stats.photos.to_string(),
@@ -964,7 +964,7 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::t(
                     lang,
-                    "внешние программы (пусто в настройках — ищутся в PATH; без программы отключается только её работа):"
+                    "external programs (empty in the settings — looked up in PATH; without a program only its own work is off):"
                 )
             );
             for tool in tools::ALL {
@@ -972,7 +972,7 @@ fn main() -> Result<()> {
                     Ok(v) => short_version(&v),
                     Err(e) => i18n::fill(
                         lang,
-                        "не работает: {}",
+                        "does not work: {}",
                         &[format!("{e:#}")],
                     ),
                 };
@@ -984,7 +984,7 @@ fn main() -> Result<()> {
                     ),
                     None => i18n::fill(
                         lang,
-                        "не найдена: {} ({})",
+                        "not found: {} ({})",
                         &[
                             settings.tools.program(tool).to_string(),
                             settings.tools.source(tool, lang).to_string(),
@@ -998,7 +998,7 @@ fn main() -> Result<()> {
                     "",
                     i18n::fill(
                         lang,
-                        "зачем: {}; без неё: {}",
+                        "why: {}; without it: {}",
                         &[
                             tool.purpose(lang).to_string(),
                             tool.without(lang).to_string(),
@@ -1025,7 +1025,7 @@ fn main() -> Result<()> {
                             "{}",
                             i18n::fill(
                                 lang,
-                                "языки OCR: {} — на месте",
+                                "OCR languages: {} — present",
                                 std::slice::from_ref(&settings.ocr_lang)
                             )
                         );
@@ -1034,19 +1034,19 @@ fn main() -> Result<()> {
                             "{}",
                             i18n::fill(
                                 lang,
-                                "языки OCR: {} — нет {}; установите языковые пакеты tesseract для них",
+                                "OCR languages: {} — missing {}; install the tesseract language packs for them",
                                 &[settings.ocr_lang.clone(), missing.join(", ")]
                             )
                         );
                     }
                     println!(
                         "{}",
-                        i18n::fill(lang, "  доступны: {}", &[langs.join(", ")])
+                        i18n::fill(lang, "  available: {}", &[langs.join(", ")])
                     );
                 }
                 None => println!(
                     "{}",
-                    i18n::t(lang, "языки OCR: не проверить — tesseract не найден")
+                    i18n::t(lang, "OCR languages: cannot check — tesseract not found")
                 ),
             }
 
@@ -1055,14 +1055,14 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "модель CLIP: {} · {} · {}",
+                    "CLIP model: {} · {} · {}",
                     &[
                         i18n::t(lang, entry.title).to_string(),
                         db::human_in(lang, entry.bytes() as i64),
                         if embed::model_present(&settings) {
-                            i18n::t(lang, "на месте").to_string()
+                            i18n::t(lang, "in place").to_string()
                         } else {
-                            i18n::t(lang, "не скачана — смысловой поиск и теги недоступны")
+                            i18n::t(lang, "not downloaded — semantic search and tags are unavailable")
                                 .to_string()
                         },
                     ]
@@ -1072,14 +1072,14 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "модель лиц: {} · {} · {}",
+                    "face model: {} · {} · {}",
                     &[
                         faces::MODEL_ID.to_string(),
                         db::human_in(lang, faces::model_bytes(&settings)),
                         if faces::model_present(&settings) {
-                            i18n::t(lang, "на месте").to_string()
+                            i18n::t(lang, "in place").to_string()
                         } else {
-                            i18n::t(lang, "не скачана — «Настройки» или faces download --yes")
+                            i18n::t(lang, "not downloaded — “Settings” or faces download --yes")
                                 .to_string()
                         },
                     ]
@@ -1091,7 +1091,7 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "лица: {} на {} снимках, групп {}, ещё без лиц {} из {}",
+                    "people: {} on {} photos, {} groups, {} of {} still without faces",
                     &[
                         face_faces.to_string(),
                         face_photos.to_string(),
@@ -1108,7 +1108,7 @@ fn main() -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "БД: {} · {} · файлов {}, с текстом {} (знаков {})",
+                    "DB: {} · {} · {} files, {} with text ({} characters)",
                     &[
                         db_path.display().to_string(),
                         db::human_in(lang, size),
@@ -1130,7 +1130,7 @@ fn main() -> Result<()> {
             let lang = language(&args).unwrap_or_default();
             eprintln!(
                 "{}",
-                i18n::fill(lang, "неизвестная подкоманда: {}", &[other.to_string()])
+                i18n::fill(lang, "unknown subcommand: {}", &[other.to_string()])
             );
             eprintln!();
             usage(lang);
@@ -1157,7 +1157,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::t(
                         lang,
-                        "альбомов нет — создайте: photocat albums new --name \"Дача 2024\""
+                        "no albums yet — create one: photocat albums new --name \"Summer 2024\""
                     )
                 );
                 return Ok(());
@@ -1173,7 +1173,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 let trashed = if node.trashed > 0 {
                     i18n::fill(
                         lang,
-                        " · в корзине {}",
+                        " · {} in the trash",
                         &[node.trashed.to_string()],
                     )
                 } else {
@@ -1184,7 +1184,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     node.id,
                     i18n::fill(
                         lang,
-                        "файлов {} · подальбомов {} · {}{}",
+                        "{} files · {} subalbums · {}{}",
                         &[
                             node.files.to_string(),
                             node.subalbums.to_string(),
@@ -1204,7 +1204,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                         "{}",
                         i18n::t(
                             lang,
-                            "нужно имя: photocat albums new --name \"Дача 2024\" [--parent ID]"
+                            "a name is needed: photocat albums new --name \"Summer 2024\" [--parent ID]"
                         )
                     );
                     std::process::exit(2);
@@ -1219,7 +1219,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "альбом создан: {} (id {})",
+                    "album created: {} (id {})",
                     &[db::album_path(&conn, id)?, id.to_string()]
                 )
             );
@@ -1232,7 +1232,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 None => {
                     eprintln!(
                         "{}",
-                        i18n::t(lang, "нужно имя: photocat albums rename --id N --name ИМЯ")
+                        i18n::t(lang, "a name is needed: photocat albums rename --id N --name NAME")
                     );
                     std::process::exit(2);
                 }
@@ -1242,7 +1242,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "альбом переименован: {}",
+                    "album renamed: {}",
                     &[db::album_path(&conn, id)?]
                 )
             );
@@ -1255,7 +1255,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::t(
                         lang,
-                        "нужен родитель: photocat albums move --id N --parent ID [--position K]"
+                        "a parent is needed: photocat albums move --id N --parent ID [--position K]"
                     )
                 );
                 std::process::exit(2);
@@ -1266,7 +1266,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "альбом перемещён: {}",
+                    "album moved: {}",
                     &[db::album_path(&conn, id)?]
                 )
             );
@@ -1280,7 +1280,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "нужны пути: photocat albums {} --id N PATH...",
+                        "paths are needed: photocat albums {} --id N PATH...",
                         &[cmd.to_string()]
                     )
                 );
@@ -1294,7 +1294,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "альбом «{}»: добавлено {}, уже было {}, файлов {}",
+                        "album “{}”: {} added, {} already there, {} files",
                         &[
                             path,
                             added.to_string(),
@@ -1309,7 +1309,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "альбом «{}»: убрано {}, осталось {}",
+                        "album “{}”: {} removed, {} left",
                         &[
                             path,
                             removed.to_string(),
@@ -1349,7 +1349,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "будет удалено: {} — альбомов {}, строк файлов {}; файлы на диске останутся. Повторите с --yes.",
+                        "will be deleted: {} — {} albums, {} file rows; the files stay on disk. Repeat with --yes.",
                         &[
                             names.join(", "),
                             subtree.len().to_string(),
@@ -1364,7 +1364,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "удалено альбомов {}, строк файлов {}; файлы на диске не тронуты",
+                    "deleted {} albums, {} file rows; the files on disk are untouched",
                     &[albums.to_string(), rows.to_string()]
                 )
             );
@@ -1389,7 +1389,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 id,
                 i18n::fill(
                     lang,
-                    "файлов {} · подальбомов {} · {}{}",
+                    "{} files · {} subalbums · {}{}",
                     &[
                         node.files.to_string(),
                         node.subalbums.to_string(),
@@ -1404,7 +1404,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                         "  {}",
                         i18n::fill(
                             lang,
-                            "подальбом {} · файлов {} · {}",
+                            "subalbum {} · {} files · {}",
                             &[
                                 child.name.clone(),
                                 child.files.to_string(),
@@ -1416,7 +1416,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
             }
             for (position, row) in db::album_items(&conn, id)?.iter().enumerate() {
                 let mark = if row.trashed_at.is_some() {
-                    i18n::t(lang, "  [в корзине приложения]")
+                    i18n::t(lang, "  [in the app trash]")
                 } else {
                     ""
                 };
@@ -1429,7 +1429,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::fill(
                     lang,
-                    "неизвестная команда albums: {} (list [--tree] | new | rename | move | add | remove | delete | show)",
+                    "unknown albums command: {} (list [--tree] | new | rename | move | add | remove | delete | show)",
                     &[other.to_string()]
                 )
             );
@@ -1442,7 +1442,7 @@ fn album_id_arg(args: &[String], lang: Lang) -> i64 {
     match flag_str(args, "--id").and_then(|v| v.parse::<i64>().ok()) {
         Some(id) => id,
         None => {
-            eprintln!("{}", i18n::t(lang, "нужен номер альбома: --id N"));
+            eprintln!("{}", i18n::t(lang, "an album number is needed: --id N"));
             std::process::exit(2);
         }
     }
@@ -1516,7 +1516,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "словарь модели {} — {} тегов",
+                "model dictionary {} — {} tags",
                 &[entry.id.to_string(), defs.len().to_string()]
             )
         );
@@ -1524,7 +1524,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             let threshold = if d.min_percentile > 0 {
                 i18n::fill(
                     lang,
-                    ", порог {}%",
+                    ", threshold {}%",
                     &[d.min_percentile.to_string()],
                 )
             } else {
@@ -1534,11 +1534,11 @@ fn tags_cli(args: &[String]) -> Result<()> {
                 "  {:<10} {:<16} {}{} · {}",
                 d.id,
                 d.label,
-                i18n::t(lang, if d.enabled { "ок" } else { "выкл" }),
+                i18n::t(lang, if d.enabled { "ok" } else { "off" }),
                 threshold,
                 i18n::fill(
                     lang,
-                    "файлов {} · промптов {}",
+                    "{} files · {} prompts",
                     &[
                         counts.get(&d.label).copied().unwrap_or(0).to_string(),
                         d.prompts.len().to_string(),
@@ -1555,12 +1555,12 @@ fn tags_cli(args: &[String]) -> Result<()> {
     if let Some(label) = flag_str(args, "--add") {
         let label = label.trim().to_string();
         if label.is_empty() {
-            anyhow::bail!("{}", i18n::t(lang, "--add: нужна непустая метка"));
+            anyhow::bail!("{}", i18n::t(lang, "--add: an empty label is not allowed"));
         }
         if defs.iter().any(|d| d.label == label) {
             anyhow::bail!(
                 "{}",
-                i18n::fill(lang, "тег «{}» уже есть в словаре", std::slice::from_ref(&label))
+                i18n::fill(lang, "the tag “{}” is already in the dictionary", std::slice::from_ref(&label))
             );
         }
         let mut prompts: Vec<String> = Vec::new();
@@ -1577,7 +1577,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
         if prompts.is_empty() {
             anyhow::bail!(
                 "{}",
-                i18n::t(lang, "--add: нужен хотя бы один --prompt «фотография …»")
+                i18n::t(lang, "--add: at least one --prompt “a photo of …” is needed")
             );
         }
         let n = defs
@@ -1602,7 +1602,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "тег «{}» добавлен (id {}) — пересчитайте веса: photocat embed --retag",
+                "tag “{}” added (id {}) — recompute the weights: photocat embed --retag",
                 &[d.label.clone(), d.id.clone()]
             )
         );
@@ -1623,10 +1623,10 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "тег «{}» {}",
+                "tag “{}” {}",
                 &[
                     d.label.clone(),
-                    i18n::t(lang, if enable { "включён" } else { "выключен" }).to_string(),
+                    i18n::t(lang, if enable { "enabled" } else { "disabled" }).to_string(),
                 ]
             )
         );
@@ -1645,7 +1645,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "тег «{}» убран из словаря — веса исчезнут после photocat embed --retag",
+                "tag “{}” removed from the dictionary — the weights go away after photocat embed --retag",
                 std::slice::from_ref(&d.label)
             )
         );
@@ -1659,7 +1659,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "словарь выгружен: {} ({} тегов)",
+                "dictionary exported: {} ({} tags)",
                 &[path, defs.len().to_string()]
             )
         );
@@ -1675,7 +1675,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "словарь загружен: {} тегов — пересчитайте веса: photocat embed --retag",
+                "dictionary loaded: {} tags — recompute the weights: photocat embed --retag",
                 &[defs.len().to_string()]
             )
         );
@@ -1688,7 +1688,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
             "{}",
             i18n::fill(
                 lang,
-                "словарь возвращён к стандартному ({} тегов) — photocat embed --retag",
+                "dictionary restored to the default ({} tags) — photocat embed --retag",
                 &[defs.len().to_string()]
             )
         );

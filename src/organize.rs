@@ -41,9 +41,9 @@ impl Layout {
         i18n::t(
             lang,
             match self {
-                Self::Day => "по дням",
-                Self::Month => "по месяцам",
-                Self::Event => "по событиям (день + место)",
+                Self::Day => "by day",
+                Self::Month => "by month",
+                Self::Event => "by event (day + place)",
             },
         )
     }
@@ -467,7 +467,7 @@ impl ExportPlan {
     pub fn summary(&self, lang: Lang) -> String {
         let mut s = i18n::fill(
             lang,
-            "каталогов {} · файлов {} · {}; в корзине и не выгружаются: {}; имён с коллизией: {}; слишком длинных путей: {}",
+            "folders {} · files {} · {}; in the trash and not exported: {}; names with a collision: {}; paths too long: {}",
             &[
                 self.dirs.len().to_string(),
                 self.items.len().to_string(),
@@ -481,12 +481,12 @@ impl ExportPlan {
         if empty > 0 {
             s.push_str(&i18n::fill(
                 lang,
-                "; пустых каталогов: {}",
+                "; empty folders: {}",
                 &[empty.to_string()],
             ));
         }
         if self.too_long > 0 {
-            s.push_str(i18n::t(lang, "; такие файлы пропущены"));
+            s.push_str(i18n::t(lang, "; those files are skipped"));
         }
         s
     }
@@ -558,7 +558,7 @@ impl fmt::Display for ExportReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = i18n::fill(
             self.lang,
-            "выгружено {} файлов · {}; пропущено уже выгруженных {} (порядок в цели устарел {}); переименовано из-за коллизии {}; каталогов создано {}; ошибок {}",
+            "exported {} files · {}; {} already exported skipped ({} stale order in the target); {} renamed because of a collision; {} folders created; {} errors",
             &[
                 self.copied.to_string(),
                 db::human_in(self.lang, self.bytes as i64),
@@ -570,7 +570,7 @@ impl fmt::Display for ExportReport {
             ],
         );
         let tail = if self.cancelled {
-            i18n::t(self.lang, "; остановлено")
+            i18n::t(self.lang, "; stopped")
         } else {
             ""
         };
@@ -1231,7 +1231,7 @@ pub fn export_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::t(
                     lang,
-                    "нужен номер альбома: export --album N --out DIR [--name ШАБЛОН] [--apply]"
+                    "an album number is needed: export --album N --out DIR [--name TEMPLATE] [--apply]"
                 )
             );
             std::process::exit(2);
@@ -1244,7 +1244,7 @@ pub fn export_cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::t(
                     lang,
-                    "нужен каталог назначения: export --album N --out DIR [--apply]"
+                    "a destination folder is needed: export --album N --out DIR [--apply]"
                 )
             );
             std::process::exit(2);
@@ -1288,7 +1288,7 @@ pub fn export_cli(args: &[String]) -> Result<()> {
         "{}",
         i18n::fill(
             lang,
-            "выгрузка альбома: {} → {}",
+            "album export: {} → {}",
             &[root_name, plan.out.join(&plan.root).display().to_string()]
         )
     );
@@ -1299,7 +1299,7 @@ pub fn export_cli(args: &[String]) -> Result<()> {
             "\n{}",
             i18n::t(
                 lang,
-                "это план (dry-run). Добавьте --apply, чтобы скопировать файлы (не ссылки)."
+                "this is a plan (dry-run). Add --apply to copy the files (not links)."
             )
         );
         return Ok(());
@@ -1313,7 +1313,7 @@ pub fn export_cli(args: &[String]) -> Result<()> {
             if t > 0 {
                 let line = i18n::fill(
                     lang,
-                    "выгрузка: {}/{} файлов, ошибок {}",
+                    "export: {}/{} files, {} errors",
                     &[d.to_string(), t.to_string(), e.to_string()],
                 );
                 eprint!("\r{line}");
@@ -1352,7 +1352,7 @@ pub fn cli(args: &[String]) -> Result<()> {
                 "{}",
                 i18n::t(
                     lang,
-                    "нужен каталог назначения: organize --out DIR [--apply] [--by day|month|event]"
+                    "a destination folder is needed: organize --out DIR [--apply] [--by day|month|event]"
                 )
             );
             std::process::exit(2);
@@ -1374,7 +1374,7 @@ pub fn cli(args: &[String]) -> Result<()> {
                     "{}",
                     i18n::fill(
                         lang,
-                        "--by: ожидается day, month или event, получено «{}»",
+                        "--by: expected day, month or event, got “{}”",
                         &[v]
                     )
                 );
@@ -1427,7 +1427,7 @@ pub fn cli(args: &[String]) -> Result<()> {
         "{}",
         i18n::fill(
             lang,
-            "витрина: {} → {}",
+            "showcase: {} → {}",
             &[layout.title(lang).to_string(), out.display().to_string()]
         )
     );
@@ -1435,7 +1435,7 @@ pub fn cli(args: &[String]) -> Result<()> {
         "{}",
         i18n::fill(
             lang,
-            "файлов с датой: {}, без даты (не попадут в план): {}, помечено лишними и не включено: {}",
+            "files with a date: {}, without a date (not in the plan): {}, marked spare and left out: {}",
             &[
                 plan.items.len().to_string(),
                 plan.no_date.to_string(),
@@ -1447,14 +1447,14 @@ pub fn cli(args: &[String]) -> Result<()> {
         "{}",
         i18n::fill(
             lang,
-            "каталогов витрины: {}",
+            "showcase folders: {}",
             &[plan.dirs.to_string()]
         )
     );
     for (top, n) in &by_top {
         println!("  {top}: {n}");
     }
-    println!("\n{}", i18n::t(lang, "примеры:"));
+    println!("\n{}", i18n::t(lang, "examples:"));
     for it in plan.items.iter().take(5) {
         println!("  {}  →  {}", it.src.display(), it.dst.display());
     }
@@ -1463,7 +1463,7 @@ pub fn cli(args: &[String]) -> Result<()> {
             "\n{}",
             i18n::fill(
                 lang,
-                "это план (dry-run). Добавьте --apply, чтобы создать ссылки/копии в {}",
+                "this is a plan (dry-run). Add --apply to create links/copies in {}",
                 &[out.display().to_string()]
             )
         );
@@ -1474,7 +1474,7 @@ pub fn cli(args: &[String]) -> Result<()> {
         "{}",
         i18n::fill(
             lang,
-            "создано: {}, ошибок: {}",
+            "created: {}, errors: {}",
             &[ok.to_string(), fail.to_string()]
         )
     );

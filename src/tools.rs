@@ -53,10 +53,10 @@ impl Tool {
         i18n::t(
             lang,
             match self {
-                Tool::Ffmpeg => "видео: кадр-обложка, dHash, превью",
-                Tool::Ffprobe => "видео: длительность и разрешение",
-                Tool::Tesseract => "OCR: текст с документов и скриншотов",
-                Tool::Curl => "скачивание весов модели по согласию",
+                Tool::Ffmpeg => "video: cover frame, dHash, previews",
+                Tool::Ffprobe => "video: duration and resolution",
+                Tool::Tesseract => "OCR: text from documents and screenshots",
+                Tool::Curl => "downloading model weights on consent",
             },
         )
     }
@@ -67,11 +67,11 @@ impl Tool {
             lang,
             match self {
                 Tool::Ffmpeg => {
-                    "видео в индексе без превью и dHash, ошибка в счётчике; фото не страдают"
+                    "videos in the index without previews or dHash, an error in the counter; photos are unaffected"
                 }
-                Tool::Ffprobe => "видео без длительности и разрешения",
-                Tool::Tesseract => "OCR выключен: кнопка погашена, поиск по тексту пуст",
-                Tool::Curl => "веса модели придётся положить вручную (scripts/fetch-model.sh)",
+                Tool::Ffprobe => "videos without duration or resolution",
+                Tool::Tesseract => "OCR is off: the button is disabled, text search stays empty",
+                Tool::Curl => "the model weights will have to be placed by hand (scripts/fetch-model.sh)",
             },
         )
     }
@@ -175,9 +175,9 @@ impl Tools {
         i18n::t(
             lang,
             if self.configured(tool) {
-                "задано в настройках"
+                "set in the settings"
             } else {
-                "из PATH"
+                "from PATH"
             },
         )
     }

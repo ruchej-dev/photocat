@@ -105,7 +105,7 @@ impl std::fmt::Display for DownloadReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = i18n::fill(
             self.lang,
-            "модель лиц скачана: файлов {}, {}",
+            "face model downloaded: {} files, {}",
             &[
                 self.files.to_string(),
                 db::human_in(self.lang, FILES.iter().map(|x| x.bytes as i64).sum()),
@@ -520,14 +520,14 @@ impl std::fmt::Display for Stats {
         let prefix = i18n::t(
             self.lang,
             if self.cancelled {
-                "остановлено: "
+                "stopped: "
             } else {
                 ""
             },
         );
         let body = i18n::fill(
             self.lang,
-            "просканировано {} из {} снимков, лиц {}, кластеров {}, ошибок {}, за {} с",
+            "scanned {} of {} photos, {} faces, {} clusters, {} errors, {} s",
             &[
                 self.done.to_string(),
                 self.images.to_string(),
@@ -541,7 +541,7 @@ impl std::fmt::Display for Stats {
         if self.skipped > 0 {
             let note = i18n::fill(
                 self.lang,
-                " (пропущено {}, уже просканировано)",
+                " ({} skipped, already scanned)",
                 &[self.skipped.to_string()],
             );
             write!(f, "{note}")?;
@@ -734,7 +734,7 @@ impl std::fmt::Display for ClusterStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = i18n::fill(
             self.lang,
-            "лиц {}, групп {}, из них закреплено вручную {}, за {} с",
+            "{} faces, {} groups, {} pinned by hand, {} s",
             &[
                 self.faces.to_string(),
                 self.clusters.to_string(),

@@ -29,14 +29,14 @@ impl std::fmt::Display for Stats {
         let prefix = i18n::t(
             self.lang,
             if self.cancelled {
-                "остановлено: "
+                "stopped: "
             } else {
                 ""
             },
         );
         let body = i18n::fill(
             self.lang,
-            "проиндексировано {}/{} файлов ({}), без изменений {}, ошибок {}, за {} с",
+            "indexed {}/{} files ({}), unchanged {}, errors {}, {} s",
             &[
                 self.indexed.to_string(),
                 self.total.to_string(),

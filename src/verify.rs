@@ -681,14 +681,14 @@ pub fn cli(args: &[String], lang: Lang) -> Result<()> {
             None => {
                 eprintln!(
                     "{}",
-                    i18n::t(lang, "нужен каталог: photocat verify --manifest FILE DIR")
+                    i18n::t(lang, "a folder is needed: photocat verify --manifest FILE DIR")
                 );
                 std::process::exit(2);
             }
         };
         let progress = Arc::new(Progress::default());
         let show = progress.clone();
-        std::thread::spawn(move || status_line(i18n::t(lang, "проверка"), lang, show));
+        std::thread::spawn(move || status_line(i18n::t(lang, "checking"), lang, show));
         let mut report = check_manifest(&root, Path::new(&file), jobs, Some(progress))?;
         report.lang = lang;
         print!("{}", check_report(Path::new(&file), &root, &report, all));
@@ -701,14 +701,14 @@ pub fn cli(args: &[String], lang: Lang) -> Result<()> {
     if pos.len() != 2 {
         eprintln!(
             "{}",
-            i18n::t(lang, "нужны два каталога: photocat verify A B [--jobs N] [--all]")
+            i18n::t(lang, "two folders are needed: photocat verify A B [--jobs N] [--all]")
         );
         std::process::exit(2);
     }
     let (a, b) = (PathBuf::from(&pos[0]), PathBuf::from(&pos[1]));
     let progress = Arc::new(Progress::default());
     let show = progress.clone();
-    std::thread::spawn(move || status_line(i18n::t(lang, "сверка"), lang, show));
+    std::thread::spawn(move || status_line(i18n::t(lang, "comparing"), lang, show));
     let mut report = verify(&a, &b, jobs, Some(progress))?;
     report.lang = lang;
     print!("{}", verify_report(&a, &b, &report, all));
@@ -727,7 +727,7 @@ pub fn manifest_cli(args: &[String], lang: Lang) -> Result<()> {
         .unwrap_or_else(|| PathBuf::from("."));
     let progress = Arc::new(Progress::default());
     let show = progress.clone();
-    std::thread::spawn(move || status_line(i18n::t(lang, "слепок"), lang, show));
+    std::thread::spawn(move || status_line(i18n::t(lang, "manifest"), lang, show));
     let mut stats = manifest(&root, out.as_deref(), jobs, Some(progress))?;
     stats.lang = lang;
     let summary = manifest_report(&root, out.as_deref(), &stats);
@@ -749,7 +749,7 @@ fn status_line(prefix: &str, lang: Lang, p: Arc<Progress>) {
         if t > 0 {
             let line = i18n::fill(
                 lang,
-                "{}/{} файлов, ошибок {} — {}",
+                "{}/{} files, {} errors — {}",
                 &[d.to_string(), t.to_string(), e.to_string(), p.msg()],
             );
             eprint!("\r{prefix}: {line}");
@@ -790,14 +790,14 @@ pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
     use std::fmt::Write;
     let lang = r.lang;
     let mut s = String::new();
-    let _ = writeln!(s, "{}", i18n::fill(lang, "сверка: {}", &[a.display().to_string()]));
-    let _ = writeln!(s, "{}", i18n::fill(lang, "     с: {}", &[b.display().to_string()]));
+    let _ = writeln!(s, "{}", i18n::fill(lang, "comparison: {}", &[a.display().to_string()]));
+    let _ = writeln!(s, "{}", i18n::fill(lang, "     with: {}", &[b.display().to_string()]));
     let _ = writeln!(
         s,
         "{}",
         i18n::fill(
             lang,
-            "файлов: A {}, B {}; совпало по содержимому {}; sha256 проверено {} файлов ({})",
+            "files: A {}, B {}; identical content {}; sha256 checked {} files ({})",
             &[
                 r.files_a.to_string(),
                 r.files_b.to_string(),
@@ -810,32 +810,32 @@ pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
     let _ = writeln!(
         s,
         "{}",
-        i18n::fill(lang, "размер отличается: {}", &[r.size_diff.len().to_string()])
+        i18n::fill(lang, "size differs: {}", &[r.size_diff.len().to_string()])
     );
     let _ = writeln!(
         s,
         "{}",
         i18n::fill(
             lang,
-            "содержимое отличается: {}",
+            "content differs: {}",
             &[r.content_diff.len().to_string()]
         )
     );
     let _ = writeln!(
         s,
         "{}",
-        i18n::fill(lang, "только в A: {}", &[r.only_a.len().to_string()])
+        i18n::fill(lang, "only in A: {}", &[r.only_a.len().to_string()])
     );
     let _ = writeln!(
         s,
         "{}",
-        i18n::fill(lang, "только в B: {}", &[r.only_b.len().to_string()])
+        i18n::fill(lang, "only in B: {}", &[r.only_b.len().to_string()])
     );
     if r.scan_errors > 0 {
         let _ = writeln!(
             s,
             "{}",
-            i18n::fill(lang, "ошибок обхода: {}", &[r.scan_errors.to_string()])
+            i18n::fill(lang, "scan errors: {}", &[r.scan_errors.to_string()])
         );
     }
     if !r.read_errors.is_empty() {
@@ -844,7 +844,7 @@ pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
             "{}",
             i18n::fill(
                 lang,
-                "ошибок чтения: {}",
+                "read errors: {}",
                 &[r.read_errors.len().to_string()]
             )
         );
@@ -855,7 +855,7 @@ pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
             "{}",
             i18n::fill(
                 lang,
-                "не проверено из-за отмены: {}",
+                "not checked because of the stop: {}",
                 &[r.unchecked.to_string()]
             )
         );
@@ -866,26 +866,26 @@ pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
             "{}",
             i18n::fill(
                 lang,
-                "пропущено (симлинки/особые): A {}, B {}",
+                "skipped (symlinks/special): A {}, B {}",
                 &[r.skipped_a.to_string(), r.skipped_b.to_string()]
             )
         );
     }
-    write_list(&mut s, lang, "только в A", &r.only_a, all);
-    write_list(&mut s, lang, "только в B", &r.only_b, all);
+    write_list(&mut s, lang, "only in A", &r.only_a, all);
+    write_list(&mut s, lang, "only in B", &r.only_b, all);
     write_size_diff(&mut s, lang, &r.size_diff, all);
-    write_list(&mut s, lang, "содержимое отличается", &r.content_diff, all);
-    write_list(&mut s, lang, "ошибки чтения", &r.read_errors, all);
+    write_list(&mut s, lang, "content differs", &r.content_diff, all);
+    write_list(&mut s, lang, "read errors", &r.read_errors, all);
     let verdict = i18n::fill(
         lang,
-        "вердикт: {} (за {} с)",
+        "verdict: {} ({} s)",
         &[
             i18n::t(
                 lang,
                 if r.identical() {
-                    "копии совпадают"
+                    "the copies match"
                 } else {
-                    "найдены расхождения"
+                    "differences found"
                 },
             )
             .to_string(),
@@ -904,19 +904,19 @@ pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> Str
     let _ = writeln!(
         s,
         "{}",
-        i18n::fill(lang, "проверка слепка: {}", &[file.display().to_string()])
+        i18n::fill(lang, "manifest check: {}", &[file.display().to_string()])
     );
     let _ = writeln!(
         s,
         "{}",
-        i18n::fill(lang, "           каталог: {}", &[root.display().to_string()])
+        i18n::fill(lang, "            folder: {}", &[root.display().to_string()])
     );
     let _ = writeln!(
         s,
         "{}",
         i18n::fill(
             lang,
-            "совпало: {}, изменено: {}, нет в каталоге: {}, нет в слепке: {}",
+            "matched: {}, changed: {}, missing from the folder: {}, missing from the manifest: {}",
             &[
                 r.same.to_string(),
                 r.changed.len().to_string(),
@@ -929,7 +929,7 @@ pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> Str
         let _ = writeln!(
             s,
             "{}",
-            i18n::fill(lang, "ошибок обхода: {}", &[r.scan_errors.to_string()])
+            i18n::fill(lang, "scan errors: {}", &[r.scan_errors.to_string()])
         );
     }
     if !r.read_errors.is_empty() {
@@ -938,7 +938,7 @@ pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> Str
             "{}",
             i18n::fill(
                 lang,
-                "ошибок чтения: {}",
+                "read errors: {}",
                 &[r.read_errors.len().to_string()]
             )
         );
@@ -949,7 +949,7 @@ pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> Str
             "{}",
             i18n::fill(
                 lang,
-                "не проверено из-за отмены: {}",
+                "not checked because of the stop: {}",
                 &[r.unchecked.to_string()]
             )
         );
@@ -960,25 +960,25 @@ pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> Str
             "{}",
             i18n::fill(
                 lang,
-                "пропущено (симлинки/особые): {}",
+                "skipped (symlinks/special): {}",
                 &[r.skipped.to_string()]
             )
         );
     }
-    write_list(&mut s, lang, "нет в каталоге", &r.missing, all);
-    write_list(&mut s, lang, "нет в слепке", &r.extra, all);
-    write_list(&mut s, lang, "изменено", &r.changed, all);
-    write_list(&mut s, lang, "ошибки чтения", &r.read_errors, all);
+    write_list(&mut s, lang, "missing from the folder", &r.missing, all);
+    write_list(&mut s, lang, "missing from the manifest", &r.extra, all);
+    write_list(&mut s, lang, "changed", &r.changed, all);
+    write_list(&mut s, lang, "read errors", &r.read_errors, all);
     let verdict = i18n::fill(
         lang,
-        "вердикт: {} (за {} с)",
+        "verdict: {} ({} s)",
         &[
             i18n::t(
                 lang,
                 if r.identical() {
-                    "каталог совпадает со слепком"
+                    "the folder matches the manifest"
                 } else {
-                    "каталог расходится со слепком"
+                    "the folder does not match the manifest"
                 },
             )
             .to_string(),
@@ -995,9 +995,9 @@ pub fn manifest_report(root: &Path, out: Option<&Path>, stats: &ManifestStats) -
     let prefix = if stats.written {
         ""
     } else if stats.cancelled {
-        i18n::t(lang, "отменено: ")
+        i18n::t(lang, "cancelled: ")
     } else {
-        i18n::t(lang, "не записан: ")
+        i18n::t(lang, "not written: ")
     };
     let arrow = match out {
         Some(p) if stats.written => format!(" → {}", p.display()),
@@ -1007,7 +1007,7 @@ pub fn manifest_report(root: &Path, out: Option<&Path>, stats: &ManifestStats) -
         "{prefix}{}{arrow}\n",
         i18n::fill(
             lang,
-            "слепок {}: {} файлов ({}), пропущено {}, ошибок {}, не проверено {}, за {} с",
+            "manifest {}: {} files ({}), skipped {}, errors {}, not checked {}, {} s",
             &[
                 root.display().to_string(),
                 stats.files.to_string(),
@@ -1037,7 +1037,7 @@ fn write_list(s: &mut String, lang: Lang, title: &'static str, list: &[String], 
             "{}",
             i18n::fill(
                 lang,
-                "  … ещё {} (показать все)",
+                "  … {} more (show all)",
                 &[(list.len() - limit).to_string()]
             )
         );
@@ -1049,7 +1049,7 @@ fn write_size_diff(s: &mut String, lang: Lang, list: &[(String, u64, u64)], all:
     if list.is_empty() {
         return;
     }
-    let _ = writeln!(s, "\n{}:", i18n::t(lang, "размер отличается"));
+    let _ = writeln!(s, "\n{}:", i18n::t(lang, "size differs"));
     let limit = if all { list.len() } else { 20 };
     for (path, a, b) in list.iter().take(limit) {
         let delta = *b as i64 - *a as i64;
@@ -1083,7 +1083,7 @@ fn write_size_diff(s: &mut String, lang: Lang, list: &[(String, u64, u64)], all:
             "{}",
             i18n::fill(
                 lang,
-                "  … ещё {} (показать все)",
+                "  … {} more (show all)",
                 &[(list.len() - limit).to_string()]
             )
         );

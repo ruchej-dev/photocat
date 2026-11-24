@@ -306,8 +306,8 @@ static CATALOG: [ModelEntry; 4] = [
     ModelEntry {
         id: DEFAULT_MODEL,
         dir: "clip-vit-b32",
-        title: "CLIP ViT-B/32, мультиязычная",
-        note: "русский поиск и теги, лучшее качество",
+        title: "CLIP ViT-B/32, multilingual",
+        note: "Russian search and tags, the best quality",
         license: "MIT + Apache-2.0",
         kind: TextKind::Projected,
         dim: 512,
@@ -325,8 +325,8 @@ static CATALOG: [ModelEntry; 4] = [
     ModelEntry {
         id: "clip-vit-b32-en",
         dir: "clip-vit-b32-en",
-        title: "CLIP ViT-B/32, английская",
-        note: "меньше по размеру, запросы только по-английски",
+        title: "CLIP ViT-B/32, English",
+        note: "smaller, English queries only",
         license: "MIT",
         kind: TextKind::Direct,
         dim: 512,
@@ -344,8 +344,8 @@ static CATALOG: [ModelEntry; 4] = [
     ModelEntry {
         id: "siglip-base-224-en",
         dir: "siglip-base-224-en",
-        title: "SigLIP base 224, английская",
-        note: "768 признаков, архитектура SigLIP; запросы по-английски",
+        title: "SigLIP base 224, English",
+        note: "768 features, SigLIP architecture; English queries",
         license: "Apache-2.0",
         kind: TextKind::Pooler,
         dim: 768,
@@ -365,8 +365,8 @@ static CATALOG: [ModelEntry; 4] = [
     ModelEntry {
         id: "siglip2-base-224-multi",
         dir: "siglip2-base-224-multi",
-        title: "SigLIP 2 base 224, мультиязычная",
-        note: "768 признаков, тексты на 100+ языках; нужен лимит 400 МиБ",
+        title: "SigLIP 2 base 224, multilingual",
+        note: "768 features, 100+ languages; needs a 400 MiB limit",
         license: "Apache-2.0",
         kind: TextKind::Pooler,
         dim: 768,
@@ -1181,14 +1181,14 @@ impl std::fmt::Display for EmbedStats {
         let prefix = i18n::t(
             self.lang,
             if self.cancelled {
-                "остановлено: "
+                "stopped: "
             } else {
                 ""
             },
         );
         let text = i18n::fill(
             self.lang,
-            "CLIP ({}): {}посчитано {}/{}, пропущено {}, ошибок {}, за {} с, модель {}",
+            "CLIP ({}): {}computed {}/{}, skipped {}, errors {}, {} s, model {}",
             &[
                 self.model.to_string(),
                 prefix.to_string(),
@@ -1235,7 +1235,7 @@ pub fn embed_missing(
     let skipped = total.saturating_sub(todo.len());
     if let Some(p) = &progress {
         p.set_total(todo.len());
-        p.set_msg("загрузка модели CLIP…");
+        p.set_msg("loading the CLIP model…");
     }
     if todo.is_empty() {
         if let Some(p) = &progress {
@@ -1351,7 +1351,7 @@ impl std::fmt::Display for RetagStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = i18n::fill(
             self.lang,
-            "теги ({}): пересчитано {}/{}, за {} с",
+            "tags ({}): recomputed {}/{}, {} s",
             &[
                 self.model.to_string(),
                 self.tagged.to_string(),
@@ -1538,12 +1538,12 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
     buckets.sort_by_key(|b| std::cmp::Reverse(b.len()));
 
     let lang = settings.lang;
-    let mut md = String::from(i18n::t(lang, "# Кластеры CLIP (M3)\n\n"));
+    let mut md = String::from(i18n::t(lang, "# CLIP clusters (M3)\n\n"));
     md.push_str(&format!(
         "{}\n\n",
         i18n::fill(
             lang,
-            "Модель `{}`, файлов с эмбеддингами: {}, кластеров: {}, k={}.",
+            "Model `{}`, files with embeddings: {}, clusters: {}, k={}.",
             &[
                 entry.id.to_string(),
                 xs.len().to_string(),
@@ -1554,14 +1554,14 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
     ));
     md.push_str(i18n::t(
         lang,
-        "Отчёт для просмотра владельцем: 12 примеров на кластер.\n",
+        "A report for the owner: 12 examples per cluster.\n",
     ));
     for (n, b) in buckets.iter().enumerate() {
         md.push_str(&format!(
             "\n{}\n\n",
             i18n::fill(
                 lang,
-                "## Кластер {} — {} фото",
+                "## Cluster {} — {} photos",
                 &[(n + 1).to_string(), b.len().to_string()],
             )
         ));
@@ -1574,7 +1574,7 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
         if b.len() > 12 {
             md.push_str(&format!(
                 "- {}\n",
-                i18n::fill(lang, "… и ещё {}", &[(b.len() - 12).to_string()])
+                i18n::fill(lang, "… and {} more", &[(b.len() - 12).to_string()])
             ));
         }
     }
@@ -1604,7 +1604,7 @@ impl std::fmt::Display for DownloadReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut text = i18n::fill(
             self.lang,
-            "модель {}: файлов {}, {}",
+            "model {}: {} files, {}",
             &[
                 self.model.to_string(),
                 self.files.to_string(),
@@ -1614,7 +1614,7 @@ impl std::fmt::Display for DownloadReport {
         if !self.fallbacks.is_empty() {
             text.push_str(&i18n::fill(
                 self.lang,
-                " (не подошли: {})",
+                " (did not fit: {})",
                 &[self.fallbacks.join("; ")],
             ));
         }
@@ -2152,16 +2152,16 @@ mod tests {
     /// окне строка модели молча остаётся русской (хвост M21.6).
     #[test]
     fn the_model_catalogue_is_translated() {
-        let en = crate::i18n::Lang::En;
+        let ru = crate::i18n::Lang::Ru;
         for e in catalog() {
             assert_ne!(
-                crate::i18n::t(en, e.title),
+                crate::i18n::t(ru, e.title),
                 e.title,
                 "у модели {} нет перевода названия",
                 e.id
             );
             assert_ne!(
-                crate::i18n::t(en, e.note),
+                crate::i18n::t(ru, e.note),
                 e.note,
                 "у модели {} нет перевода описания",
                 e.id

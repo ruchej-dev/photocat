@@ -1047,3 +1047,33 @@ swipe coasts after the fingers lift) — 2026-11-24.
 **Not doing.** A third theme, an accent picker, a "compact mode", bundled fonts until the owner
 decides, cropped previews, a floating selection bar, favourites/ratings/share/permanent delete, the
 mock-up's EXIF/GPU/tray/update functions, a network call, a file operation.
+
+
+---
+
+## M23 — English is the language of the code 🔄 (M23.1 done)
+
+**Goal.** The repository is English in the code as well as in the documents: identifiers, comments,
+logs, errors and the source text of the interface. Russian survives only as a translation
+(`src/i18n.rs`, `*.ru.md`, the model prompts). ADR 0046; the direction is the reverse of ADR 0040.
+
+**Acceptance criteria.**
+1. No Cyrillic identifier in `src/`: `cargo test --test source_language` fails on one. ✅ (M23.1)
+2. `PAIRS` is English → Russian; `t(lang, en)` gives Russian for `Lang::Ru` and the English source
+   otherwise; `count(lang, n, noun)` holds both plural sets. ✅ (M23.1)
+3. The window and the CLI show the same text as before for the same language — the inversion
+   changed no behaviour. ✅ (M23.1: `cargo test` 234 passed)
+4. Every module is converted: `PENDING` in `tests/source_language.rs` is empty, so a Russian
+   comment or string in `src/` fails the guard (the model prompts of `embed.rs` stay exempt).
+5. `plan/I18N.md`, `docs/ARCHITECTURE.md` and `AGENTS.md` §6 describe the new direction. ✅ (M23.1)
+
+**Steps.** M23.1 — identifiers, the inverted table, the guard, the documents (done). M23.2 — L0/L1:
+`i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs`. M23.3 — L2: `dupes`, `embed`, `eval`,
+`ocr`, `faces`, `organize`, `verify`, `recycle`, `index`, `player`. M23.4 — `app.rs` (the bulk:
+comments and the remaining labels). M23.5 — `main.rs`, the tests and `scripts/`. M23.6 — the
+corpus pass and the numbers in `docs/ARCHITECTURE.md`.
+
+**Not doing.** Translating the owner's own data (album and face names, user tags, `labels.csv`);
+a third language; gettext/fluent; changing the language mechanism decided in ADR 0040.
+
+**Files.** `src/*.rs`, `tests/source_language.rs`, `docs/DECISIONS.md`, `plan/I18N.md`.

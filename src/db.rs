@@ -2302,9 +2302,9 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
     let _ = writeln!(
         out,
         "{:<10} {:>10} {:>12}",
-        i18n::t(lang, "тип"),
-        i18n::t(lang, "файлов"),
-        i18n::t(lang, "объём")
+        i18n::t(lang, "kind"),
+        i18n::t(lang, "files"),
+        i18n::t(lang, "size")
     );
     for r in rows {
         let (k, n, b) = r?;
@@ -2337,21 +2337,21 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
         "{}",
         i18n::fill(
             lang,
-            "всего: {} файлов, {}",
+            "total: {} files, {}",
             &[total_n.to_string(), human_in(lang, total_b)]
         )
     );
     let _ = writeln!(
         out,
         "{}",
-        i18n::fill(lang, "без даты съёмки: {}", &[no_date.to_string()])
+        i18n::fill(lang, "without a capture date: {}", &[no_date.to_string()])
     );
     let _ = writeln!(
         out,
         "{}",
         i18n::fill(
             lang,
-            "без перцептивного хеша: {}",
+            "without a perceptual hash: {}",
             &[no_hash.to_string()]
         )
     );
@@ -2360,7 +2360,7 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
         "{}",
         i18n::fill(
             lang,
-            "уникальных sha256: {}  (точных копий: {})",
+            "unique sha256: {}  (exact copies: {})",
             &[uniq_sha.to_string(), (total_n - uniq_sha).to_string()]
         )
     );
@@ -2369,7 +2369,7 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
         "{}",
         i18n::fill(
             lang,
-            "уникальных dhash: {}",
+            "unique dhash: {}",
             &[uniq_dhash.to_string()]
         )
     );
@@ -2384,7 +2384,7 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
         "{}",
         i18n::fill(
             lang,
-            "видео с длительностью: {}, суммарно {}",
+            "videos with a duration: {}, {} in total",
             &[vid_n.to_string(), duration(vid_dur)]
         )
     );
@@ -2395,7 +2395,7 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
             "{}",
             i18n::fill(
                 lang,
-                "файлов с распознанным текстом: {}, знаков: {}",
+                "files with recognised text: {}, characters: {}",
                 &[ocr_n.to_string(), ocr_chars.to_string()]
             )
         );

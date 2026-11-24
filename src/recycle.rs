@@ -23,7 +23,7 @@ impl std::fmt::Display for Report {
             f,
             "{}в системную корзину: {}, ошибок {}, {}",
             if self.cancelled {
-                "остановлено: "
+                "stopped: "
             } else {
                 ""
             },
