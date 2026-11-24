@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document) → next:M21.7b (`docs/UI.md`), M21.7c (`docs/DECISIONS.md`), then M21.8 (`plan/`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document) → next:M21.7c (`docs/DECISIONS.md`), then M21.8 (`plan/`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -79,7 +79,7 @@ sha256; вторая (английская) модель на 148.6 МиБ; те
 - **Настройки переживают перезапуск:** `settings.grid_layout` (`months|flat`),
   `settings.grid_sort` (`date_desc|date_asc|name|size_desc`); неизвестное значение из старой БД —
   значение по умолчанию, без падения. `SCHEMA_VERSION` не поднимался.
-- **Документы:** `docs/UI.md` (переключатели, один порядок, недоступность при поиске),
+- **Документы:** `docs/UI.ru.md` (переключатели, один порядок, недоступность при поиске),
   `.pi/skills/add-view/SKILL.md` (настройки показа — в `settings`, данные вида — в `App`).
 
 Проверки: `cargo test` — 118 passed (было 112; новые: плоский порядок по дате в обе стороны,
@@ -275,7 +275,7 @@ OCR и лица.
 
 Хвосты: заголовок месяца не закрепляется при прокрутке (`ScrollArea` в egui не даёт sticky-строку
 без ручной отрисовки); мультивыбора плиток нет — это отдельная задача, а не скрытая функция.
-Клавиатурные сокращения (Ctrl+I, Ctrl+F, F5, стрелки) по-прежнему в `docs/UI.md` §Долг.
+Клавиатурные сокращения (Ctrl+I, Ctrl+F, F5, стрелки) по-прежнему в `docs/UI.ru.md` §Долг.
 
 ## Интерфейс (2026-11-22): три колонки и «Настройки» в диалоге
 
@@ -293,12 +293,12 @@ OCR и лица.
 с разделами; режим без правой панели. `cargo clippy --all-targets` — без замечаний,
 `enforce-architecture` — 33 проверки ок. Замеров логики не требуется: раскладка не меняет
 индексацию, дубли, CLIP и OCR. Решение записано в `docs/DECISIONS.md` 0024, правила — в
-`docs/UI.md`.
+`docs/UI.ru.md`.
 
 Хвосты: в макете «Настройки» открывались шестерёнкой — оставлено слово «Настройки», иконка без
 подписи запрещена правилами находимости. Прогресс прохода переехал в третью строку верхней
 панели, чтобы кнопки не сдвигались при запуске. Клавиатурные сокращения (Ctrl+I, Ctrl+F, F5,
-стрелки) по-прежнему не сделаны — они в `docs/UI.md` §Долг.
+стрелки) по-прежнему не сделаны — они в `docs/UI.ru.md` §Долг.
 
 ## M13 — замечания владельца после просмотра (2026-11-22)
 
@@ -642,7 +642,7 @@ TurboJPEG — в § M13b и `docs/ARCHITECTURE.ru.md`.
   подтверждение и старый результат. Неполный слепок (отмена/ошибка чтения) на диск не попадает.
 - **Пути проверяются до запуска:** один и тот же путь в A и B, несуществующий каталог, файл
   слепка-каталог или отсутствующий слепок — красная строка с причиной и ноль записей на диск.
-- **Документы:** `docs/UI.md` (экран, состояния, метрики, «шесть видов»),
+- **Документы:** `docs/UI.ru.md` (экран, состояния, метрики, «шесть видов»),
   `docs/ARCHITECTURE.ru.md` § «Целостность», карта слоёв `check.sh` (`app` может `verify`).
 
 Проверки: `cargo test` — 165 passed, 4 `#[ignore]` (новые: экран показывает поля
@@ -711,7 +711,7 @@ sha256. Не-UTF-8 имена в слепке теряют байты через
   отсчёта: архив только что прочитан целиком. Ошибка и отмена прохода не трогают прошлый
   успешный отчёт и дату. CLI `verify --manifest` для cron/systemd не менялся, приложение
   системных таймеров не ставит (пример — в README).
-- **Документы:** `docs/UI.md` (баннер, строка напоминания, состояния), `docs/ARCHITECTURE.ru.md`
+- **Документы:** `docs/UI.ru.md` (баннер, строка напоминания, состояния), `docs/ARCHITECTURE.ru.md`
   § «Напоминание о проверке», ADR 0037, README (§ расписание).
 
 Проверки: `cargo test` — 170 passed, 4 `#[ignore]` (новые: расчёт срока во всех шести случаях,
@@ -781,7 +781,7 @@ headless-кадром, потому что на экране его видит �
 - **Поиск/теги/кластеры** читают только активную модель; `retag` пересчитывает только её словарь.
   GUI и `models list` показывают признаки, лицензию, размер и статус; лимит 250 МиБ вмещает
   SigLIP (203.5), прежний 160 — нет.
-- **Документы:** `docs/ARCHITECTURE.ru.md` § «Каталог моделей», `docs/UI.md` (настройки модели и
+- **Документы:** `docs/ARCHITECTURE.ru.md` § «Каталог моделей», `docs/UI.ru.md` (настройки модели и
   переключение), `README.md`, ADR 0039.
 
 Проверки: `cargo test` — 176 passed, 6 `#[ignore]` (новые: каталог с уникальными id/каталогами,
@@ -1423,3 +1423,28 @@ matter (`stats` in two languages) keeps `ГиБ`/`GiB` as the observation.
 `cargo test`/`clippy`/`check.sh` are unaffected by this commit.
 
 **Next.** M21.7b: `docs/UI.md`.
+
+## M21.7b — the interface document in English (2026-11-24)
+
+`docs/UI.md` is now English; the Russian original is `docs/UI.ru.md`, and both files link to each
+other. Everything that makes the document normative survived: the three rule blocks ("Rules that are
+not up for debate", "Layout", "Interaction"), the "Findable in a second" table, the 27-row metrics
+table, the screen table, the long state list, the keyboard table, the wording rules and the debt
+list. The pointer to the normative sources (`.pi/skills/ui-design/references/*.md`) is unchanged.
+
+**Labels quoting the UI.** The English variant quotes the labels the owner sees in English mode
+(`Index`, `By months / Flat`, `LIBRARY`/`TOOLS`, `Keep`/`spare`, the integrity verdicts) and says at
+the top of § Wording that the code keeps the Russian string as the translation key (`i18n::PAIRS`,
+`plan/I18N.md`). Screen names are the view names (`Grid`, `Duplicates`, `Calendar`, `Faces`,
+`Albums`, `Trash`, `Integrity`), so a section reads the same as the `View` enum.
+
+**One stale item fixed in both variants.** The debt list claimed "there is no multi-selection of
+tiles" — false since M18, which the same document describes. Item 9 now says what is actually
+missing: decisions on duplicates are still made one tile at a time; the multi-selection works in the
+grid, in albums and in the trash, and batch actions over duplicate groups are a separate task.
+
+**Links.** Russian plan documents that cited `docs/UI.md` §Долг/§Взаимодействие were retargeted to
+`docs/UI.ru.md`, so a Russian section name never points into the English file. Both UI files have the
+same 67 table rows; no code was touched.
+
+**Next.** M21.7c: `docs/DECISIONS.md`.

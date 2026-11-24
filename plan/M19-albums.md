@@ -230,7 +230,7 @@ photocat export --album N --out DIR [--name TEMPLATE] [--apply]
 9. Замер на корпусе: дерево из 3 уровней, 500 файлов — время и объём копии; повтор — время и 0
    новых файлов; 2230 файлов — время и объём; `docs/ARCHITECTURE.ru.md` §Замеры.
 10. ADR 0035 «Выгрузка альбома: структура альбома, копии файлов, ничего не перезаписывается»,
-    `docs/UI.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
+    `docs/UI.ru.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
 
 ### 6.4. Не делать в M20
 

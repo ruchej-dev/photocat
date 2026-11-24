@@ -301,7 +301,7 @@ label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--j
 пропущено, 259 обработано за 10.2 с, повтор — 0.024 с.
 
 **Файлы.** `src/app.rs`, `src/db.rs`, `src/embed.rs`, `src/faces.rs`, `src/index.rs`,
-`src/tools.rs`, `src/recycle.rs`, `src/storage.rs`, `Cargo.toml`, `check.sh`, `docs/UI.md`,
+`src/tools.rs`, `src/recycle.rs`, `src/storage.rs`, `Cargo.toml`, `check.sh`, `docs/UI.ru.md`,
 `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.md` (0025, 0026, 0027).
 
 ---
@@ -323,10 +323,10 @@ label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--j
    Во время сверки и проверки в архив не пишется ничего.
 5. GUI и CLI используют одни функции `verify`; отчёт и коды те же, логика не дублируется в
    `app.rs`.
-6. `docs/UI.md` описывает экран, состояния, пустые значения и поведение «Стоп»; smoke-запуск GUI
+6. `docs/UI.ru.md` описывает экран, состояния, пустые значения и поведение «Стоп»; smoke-запуск GUI
    без падений; `cargo test`, `clippy`, `check.sh` — зелёные.
 
-**Файлы.** `src/app.rs`, `src/verify.rs` (публичные отчёты), `docs/UI.md`.
+**Файлы.** `src/app.rs`, `src/verify.rs` (публичные отчёты), `docs/UI.ru.md`.
 
 **Сделано.** Вид `View::Integrity` с пунктом «Целостность»; поля A/B/слепок, галочка
 «Показать все пути», кнопки «Сверить копии», «Записать слепок»/«Перезаписать слепок»,
@@ -528,7 +528,7 @@ clippy и границы зелёные.
 сеть за промптами; удаление/переименование файлов; обещание детектора объектов.
 
 **Файлы.** `src/derive.rs`, `src/embed.rs`, `src/db.rs`, `src/app.rs`, `src/ocr.rs`,
-`src/organize.rs`, `plan/M15-tags.md`, `docs/UI.md`, `docs/ARCHITECTURE.ru.md`,
+`src/organize.rs`, `plan/M15-tags.md`, `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`,
 `docs/DECISIONS.md`.
 
 ---
@@ -553,10 +553,10 @@ clippy и границы зелёные.
 6. Секции панелей и карточки без `Frame::group`; один стиль на весь GUI.
 7. `cargo clippy --all-targets` чисто, `enforce-architecture` без нарушений, `cargo test` зелёный,
    `timeout 6 photocat gui --db <копия реальной БД>` не падает.
-8. Документы обновлены тем же изменением: `docs/UI.md`, `docs/DECISIONS.md` 0033,
+8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `docs/DECISIONS.md` 0033,
    `.pi/skills/ui-design/references/verstka.md`, `plan/STATUS.md`.
 
-**Файлы.** `src/app.rs`, `docs/UI.md`, `docs/DECISIONS.md`, `plan/M16-interface.md`,
+**Файлы.** `src/app.rs`, `docs/UI.ru.md`, `docs/DECISIONS.md`, `plan/M16-interface.md`,
 `plan/STATUS.md`, `plan/BACKLOG.md`, `.pi/skills/ui-design/references/verstka.md`.
 
 **Не делать.** Светлую тему, иконки без подписей, избранное, карту; менять
@@ -589,11 +589,11 @@ clippy и границы зелёные.
 7. Тесты без окна: плоско — по дате; «старые сверху» переворачивает месяцы и плоский список;
    «Без даты» в конце в обе стороны; имя и размер сортируются; при поиске порядок = релевантность;
    roundtrip настроек.
-8. `docs/UI.md` (переключатели, правило одного порядка, недоступность при поиске), строка в
+8. `docs/UI.ru.md` (переключатели, правило одного порядка, недоступность при поиске), строка в
    `.pi/skills/add-view/SKILL.md` о том, что настройки вида (`tile_size`, представление,
    сортировка) живут в `settings`, а данные вида — в `App`; `plan/STATUS.md`.
 
-**Файлы.** `src/app.rs`, `src/db.rs`, `docs/UI.md`, `.pi/skills/add-view/SKILL.md`, `plan/`.
+**Файлы.** `src/app.rs`, `src/db.rs`, `docs/UI.ru.md`, `.pi/skills/add-view/SKILL.md`, `plan/`.
 
 **Не делать.** Второй рендерер сетки, sticky-заголовок месяца (отдельная задача), сортировку по
 GPS/тегам/камере, запись порядка в БД.
@@ -618,9 +618,9 @@ GPS/тегам/камере, запись порядка в БД.
    пустое.
 6. Тесты без окна (headless egui): Ctrl+клик добавляет, Shift+клик даёт диапазон, Esc и смена
    фильтра сбрасывают, «выбрать все» берёт только видимое.
-7. `docs/UI.md` §Взаимодействие — правила выделения; `plan/STATUS.md`.
+7. `docs/UI.ru.md` §Взаимодействие — правила выделения; `plan/STATUS.md`.
 
-**Файлы.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`.
+**Файлы.** `src/app.rs`, `docs/UI.ru.md`, `plan/STATUS.md`.
 
 **Не делать.** Резиновую рамку мышью, выделение в дублях/лицах/корзине (отдельно), drag&drop.
 
@@ -666,11 +666,11 @@ GPS/тегам/камере, запись порядка в БД.
    ничего не пишет.
 9. Замер: `albums add` 500 файлов (время), дерево 3 уровней на корпусе, размер БД до/после;
    `docs/ARCHITECTURE.ru.md` §Замеры.
-10. Документы: `docs/UI.md` (вид, вложенность, порядок), `docs/ARCHITECTURE.ru.md` §Схема,
+10. Документы: `docs/UI.ru.md` (вид, вложенность, порядок), `docs/ARCHITECTURE.ru.md` §Схема,
     ADR 0034 «Альбомы в БД: дерево и порядок, отдельно от каталогов на диске», `plan/M19-albums.md`,
     `plan/STATUS.md`.
 
-**Файлы.** `src/db.rs`, `src/app.rs`, `src/main.rs`, `docs/UI.md`, `docs/ARCHITECTURE.ru.md`,
+**Файлы.** `src/db.rs`, `src/app.rs`, `src/main.rs`, `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`,
 `docs/DECISIONS.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
 
 **Не делать.** Файлы на диске, копии, «умные» альбомы по фильтру, обложку руками, синхронизацию с
@@ -714,7 +714,7 @@ GPS/тегам/камере, запись порядка в БД.
 10. Замер на корпусе: дерево из 3 уровней, 500 файлов — время и объём копии; повтор — время и 0
     новых; 2230 файлов — время и объём; `docs/ARCHITECTURE.ru.md` §Замеры.
 11. ADR 0035 «Выгрузка альбома: структура альбома, копии файлов, ничего не перезаписывается»,
-    `docs/UI.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
+    `docs/UI.ru.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
 
 **Файлы.** `src/organize.rs` (`plan_album`, `apply_copy`), `src/db.rs` (чтение дерева), `src/main.rs`,
 `src/app.rs`, `docs/`, `plan/`.

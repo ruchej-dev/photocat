@@ -1,506 +1,538 @@
-# Интерфейс photocat
+# photocat interface
 
-Владелец — человек, который разбирает семейный архив, а не дизайнер и не фотограф. Экран должен
-быть плотным, тёмным и предсказуемым: сетка снимков, одна строка статуса, панель фильтров. Ничего,
-что требует обучения.
+*Русская версия: [UI.ru.md](UI.ru.md).*
 
-## Правила, которые не обсуждаются
+The owner is a person who sorts out a family archive, not a designer and not a photographer. The
+screen must be dense, dark and predictable: a grid of snapshots, one status line, a filter panel.
+Nothing that needs to be learned.
 
-- **Два языка, выбор в «Настройки → Интерфейс»** (M21, ADR 0040): английский — основной, русский —
-  второй. При первом запуске язык берётся из локали системы, при неопределённой — английский. Русская строка в коде идёт через `i18n::t(lang, "…")`; непереведённая подпись
-  показывается по-русски, поэтому экран переводится целиком за один шаг, а не наполовину.
-  Идентификаторы в коде — по-английски. Даты — `ГГГГ-ММ-ДД ЧЧ:ММ`, объёмы — через
-  `db::human_in(lang, …)` (`КиБ/МиБ` или `KiB/MiB`), размеры фото — `Ш×В` с `×`. Счётчики —
-  через `i18n::count` (русские 1/2–4/5+, английские 1/N), иначе в английском «files 1».
-  С M21.5 через `t()` идут все видимые поверхности окна — включая полный экран, управление
-  плеером, диалоги каталогов и подтверждение очистки; позиция в полном экране —
-  `i18n::position`, интервал слайд-шоу — `i18n::seconds`. Отчёты CLI переводятся в M21.6.
-- **Ни одного действия, которое что-то удаляет или переименовывает.** Слова «удалить», «очистить»,
-  «переместить» в основном сценарии не появляются; максимум «пометить лишним», «убрать тег» (скрыть
-  подпись в БД, оригинал не меняется) и «экспорт плана». Исключение, запрошенное владельцем:
-  «В корзину» (только запись в БД) и «Очистить корзину» — перенос в **системную** корзину ОС после
-  подтверждения. Кэш чистится только в «Настройки → Хранилище» и только после подтверждения.
-- **Сеть — только по кнопке.** «Скачать модель» активна лишь после галочки согласия; никакой
-  фоновой загрузки, никакой отправки фото, путей и запросов.
-- **Долгая работа — с прогрессом и стопом.** Индексация, кластеризация, инференс, OCR: фоновый
-  поток, `egui::ProgressBar` рядом с «Стоп». После остановки кнопка запуска показывает остаток
-  («Продолжить (N)»), потому что уже сделанное пропускается по `sha256`.
-- **Виджет один.** Сетку превью рисует одна функция (`draw_cell` в `app.rs`); новый экран её
-  вызывает, а не копирует. Исключение — лица: `draw_face_cell` рисует выровненный кроп лица, а не
-  файл; метрика плитки и подписи у него та же (150×150 + 26).
-- **Числа — рядом с подписью**: «зря 214.1 МиБ», «файлов 238», а не столбик цифр без единиц.
-- **Ошибка видна там, где случилась**: статус-строка внизу, не модальное окно.
+## Rules that are not up for debate
 
-## Вёрстка
+- **Two languages, chosen in "Settings → Interface"** (M21, ADR 0040): English is the main one,
+  Russian the second. On the first launch the language comes from the system locale, and from
+  English when it cannot be detected. A Russian string in the code goes through
+  `i18n::t(lang, "…")`; an untranslated label is shown in Russian, so a screen is translated in one
+  step, not half of it. Identifiers in the code are English. Dates are `YYYY-MM-DD HH:MM`, sizes go
+  through `db::human_in(lang, …)` (`КиБ/МиБ` or `KiB/MiB`), image dimensions are `W×H` with `×`.
+  Counters go through `i18n::count` (Russian 1/2–4/5+, English 1/N), otherwise English shows
+  "files 1". Since M21.5 every visible surface of the window goes through `t()` — including the
+  full screen, the player controls, the folder dialogs and the storage confirmation; the position
+  in the full screen comes from `i18n::position`, the slideshow interval from `i18n::seconds`. CLI
+  reports were translated in M21.6.
+- **Not a single action that deletes or renames anything.** The words "delete", "clear", "move" do
+  not appear in the main scenario; at most "mark as spare", "remove the tag" (hide the label in the
+  DB, the original does not change) and "export the plan". The exception requested by the owner: "To
+  trash" (a DB row only) and "Empty the trash" — a move to the **OS** trash after confirmation. The
+  cache is cleaned only in "Settings → Storage" and only after confirmation.
+- **The network only by a button.** "Download model" is enabled only after the consent tick; no
+  background download, no sending of photos, paths or queries.
+- **Long work shows progress and a stop.** Indexing, clustering, inference, OCR: a background
+  thread, an `egui::ProgressBar` next to "Stop". After a stop the start button shows the remainder
+  ("Resume (N)"), because what is done is skipped by `sha256`.
+- **One widget.** The preview grid is drawn by one function (`draw_cell` in `app.rs`); a new screen
+  calls it instead of copying it. The exception is faces: `draw_face_cell` draws an aligned face
+  crop, not a file; its tile metrics and caption are the same (150×150 + 26).
+- **Numbers next to their label**: "214.1 MiB wasted", "238 files", not a column of digits without
+  units.
+- **An error is visible where it happened**: the status line at the bottom, not a modal window.
 
-Нормативные правила — в `.pi/skills/ui-design/references/verstka.md`. Здесь — цифры, которые
-нельзя менять в одиночку, и то, что проверяется глазами. Разделы «Вёрстка», «Взаимодействие»,
-«Найти за секунду» — требования к интерфейсу; что из этого код ещё не делает — в §Долг по
-правилам интерфейса в конце файла.
+## Layout
 
-- **Тема одна** (`app::style`, M16): шаг `8×6`, отступ в кнопке `10×4`, минимальная цель
-  `32×26`, отступ вложенности 16, ползунок 120 px, скругление 4 px, тени выключены. Цвета — из
-  `ui.visuals()`, кроме акцента; тема не переопределяет палитру, только ритм и форму.
-- **Сетка 4 px.** Отступы только `2, 4, 6, 8, 12, 16, 24`. Внутри группы 4, между группами 8,
-  между секциями 12, перед заголовком 8.
-- **Плитки стоят плотно:** шаг сетки `2 px` по обеим осям (M16, как в PhotoPrism); зазор
-  задаётся только внутри области сетки и не меняет `item_spacing` остальных экранов.
-- **Секции плоские:** подпись 11 px приглушённым, содержимое, тонкая линия. `Frame::group`
-  вокруг блоков панели и карточки не используется — рамка в рамке спорит с фото.
-- **Сетка сгруппирована по месяцам** (M16): заголовок «май 2024» 14 px + «· файлов N · объём»
-  11 px, от свежих к старым; внутри месяца снимки тоже от свежих. «Без даты» — последняя группа.
-- **Представление и порядок выбирает владелец** (M17): в заголовке вида рядом с «Плитки N» — две
-  кнопки «По месяцам / Подряд» и меню «Сортировка» («Дата: новые сверху» по умолчанию, «Дата:
-  старые сверху», «Имя», «Размер: крупные сверху»). «Подряд» — одна непрерывная лента без
-  заголовков месяцев. «Без даты» — последняя группа в обе стороны. Пока идёт смысловой поиск,
-  сортировка и группировка погашены: результаты — плоский список по релевантности, «порядок
-  задаёт поиск».
-- **Шрифты только `11, 12, 14, 16, 18`**. На экране не больше четырёх размеров. Начертаний два:
-  обычное и `small/weak`. Курсив, CAPS и разрядка не добавляются.
-- **Цвет** — из `ui.visuals()`; собственный один — акцент `rgb(90,170,255)`. Он значит только
-  «выбрано», «уверенный тег», «оставить». Больше одного акцента на плитку.
-- **Читаемый текст** не темнее `gray(150)`: подпись под плиткой `gray(190)`, слово «лишний»
-  `gray(210)`, текст на затемнённом кадре `gray(235)`.
-- **Одна прокрутка на регион.** Вложенных `ScrollArea` нет; исключение — список групп лиц
+The normative rules are in `.pi/skills/ui-design/references/verstka.md`. Here are the numbers that
+cannot be changed alone, and what is checked by eye. The sections "Layout", "Interaction", "Findable
+in a second" are requirements for the interface; what the code does not do yet is in § Debt against
+the interface rules at the end of the file.
+
+- **One theme** (`app::style`, M16): step `8×6`, button padding `10×4`, minimum target `32×26`,
+  nesting indent 16, slider 120 px, rounding 4 px, shadows off. Colours come from `ui.visuals()`
+  except the accent; the theme overrides no palette, only the rhythm and the shape.
+- **A 4 px grid.** Spacing only `2, 4, 6, 8, 12, 16, 24`. Inside a group 4, between groups 8, between
+  sections 12, before a heading 8.
+- **Tiles sit tight:** the grid step is `2 px` on both axes (M16, like PhotoPrism); the gap is set
+  only inside the grid area and does not change `item_spacing` of other screens.
+- **Sections are flat:** an 11 px label in the muted colour, the content, a thin line. `Frame::group`
+  is not used around panel blocks and the card — a frame inside a frame competes with the photo.
+- **The grid is grouped by month** (M16): the heading "May 2024" at 14 px + "· 132 files · 5.4 GiB"
+  at 11 px, from the newest to the oldest; inside a month the snapshots also go newest first. "No
+  date" is the last group.
+- **The owner chooses the layout and the order** (M17): in the view header, next to "Tiles N", two
+  buttons "By months / Flat" and a "Sort" menu ("Date: newest first" by default, "Date: oldest
+  first", "Name", "Size: largest first"). "Flat" is one continuous ribbon without month headings.
+  "No date" is the last group in both directions. While a semantic search runs, sorting and grouping
+  are disabled: the results are a flat list by relevance, "the search sets the order".
+- **Fonts are only `11, 12, 14, 16, 18`**. No more than four sizes on a screen. Two weights: normal
+  and `small/weak`. No italics, CAPS or letter spacing.
+- **Colour** comes from `ui.visuals()`; the one of our own is the accent `rgb(90,170,255)`. It means
+  only "selected", "confident tag", "keep". No more than one accent per tile.
+- **Readable text** is no darker than `gray(150)`: the caption under a tile `gray(190)`, the word
+  "spare" `gray(210)`, text on a dimmed frame `gray(235)`.
+- **One scroll per region.** No nested `ScrollArea`; the exception is the face group list
   (`max_height 250`).
-- **Место под плитку резервируется всегда**: нет превью — текст в том же прямоугольнике. Прыжков
-  раскладки при догрузке нет.
-- **Плитка:** фон → превью целиком → полоса видео 16 px → метка решения → подпись 26 px
-  (дата слева, вторичное справа) → обводка выбора 2 px.
-- **Верхняя панель** — не больше двух строк управления; третья строка — только прогресс прохода.
-  Строка 1: каталог + «Индексировать» + «Обновить» + справа «Каталоги», «Сведения», «Настройки».
-  Строка 2: сегментированный режим поиска, поле, «Найти», «Сбросить».
-- **Панель содержимого:** название вида 18 px, факты рядом 12 px; справа — «Плитки» и ползунок
-  100–260 px, «По месяцам / Подряд» и меню «Сортировка»; ниже — чипы активных фильтров с «×» и
-  итог «найдено N из M». Строка фильтров остаётся на месте при пустом фильтре: заголовок вида не
-  прыгает.
-- **Три колонки:** слева карта приложения и фильтры, в центре сетка, справа сведения о выбранном
-  файле. Правая панель — 280 px и появляется, пока в сетке остаются 4 колонки (окно ≥ 1200 px);
-  ниже этого карточка переезжает в левую панель, чтобы сетка не «съёживалась» до 2 колонок.
-- **Левая панель:** навигация и поиск закреплены сверху и не скроллятся; снизу прижата «Сводка»;
-  между ними прокручивается контекст вида, блоки модели и текста, карточка файла (на узком окне).
-- **Правая панель:** «Сведения о файле» закреплены сверху, ниже — прокрутка. Ничего не выбирается
-  само: пока файла нет, панель говорит «Выберите снимок в сетке».
-- **Формы:** поля ввода 380–420 px, длинные пути 520 px, строка не длиннее 80 знаков.
-- **Запрещено:** тени, градиенты, радиусы больше 4 px, иконки-эмодзи (кроме «▶»), иконка без
-  подписи как единственный путь, скелетоны и спиннеры на весь экран.
-- **Исключение для плеера:** ⏮ ▶ ⏸ ⏭ и значок звука рисуются геометрией (`paint_icon`), а не
-  шрифтом и не эмодзи; у каждой кнопки есть подсказка, ▶ по центру кадра подписан словами, а
-  листание и пуск дублируются клавишами ←/→ и пробелом. Это просьба владельца: «кнопки-иконки,
-  как у плееров».
+- **A place for a tile is always reserved**: no preview — the text goes in the same rectangle. There
+  are no layout jumps while loading.
+- **A tile:** background → the whole preview → a 16 px video bar → the decision mark → a 26 px
+  caption (date on the left, secondary on the right) → a 2 px selection outline.
+- **The top bar** is no more than two rows of controls; the third row is the pass progress only.
+  Row 1: folder + "Index" + "Refresh" + on the right "Folders", "Details", "Settings". Row 2: the
+  segmented search mode, the field, "Find", "Reset".
+- **The content panel:** the view title at 18 px, the facts next to it at 12 px; on the right "Tiles"
+  with a 100–260 px slider, "By months / Flat" and the "Sort" menu; below, the chips of active
+  filters with "×" and the total "found N of M". The filter row stays in place when the filter is
+  empty: the view title does not jump.
+- **Three columns:** on the left the app map and the filters, in the centre the grid, on the right
+  the details of the selected file. The right panel is 280 px and appears while the grid keeps 4
+  columns (window ≥ 1200 px); below that the card moves into the left panel, so that the grid does
+  not shrink to 2 columns.
+- **The left panel:** navigation and search are pinned on top and do not scroll; "Summary" is
+  pinned at the bottom; between them scroll the view context, the model and text blocks, and the
+  file card (in a narrow window).
+- **The right panel:** "File details" is pinned on top, the rest scrolls. Nothing is selected by
+  itself: while there is no file, the panel says "Pick a snapshot in the grid".
+- **Forms:** input fields 380–420 px, long paths 520 px, a line no longer than 80 characters.
+- **Forbidden:** shadows, gradients, radii over 4 px, emoji icons (except "▶"), an icon without a
+  label as the only path, skeletons and full-screen spinners.
+- **The player exception:** ⏮ ▶ ⏸ ⏭ and the sound sign are drawn as geometry (`paint_icon`), not
+  with a font and not as emoji; every button has a hint, ▶ in the centre of the frame is labelled
+  with words, and paging and play are duplicated by ←/→ and space. This is the owner's request:
+  "icon buttons, like players have".
 
-## Взаимодействие
+## Interaction
 
-Правила целиком — `.pi/skills/ui-design/references/vzaimodeystvie.md`. Коротко:
+The full rules are in `.pi/skills/ui-design/references/vzaimodeystvie.md`. In short:
 
-- **Один клик = выбор или действие.** Двойной клик открывает полноэкранный просмотр (добавлен
-  по просьбе владельца); одиночный клик по-прежнему только выбирает. Перетаскиваний и правого
-  клика в основном сценарии нет. Наведение даёт только подсказку.
-- **Выделение нескольких плиток (M18):** Ctrl/Cmd+клик добавляет и убирает файл, Shift+клик берёт
-  диапазон по тому же порядку, что и сетка (`App::ordered`), Ctrl+A — всё найденное, клик по
-  пустому месту или Esc — пусто. Выделенная плитка видна без наведения: обводка акцентом и
-  галочка. Над сеткой — «выбрано N · объём», «Выбрать все (M)» и «Снять выделение». Смена вида,
-  фильтра, запроса, поиска или порядка снимает выделение с причиной в статусе
-  («выделение снято: изменился фильтр по пути/дате»): действие не должно задеть невидимые файлы.
-  Выделение живёт только в памяти и после перезапуска пустое.
-- **Альбомы (M19):** вид «Альбомы» — дерево с отступами и треугольниками свёртывания; у узла
-  «N файлов · M подальбомов · объём», у непустой корзины — «в корзине N». Клик по альбому
-  открывает его, треугольник только раскрывает подальбомы. Внутри — плитки подальбомов и сетка
-  снимков в порядке альбома; справа сверху — «Добавить выбранные», «Убрать из альбома»,
-  «Файл выше / ниже», «Выгрузить на диск…». Переключатель «В альбоме / Все файлы» — это
-  временный взгляд, чтобы набрать снимки и добавить их: сам по себе он ничего не сохраняет.
-  «Порядок альбома» — отдельный вариант сортировки, доступный только внутри альбома; вне его
-  сортировка возвращается к дате ↓. Удаление альбома спрашивает подтверждение и показывает
-  поддерево; файлы на диске не меняются.
-- **Выгрузка альбома (M20):** «Выгрузить на диск…» открывает диалог: каталог назначения (должен
-  уже существовать), шаблон имени (`{n}_{orig}` по умолчанию), «Показать план» и «Выгрузить N
-  файлов». Сначала видно план-дерево с каталогами и именами; копирование идёт в фоне, прогресс и
-  «Стоп» — в верхней панели. В каталоге назначения создаются **копии** файлов в структуре альбома;
-  подкаталоги без номеров, порядок виден по номеру в имени файла. Ничего не перезаписывается и не
-  удаляется: занятое имя получает `-2`, уже выгруженный файл (тот же `sha256`) пропускается.
-  Каталог внутри архива выбирать нельзя — это отказ с объяснением, а не запись рядом с оригиналами.
-- **Отклик:** выделение и фильтры — до 100 мс; пересчёт дублей, пересборка групп лиц и смысловой
-  поиск — до 1 с с итогом в статусе; дольше — фон, прогресс `done/total`, «Стоп». Действие никогда
-  не выполняется молча.
-- **Обратимость:** скрытые теги возвращаются, решение по дублю переигрывается, имя группы
-  очищается, файл возвращается из корзины. Единственные подтверждения — «Очистить корзину»
-  (системная корзина) и очистка кэша/индекса: там меняется состояние на диске или теряется индекс.
-- **Ошибки** — в строке статуса: что случилось + что сделать. Без модальных окон и стеков.
-- **Погашенная кнопка** объясняет причину текстом рядом («модель не скачана»).
-- **Долгий проход:** план до запуска («кандидатов 435»), «Стоп» всегда доступен, после остановки —
-  «Продолжить (N)», повторный запуск пропускает сделанное по `sha256`.
-- **Фокус виден** обводкой 2 px; Tab идёт в визуальном порядке; Enter — основное действие, Esc —
-  сброс. Delete не назначен: удаления нет.
-- **Состояние вида сохраняется**: последний выбранный файл, фильтр, порог, группа лиц, месяц
-  календаря, поиск. Мультивыбор (M18) в настройки не пишется: внутри сессии он живёт, пока
-  не изменится вид/фильтр/порядок, а после перезапуска пуст.
-  Представление сетки и сортировка (`settings.grid_layout`, `settings.grid_sort`) переживают
-  перезапуск; неизвестное значение из старой базы читается как умолчание. Переключение режима
-  поиска сбрасывает результаты и говорит об этом статусом.
-- **Словарь:** файл, снимок, видео, плитка, группа, лицо, тег, модель, проход, индекс. Одно
-  понятие — одно слово во всех видах.
+- **One click = select or act.** A double click opens the full-screen view (added at the owner's
+  request); a single click still only selects. There is no dragging and no right click in the main
+  scenario. Hovering gives a hint only.
+- **Selecting several tiles (M18):** Ctrl/Cmd+click adds and removes a file, Shift+click takes a
+  range in the same order as the grid (`App::ordered`), Ctrl+A takes everything found, a click on an
+  empty place or Esc clears. A selected tile is visible without hovering: an accent outline and a
+  tick. Above the grid: "N selected · size", "Select all (M)" and "Clear the selection". Changing
+  the view, filter, query, search or order clears the selection with the reason in the status
+  ("selection cleared: the path/date filter changed"): an action must not hit invisible files. The
+  selection lives in memory only and is empty after a restart.
+- **Albums (M19):** the "Albums" view is a tree with indents and collapse triangles; a node shows
+  "N files · M subalbums · size", a non-empty trash shows "N in the trash". A click on an album
+  opens it, the triangle only expands the subalbums. Inside are the tiles of subalbums and the grid
+  of snapshots in album order; top right: "Add selected", "Remove from the album", "File up / down",
+  "Export to disk…". The "In the album / All files" switch is a temporary look that lets you collect
+  snapshots and add them: by itself it saves nothing. "Album order" is a separate sort option,
+  available only inside an album; outside it the sort returns to date ↓. Deleting an album asks for
+  confirmation and shows the subtree; the files on disk do not change.
+- **Album export (M20):** "Export to disk…" opens a dialog: the destination folder (it must already
+  exist), the name template (`{n}_{orig}` by default), "Show the plan" and "Export N files". First
+  the plan tree with folders and names is visible; copying runs in the background, progress and
+  "Stop" are in the top bar. The destination gets **copies** of the files in the structure of the
+  album; subfolders have no numbers, the order is visible through the number in the file name.
+  Nothing is overwritten or deleted: a taken name gets `-2`, an already exported file (the same
+  `sha256`) is skipped. A folder inside the archive cannot be chosen — that is a refusal with an
+  explanation, not a write next to the originals.
+- **Response:** selection and filters within 100 ms; duplicate recomputation, face group rebuild and
+  semantic search within 1 s with the result in the status; longer — background, `done/total`
+  progress, "Stop". An action is never performed silently.
+- **Reversibility:** hidden tags come back, a duplicate decision is replayed, a group name is
+  cleared, a file comes back from the trash. The only confirmations are "Empty the trash" (the OS
+  trash) and cleaning the cache/index: there the state on disk changes or the index is lost.
+- **Errors** go to the status line: what happened + what to do. No modal windows, no stacks.
+- **A disabled button** explains the reason in text next to it ("the model is not downloaded").
+- **A long pass:** the plan before the start ("435 candidates"), "Stop" always available, after a
+  stop "Resume (N)", a rerun skips what is done by `sha256`.
+- **Focus is visible** with a 2 px outline; Tab goes in visual order; Enter is the main action, Esc
+  is reset. Delete is not assigned: there is no deletion.
+- **The view state is kept**: the last selected file, the filter, the threshold, the face group, the
+  calendar month, the search. The multi-selection (M18) is not written to the settings: it lives
+  within a session until the view/filter/order changes, and is empty after a restart. The grid
+  layout and sort (`settings.grid_layout`, `settings.grid_sort`) survive a restart; an unknown value
+  from an old database is read as the default. Switching the search mode resets the results and says
+  so in the status.
+- **Vocabulary:** file, snapshot, video, tile, group, face, tag, model, pass, index. One notion — one
+  word in every view.
 
-## Найти за секунду
+## Findable in a second
 
-Правило: нужная функция видна без прокрутки и наведения и делается **одним кликом**; время до
-первого правильного клика — до 1 с для частого, до 10 с для редкого.
+The rule: a needed function is visible without scrolling and without hovering and is done with
+**one click**; the time to the first correct click is up to 1 s for a frequent action, up to 10 s for
+a rare one.
 
-| Что | Где | Кликов |
+| What | Where | Clicks |
 |---|---|---|
-| Каталог, «Индексировать», «Обновить» | верхняя панель | 0 |
-| Прогресс и «Стоп» | верхняя панель, рядом с запуском | 1 |
-| Поиск (смысловой / по тексту) | верхняя панель, строка 2 | 1 |
-| Шесть видов | левая панель, две группы с числами | 1 |
-| Сверка копий и слепок | «Целостность» → поля и кнопки на экране | 1 |
-| Фильтр по пути/дате, «Все / Фото / Видео» | левая панель, секция «Фильтр» | 0–1 |
-| Активные фильтры и сброс | над сеткой, чипы с «×» | 1 |
-| Выделение нескольких файлов | Ctrl/Shift+клик по плиткам, «Выбрать все (M)» над сеткой | 1 |
-| Альбомы: дерево, подальбомы, порядок | левая панель «Альбомы (N)» → дерево в панели содержимого; «+ Новый альбом», «+ Подальбом» | 1–2 |
-| Размер плиток («Плитки») | над сеткой, справа от заголовка вида | 0 |
-| Представление и сортировка | там же: «По месяцам / Подряд» и меню «Сортировка» | 1 |
-| Главное действие вида | левая панель, первая группа после навигации | 1 |
-| Итоги и счётчики вида | в заголовке вида и в числах навигации | 0 |
-| Карточка файла | правая панель | 0 |
-| Модели, лимиты, пороги, программы | «Настройки» в верхней панели, разделы в диалоге | 1–2 (редкое) |
+| Folder, "Index", "Refresh" | top bar | 0 |
+| Progress and "Stop" | top bar, next to the start | 1 |
+| Search (semantic / by text) | top bar, row 2 | 1 |
+| Six views | left panel, two groups with numbers | 1 |
+| Copy comparison and manifest | "Integrity" → fields and buttons on the screen | 1 |
+| Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section | 0–1 |
+| Active filters and reset | above the grid, chips with "×" | 1 |
+| Selecting several files | Ctrl/Shift+click on tiles, "Select all (M)" above the grid | 1 |
+| Albums: tree, subalbums, order | left panel "Albums (N)" → the tree in the content panel; "+ New album", "+ Subalbum" | 1–2 |
+| Tile size ("Tiles") | above the grid, to the right of the view title | 0 |
+| Layout and sort | there too: "By months / Flat" and the "Sort" menu | 1 |
+| The main action of the view | left panel, the first group after navigation | 1 |
+| Totals and counters of the view | in the view title and in the navigation numbers | 0 |
+| File card | right panel | 0 |
+| Models, limits, thresholds, programs | "Settings" in the top bar, sections in the dialog | 1–2 (rare) |
 
-- **Одно главное действие на экран**: «Все файлы» → «Индексировать»/«Найти»; «Дубли» → «Найти
-  группы»; «Лица» → «Найти лица (N)»; «Целостность» → «Сверить копии»; в диалоге «Настройки» →
-  «Скачать модель» (если не скачана).
-- **Бюджет левой панели:** марка, две группы навигации (6 видов) и 2 строки фильтра (путь/дата,
-  «Все / Фото / Видео») помещаются на 840 px без прокрутки. Новая функция не добавляется в панель,
-  если она уже прокручивается при пустом выделении: переносить в экран вида, в «Настройки» или
-  заменять существующую.
-- **Число рядом с действием** объясняет цену до нажатия: «кандидатов 435», «ещё без лиц: 0 из 1972»,
-  «помечено лишними 135, освободится 214.1 МиБ».
-- **Клавиатура — добавка**, не вход: ни одно действие не доступно только на клавиатуре и ни одно —
-  только по наведению.
-- **Проверка:** задачи владельца и секундомер (`.pi/skills/ui-design/references/nayti-za-sekundu.md`
-  §7). Провал задачи — дефект находимости.
+- **One main action per screen**: "All files" → "Index"/"Find"; "Duplicates" → "Find groups";
+  "Faces" → "Find faces (N)"; "Integrity" → "Compare the copies"; in the "Settings" dialog →
+  "Download model" (if not downloaded).
+- **Left panel budget:** the brand, two navigation groups (6 views) and 2 filter rows (path/date,
+  "All / Photos / Videos") fit into 840 px without scrolling. A new function is not added to the
+  panel if it already scrolls when nothing is selected: move it into the view screen, into
+  "Settings", or replace an existing one.
+- **A number next to an action** explains the cost before the press: "435 candidates", "still
+  without faces: 0 of 1972", "135 marked spare, 214.1 MiB will be freed".
+- **The keyboard is an addition**, not an entrance: no action is available only on the keyboard and
+  none only on hover.
+- **Check:** the owner's tasks and a stopwatch
+  (`.pi/skills/ui-design/references/nayti-za-sekundu.md` §7). A failed task is a findability defect.
 
-## Метрики (менять только вместе с docs/UI.md)
+## Metrics (change only together with docs/UI.md)
 
-| Что | Значение | Где |
+| What | Value | Where |
 |---|---|---|
-| Ячейка сетки | 100–260 px (ползунок «Плитки» над сеткой, по умолчанию 150) + 26 px под подпись; превью вписывается целиком с сохранением пропорций, поля по краям залиты фоном; у видео — полоса «▶ М:СС» внизу кадра | `app.rs::draw_cell` |
-| Шаг сетки | 2 px по обеим осям внутри области сетки; остальные экраны живут на общем `item_spacing` 8×6 | `ui()` → `View::Grid` |
-| Заголовок месяца | «май 2024» 14 px слева, «· файлов N · объём» 11 px рядом, 4 px до плиток и 16 px после группы | `app.rs::month_header` |
-| Панель содержимого | название вида 18 px + факты 12 px; справа «Плитки» 11 px и ползунок 120 px; рядом кнопки «По месяцам / Подряд» и меню «Сортировка» (подпись 11 px); строка чипов высотой 26 px | `ui()` → `draw_filter_chips` |
-| Пункт навигации | 28 px высотой, подпись 14 px слева, число 11 px справа; выбранный — заливка акцентом 40/255 и текст акцентом | `app.rs::nav_item` |
-| Строка сведений | подпись 11 px слева в колонке 72 px, значение 12 px с переносом | `app.rs::meta_row` |
-| Плитка лица | 150×150 px + 26 px подпись; кроп 112×112, выровненный по 5 точкам; справа вверху кнопка «не он», под кадром дата и уверенность детекции | `app.rs::draw_face_cell` |
-| Кроп лица в кэше | 112×112, JPEG, ключ `<sha256[..24]>-<номер>` | `faces.rs` → `<кэш>/faces/` |
-| Ячейка календаря | месяц: ширина `(панель−24)/7`, высота 96 px, число, счётчик, до 3 миниатюр; год: 4×3 месяца по 92 px; неделя: 7 дней, 2×3 миниатюры; день: сетка `draw_cell`; двойной клик по месяцу/дню проваливает на слой ниже | `View::Calendar` |
-| Полноэкранный просмотр | модальное окно на всё окно; 320 px миниатюра не растягивается; кадр 1920 px из очереди предзагрузки; 100% = вписать; панель воспроизведения: кнопки-иконки ⏮ ▶/⏸ ⏭ по 32 px, ←/→, «Слайд-шоу» с интервалом 3/5/10 с, «Текст на фото» рядом | `App::viewer_modal` |
-| Видео в полном экране | кадр-обложка 320 px + большая кнопка ▶ по центру (плашка 76×76, скругление 4, подпись «видео · нажмите ▶, чтобы смотреть»); играет встроенный плеер: ▶/⏸, перемотка, звук, «Стоп видео»; конец файла — следующий файл сам | `App::viewer_modal`, `src/player.rs` |
-| Превью в кэше | 320 px по длинной стороне, JPEG q≈80 | `index.rs` → `derive::analyze_image` |
-| Тултип-превью | до 400 px по длинной стороне, пропорции сохраняются | `draw_cell` |
-| Левая панель | 260 px, без перетаскивания ширины | `Panel::left(...).exact_size` |
-| Правая панель | 280 px; закрывается кнопкой «Скрыть» и «Сведения» в верхней панели; скрыта, пока окно уже 1200 px — тогда карточка в левой панели | `Panel::right` |
-| Превью в карточке | ширина панели, пропорция 4:3, высота не больше 210 px, кадр вписан целиком; ниже имя файла 14 px и путь 11 px | `App::file_card` |
-| Диалог «Настройки» | 760×620 px, список разделов слева 200 px, поля до 520 px | `App::settings_modal` |
-| Подпись под ячейкой | дата `ГГГГ-ММ-ДД ЧЧ:ММ` или «без даты», 11 px | `draw_cell` |
-| Выделение | обводка 2 px `rgb(90,170,255)` у выделенной плитки и галочка в круге того же цвета; счёт «выбрано N · объём» 11 px в строке чипов | `draw_cell`, `draw_filter_chips` |
-| Дерево альбомов | строка 26 px, отступ 14 px на уровень, треугольник 22 px, подпись 14 px; «файлов N · подальбомов M · объём» 11 px рядом; область дерева не выше 190 px | `draw_album_tree` |
-| Плитка подальбома | 100–260 px (как плитка сетки) × 96 px; имя 13 px, «файлов N» и объём 11 px; клик открывает | `draw_album_cell` |
-| Экран «Целостность» | поля «Каталог A/B» и «Файл слепка» шириной 460 px, подписи слева; галочка «Показать все пути»; вердикт 14 px акцентом / красным / серым; отчёт моноширинный 11 px в прокрутке; строка напоминания «Напоминать о проверке каждые [30] дн.» (0 — выключено), дата и итог прошлого прохода, путь `verify-last.txt` и «Скопировать прошлый отчёт» 11 px | `App::integrity_panel` |
-| Баннер напоминания | в верхней панели, ниже строк поиска: «Пора проверить архив» 13 px акцентом, факт о слепке и сроке 11 px серым, кнопки «Проверить» и «Напомнить позже»; сам ничего не запускает | `App::verify_banner` |
+| Grid cell | 100–260 px (the "Tiles" slider above the grid, 150 by default) + 26 px for the caption; the preview fits entirely with its proportions kept, the margins are filled with the background; a video gets a "▶ M:SS" bar at the bottom of the frame | `app.rs::draw_cell` |
+| Grid step | 2 px on both axes inside the grid area; other screens live on the common `item_spacing` 8×6 | `ui()` → `View::Grid` |
+| Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group | `app.rs::month_header` |
+| Content panel | view title 18 px + facts 12 px; on the right "Tiles" 11 px and a 120 px slider; next to it the "By months / Flat" buttons and the "Sort" menu (11 px label); the chips row 26 px high | `ui()` → `draw_filter_chips` |
+| Navigation item | 28 px high, 14 px label on the left, 11 px number on the right; the selected one — accent fill 40/255 and accent text | `app.rs::nav_item` |
+| Details row | an 11 px label on the left in a 72 px column, a 12 px value with wrapping | `app.rs::meta_row` |
+| Face tile | 150×150 px + a 26 px caption; a 112×112 crop aligned by 5 points; a "not him" button top right, the date and the detection confidence under the frame | `app.rs::draw_face_cell` |
+| Face crop in the cache | 112×112, JPEG, key `<sha256[..24]>-<number>` | `faces.rs` → `<cache>/faces/` |
+| Calendar cell | month: width `(panel−24)/7`, height 96 px, the day number, a counter, up to 3 thumbnails; year: 4×3 months of 92 px; week: 7 days, 2×3 thumbnails; day: the `draw_cell` grid; a double click on a month/day drills down a layer | `View::Calendar` |
+| Full-screen view | a modal window over the whole window; the 320 px thumbnail is not stretched; a 1920 px frame from the preload queue; 100% = fit; the playback row: icon buttons ⏮ ▶/⏸ ⏭ of 32 px, ←/→, "Slideshow" with a 3/5/10 s interval, "Text on the photo" next to it | `App::viewer_modal` |
+| Video in the full screen | a 320 px cover frame + a big ▶ button in the centre (a 76×76 plate, rounding 4, the label "video · press ▶ to play"); the built-in player plays it: ▶/⏸, seek, sound, "Stop the video"; the end of the file opens the next one | `App::viewer_modal`, `src/player.rs` |
+| Preview in the cache | 320 px on the long side, JPEG q≈80 | `index.rs` → `derive::analyze_image` |
+| Tooltip preview | up to 400 px on the long side, proportions kept | `draw_cell` |
+| Left panel | 260 px, width not draggable | `Panel::left(...).exact_size` |
+| Right panel | 280 px; closed by "Hide" and by "Details" in the top bar; hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right` |
+| Preview in the card | the panel width, 4:3, no higher than 210 px, the frame fitted entirely; below the file name 14 px and the path 11 px | `App::file_card` |
+| "Settings" dialog | 760×620 px, a 200 px section list on the left, fields up to 520 px | `App::settings_modal` |
+| Caption under a cell | the date `YYYY-MM-DD HH:MM` or "no date", 11 px | `draw_cell` |
+| Selection | a 2 px `rgb(90,170,255)` outline on the selected tile and a tick in a circle of the same colour; "N selected · size" at 11 px in the chips row | `draw_cell`, `draw_filter_chips` |
+| Album tree | a row 26 px, a 14 px indent per level, a 22 px triangle, a 14 px label; "N files · M subalbums · size" at 11 px next to it; the tree area no higher than 190 px | `draw_album_tree` |
+| Subalbum tile | 100–260 px (like a grid tile) × 96 px; the name 13 px, "N files" and the size 11 px; a click opens it | `draw_album_cell` |
+| "Integrity" screen | the "Folder A/B" and "Manifest file" fields 460 px wide with labels on the left; the "Show all paths" tick; the verdict at 14 px in the accent / red / grey; the report monospaced at 11 px in a scroll area; the reminder row "Remind me to check every [30] days" (0 — off), the date and result of the last pass, the `verify-last.txt` path and "Copy the last report" at 11 px | `App::integrity_panel` |
+| Reminder banner | in the top bar, below the search rows: "Time to check the archive" at 13 px in the accent, a fact about the manifest and the deadline at 11 px in grey, the "Check" and "Remind later" buttons; it starts nothing itself | `App::verify_banner` |
 
-Цвета берутся из `ui.visuals()` (тема egui); собственные константы — только акцент
-`rgb(90,170,255)` и четыре разрешённых серых `150/190/210/235`.
+Colours come from `ui.visuals()` (the egui theme); the only own constants are the accent
+`rgb(90,170,255)` and four allowed greys `150/190/210/235`.
 
-## Экраны
+## Screens
 
-| Экран | Что на нём | Главное действие |
+| Screen | What is on it | Main action |
 |---|---|---|
-| Сетка (`View::Grid`) | поле каталога, «Индексировать», «Обновить», «Сведения», «Каталоги», «Настройки»; вторая строка — переключатель «Смысловой / По тексту», поле запроса, «Найти», «Сбросить»; слева два раздела навигации с числами и секция «Фильтр» (путь/дата, «Все / Фото / Видео»), блоки модели и текста, сводка; над сеткой — название вида 18 px, «Плитки» с ползунком, «По месяцам / Подряд», меню «Сортировка» и чипы фильтра с «×»; в блоке модели — фильтр по тегу с числом снимков у каждого («мебель · 669») и ползунок порога 0–100% (процентиль по выбранному тегу: 100% — его самый сильный снимок, 0% — все); «По месяцам» — сетка группами («май 2024 · файлов 132 · 5.4 ГиБ») от свежих к старым, «Подряд» — одна лента без заголовков; шаг 2 px, видео — с кадром-обложкой и подписью «▶ М:СС»; в строке чипов — «выбрано N · объём», «Выбрать все (M)», «Снять выделение»; справа — сведения о выбранном файле | найти и открыть |
-| Дубли (`View::Dupes`) | слайдер порога, «Найти группы», сводка «в группах N, помечено лишними M, освободится X», группы картинками с подписью «файлов N · зря X» и советом «оставить <имя> — резче остальных»; на каждой плитке кнопка «оставить», у остальных — пометка «лишний» | решить, что лишнее, и выгрузить план |
-| Календарь (`View::Calendar`) | вкладки «Год/Месяц/Неделя/День», «← … →» (месяц листает только месяцы с файлами, день — по одному), «Сегодня»; год — 4×3 месяца, месяц — сетка недель Пн–Вс с миниатюрами, неделя — 7 дней по 2×3 миниатюры; двойной клик по месяцу/дню проваливает на слой ниже, один клик выделяет; на слое «День» — снимки сеткой `draw_cell`; на верхних слоях ниже — выбранный день и «Без даты» | найти день и посмотреть его снимки |
-| Лица (`View::Faces`) | порог склейки, «Найти лица (N)» / «Продолжить (N)», «Пересобрать группы», список групп с подписями, числом фото и галочкой «вместе», кропы лиц выбранной группы, «не он», «выбрать» и «Назначить имя выбранным», поле имени и «Сохранить имя», кнопка «Фото, где все вместе (N)» | назвать человека, отделить чужих и найти снимки, где люди вместе |
-| Альбомы (`View::Albums`) | дерево с отступами и свёртыванием, «+ Новый альбом», «+ Подальбом», «Переименовать», «Переместить в…», «Выше / Ниже», «Удалить альбом»; внутри — плитки подальбомов и сетка снимков в порядке альбома, «В альбоме / Все файлы», «Добавить выбранные (N)», «Убрать из альбома (N)», «Файл выше / ниже», «Выгрузить на диск…»; чип «Альбом «Имя» ×» | собрать дерево и порядок, добавить снимки, выгрузить копии на диск |
-| Выгрузка альбома (диалог, `App::export_modal`) | «Каталог» (должен существовать), «Имя файла» (`{n}_{orig}`), подсказка подстановок, «Показать план», «Выгрузить N файлов», «Закрыть»; ниже — сводка и дерево «альбом / подальбом / 001_имя.jpg»; после прохода — строка отчёта и «Скопировать отчёт» | получить настоящий каталог с копиями в порядке альбома |
-| Корзина (`View::Trash`) | счётчик и объём, «Вернуть всё», «Очистить корзину (N)» с подтверждением, плитки с пометкой «в корзине» и кнопкой «вернуть» | вернуть файл или осознанно перенести в системную корзину |
-| Целостность (`View::Integrity`) | поля «Каталог A (архив)», «Каталог B (копия)», «Файл слепка»; галочка «Показать все пути»; кнопки «Сверить копии», «Записать слепок» (при существующем файле — «Перезаписать слепок» и «Отмена»), «Проверить по слепку»; строка «Напоминать о проверке каждые [N] дн.» (0 — выключено), дата и итог прошлого прохода, путь отчёта `verify-last.txt` и «Скопировать прошлый отчёт»; вердикт словами, отчёт того же формата, что у CLI, и «Скопировать отчёт» | сверить бэкап или проверить архив по слепку без терминала |
-| «Каталоги» (диалог) | список путей, «Убрать из индекса», «Добавить каталог…», встроенный выбор каталога, «Индексировать все» | добавить несколько каталогов без ввода пути руками |
-| Полный экран (модальный) | имя и дата, «N из M», «Закрыть»; панель воспроизведения ⏮ ▶/⏸ ⏭ (у снимка ▶ включает слайд-шоу), «Слайд-шоу», интервал 3/5/10 с; ниже — масштаб, «Текст на фото», «В системном просмотрщике»; кадр | посмотреть снимок целиком и вернуться туда же |
-| Видео в полном экране (модальный, тот же экран) | кадр-обложка с большой кнопкой ▶ по центру; после запуска — кадр играет в окне, ▶/⏸, «0:12 / 0:22» с перемоткой, значок звука и ползунок, подпись «нет устройства», «Стоп видео»; доиграло — следующий файл сам | посмотреть видео со звуком, не выходя из приложения |
-| Настройки (диалог, `App::settings_modal`) | слева разделы: «Интерфейс» (язык — English или Русский, выбор сохраняется сразу; при английском непереведённые подписи остаются русскими — `plan/I18N.md`), «Модель ИИ», «Индексация и дубли», «Теги», «Лица», «Хранилище», «Внешние программы»; внутри — модель из каталога с числом признаков, лицензией и подсказкой (CLIP 512, SigLIP 768), состояние «Скачана · проверена», папка моделей, лимит размера, согласие и «Скачать модель», «Проверить модель», «Посчитать теги», пороги тегов и дублей (порог фильтра-процентиля 0–100% по каждому тегу и отдельный порог уверенного тега 0.22 + отрыв; рядом — сколько файлов проходит), редактор словаря тегов (строка на тег: включён, метка, минимальный процентиль, «Убрать из словаря», 2–3 промпта по строке — вес тега берётся лучший из них; ниже — поля «новая метка» и «промпт», «Добавить в словарь», «Пересчитать теги», «Экспорт JSON», «Импорт JSON», «Вернуть стандартные», путь к файлу JSON), число потоков, модель лиц с согласием и «Скачать модель лиц», порог склейки лиц, занятое место («Посчитать занятое место»), очистка превью/лиц/индекса, пути БД/кэша/моделей, поля путей к `ffmpeg`/`ffprobe`/`tesseract`/`curl` с версией и подсказкой «без неё», «Проверить и сохранить программы»; внизу «Изменения сохраняются сразу» и «Закрыть» | скачать/сменить модель, настроить пороги, словарь тегов, лица, место на диске и внешние программы |
-| Карточка файла (правая панель) | превью 4:3, путь, дата с источником (EXIF / имя файла / время файла), камера, GPS, размер `Ш×В` и объём, для видео — «▶ М:СС», sha256, блок «Теги ИИ»: строка «тег: <имя>» или «тег: не уверен — первые веса близки», веса с процентилями, у уверенного тега акцент; при неуверенности видны топ-3, остальные — под «все теги (N)»; кнопка «убрать», «вернуть скрытые теги (N)», кнопка «Распознать текст» / «Распознать заново» и блок текста с подсветкой совпадения | понять, что это, и поправить теги |
+| Grid (`View::Grid`) | the folder field, "Index", "Refresh", "Details", "Folders", "Settings"; the second row — the "Semantic / By text" switch, the query field, "Find", "Reset"; on the left two navigation sections with numbers and the "Filter" section (path/date, "All / Photos / Videos"), the model and text blocks, the summary; above the grid — the view title at 18 px, "Tiles" with a slider, "By months / Flat", the "Sort" menu and filter chips with "×"; in the model block — a tag filter with the snapshot count next to each tag ("furniture · 669") and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; step 2 px, a video comes with a cover frame and a "▶ M:SS" caption; in the chips row — "N selected · size", "Select all (M)", "Clear the selection"; on the right — the details of the selected file | find and open |
+| Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed", groups as pictures with the caption "N files · X wasted" and the advice "keep <name> — sharper than the rest"; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
+| Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 months, a month — a grid of weeks Mon–Sun with thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects; on the "Day" layer — the snapshots in a `draw_cell` grid; on the upper layers below — the selected day and "No date" | find a day and look at its snapshots |
+| Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups", the group list with names, photo counts and a "together" tick, the face crops of the selected group, "not him", "pick" and "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" button | name a person, split off strangers and find photos where people are together |
+| Albums (`View::Albums`) | the tree with indents and collapsing, "+ New album", "+ Subalbum", "Rename", "Move to…", "Up / Down", "Delete the album"; inside — subalbum tiles and a grid of snapshots in album order, "In the album / All files", "Add selected (N)", "Remove from the album (N)", "File up / down", "Export to disk…"; the chip "Album "Name" ×" | build a tree and an order, add snapshots, export copies to disk |
+| Album export (dialog, `App::export_modal`) | "Folder" (must exist), "File name" (`{n}_{orig}`), a hint about the substitutions, "Show the plan", "Export N files", "Close"; below — a summary and the tree "album / subalbum / 001_name.jpg"; after the pass — a report line and "Copy the report" | get a real folder with copies in album order |
+| Trash (`View::Trash`) | the counter and size, "Restore all", "Empty the trash (N)" with confirmation, tiles marked "in trash" and a "restore" button | return a file or deliberately move it to the OS trash |
+| Integrity (`View::Integrity`) | the "Folder A (archive)", "Folder B (copy)", "Manifest file" fields; the "Show all paths" tick; the "Compare the copies", "Write the manifest" (with an existing file — "Overwrite the manifest" and "Cancel"), "Check against the manifest" buttons; the row "Remind me to check every [N] days" (0 — off), the date and result of the last pass, the report path `verify-last.txt` and "Copy the last report"; the verdict in words, a report in the same format as the CLI, and "Copy the report" | compare a backup or check the archive against the manifest without a terminal |
+| "Folders" (dialog) | the list of paths, "Remove from the index", "Add a folder…", the built-in folder picker, "Index all" | add several folders without typing paths by hand |
+| Full screen (modal) | the name and date, "N of M", "Close"; the playback row ⏮ ▶/⏸ ⏭ (on a snapshot ▶ starts the slideshow), "Slideshow", a 3/5/10 s interval; below — zoom, "Text on the photo", "In the system viewer"; the frame | look at a snapshot in full and come back to the same place |
+| Video in the full screen (modal, the same screen) | a cover frame with a big ▶ button in the centre; after it starts the frame plays in the window, ▶/⏸, "0:12 / 0:22" with seek, the sound sign and a slider, the "no device" label, "Stop the video"; when finished — the next file opens itself | watch a video with sound without leaving the app |
+| Settings (dialog, `App::settings_modal`) | on the left the sections: "Interface" (the language — English or Русский, the choice is saved immediately; in English an untranslated label stays Russian — `plan/I18N.md`), "AI model", "Indexing and duplicates", "Tags", "Faces", "Storage", "External programs"; inside — the model from the catalogue with the number of features, the licence and a hint (CLIP 512, SigLIP 768), the state "Downloaded · verified", the model folder, the size limit, the consent and "Download model", "Verify the model", "Compute tags", the tag and duplicate thresholds (a 0–100% filter percentile per tag and a separate confident-tag threshold 0.22 + margin; next to it — how many files pass), the tag dictionary editor (a row per tag: enabled, label, minimum percentile, "Remove from the dictionary", 2–3 prompts per line — the tag weight is the best of them; below — the "new label" and "prompt" fields, "Add to the dictionary", "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults", the JSON file path), the thread count, the face model with consent and "Download the face model", the face merge threshold, the used space ("Compute the used space"), cleaning previews/faces/index, the DB/cache/model paths, the `ffmpeg`/`ffprobe`/`tesseract`/`curl` path fields with the version and a "without it" hint, "Verify and save the programs"; at the bottom "Changes are saved immediately" and "Close" | download/switch the model, set thresholds, the tag dictionary, faces, disk space and external programs |
+| File card (right panel) | a 4:3 preview, the path, the date with its source (EXIF / file name / file time), the camera, GPS, the dimensions `W×H` and the size, for a video — "▶ M:SS", sha256, the "AI tags" block: the line "tag: <name>" or "tag: not sure — the first weights are close", the weights with percentiles, the accent on a confident tag; when unsure the top-3 are visible and the rest are under "all tags (N)"; the "remove" button, "restore hidden tags (N)", the "Recognize text" / "Recognize again" button and the text block with the match highlighted | understand what this is and fix the tags |
 
-## Состояния
+## States
 
-- Пустая БД → в сетке одна строка: «Введите каталог и нажмите „Индексировать“», без пустых плиток.
-- Активный фильтр → над сеткой появляются чипы «путь/дата: … ×», «тег: … ×», «только фото ×»,
-  «по релевантности: … ×», рядом «найдено N из M»; «×» снимает только свой фильтр, сетка не
-  сдвигается.
-- Выделено несколько плиток → у каждой обводка акцентом и галочка, в строке чипов — «выбрано N ·
-  объём», «Снять выделение»; в карточке — файл, который кликнули последним, и «в выделении N»;
-  в статусе справа — «Выбрано N · последний: имя». Смена вида/фильтра/поиска/порядка очищает
-  выбор и пишет причину.
-- «Подряд» включён → одна непрерывная сетка без заголовков месяцев; порядок тот же, что в полном
-  экране и в выделении: одна функция `App::ordered`, ключ `(дата, id)`.
-- Идёт смысловой поиск → результаты — плоский список по релевантности; «По месяцам / Подряд» и
-  меню «Сортировка» погашены с подсказкой «порядок задаёт поиск», чип «по релевантности: N
-  файлов» с «×» снимает поиск и возвращает выбранные представление и сортировку.
-- Сетка сгруппирована по месяцам → месяц без файлов не рисуется; «без даты» — последняя группа
-  с тем же заголовком и числом.
-- Альбом открыт → заголовок «Альбом «Имя»», рядом «файлов N · подальбомов M · объём» и «в корзине
-  N», чип «Альбом «Имя» ×»; сетка — только его снимки в его порядке. Пустой альбом пишет
-  «В альбоме пока нет файлов — переключитесь на «Все файлы»…». «Все файлы» внутри альбома — тот
-  же архив, но выделение и кнопка «Добавить выбранные» нацелены на открытый альбом.
-- Альбом не выбран → вид показывает только дерево и «Выберите альбом в дереве или создайте новый»,
-  сетки нет. Диалог удаления показывает поддерево и число строк: «удалить … — 3 альбома, 412
-  строк; файлы на диске останутся».
-- Выгрузка альбома → в диалоге поля «Каталог» и «Имя файла», кнопки «Показать план» и
-  «Выгрузить N файлов», ниже сводка «каталогов 4 · файлов 500 · 2.4 ГиБ; в корзине …» и дерево
-  «Дача_2024/ Май/ 001_….jpg». Идёт копирование → в верхней панели «Выгрузка: 173/500» и «Стоп»;
-  закончилось → строка отчёта «выгружено 500 файлов · 2.4 ГиБ; пропущено уже выгруженных 0
-  (порядок в цели устарел 0); переименовано из-за коллизии 0; ошибок 0» и «Скопировать отчёт».
-  Каталог не существует, он внутри архива или в шаблоне неизвестная подстановка → красная строка
-  с причиной, план не строится, на диске ничего не меняется.
-- Индексация идёт → прогресс-бар в верхней панели, статус «индексация <путь>…», кнопки активны, но
-  повторный запуск игнорируется.
-- Нет превью (битый файл, нет `ffmpeg`) → плитка с текстом «▶ видео · М:СС» (если длина известна)
-  или «нет превью», без иконок-заглушек. Видео с кадром-обложкой — кадр и полоса «▶ М:СС».
-- Файлов нет в фильтре → «ничего не найдено», счётчики остаются видимыми.
-- Решение по группе принято → подпись группы меняется с «совет» на «решение», счётчик «помечено
-  лишними M» пересчитывается в том же кадре, плитки лишних затемнены с словом «лишний».
-- Резкость не посчитана (старая БД без переиндексации) → в панели дублей строка «резкость не
-  посчитана у N снимков — проиндексируйте каталог», совет считается по разрешению и размеру.
-- Модель не скачана → в блоке «Модель ИИ» строка «модель не скачана» и кнопка «Настройки модели»;
-  режим «Смысловой» погашен, рядом с «Найти» написано «модель не скачана»; режим «По тексту»
-  работает, если текст уже распознан; остальной интерфейс работает.
-- Модель переключена → старые векторы и теги остаются в БД, но поиск, теги, фильтр и кластеры
-  читают только новую; возврат к прежней показывает её теги без пересчёта. В каталоге видно
-  «768 призн. · 203.5 МиБ · Apache-2.0»; SigLIP отвечает на английские запросы, у него ниже шкала
-  косинуса — уверенный тег 0.22 почти не срабатывает, фильтр по процентилю работает.
-- Режим поиска переключён → результаты прошлого запроса сбрасываются, статус называет режим:
-  «смысловой поиск по содержимому снимков» / «поиск по тексту, распознанному на снимках».
-- Пустой каталог (`items` пуст) → в сетке «Введите каталог и нажмите „Индексировать“», без пустых
-  плиток; фильтр ничего не нашёл → «ничего не найдено» и кнопка «Сбросить фильтр», счётчики
-  остаются видимыми.
-- Ничего не выбрано → в правой панели «Выберите снимок в сетке — здесь появятся дата, камера, теги
-  и текст»; сетка не меняет ширину от появления карточки.
-- Окно уже 1200 px → правая панель не рисуется, карточка уходит в левую под блоки вида, а «Сводка»
-  переезжает в общую прокрутку: сетка сохраняет не меньше 4 колонок.
-- «Настройки» открыты → диалог поверх затемнения; закрывают «Закрыть», Esc и клик мимо. Изменения
-  применяются и сохраняются сразу, кнопки «Отмена» нет — отменять нечего, оригиналы не меняются.
-- `tesseract` не найден → в блоке «Текст на фото» строка «tesseract не запускается — укажите путь
-  в «Настройках» или установите tesseract и языки rus, eng», кнопка «Распознать текст» погашена,
-  остальное работает.
-- Модель лиц не скачана → в блоке «Лица» «модель лиц не скачана», кнопка «Найти лица» погашена,
-  кнопка «Настройки лиц» ведёт к согласию и загрузке; остальной интерфейс работает.
-- Идёт поиск лиц → прогресс «Лица: 120/1972» в верхней панели и кнопка «Стоп»; окно не замирает,
-  после остановки кнопка «Продолжить (N)», повторный запуск пропускает снимки по `sha256`.
-- Лиц нет → «Лиц пока нет: нажмите «Найти лица» слева (нужна модель лиц)».
-- Группа без имени → подпись «без имени · N фото»; после ввода имени кнопка «Сохранить имя»
-  переименовывает группу и закрепляет её при пересборке.
-- Ложная склейка → на кропе кнопка «не он»; лицо уезжает в новую группу, старая группа остаётся
-  с остальными лицами. Кнопка работает без модальных окон, статус внизу объясняет результат.
-- Порог изменён → «Пересобрать группы» применяет его к незакреплённым лицам; группы с подписью и
-  ручными разъединениями не меняются. Счётчик «лиц: N на M снимках, групп: K» обновляется.
-- Путь к программе не запускается → путь не сохраняется, в статусе «программы не сохранены: …» с
-  причиной; в «Настройках» остаётся прежний рабочий путь, OCR/видео продолжают работать как раньше.
-- Путь к программе сохранён → рядом с полем версия и найденный файл: «ffmpeg version 9.0.2 ·
-  /usr/bin/ffmpeg (задано в настройках)».
-- Идёт распознавание → прогресс «OCR: 120/435» и кнопка «Стоп» в верхней панели, окно не замирает,
-  выбор файлов откликается сразу (чтение БД не блокируется транзакцией прогона); после завершения
-  счётчики «с текстом: N из M снимков» и «осталось N» обновляются.
-- Нажали «Стоп» → текущий файл доводится, статус «остановлено: распознано 120 из 435…», кнопка
-  пакетного прохода показывает «Продолжить (315)»; повторный запуск начинает с оставшихся. Кнопка в карточке распознаёт **только выбранный**
-  снимок; пакетный проход — отдельная кнопка «Распознать документы (N)», где N — число кандидатов,
-  видимое до нажатия.
-- Снимок выбран, но текста нет → в карточке кнопка «Распознать текст»; после прохода либо «текст
-  распознан: знаков N», либо «на этом снимке текста не найдено». Кнопка меняется на «Распознать
-  заново», когда текст уже есть.
-- Поиск по тексту включён (галочка), но текста ещё нет → «Найти» находит 0 файлов и статус честно
-  говорит «файлов 0»; кнопка «Распознать текст» рядом.
-- Поиск по тексту идёт → статус «поиск по тексту «справка»: файлов 3 за 2 мс»; совпадение в
-  карточке выделено акцентом, фрагмент ограничен 12 словами.
-- Идёт скачивание модели → галочка согласия, кнопка заблокирована, прогресс «файлов: 2/4», в
-  статусе — что не отправляются пользовательские данные.
-- Выбранная модель недоступна → загрузчик перебирает зеркало и совместимые варианты в пределах
-  лимита; в статусе остаётся итог: «модель <id>: файлов N, X МиБ (не подошли: …)».
-- Модель не влезает в лимит → строки каталога «сверх лимита», загрузка отклоняется с числами.
-- Тег убран у фото → строка тега исчезает из карточки и фильтра в том же кадре; «вернуть скрытые
-  теги (N)» возвращает все; оригинал на диске не меняется.
-- Месяц календаря пуст (например, после фильтра) → «В этом месяце файлов нет» и кнопка «Перейти к
-  ГГГГ-ММ»; при листании стрелками пустые месяцы пропускаются, стрелка в пустоту неактивна.
-- Двойной клик по месяцу/дню проваливает календарь на слой ниже: год → месяц → неделя → день.
-  Один клик только выделяет месяц или день (и показывает снимки дня ниже); вкладки
-  «Год/Месяц/Неделя/День» возвращают наверх, поэтому подъём не спрятан в жесте.
-- На слое «День» файлов нет → «В этот день файлов нет» и стрелки ←/→ листают соседние дни.
-- CLIP-теги считаются → прогресс «CLIP: 480/1971» в верхней панели, окно не замирает; после
-  завершения счётчик «с уверенным тегом: N» обновляется.
-- Смысловой поиск идёт → «загрузка модели CLIP…» в строке поиска; повторные запросы без паузы,
-  статус показывает «N файлов за M мс».
-- Смысловой поиск ничего не нашёл → пустая сетка, «ничего не найдено» и «Сбросить фильтр»;
-  «Сбросить» в верхней панели гасит сам запрос.
-- Тег не уверен (первый вес ниже порога 0.22 или отрыв от второго меньше 0.01) → в карточке
-  строка «тег: не уверен — первые веса близки», ни один тег не подсвечен, видны топ-3 с весом и
-  процентилем (например, «документ 0.27 · 98%»), остальные 11 — под «все теги (14)». В фильтр
-  файл всё равно попадает по любому тегу выше процентильного порога: «не уверен» — про подпись,
-  а не про поиск. Выдумывать тег запрещено.
-- Уверенный тег (первый ≥ 0.22 и отрыв ≥ 0.01) → строка «тег: мебель», акцент на этой строке;
-  остальные веса видны без акцента.
-- У каждого тега в фильтре число снимков при его процентильном пороге («мебель · 669»): ноль
-  виден до нажатия, а не после. Выбран тег, а снимков ноль → «нет снимков с тегом «мебель» выше
-  порога 70% (0.23) — опустите ползунок порога в левой панели» и «Сбросить фильтр».
-- Порог фильтра — процентиль **своего** тега, а не всего индекса: 100% — его самый сильный снимок,
-  0% — все, 70% (по умолчанию) — верхние 30%. Поэтому на 100% у любого выбранного тега хотя бы
-  один снимок, и меньший максимум другого тега ничего не обнуляет. У «мебели» на 70% порог 0.229,
-  у «детей» — 0.248: у каждого тега своя шкала.
-- На каталоге меньше 100 файлов процентиль шумный → подпись «мало тегов (N файлов) — процентиль
-  шумный, берётся сырой порог 0.22», фильтр работает по сырому порогу.
-- Уверенность тега (подсветка в карточке, OCR, `{tag}` в витрине) — отдельный порог 0.22 и отрыв
-  0.01: ползунок фильтра его не двигает. Старый `tag_show` выше 0.22 при чтении базы мигрирует:
-  уверенность 0.22, фильтр 70%; архив, БД и теги не меняются.
-- Словарь изменён (метка, промпты, включение, добавление, импорт, сброс) → строка «словарь
-  изменён — нажмите «Пересчитать теги»» акцентом, кнопка получает точку «Пересчитать теги •».
-  Пересчёт идёт фоном с прогрессом, фото не читает; в статусе — «теги (модель): пересчитано
-  N/N, за M с». После пересчёта фильтр и числа у тегов обновляются в том же кадре.
-- Тег выключен в словаре → исчезает из фильтра и не считается; его старые веса остаются в БД,
-  пока не нажали «Пересчитать теги», но фильтр этот тег уже не предлагает. Удалённый тег
-  исчезает из `tags` только после пересчёта — об этом говорит статус.
-- Словарь не засеян (модель ещё не считала теги) → в «Настройках → Теги» строка «словарь ещё не
-  засеян — он появится после первого «Посчитать теги»»; «Добавить в словарь» работает
-  и до этого (засеет 14 стандартных при первом пересчёте не нужно — добавится только свой).
-- Ошибка словаря (пустая метка, метка уже занята, файл JSON не читается/не разбирается) →
-  статус словами с причиной; словарь в БД не меняется.
-- «Вернуть стандартные» заменяет словарь модели 14 общими тегами; правки владельца теряются,
-  поэтому кнопка подписана «14 общих тегов из кода; ваши правки будут заменены».
-- «Экспорт JSON» пишет `<кэш>/photocat/tags.json`, если путь не задан; в статусе — путь и число
-  тегов. «Импорт JSON» заменяет словарь модели целиком и просит пересчёт. Сеть не нужна.
-- «Целостность»: сверка идёт → в верхней панели «Целостность: 120/2230» и «Стоп»; окно
-  откликается. После «Стоп» вердикт — «сверка остановлена: проверено не всё», а не «совпадает»:
-  непроверенное не выдаётся за проверенное.
-- Файл слепка уже есть → первое нажатие «Записать слепок» не пишет, а просит подтверждение
-  («файл слепка уже есть: …»), кнопка становится «Перезаписать слепок», рядом «Отмена»; правка
-  поля «Файл слепка» сбрасывает подтверждение и старый результат.
-- Слепок записан → вердикт «слепок записан: N файлов (объём) → путь»; путь в отчёте появляется
-  только тогда, когда файл действительно записан. Ошибка чтения или отмена — «не записан» с
-  числом ошибок, неполный слепок на диск не попадает.
-- Сверка нашла расхождения → вердикт «найдены расхождения: только A N, только B M, размер K,
-  содержимое J, ошибок E»; ниже отчёт по разделам и список путей (первые 20 без галочки
-  «Показать все пути»). «Скопировать отчёт» кладёт в буфер тот же текст, что печатает
-  `photocat verify`.
-- Один и тот же путь в A и B или несуществующий каталог → красная строка с причиной, проход не
-  запускается, на диске ничего не меняется.
-- «Проверить по слепку» без файла слепка → «файл слепка не найден: …»; проверка начинается
-  только по кнопке.
-- Срок проверки вышел (слепок задан, интервал не 0, с прошлого прохода прошло не меньше срока)
-  → в верхней панели баннер «Пора проверить архив»: имя слепка, дата прошлого прохода и на
-  сколько дней вышел срок, кнопки «Проверить» и «Напомнить позже». Баннер ничего не запускает
-  сам; «Проверить» открывает «Целостность» и запускает ту же фоновую проверку, что кнопка там.
-- «Напомнить позже» → баннер скрыт до следующего запуска, статус «напоминание отложено до
-  следующего запуска»; срок в настройках не меняется.
-- Интервал 0 дней → напоминание выключено, баннер не показывается; значение сохраняется сразу.
-- Прошлый проход был, дата в будущем (часы перевели назад) → баннер молчит: срок не наступил.
-  Испорченная дата — наоборот, «пора»: лучше напомнить, чем молчать.
-- Слепок записан или проверка завершилась → в настройках дата, «ок» и полный отчёт, файл
-  `<кэш>/photocat/verify-last.txt`; на экране строка «последний проход: ГГГГ-ММ-ДД ЧЧ:ММ ·
-  совпало / были расхождения» и кнопка «Скопировать прошлый отчёт». Запись слепка тоже ставит
-  дату отсчёта: архив только что прочитан целиком.
-- Проверка упала или остановлена → красная строка с причиной; прошлый успешный отчёт, дата и
-  строка напоминания не меняются. В каталог архива не пишется ничего.
+- Empty DB → one line in the grid: "Type a folder and press "Index"", no empty tiles.
+- An active filter → chips appear above the grid: "path/date: … ×", "tag: … ×", "photos only ×",
+  "by relevance: … ×", next to them "found N of M"; "×" removes only its own filter, the grid does
+  not shift.
+- Several tiles selected → each gets an accent outline and a tick, the chips row shows "N selected ·
+  size", "Clear the selection"; the card shows the file clicked last and "N in the selection"; the
+  status on the right shows "N selected · last: name". Changing the view/filter/search/order clears
+  the selection and writes the reason.
+- "Flat" on → one continuous grid without month headings; the same order as in the full screen and
+  in the selection: one function `App::ordered`, key `(date, id)`.
+- A semantic search is running → the results are a flat list by relevance; "By months / Flat" and the
+  "Sort" menu are disabled with the hint "the search sets the order", the chip "by relevance: N
+  files" with "×" clears the search and returns the chosen layout and sort.
+- The grid is grouped by month → a month without files is not drawn; "no date" is the last group with
+  the same heading and count.
+- An album is open → the title "Album "Name"", next to it "N files · M subalbums · size" and "N in
+  the trash", the chip "Album "Name" ×"; the grid shows only its snapshots in its order. An empty
+  album says "There are no files in the album yet — switch to "All files"…". "All files" inside an
+  album is the same archive, but the selection and the "Add selected" button target the open album.
+- No album selected → the view shows only the tree and "Pick an album in the tree or create a new
+  one", there is no grid. The delete dialog shows the subtree and the number of rows: "delete … — 3
+  albums, 412 rows; the files on disk will stay".
+- Album export → the dialog has the "Folder" and "File name" fields, the "Show the plan" and "Export
+  N files" buttons, below a summary "4 folders · 500 files · 2.4 GiB; in the trash …" and the tree
+  "Дача_2024/ Май/ 001_….jpg". Copying → the top bar shows "Export: 173/500" and "Stop"; finished →
+  the report line "exported 500 files · 2.4 GiB; skipped already exported 0 (target order stale 0);
+  renamed because of a collision 0; errors 0" and "Copy the report". The folder does not exist, is
+  inside the archive, or the template has an unknown substitution → a red line with the reason, no
+  plan is built, nothing on disk changes.
+- Indexing is running → a progress bar in the top bar, the status "indexing <path>…", the buttons are
+  active but a second start is ignored.
+- No preview (a broken file, no `ffmpeg`) → a tile with the text "▶ video · M:SS" (if the length is
+  known) or "no preview", without placeholder icons. A video with a cover frame — the frame and a
+  "▶ M:SS" bar.
+- No files in the filter → "nothing found", the counters stay visible.
+- A group decision is made → the group caption changes from "advice" to "decision", the counter
+  "marked spare M" is recomputed in the same frame, the spare tiles are dimmed with the word "spare".
+- Sharpness not computed (an old DB without re-indexing) → the duplicates panel shows "sharpness not
+  computed for N snapshots — index the folder", the advice is computed from the resolution and size.
+- The model is not downloaded → the "AI model" block shows "the model is not downloaded" and a
+  "Model settings" button; the "Semantic" mode is disabled, next to "Find" it says "the model is not
+  downloaded"; the "By text" mode works if the text has already been recognized; the rest of the
+  interface works.
+- The model is switched → the old vectors and tags stay in the DB, but search, tags, the filter and
+  clusters read only the new one; switching back shows its tags without recomputation. The
+  catalogue shows "768 features · 203.5 MiB · Apache-2.0"; SigLIP answers English queries and has a
+  lower cosine scale — a confident tag at 0.22 almost never fires, the percentile filter works.
+- The search mode is switched → the results of the previous query are reset, the status names the
+  mode: "semantic search by the content of the snapshots" / "search by the text recognized on the
+  snapshots".
+- An empty folder (`items` is empty) → the grid says "Type a folder and press "Index"", no empty
+  tiles; the filter found nothing → "nothing found" and a "Reset the filter" button, the counters
+  stay visible.
+- Nothing is selected → the right panel says "Pick a snapshot in the grid — the date, camera, tags
+  and text will appear here"; the grid does not change width when the card appears.
+- The window is narrower than 1200 px → the right panel is not drawn, the card moves into the left
+  panel under the view blocks, and "Summary" moves into the common scroll: the grid keeps at least
+  4 columns.
+- "Settings" is open → a dialog over a dimmed background; it is closed by "Close", Esc and a click
+  outside. Changes are applied and saved immediately, there is no "Cancel" button — there is nothing
+  to cancel, the originals do not change.
+- `tesseract` is not found → the "Text on the photo" block shows "tesseract does not start — set the
+  path in "Settings" or install tesseract and the rus, eng languages", the "Recognize text" button
+  is disabled, the rest works.
+- The face model is not downloaded → the "Faces" block shows "the face model is not downloaded",
+  the "Find faces" button is disabled, the "Face settings" button leads to the consent and the
+  download; the rest of the interface works.
+- A face scan is running → the progress "Faces: 120/1972" in the top bar and a "Stop" button; the
+  window does not freeze, after a stop the button shows "Resume (N)", a rerun skips snapshots by
+  `sha256`.
+- No faces → "No faces yet: press "Find faces" on the left (the face model is needed)".
+- A group without a name → the caption "no name · N photos"; after typing a name the "Save the name"
+  button renames the group and pins it during a rebuild.
+- A false merge → the crop has a "not him" button; the face moves to a new group, the old group keeps
+  the remaining faces. The button works without modal windows, the status at the bottom explains the
+  result.
+- The threshold changed → "Rebuild groups" applies it to unpinned faces; groups with a name and manual
+  splits do not change. The counter "faces: N on M snapshots, groups: K" is updated.
+- A program path does not start → the path is not saved, the status says "the programs were not
+  saved: …" with the reason; "Settings" keeps the previous working path, OCR/video keep working as
+  before.
+- A program path is saved → the field shows the version and the found file: "ffmpeg version 9.0.2 ·
+  /usr/bin/ffmpeg (set in the settings)".
+- Recognition is running → the progress "OCR: 120/435" and a "Stop" button in the top bar, the window
+  does not freeze, selecting files responds immediately (reading the DB is not blocked by the run's
+  transaction); when it finishes the counters "with text: N of M snapshots" and "N left" are updated.
+- "Stop" is pressed → the current file is finished, the status "stopped: 120 of 435 recognized…", the
+  batch button shows "Resume (315)"; a rerun starts from what is left. The button in the card
+  recognizes **only the selected** snapshot; the batch pass is a separate "Recognize documents (N)"
+  button, where N is the number of candidates visible before the press.
+- A snapshot is selected but there is no text → the card has a "Recognize text" button; after the
+  pass either "text recognized: N characters" or "no text found on this snapshot". The button
+  becomes "Recognize again" once text exists.
+- Text search is on (a tick) but there is no text yet → "Find" finds 0 files and the status honestly
+  says "0 files"; the "Recognize text" button is next to it.
+- A text search is running → the status "search by text "справка": 3 files in 2 ms"; the match in the
+  card is highlighted with the accent, the excerpt is limited to 12 words.
+- A model download is running → the consent tick, the button disabled, the progress "files: 2/4", and
+  in the status — that no user data is sent.
+- The selected model is unavailable → the downloader tries the mirror and compatible variants within
+  the limit; the status keeps the result: "model <id>: N files, X MiB (did not fit: …)".
+- A model does not fit the limit → the catalogue rows say "over the limit", the download is refused
+  with the numbers.
+- A tag is removed from a photo → the tag line disappears from the card and the filter in the same
+  frame; "restore hidden tags (N)" brings all of them back; the original on disk does not change.
+- A calendar month is empty (for example after a filter) → "No files this month" and a "Go to
+  YYYY-MM" button; when paging with the arrows empty months are skipped, an arrow into emptiness is
+  inactive.
+- A double click on a month/day drills the calendar down a layer: year → month → week → day. A single
+  click only selects a month or a day (and shows that day's snapshots below); the
+  "Year/Month/Week/Day" tabs go back up, so going up is not hidden in a gesture.
+- No files on the "Day" layer → "No files on this day" and the ←/→ arrows page through neighbouring
+  days.
+- CLIP tags are being computed → the progress "CLIP: 480/1971" in the top bar, the window does not
+  freeze; when it finishes the counter "with a confident tag: N" is updated.
+- A semantic search is running → "loading the CLIP model…" in the search row; repeated queries
+  without a pause, the status shows "N files in M ms".
+- A semantic search found nothing → an empty grid, "nothing found" and "Reset the filter"; "Reset" in
+  the top bar clears the query itself.
+- A tag is not sure (the first weight is below 0.22 or the gap to the second is under 0.01) → the
+  card shows "tag: not sure — the first weights are close", no tag is highlighted, the top-3 are
+  visible with weight and percentile (for example "document 0.27 · 98%"), the other 11 are under
+  "all tags (14)". The file still enters the filter by any tag above the percentile threshold: "not
+  sure" is about the caption, not about the search. Inventing a tag is forbidden.
+- A confident tag (the first ≥ 0.22 and the gap ≥ 0.01) → the line "tag: furniture", the accent on
+  that line; the other weights are visible without the accent.
+- Every tag in the filter shows the snapshot count at its percentile threshold ("furniture · 669"):
+  zero is visible before the press, not after. A tag is selected and there are zero snapshots →
+  "no snapshots with the tag "furniture" above the 70% threshold (0.23) — lower the threshold slider
+  in the left panel" and "Reset the filter".
+- The filter threshold is a percentile of **its own** tag, not of the whole index: 100% is its
+  strongest snapshot, 0% is all, 70% (the default) is the top 30%. Therefore at 100% any selected tag
+  has at least one snapshot, and a lower maximum of another tag zeroes nothing. "Furniture" at 70%
+  has the threshold 0.229, "children" — 0.248: every tag has its own scale.
+- On a folder of fewer than 100 files the percentile is noisy → the label "few tags (N files) — the
+  percentile is noisy, the raw 0.22 threshold is used", the filter works by the raw threshold.
+- Tag confidence (the highlight in the card, OCR, `{tag}` in the showcase) is a separate threshold
+  0.22 and a margin of 0.01: the filter slider does not move it. An old `tag_show` above 0.22 is
+  migrated when the database is read: confidence 0.22, filter 70%; the archive, the DB and the tags
+  do not change.
+- The dictionary is changed (a label, prompts, enabling, adding, an import, a reset) → the line "the
+  dictionary has changed — press "Recompute tags"" in the accent, the button gets a dot "Recompute
+  tags •". The recomputation runs in the background with progress and reads no photos; the status
+  says "tags (model): recomputed N/N in M s". After it the filter and the tag counts are updated in
+  the same frame.
+- A tag is disabled in the dictionary → it disappears from the filter and is not computed; its old
+  weights stay in the DB until "Recompute tags" is pressed, but the filter no longer offers that tag.
+  A removed tag disappears from `tags` only after the recomputation — the status says so.
+- The dictionary is not seeded (the model has not computed tags yet) → "Settings → Tags" shows "the
+  dictionary is not seeded yet — it will appear after the first "Compute tags"". "Add to the
+  dictionary" works before that too (it does not need the 14 standard tags to be seeded first — only
+  your own tag is added).
+- A dictionary error (an empty label, a label already taken, a JSON file that cannot be read or
+  parsed) → the status in words with the reason; the dictionary in the DB does not change.
+- "Restore the defaults" replaces the model's dictionary with the 14 common tags; the owner's edits
+  are lost, so the button is labelled "14 common tags from the code; your edits will be replaced".
+- "Export JSON" writes `<cache>/photocat/tags.json` if no path is set; the status shows the path and
+  the number of tags. "Import JSON" replaces the model's dictionary entirely and asks for a
+  recomputation. No network is needed.
+- "Integrity": a comparison is running → the top bar shows "Integrity: 120/2230" and "Stop"; the
+  window responds. After "Stop" the verdict is "the comparison was stopped: not everything was
+  checked", not "matches": what was not checked is not passed off as checked.
+- The manifest file already exists → the first press of "Write the manifest" does not write but asks
+  for confirmation ("the manifest file already exists: …"), the button becomes "Overwrite the
+  manifest", "Cancel" is next to it; editing the "Manifest file" field resets the confirmation and
+  the old result.
+- The manifest is written → the verdict "manifest written: N files (size) → path"; the path appears
+  in the report only when the file has actually been written. A read error or a cancel — "not
+  written" with the number of errors, an incomplete manifest never lands on disk.
+- The comparison found differences → the verdict "differences found: only A N, only B M, size K,
+  content J, errors E"; below the report by section and the list of paths (the first 20 without the
+  "Show all paths" tick). "Copy the report" puts into the clipboard the same text that `photocat
+  verify` prints.
+- The same path in A and B, or a non-existent folder → a red line with the reason, the pass does not
+  start, nothing on disk changes.
+- "Check against the manifest" without a manifest file → "manifest file not found: …"; the check
+  starts only by the button.
+- The check deadline has come (a manifest is set, the interval is not 0, at least the interval has
+  passed since the last pass) → the top bar shows the banner "Time to check the archive": the
+  manifest name, the date of the last pass and how many days overdue, the "Check" and "Remind later"
+  buttons. The banner starts nothing by itself; "Check" opens "Integrity" and starts the same
+  background check as the button there.
+- "Remind later" → the banner is hidden until the next start, the status "the reminder is postponed
+  until the next start"; the deadline in the settings does not change.
+- Interval 0 days → the reminder is off, the banner is not shown; the value is saved immediately.
+- The last pass is in the future (the clock was set back) → the banner stays silent: the deadline has
+  not come. A broken date — the opposite, "due": better to remind than to stay silent.
+- The manifest is written or a check has finished → the settings hold the date, "ok" and the full
+  report, the file `<cache>/photocat/verify-last.txt`; the screen shows the line "last pass:
+  YYYY-MM-DD HH:MM · matched / there were differences" and a "Copy the last report" button. Writing
+  a manifest also sets the reference date: the archive has just been read in full.
+- A check failed or was stopped → a red line with the reason; the previous successful report, the
+  date and the reminder line do not change. Nothing is written into the archive folder.
 
-## Клавиатура и указатель
+## Keyboard and pointer
 
-| Действие | Сейчас | Ближайшее |
+| Action | Now | Nearest |
 |---|---|---|
-| Выбрать файл | клик по плитке | стрелки по сетке, Home/End, Enter — открыть |
-| Прокрутка | колесо по области сетки | PageUp/PageDown |
-| Запуск индексации | кнопка | Ctrl+I |
-| Обновить из БД | кнопка «Обновить» | F5 |
-| Фокус в поиск | клик по полю | Ctrl+F |
-| Сброс поиска/выделения | кнопка «Сбросить»; Esc снимает выделение; Ctrl+A выбирает найденное | стрелки по сетке, Home/End |
-| Основное действие | кнопка | Enter в поле |
-| Полный экран | двойной клик по плитке или кнопка в карточке | Enter — открыть выбранное |
-| Слои календаря | двойной клик по месяцу в «Годе», по дню в «Месяце» и в «Неделе» | — |
-| Листание в полном экране | ←/→, кнопки-иконки ⏮ ⏭, «Слайд-шоу», интервал 3/5/10 с | у снимка пробел — пуск/стоп слайд-шоу |
-| Видео в полном экране | большая кнопка ▶ по центру кадра, иконки ⏮ ▶/⏸ ⏭, перемотка, звук, «Стоп видео» | у видео пробел — пауза и продолжение, клик по кадру — то же |
-| Удаление | «В корзину» в карточке (только БД) | Delete не назначать: файлы не удаляются |
+| Select a file | a click on a tile | arrows in the grid, Home/End, Enter — open |
+| Scroll | the wheel over the grid area | PageUp/PageDown |
+| Start indexing | a button | Ctrl+I |
+| Refresh from the DB | the "Refresh" button | F5 |
+| Focus the search | a click on the field | Ctrl+F |
+| Reset search/selection | the "Reset" button; Esc clears the selection; Ctrl+A selects what was found | arrows in the grid, Home/End |
+| The main action | a button | Enter in the field |
+| Full screen | a double click on a tile or a button in the card | Enter — open the selected one |
+| Calendar layers | a double click on a month in "Year", on a day in "Month" and in "Week" | — |
+| Paging in the full screen | ←/→, the icon buttons ⏮ ⏭, "Slideshow", a 3/5/10 s interval | on a snapshot space starts/stops the slideshow |
+| Video in the full screen | the big ▶ button in the centre of the frame, the icons ⏮ ▶/⏸ ⏭, seek, sound, "Stop the video" | on a video space pauses and resumes, a click on the frame does the same |
+| Deletion | "To trash" in the card (DB only) | do not assign Delete: files are not deleted |
 
-Правило: ни одно действие не доступно **только** по наведению и ни одно — **только** с
-клавиатуры; фокус виден обводкой 2 px акцентом.
+Rule: no action is available **only** on hover and none **only** from the keyboard; the focus is
+visible with a 2 px accent outline.
 
-## Тексты
+## Wording
 
-- Кнопки: глагол в инфинитиве — «Индексировать», «Обновить», «Настройки», «Найти группы»,
-  «Экспорт плана», «Скопировать список», «Посчитать теги», «Найти», «Сбросить», «Сбросить фильтр»,
-  «Закрыть», «Скачать модель»,
-  «Проверить модель», «Применить путь», «Проверить и сохранить программы», «Скачать модель лиц»,
-  «Проверить модель лиц», «Найти лица (1972)», «Продолжить (N)», «Пересобрать группы», «не он»,
-  «Сохранить имя», «Распознать текст», «Распознать заново»,
-  «Распознать документы (435)», «Продолжить (315)», «Стоп», «Сегодня», «Каталоги (N)»,
-  «Добавить каталог…», «Убрать из индекса», «Индексировать все», «Открыть полный экран»,
-  «Слайд-шоу», «Стоп слайд-шоу», «3 с», «5 с», «10 с», «Текст на фото», «Показать текст целиком», «Стоп видео», «Закрыть»,
-  «В корзину», «Вернуть», «Вернуть всё», «Очистить корзину (N)», «Переместить в системную
-  корзину», «Назначить имя выбранным», «Снять выбор», «Фото, где все вместе (N)»,
-  «Посчитать занятое место», «Очистить превью…», «Очистить кропы лиц…», «Сбросить индекс…»,
-  «Посчитать теги», «Добавить тег», «Добавить в словарь», «Убрать из словаря»,
-  «Пересчитать теги», «Экспорт JSON», «Импорт JSON», «Вернуть стандартные»,
-  «Добавить и индексировать», «Добавить без индексации».
-- Каталог моделей: «217.5 МиБ · на месте», «148.6 МиБ · не скачана», «сверх лимита»; лимит — «250
-  МиБ» с единицей.
-- Режим поиска: «Смысловой» / «По тексту» (переключатель, активный имеет акцентную подчёрку).
-- Панель содержимого: «Плитки», «По месяцам / Подряд», «Сортировка», «Все», «Фото», «Видео»,
-  «найдено N из M»; чипы фильтра — «путь/дата: … ×», «тег: … ×», «по релевантности: … ×» (у чипа
-  только один «×» и тултип «снять фильтр»).
-- Заголовок месяца: «май 2024» и «· файлов 132 · 5.4 ГиБ»; без даты — «Без даты»; ноль файлов
-  в месяце не рисуется вовсе.
-- Навигация: «БИБЛИОТЕКА» (Все файлы, Календарь, Лица) и «ИНСТРУМЕНТЫ» (Дубли и серии,
-  Корзина); число справа — сколько файлов, групп или лиц, ноль тоже число.
-- Карточка: «Сведения о файле», имя файла 14 px, путь 11 px, «Дата», «Камера», «GPS», «Размер»,
-  «SHA256», «Теги ИИ», «Текст на фото», «Выбрано: <файл> · <дата>» в строке статуса.
-- Источник даты: «(EXIF)», «(имя файла)», «(время файла)» — в БД лежит `exif`/`filename`/`mtime`.
-- Смысловое: «Текст на фото:», «тег: дети (0.24)», «тег: не уверен»,
-  «с уверенным тегом: 1122», «с текстом: 146 из 1972 снимков», «кандидатов на проход: 435,
-  осталось 315», «текст с фото:».
-- Решение по дублю — только «оставить» и «лишний»; слов «удалить», «очистить», «переместить» нет.
-- Лица: «лиц: 2498 на 856 снимках, групп: 617», «ещё без лиц: 0 из 1972 снимков», «модель лиц
-  buffalo_l · 182.4 МиБ», «лицо отделено в новую группу; дайте ей имя».
-- Статусы: факт + число + единица — «проиндексировано 2230/2230 файлов (21.2 ГиБ), ошибок 0, за 64.9 с».
-- Не писать «файл(ов)», «шт.»: либо конкретное число с правильным словом, либо «файлов: 238».
-- Никаких восклицательных знаков и «Успешно!».
-- Про сеть: «разрешаю скачать веса модели (фото, пути и запросы не отправляются)».
-- Про корзину: «на диске не тронут», «в системную корзину ОС», «безвозвратного удаления в
-  приложении нет».
-- Про теги: «свои теги» (вручную) и «Теги ИИ» (CLIP) — разные блоки, не смешивать.
-- Счётчики тегов: «мебель · 669», «свой: дача · 12», «порог 70% (0.23 — свой для этого тега)»,
-  «выше порога: файлов 2129 из 2229 с тегами». Ноль — тоже число: «скриншот · 0».
-- Про лица вместе: «Фото, где все вместе» — только снимки, где есть лицо из каждой отмеченной
-  группы, а не «любое из».
+The code keeps the Russian string as the translation key (`i18n::PAIRS`); the English labels below
+are what the owner sees in English mode. See `plan/I18N.md`.
 
-## Чего в интерфейсе не будет
+- Buttons: a verb in the infinitive — "Index", "Refresh", "Settings", "Find groups", "Export the
+  plan", "Copy the list", "Compute tags", "Find", "Reset", "Reset the filter", "Close", "Download
+  model", "Verify the model", "Apply the path", "Verify and save the programs", "Download the face
+  model", "Verify the face model", "Find faces (1972)", "Resume (N)", "Rebuild groups", "not him",
+  "Save the name", "Recognize text", "Recognize again", "Recognize documents (435)", "Resume (315)",
+  "Stop", "Today", "Folders (N)", "Add a folder…", "Remove from the index", "Index all", "Open full
+  screen", "Slideshow", "Stop the slideshow", "3 s", "5 s", "10 s", "Text on the photo", "Show the
+  full text", "Stop the video", "Close", "To trash", "Restore", "Restore all", "Empty the trash
+  (N)", "Move to the OS trash", "Name the picked people", "Unpick", "Photos where everyone is
+  together (N)", "Compute the used space", "Clean the previews…", "Clean the face crops…", "Reset
+  the index…", "Compute tags", "Add tag", "Add to the dictionary", "Remove from the dictionary",
+  "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults", "Add and index", "Add
+  without indexing".
+- Model catalogue: "217.5 MiB · in place", "148.6 MiB · not downloaded", "over the limit"; the limit
+  is "250 MiB" with a unit.
+- Search mode: "Semantic" / "By text" (a switch, the active one has an accent underline).
+- Content panel: "Tiles", "By months / Flat", "Sort", "All", "Photos", "Videos", "found N of M"; the
+  filter chips — "path/date: … ×", "tag: … ×", "by relevance: … ×" (a chip has only one "×" and the
+  tooltip "remove the filter").
+- Month heading: "May 2024" and "· 132 files · 5.4 GiB"; without a date — "No date"; a month with
+  zero files is not drawn at all.
+- Navigation: "LIBRARY" (All files, Calendar, Faces) and "TOOLS" (Duplicates and series, Trash); the
+  number on the right is how many files, groups or faces there are, zero is a number too.
+- Card: "File details", the file name at 14 px, the path at 11 px, "Date", "Camera", "GPS", "Size",
+  "SHA256", "AI tags", "Text on the photo", "Selected: <file> · <date>" in the status line.
+- Date source: "(EXIF)", "(file name)", "(file time)" — the DB holds `exif`/`filename`/`mtime`.
+- Semantic: "Text on the photo:", "tag: children (0.24)", "tag: not sure", "with a confident tag:
+  1122", "with text: 146 of 1972 snapshots", "candidates for the pass: 435, N left", "text from the
+  photo:".
+- A duplicate decision is only "keep" and "spare"; the words "delete", "clear", "move" are not used.
+- Faces: "faces: 2498 on 856 snapshots, groups: 617", "still without faces: 0 of 1972 snapshots", "the
+  face model buffalo_l · 182.4 MiB", "the face was split into a new group; give it a name".
+- Statuses: a fact + a number + a unit — "indexed 2230/2230 files (21.2 GiB), 0 errors, in 64.9 s".
+- Do not write "file(s)" or "pcs": either a concrete number with the right word, or "files: 238".
+- No exclamation marks and no "Success!".
+- About the network: "I allow downloading the model weights (photos, paths and queries are not
+  sent)".
+- About the trash: "untouched on disk", "to the OS trash", "there is no permanent deletion in the
+  app".
+- About tags: "My tags" (by hand) and "AI tags" (CLIP) are different blocks, not to be mixed.
+- Tag counters: "furniture · 669", "mine: dacha · 12", "threshold 70% (0.23 — its own for this
+  tag)", "above the threshold: 2129 of 2229 files with tags". Zero is a number too: "screenshot ·
+  0".
+- About people together: "Photos where everyone is together" — only snapshots that have a face from
+  each ticked group, not "any of them".
 
-- Настроек темы, акцентных цветов, «компактного режима» — пока не попросят.
-- Модальных подтверждений для неразрушающих действий.
-- Прогресс-баров, которые двигаются «примерно»: только реальные `done/total`.
-- Иконок-эмодзи вместо слов, кроме «▶» для видео. Геометрические значки плеера (⏮ ⏸ ⏭, звук) —
-  не эмодзи, а фигуры `paint_icon` с подсказками; это исключение записано в §Вёрстка.
-- Автоматической загрузки моделей и телеметрии.
+## What the interface will not have
 
-## Долг по правилам интерфейса
+- Theme settings, accent colours, a "compact mode" — until asked.
+- Modal confirmations for non-destructive actions.
+- Progress bars that move "approximately": only real `done/total`.
+- Emoji icons instead of words, except "▶" for video. The geometric player signs (⏮ ⏸ ⏭, sound) are
+  not emoji but `paint_icon` shapes with hints; this exception is recorded in § Layout.
+- Automatic model downloads and telemetry.
 
-Честный список на 2026-11-23: правила выше уже действуют, но код им ещё не везде следует.
-Пункт либо исправляется, либо получает здесь строку-исключение с причиной.
+## Debt against the interface rules
 
-1. Клавиатурной навигации по сетке нет: стрелки работают только в полном экране; Tab-порядок
-   дефолтный, Ctrl+I/Ctrl+F/F5 — в таблице «Ближайшее».
-2. Прогресс показывается сразу и мигает на коротких проходах; по правилу — только если проход идёт
-   дольше 300 мс.
-3. Неверный путь к каталогу пишется в статус, но поле не подсвечивается: связь «ошибка ↔ поле»
-   только текстовая.
-4. Выбранный день календаря сбрасывается при листании месяца — оставлено осознанно: месяц и день
-   меняются одним действием, иначе выбор дня в другом месяце не имеет смысла.
-5. Кадр в полном экране при масштабе больше 100% центрируется и обрезается: перетаскивания для
-   панорамирования пока нет. Это следующий шаг, а не скрытая функция.
-6. Свои теги — ручные: CLIP сам их не создаёт. Свободный смысловой поиск («мебель») остаётся
-   способом найти предмет, которого нет в 14 подсказках.
-7. Конец видео у последнего файла не листает по кругу: показ остаётся на кадре-обложке, чтобы
-   просмотр не начинался заново с первого снимка. У остальных файлов конец видео открывает
-   следующий — это и есть «смена файла автоматически».
-8. Заголовок месяца не закрепляется при прокрутке: `ScrollArea` в egui не даёт sticky-строку без
-   ручной отрисовки поверх области. Месяц виден в начале группы; следующая задача — закрепление.
-9. Мультивыбора плиток нет: клик — один выбранный файл, как и раньше. Пакетные действия
-   (несколько дублей, массовые теги) не обещаны; это отдельная задача, а не скрытая функция.
+An honest list as of 2026-11-23: the rules above are in force, but the code does not follow them
+everywhere yet. An item is either fixed or gets an exception line here with a reason.
+
+1. There is no keyboard navigation in the grid: the arrows work only in the full screen; the Tab
+   order is the default one, Ctrl+I/Ctrl+F/F5 are in the "Nearest" column.
+2. Progress is shown immediately and blinks on short passes; by the rule — only if the pass runs
+   longer than 300 ms.
+3. A wrong folder path goes to the status, but the field is not highlighted: the link "error ↔ field"
+   is text only.
+4. The selected calendar day is reset when paging the month — left there on purpose: the month and
+   the day change by one action, otherwise selecting a day in another month would be meaningless.
+5. The frame in the full screen at a zoom above 100% is centred and cropped: there is no dragging for
+   panning yet. This is the next step, not a hidden feature.
+6. My tags are manual: CLIP does not create them. A free semantic search ("furniture") remains the
+   way to find a thing that is not among the 14 hints.
+7. The end of a video on the last file does not page round: the view stays on the cover frame, so
+   that watching does not start over from the first snapshot. On the other files the end of a video
+   opens the next one — that is "change the file automatically".
+8. The month heading is not pinned when scrolling: `ScrollArea` in egui gives no sticky row without
+   manual drawing over the area. The month is visible at the start of the group; pinning it is the
+   next task.
+9. Duplicate decisions are made one tile at a time: the multi-selection (M18) works in the grid,
+   in albums and in the trash, but marking N snapshots of a group as "spare" at once is not possible
+   — batch actions over duplicates are not promised, that is a separate task.
