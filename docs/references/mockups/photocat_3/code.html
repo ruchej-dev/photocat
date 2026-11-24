@@ -1,0 +1,472 @@
+<!DOCTYPE html><html class="dark" lang="ru"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<meta content="web_dashboard" name="shell-type">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+    @layer base {
+      html, body { margin: 0; padding: 0; }
+      body { overscroll-behavior: none; }
+      main > :first-child { margin-top: 0 !important; }
+      main > :last-child { margin-bottom: 0 !important; }
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #111317; }
+    ::-webkit-scrollbar-thumb { background: #282a2e; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #37393e; }
+  </style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface": "#111317",
+            "surface-dim": "#111317",
+            "surface-container-lowest": "#0c0e12",
+            "surface-container-low": "#1a1c20",
+            "surface-container": "#1e2024",
+            "surface-container-high": "#282a2e",
+            "surface-container-highest": "#333539",
+            "surface-bright": "#37393e",
+            "on-surface": "#e2e2e8",
+            "on-surface-variant": "#a7aab3",
+            "outline": "#a08e7a",
+            "outline-variant": "#2b2e35",
+            "primary": "#ffc174",
+            "primary-container": "#f59e0b",
+            "on-primary-container": "#3f2200",
+            "on-primary": "#472a00",
+            "secondary": "#bdc7db",
+            "secondary-container": "#2e3440",
+            "error": "#ffb4ab",
+            "error-container": "#93000a",
+            "tertiary": "#8fd5ff"
+          },
+          fontFamily: {
+            "sans": ["Inter", "sans-serif"],
+            "body-md": ["Inter", "sans-serif"],
+            "mono": ["JetBrains Mono", "monospace"],
+            "mono-numeric": ["JetBrains Mono", "monospace"],
+            "mono-data": ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-surface-container-lowest font-sans text-on-surface antialiased select-none flex flex-col h-screen overflow-hidden">
+<!-- ======================================================== -->
+<!-- 1. STREAMLINED TOP BAR (HEADER)                         -->
+<!-- ======================================================== -->
+<header class="h-12 bg-surface-container-low border-b border-outline-variant px-3 flex items-center justify-between gap-4 z-40 flex-shrink-0">
+<!-- Left: App Brand & Current Archive Folder Pill -->
+<div class="flex items-center gap-3">
+<!-- Window Controls (Native macOS / Rust Egui aesthetic) -->
+<!-- App Title -->
+<div class="flex items-center gap-1.5 font-semibold text-sm tracking-tight text-on-surface pr-1">
+<span class="material-symbols-outlined text-primary-container text-lg leading-none">photo_library</span>
+<span>photocat</span>
+</div>
+<!-- Current Catalog Pill with Dropdown -->
+</div>
+<!-- Center: Clean Integrated Search Bar -->
+<div class="flex-1 max-w-xl flex items-center bg-surface-container-lowest border border-outline-variant rounded-lg px-2 h-8 focus-within:border-primary-container/80 transition-colors shadow-inner"><label class="sr-only" for="main-search-input">Поиск по фото, датам, местам или тексту</label><span aria-hidden="true" class="material-symbols-outlined text-base text-on-surface-variant mr-1.5">search</span><div class="relative flex items-center mr-2 flex-shrink-0"><select aria-label="Режим поиска" class="appearance-none bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 rounded pl-2 pr-5 py-0.5 text-[11px] font-medium text-primary-container focus:outline-none focus:border-primary-container cursor-pointer transition-colors"><option class="bg-surface-container-high text-on-surface" selected="" value="semantic">✦ Смысловой (AI)</option><option class="bg-surface-container-high text-on-surface" value="text">По тексту (OCR)</option><option class="bg-surface-container-high text-on-surface" value="metadata">Имя файла / EXIF</option></select></div><input class="bg-transparent text-xs text-on-surface font-sans w-full border-0 outline-none ring-0 shadow-none focus:outline-none focus:ring-0 focus:border-0 p-0 placeholder-on-surface-variant/50" id="main-search-input" placeholder="Поиск по фото, датам, местам или тексту..." type="text" value="торт, море, горы, праздник"><button aria-label="Очистить поисковый запрос" class="p-0.5 text-on-surface-variant hover:text-on-surface rounded-full transition-colors ml-1" title="Очистить поиск" type="button"><span aria-hidden="true" class="material-symbols-outlined text-sm">cancel</span></button></div>
+<!-- Right: Clean Icon Toolbar -->
+<div class="flex items-center gap-1.5"><!-- Grid Zoom Control Pill -->
+<div class="flex items-center gap-1.5 px-2 h-7 bg-surface-container border border-outline-variant rounded text-xs text-on-surface-variant mr-1">
+<span class="material-symbols-outlined text-xs">grid_view</span>
+<input aria-label="Масштаб миниатюр" class="w-14 h-1 accent-amber-500 bg-surface-container-highest rounded cursor-pointer" max="260" min="120" title="Размер плиток" type="range" value="160">
+</div>
+<!-- Background Status Indicator (compact dot) -->
+<div class="relative group">
+<button class="h-7 px-2 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant flex items-center gap-1.5 text-xs font-mono text-on-surface-variant transition-colors" title="Статус базы данных" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+<span class="hidden xl:inline text-[11px]">Синхронизировано</span>
+</button>
+<div class="absolute right-0 top-full mt-1 w-48 bg-surface-container-high border border-outline-variant rounded-md shadow-xl p-2.5 hidden group-hover:block z-50 text-[11px] font-mono">
+<div class="text-on-surface font-semibold mb-1">CLIP &amp; Метаданные</div>
+<div class="text-on-surface-variant">Все 2 230 файлов обработаны. Фоновых задач нет.</div>
+</div>
+</div>
+<!-- Inspector Sidebar Toggle -->
+<button aria-label="Показать или скрыть свойства файла" class="h-7 w-7 rounded bg-surface-container-high text-primary-container hover:bg-surface-bright border border-outline-variant flex items-center justify-center transition-colors" id="toggle-inspector" title="Сведения о файле (I)" type="button">
+<span class="material-symbols-outlined text-sm">dock_to_right</span>
+</button>
+<!-- Global Settings Button (photocat settings modal trigger) -->
+<button aria-label="Настройки приложения" class="h-7 px-2.5 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant flex items-center gap-1.5 text-xs font-medium text-on-surface transition-colors cursor-pointer" id="open-settings-modal" title="Настройки photocat (Каталоги, ИИ, Хранилище, Кэш)" type="button">
+<span class="material-symbols-outlined text-sm text-primary-container">settings</span>
+<span class="hidden sm:inline text-[11px]">Настройки</span>
+</button></div>
+</header>
+<!-- ======================================================== -->
+<!-- MAIN WORKSPACE (LEFT NAV + HERO GRID + RIGHT INSPECTOR)  -->
+<!-- ======================================================== -->
+<div class="flex-1 flex min-h-0 bg-surface-container-lowest overflow-hidden">
+<!-- ======================================================== -->
+<!-- 2. STREAMLINED LEFT SIDEBAR (DAILY NAVIGATION)          -->
+<!-- ======================================================== -->
+<aside class="w-56 flex-shrink-0 bg-surface-container-low border-r border-outline-variant flex flex-col justify-between overflow-y-auto">
+<div class="p-2 space-y-4"><!-- Section: Рабочий каталог (Вариант Б) -->
+<div>
+<div class="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant/80">
+<span>Рабочий каталог</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-0.5" title="Добавить каталог" type="button">
+<span class="material-symbols-outlined text-xs">add</span>
+</button>
+</div>
+<div class="relative group mt-0.5">
+<button class="w-full p-2 rounded-lg bg-surface-container hover:bg-surface-container-high border border-outline-variant/80 hover:border-primary-container text-left transition-colors flex items-center justify-between gap-1.5" type="button"><div class="flex items-center gap-2 min-w-0"><div class="w-7 h-7 rounded bg-surface-container-highest flex items-center justify-center flex-shrink-0 border border-outline-variant/60 text-primary-container"><span class="material-symbols-outlined text-base">folder_special</span></div><div class="min-w-0"><div class="text-xs font-mono font-semibold text-on-surface truncate leading-tight">Все каталоги</div><div class="text-[10px] font-mono text-on-surface-variant/70 truncate mt-0.5">86.4 ГБ · 7 370 шт</div></div></div><span class="material-symbols-outlined text-sm text-on-surface-variant flex-shrink-0 group-hover:text-on-surface transition-colors">unfold_more</span></button>
+<!-- Catalog Dropdown Switcher Menu -->
+<div class="absolute left-0 top-full mt-1 w-full bg-surface-container-high border border-outline-variant rounded-md shadow-2xl py-1 hidden group-hover:block group-focus-within:block z-50 text-xs font-sans"><div class="px-2.5 py-1 text-[10px] font-mono text-on-surface-variant uppercase tracking-wider border-b border-outline-variant/40">Каталоги хранилища</div><button class="w-full px-2.5 py-1.5 text-left bg-surface-container-highest/60 flex items-center justify-between text-on-surface transition-colors font-mono" type="button"><span class="flex items-center gap-1.5 truncate text-[11px] font-semibold text-primary"><span class="material-symbols-outlined text-xs text-primary-container">check</span><span class="material-symbols-outlined text-xs text-primary-container">folder_special</span>Все каталоги</span><span class="text-[10px] text-on-surface-variant/70">86.4 ГБ</span></button><button class="w-full px-2.5 py-1.5 text-left hover:bg-surface-container-highest flex items-center justify-between text-on-surface-variant hover:text-on-surface transition-colors font-mono" type="button"><span class="flex items-center gap-1.5 truncate text-[11px] pl-4">PhotoArchive_Master</span><span class="text-[10px] text-on-surface-variant/70">2 230</span></button><button class="w-full px-2.5 py-1.5 text-left hover:bg-surface-container-highest flex items-center justify-between text-on-surface-variant hover:text-on-surface transition-colors font-mono" type="button"><span class="flex items-center gap-1.5 truncate text-[11px] pl-4">Archive_2023_RAW</span><span class="text-[10px] text-on-surface-variant/70">5 140</span></button><div class="h-px bg-outline-variant/60 my-1"></div><button class="w-full px-2.5 py-1 text-left hover:bg-surface-container-highest flex items-center gap-1.5 text-[11px] text-primary-container transition-colors" type="button"><span class="material-symbols-outlined text-xs">create_new_folder</span><span>Подключить каталог...</span></button><button class="w-full px-2.5 py-1 text-left hover:bg-surface-container-highest flex items-center gap-1.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors" type="button"><span class="material-symbols-outlined text-xs">sync</span><span>Переиндексировать</span></button></div>
+</div>
+</div>
+<!-- Section: Библиотека -->
+<div>
+<div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant/80">Библиотека</div>
+<nav class="mt-1 space-y-0.5 text-xs font-medium"><a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#"><span class="flex items-center gap-2"><span class="material-symbols-outlined text-base">photo_library</span> Все файлы</span><span class="text-[11px] font-mono text-on-surface-variant/70">2 230</span></a><a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#"><span class="flex items-center gap-2"><span class="material-symbols-outlined text-base">grade</span> Избранное</span><span class="text-[11px] font-mono text-on-surface-variant/70">128</span></a><a class="flex items-center justify-between px-2.5 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold transition-colors" href="#"><span class="flex items-center gap-2"><span class="material-symbols-outlined text-base text-primary-container">collections_bookmark</span> Альбомы</span><span class="text-[11px] font-mono font-semibold text-amber-300">14</span></a><a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#"><span class="flex items-center gap-2"><span class="material-symbols-outlined text-base">calendar_month</span> Календарь</span><span class="text-[11px] font-mono text-on-surface-variant/70">12 лет</span></a><a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#"><span class="flex items-center gap-2"><span class="material-symbols-outlined text-base">face</span> Лица</span><span class="text-[11px] font-mono text-on-surface-variant/70">38</span></a></nav>
+</div>
+<!-- Section: Инструменты архива -->
+<div>
+<div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant/80">Инструменты</div>
+<nav class="mt-1 space-y-0.5 text-xs font-medium">
+<a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#">
+<span class="flex items-center gap-2">
+<span class="material-symbols-outlined text-base">photo_library</span>
+                Все файлы
+              </span>
+<span class="text-[11px] font-mono text-on-surface-variant/70">2 230</span>
+</a>
+<a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#">
+<span class="flex items-center gap-2">
+<span class="material-symbols-outlined text-base">verified</span>
+                Целостность
+              </span>
+<span class="text-[11px] font-mono text-emerald-400">100%</span>
+</a>
+<a class="flex items-center justify-between px-2.5 py-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" href="#">
+<span class="flex items-center gap-2">
+<span class="material-symbols-outlined text-base">delete</span>
+                Корзина
+              </span>
+<span class="text-[11px] font-mono text-on-surface-variant/70">47</span>
+</a>
+</nav>
+</div>
+<!-- Section: Быстрые фильтры / Теги -->
+<div>
+<div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant/80 flex items-center justify-between">
+<span>Быстрые фильтры</span>
+</div>
+<div class="mt-1 space-y-1.5 px-1"><div aria-label="Фильтрация по типам медиа" class="flex items-center gap-1" role="group"><button aria-pressed="true" class="flex-1 px-2 py-1 rounded bg-surface-container-highest border border-primary-container text-primary font-medium text-[11px] flex items-center justify-center gap-1 transition-colors" type="button"><span aria-hidden="true" class="material-symbols-outlined text-xs">apps</span> Все</button><button aria-pressed="false" class="flex-1 px-2 py-1 rounded bg-surface-container-high border border-outline-variant/60 hover:border-primary-container text-[11px] text-on-surface flex items-center justify-center gap-1 transition-colors" type="button"><span aria-hidden="true" class="material-symbols-outlined text-xs text-primary-container">photo</span> Фото</button><button aria-pressed="false" class="flex-1 px-2 py-1 rounded bg-surface-container-high border border-outline-variant/60 hover:border-primary-container text-[11px] text-on-surface flex items-center justify-center gap-1 transition-colors" type="button"><span aria-hidden="true" class="material-symbols-outlined text-xs text-tertiary">videocam</span> Видео</button></div><div class="flex items-center bg-surface-container-high/90 border border-outline-variant/60 rounded px-2 h-7 focus-within:border-primary-container transition-colors"><label class="sr-only" for="sidebar-path-search">Поиск по пути или дате</label><span aria-hidden="true" class="material-symbols-outlined text-xs text-on-surface-variant mr-1.5">search</span><input class="bg-transparent border-0 p-0 text-[11px] text-on-surface font-sans w-full focus:outline-none focus:ring-0 placeholder-on-surface-variant/50" id="sidebar-path-search" placeholder="Поиск по пути или дате" type="text"></div><button aria-pressed="false" class="w-full px-2 py-1 rounded bg-surface-container-low hover:bg-surface-container border border-outline-variant/60 hover:border-primary-container/60 text-[11px] text-on-surface-variant hover:text-on-surface flex items-center justify-between transition-colors group cursor-pointer" id="filter-no-date" title="Показать только файлы без даты (90 файлов)" type="button"><span class="flex items-center gap-1.5 truncate"><span class="material-symbols-outlined text-xs text-on-surface-variant group-hover:text-primary-container transition-colors">event_busy</span><span>Без даты</span></span><span class="text-[10px] font-mono text-error/80 bg-error-container/10 px-1.5 py-0.2 rounded border border-error-container/20 group-hover:bg-error-container/20 transition-colors">90</span></button></div>
+</div><div class="p-2 rounded-lg bg-surface-container border border-amber-500/30 space-y-2 mt-3"><div class="flex items-center justify-between"><div class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary"><span class="material-symbols-outlined text-xs text-primary-container">auto_awesome</span><span>ИИ-теги (CLIP)</span></div><span class="text-[9px] font-mono px-1 py-0.2 rounded bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/30">ViT-B/32</span></div><div class="space-y-1 bg-surface-container-lowest/60 p-1.5 rounded border border-outline-variant/40"><div class="flex items-center justify-between text-[10px] font-mono"><span class="text-on-surface-variant">Порог:</span></div><div class="flex items-center gap-1.5"><input class="w-full h-1 accent-amber-500 bg-surface-container-highest rounded cursor-pointer" max="100" min="50" title="Порог уверенности нейросети" type="range" value="85"><span class="text-[10px] font-mono text-on-surface-variant/80 w-6 text-right">85%</span></div></div><div class="space-y-1.5"><div class="relative flex items-center"><select class="w-full appearance-none bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/70 rounded px-2 py-1 text-[11px] font-mono text-on-surface focus:outline-none focus:border-primary-container cursor-pointer transition-colors pr-6" style="appearance: none; background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' height='16' viewBox='0 -960 960 960' width='16' fill='%23a7aab3'%3E%3Cpath d='M480-345 240-585l56-56 184 184 184-184 56 56-240 240Z'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 6px center;"><option disabled="" selected="" value="">Выбрать ИИ-тег...</option><option value="sea">#море (42)</option><option value="mountains">#горы (28)</option><option value="sunset">#закат (19)</option><option value="dog">#собака (14)</option><option value="holiday">#праздник (11)</option><option value="doc">#документ (8)</option><option value="car">#автомобиль (7)</option></select></div><div class="flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-primary-container text-[10px] font-mono text-amber-300"><span class="material-symbols-outlined text-[10px] text-primary-container">auto_awesome</span><span>#море</span><button class="hover:text-error leading-none text-xs ml-0.5 transition-colors" title="Удалить тег" type="button">×</button></span><span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-primary-container text-[10px] font-mono text-amber-300"><span class="material-symbols-outlined text-[10px] text-primary-container">auto_awesome</span><span>#горы</span><button class="hover:text-error leading-none text-xs ml-0.5 transition-colors" title="Удалить тег" type="button">×</button></span></div></div></div>
+<!-- Section: Хронология по годам -->
+<div>
+<div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant/80">Годы</div>
+<div class="mt-1 flex flex-col space-y-0.5 text-xs font-mono">
+<a class="px-2.5 py-1 rounded text-primary-container bg-surface-container/60 font-semibold flex items-center justify-between" href="#">
+<span>2024</span>
+<span class="text-[10px] text-on-surface-variant">326 шт</span>
+</a>
+<a class="px-2.5 py-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors flex items-center justify-between" href="#">
+<span>2023</span>
+<span class="text-[10px] text-on-surface-variant/70">894 шт</span>
+</a>
+<a class="px-2.5 py-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors flex items-center justify-between" href="#">
+<span>2022</span>
+<span class="text-[10px] text-on-surface-variant/70">612 шт</span>
+</a>
+</div>
+</div>
+</div>
+<!-- Subtle Catalog Storage footer -->
+<div class="p-3 border-t border-outline-variant bg-surface-container-lowest/60">
+<div class="flex items-center justify-between text-[11px] font-mono text-on-surface-variant mb-1">
+<span>Хранилище</span>
+<span class="text-on-surface">64.8 / 70.0 ГБ</span>
+</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-primary-container w-[92%] rounded-full"></div>
+</div>
+</div>
+</aside>
+<!-- ======================================================== -->
+<!-- 3. CENTRAL PHOTO GRID (THE HERO AREA)                   -->
+<!-- ======================================================== -->
+<main class="flex-1 flex flex-col min-w-0 bg-surface-container-lowest overflow-hidden relative"><div class="flex flex-col w-full h-full min-h-0 overflow-hidden bg-surface-container-lowest"><header class="h-11 px-4 bg-surface-container-low border-b border-surface-container-highest flex items-center justify-between gap-4 flex-shrink-0 z-20"><div class="flex items-center gap-3"><div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary-container text-base leading-none">collections_bookmark</span><h1 class="text-xs font-semibold tracking-tight text-on-surface uppercase">Альбомы</h1></div></div><div class="flex items-center gap-2.5"><div class="flex items-center bg-surface-container border border-outline-variant/60 rounded px-2 h-7 focus-within:border-primary-container transition-colors"><span class="material-symbols-outlined text-xs text-on-surface-variant mr-1.5">filter_list</span><input class="bg-transparent border-0 p-0 text-[11px] text-on-surface font-sans w-36 focus:outline-none focus:ring-0 placeholder-on-surface-variant/50" placeholder="Фильтр по альбомам..." type="text"></div><div class="flex items-center gap-1 bg-surface-container border border-outline-variant/40 rounded px-2 h-7 text-xs font-mono text-on-surface-variant"><span class="material-symbols-outlined text-xs">sort</span><select class="bg-transparent text-[11px] text-on-surface outline-none cursor-pointer border-0 p-0 pr-2"><option class="bg-surface-container-high text-on-surface" value="updated">По обновлению</option><option class="bg-surface-container-high text-on-surface" value="name">По названию</option><option class="bg-surface-container-high text-on-surface" value="count">По количеству</option><option class="bg-surface-container-high text-on-surface" value="size">По размеру</option></select></div><div aria-label="Режим отображения альбомов" class="flex items-center bg-surface-container border border-outline-variant/40 p-0.5 rounded text-[11px] font-medium" role="radiogroup"><button aria-checked="true" class="px-2 py-0.5 bg-surface-container-highest text-primary-container font-semibold rounded transition-colors shadow-sm flex items-center gap-1" role="radio" title="Сетка" type="button"><span class="material-symbols-outlined text-xs">grid_view</span></button><button aria-checked="false" class="px-2 py-0.5 text-on-surface-variant hover:text-on-surface rounded transition-colors flex items-center gap-1" role="radio" title="Список" type="button"><span class="material-symbols-outlined text-xs">format_list_bulleted</span></button></div><button aria-label="Новый альбом" class="h-7 w-7 rounded bg-primary-container hover:bg-amber-400 text-on-primary flex items-center justify-center transition-colors shadow-sm cursor-pointer flex-shrink-0" title="Новый альбом" type="button"><span class="material-symbols-outlined text-base font-bold">add</span></button></div></header><div class="flex-1 overflow-y-auto p-4 pb-20"><div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"><div class="group bg-surface-container hover:bg-surface-container-high border border-primary-container rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer ring-2 ring-primary-container shadow-md transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Отпуск 2024 обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQ3IENXy7wY1TMRUnEx38-CDHEgZFz9t7tTx3Aecno6Z5iDyC5FLss5hM9b3sKWeSRdQPLnHKohceeobDcPrQvFqa2haBfaGDC_9iHxtjTPWNBvrhfj4_7fI9KVExd2rr7rj76r4VUknWyVfeKGEddsJXkprp_QUyy8DkA_gWWk9oaF6hA4WQjsUVpU24Ff8lLDW6SbWRD8N1KhYvjK9j-_8CQxsYWQtP0P0FC-Gg"><span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur font-mono text-[10px] text-primary flex items-center gap-1"><span class="material-symbols-outlined text-xs">lock</span> Локальный</span><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">326 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-primary leading-snug tracking-tight">Отпуск 2024</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">8.4 ГБ</span><span class="text-outline-variant">·</span><span>18 мая 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Избранные пейзажи обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6uGcMAeiF7UbeEprR0d7sSOT2UJzGyBL1Pdrtr43M3aEeu8Tp72OH0tX_WAKGm7a3nnyrlOxNEXZwRMDlqF17eCuZubguXhL3BHN0dPoFmMu5pmx_LA-XB-aMe3jQNiGeo-s50EM76SqF6XK7Ud_whnUYSpBR3RyOST0jRnwmeIaWzBWv7r4H6rT5KdqgO4en-efxszrI2ieLMAPNbsvJTZJ4qtcln4S8eSyhz3c"><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">142 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">Избранные пейзажи</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">3.8 ГБ</span><span class="text-outline-variant">·</span><span>12 мая 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Семейный архив обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAuYIqs35coQeHBstc39DMQYXvoG4lSep2NokFeXaRkEbgOz2oC81mAOI-9AyQRFf6aqvZxfomLBQ6X5ahupsyik1iuNMDuzDuY0dKj6vXlFqsfm8rxQlbUhDC9yFqAAYqaaAloi-PLQxB5ppX4IXCUIgTmELnJipHDTqT_m3vgbu-mjpsRzOC1Ri0_SlYMpWSCd7a22tUezdhwgvFNYPvO8wHQf2sVAljjlh3TYpM"><span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur font-mono text-[9px] text-amber-300">Сканы EXIF</span><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">854 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">Семейный архив (1998–2010)</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">14.2 ГБ</span><span class="text-outline-variant">·</span><span class="text-amber-400 font-medium">Реставрация</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Горы и походы обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDXWHfi6kfCoKq7f1M36Zgjjm6FFQQIFWQ5kyea7ptmhRCbbQBlHHamKOgV1Lmu945rSYBKRiDAT9o2sDCvFVBJ3I8tFfznACNsYtmItOpWyDSKtIQA-uOt40SIW928dS_h-xSZwJFagZQaI1uP4xPN3fKVz9QmF5I-pwEbtRkg1TfzyZpk23PxnCHz3iFmn2Vq9zsu77pUmH1vR4nRCvsaCVTE1XLGCo0GMBFbwJU"><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">410 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">Горы и походы</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">9.6 ГБ</span><span class="text-outline-variant">·</span><span>02 мая 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Крым, мыс Айя обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCa2qMSOyjMDXa8WBDYNZel40rvk-1QuZukVt_LA7BoYK9Hu0ZyQWwLpKbI5g3c7bSfyHBJMJXeka_KNjX3vFKNHCyEw858LYAOCH9YpSPGrCm5-W6Ukjf_mHZFEF34gWK3IQ3Me87_pjTgKlxu3ArSVwyBiUXlUCs8eOYcKNdtDKioVxUPL-tZY-op0yTfuJSMgf_oISY9oY0_JQzQWxIP_Yd0cebzOn2ILhL3MH4"><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">215 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">Крым, мыс Айя</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">5.1 ГБ</span><span class="text-outline-variant">·</span><span>28 апр 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="День рождения обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBL1qaI_p332veyQv5kKF43ckIxGYTwRYswrGWhEibedtKsMRu0mNAE7otoOMcLk6085mJUP0N_yT3_qw1_VNwkmKlNaqwir_JT0LCDpDN4ec6OyeY5EJrpfyCJO3VqOoYAp3feZbxgJScuIXawDc46rddmAlHbLQYB0-NaCYDvZyPY1YB86L9qIjLElDAID7UE79axCyeNC7jKHb_9iumVBsoIFcG5lgnovLrO2gQ"><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">180 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">День рождения (Алиса, 5 лет)</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">3.9 ГБ</span><span class="text-outline-variant">·</span><span>14 апр 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Архитектура и город обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBl3IdVnb4lDNXJLo3DB_n1DqfEs3Gbei82KmmSNoG2InhKFmqRGdWC0Oon-21DbqwE46kAsRrHH9XYfgTQXcYk0HYTZ37iSDAjLqDpdWvA93wMyKymGvD924G2pz-tfO9Df0NLORrmHfCCFz0BywM0ydI7aDJo6NndP6AKhWmbuH09fXizUaBteVk1egoDbkpbeoR_TWfDSgNo00hiaxE3lXjO--Z7hLWzCA0YUmE"><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">94 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">Архитектура и город</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">2.1 ГБ</span><span class="text-outline-variant">·</span><span>06 апр 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div><div class="group bg-surface-container hover:bg-surface-container-high border border-outline-variant/60 hover:border-primary-container/60 rounded-xl overflow-hidden p-2.5 flex flex-col justify-between cursor-pointer transition-all relative"><div class="aspect-[16/10] w-full rounded-lg overflow-hidden relative bg-surface-container-lowest mb-2.5"><img alt="Коты и питомцы обложка" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAWLm6l4lTl8pLgpMsH1wksWcfXg-CbWbFHjO1e76xXkEN-8fTLR3KJnO9Bi1XKUahxhrLShXoivysaBcQ44-DIfmvRczlQs5CbUbO4cEpzJy1PT9rOrX__fyfc5AsqgTSULTgjggIZJyQfcVXqS4sapMxsu9cqEe6LPXZg4jauAUdDAhp0wrfzNFD2jDtlYhhzZ2Appq50sUcEVt9ERSr4PRFGkztTpv9TuxeP43A"><span class="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur font-mono text-[10px] text-white font-semibold">128 фото</span></div><div class="flex items-start justify-between gap-2 pt-1"><div class="min-w-0 flex-1"><h3 class="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug tracking-tight">Коты и питомцы</h3><div class="text-xs font-mono text-on-surface-variant mt-1.5 flex items-center gap-1.5 flex-wrap"><span class="text-on-surface font-medium">2.4 ГБ</span><span class="text-outline-variant">·</span><span>24 мар 2024</span></div></div><button aria-label="Действия с альбомом" class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-highest transition-colors flex-shrink-0 mt-0.5" type="button"><span class="material-symbols-outlined text-base">more_vert</span></button></div></div></div></div><div class="absolute inset-x-0 bottom-6 flex justify-center z-40 pointer-events-none px-4"><div aria-label="Выбранные альбомы" class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-surface-container-high/95 backdrop-blur border border-amber-500/40 shadow-2xl text-xs text-on-surface whitespace-nowrap pointer-events-auto transition-all duration-300 opacity-100 select-none" id="selection-bar"><div aria-live="polite" class="flex items-center gap-2 flex-shrink-0" role="status"><span aria-hidden="true" class="w-2 h-2 rounded-full bg-primary-container animate-pulse flex-shrink-0"></span><span class="font-mono font-semibold text-primary whitespace-nowrap" id="selection-count">Выбран альбом: «Отпуск 2024»</span><span aria-hidden="true" class="text-outline-variant font-mono">•</span><span class="font-mono text-on-surface-variant text-[11px] whitespace-nowrap" id="selection-size">326 снимков · 8.4 ГБ</span></div><div aria-hidden="true" class="h-4 w-px bg-outline-variant/60 flex-shrink-0"></div><div class="flex items-center gap-1.5 flex-shrink-0"><button aria-label="Сбросить выделение" class="h-7 px-2 rounded-full bg-surface-container hover:bg-surface-container-highest border border-outline-variant/40 text-on-surface-variant hover:text-on-surface flex items-center justify-center gap-1 text-[11px] font-mono transition-colors" id="clear-selection-btn" title="Снять выделение" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[15px]">close</span><span>Сбросить</span></button><button aria-label="Открыть альбом" class="h-7 px-2.5 rounded-full bg-surface-container hover:bg-surface-container-highest border border-outline-variant/40 text-primary-container hover:text-primary flex items-center justify-center gap-1 text-[11px] font-medium transition-colors" title="Открыть все снимки альбома" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[15px]">folder_open</span><span>Открыть</span></button><button aria-label="Экспорт альбома" class="h-7 w-7 rounded-full bg-surface-container hover:bg-surface-container-highest border border-outline-variant/40 text-tertiary flex items-center justify-center transition-colors" title="Экспортировать архив" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[15px]">output</span></button><button aria-label="Удалить альбом" class="h-7 w-7 rounded-full bg-surface-container hover:bg-rose-950/80 border border-outline-variant/40 text-rose-300 hover:text-rose-400 flex items-center justify-center transition-colors" title="Удалить альбом" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[15px]">delete</span></button></div></div></div></div></main>
+<!-- ======================================================== -->
+<!-- 4. REFINED RIGHT INSPECTOR (СВЕДЕНИЯ О ФАЙЛЕ)           -->
+<!-- ======================================================== -->
+<aside class="w-80 flex-shrink-0 bg-surface-container-low border-l border-outline-variant flex flex-col overflow-y-auto transition-all duration-300 relative z-30" id="inspector-panel">
+<!-- Panel Header -->
+<div class="h-11 px-3 border-b border-outline-variant/80 flex items-center justify-between flex-shrink-0 bg-surface-container/50">
+<div class="flex items-center gap-1.5 text-xs font-semibold text-on-surface">
+<span class="material-symbols-outlined text-sm text-primary-container">info</span>
+<span>Сведения о файле</span>
+</div>
+<button aria-label="Закрыть панель свойств" class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" id="close-inspector" title="Скрыть панель" type="button">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+<div class="p-3.5 space-y-4">
+<!-- Large Photo Preview with Quick Actions Overlay -->
+<div class="relative group rounded-lg overflow-hidden bg-surface-container-lowest border border-outline-variant/60 shadow">
+<img alt="Крупный предпросмотр снимка IMG_4821_RAW.CR2 — Крым, мыс Айя" class="w-full aspect-[4/3] object-cover" data-alt="Detailed inspection preview of Cape Aya Crimea coastal seascape with turquoise transparent sea, layered limestone rocks, vibrant sunlight, rich contrast, native high-res photographic view" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6uGcMAeiF7UbeEprR0d7sSOT2UJzGyBL1Pdrtr43M3aEeu8Tp72OH0tX_WAKGm7a3nnyrlOxNEXZwRMDlqF17eCuZubguXhL3BHN0dPoFmMu5pmx_LA-XB-aMe3jQNiGeo-s50EM76SqF6XK7Ud_whnUYSpBR3RyOST0jRnwmeIaWzBWv7r4H6rT5KdqgO4en-efxszrI2ieLMAPNbsvJTZJ4qtcln4S8eSyhz3c">
+<!-- Format tag -->
+<span class="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur text-white text-[10px] font-mono leading-none">
+            CR2 RAW · 14-bit
+          </span>
+<!-- Floating Quick Action Buttons -->
+<div class="absolute top-2 right-2 flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity"><button aria-label="Добавить в избранное" class="w-7 h-7 rounded-full bg-black/60 hover:bg-black/90 backdrop-blur flex items-center justify-center text-amber-400 transition-colors" title="Избранное" type="button"><span aria-hidden="true" class="material-symbols-outlined text-sm">star</span></button><button aria-label="Полноэкранный просмотр" class="w-7 h-7 rounded-full bg-black/60 hover:bg-black/90 backdrop-blur flex items-center justify-center text-white transition-colors" title="Полноэкранный просмотр" type="button"><span aria-hidden="true" class="material-symbols-outlined text-sm">fullscreen</span></button><button aria-label="Поделиться" class="w-7 h-7 rounded-full bg-black/60 hover:bg-black/90 backdrop-blur flex items-center justify-center text-white transition-colors" title="Поделиться файлом" type="button"><span aria-hidden="true" class="material-symbols-outlined text-sm">share</span></button><button aria-label="Удалить файл" class="w-7 h-7 rounded-full bg-black/60 hover:bg-black/90 backdrop-blur flex items-center justify-center text-rose-400 transition-colors" title="В корзину" type="button"><span aria-hidden="true" class="material-symbols-outlined text-sm">delete</span></button></div>
+</div>
+<!-- Essential File Info -->
+<div class="space-y-1">
+<div class="flex items-center justify-between">
+<h3 class="text-xs font-mono font-bold text-primary-container truncate" title="IMG_4821_RAW.CR2">IMG_4821_RAW.CR2</h3>
+<span class="text-xs font-mono text-on-surface-variant flex-shrink-0">18.4 МБ</span>
+</div>
+<p class="text-[11px] font-mono text-on-surface-variant/70 break-all select-all leading-relaxed">
+            /Volumes/PhotoArchive_Master/2024/05_Crimea/IMG_4821_RAW.CR2
+          </p>
+</div>
+<!-- Group: Съёмка & EXIF -->
+<div class="p-2.5 rounded-lg bg-surface-container border border-outline-variant/60 space-y-2">
+<div class="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">Параметры съёмки</div>
+<div class="flex items-center gap-1.5 text-xs text-on-surface">
+<span class="material-symbols-outlined text-sm text-primary-container">photo_camera</span>
+<span class="truncate">Canon EOS R6 Mark II</span>
+</div>
+<div class="text-[11px] text-on-surface-variant pl-5 truncate">
+            RF 24-70mm F2.8L IS USM
+          </div>
+<!-- Exposure Badges -->
+<div class="flex items-center gap-1.5 pt-1">
+<span class="px-2 py-0.5 rounded bg-surface-container-highest font-mono text-[11px] text-on-surface">1/800s</span>
+<span class="px-2 py-0.5 rounded bg-surface-container-highest font-mono text-[11px] text-on-surface">f/5.6</span>
+<span class="px-2 py-0.5 rounded bg-surface-container-highest font-mono text-[11px] text-on-surface">ISO 100</span>
+<span class="px-2 py-0.5 rounded bg-surface-container-highest font-mono text-[11px] text-on-surface">35mm</span>
+</div>
+<div class="h-px bg-outline-variant/40 my-1"></div>
+<!-- Date & Resolution -->
+<div class="grid grid-cols-2 gap-2 text-[11px] font-mono text-on-surface-variant pt-0.5">
+<div>
+<span class="text-on-surface-variant/60 block text-[9px] uppercase">Дата и время</span>
+<span class="text-on-surface">18.05.2024 14:23</span>
+</div>
+<div>
+<span class="text-on-surface-variant/60 block text-[9px] uppercase">Разрешение</span>
+<span class="text-on-surface">6000×4000 (24 Мп)</span>
+</div>
+</div>
+<!-- Location / GPS -->
+<div class="pt-1 flex items-start gap-1.5 text-xs">
+<span class="material-symbols-outlined text-sm text-amber-500 mt-0.5">location_on</span>
+<div class="min-w-0">
+<span class="text-primary-container font-medium block truncate">Крым, мыс Айя</span>
+<span class="text-[10px] font-mono text-on-surface-variant">44.4021° N, 34.0532° E</span>
+</div>
+</div>
+</div>
+<!-- Section: Альбомы -->
+<div class="space-y-1.5">
+<div class="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+<span>Альбомы</span>
+<span class="font-mono text-on-surface-variant/80">2</span>
+</div>
+<div class="flex flex-wrap gap-1">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container border border-outline-variant text-[11px] text-on-surface">
+<span class="material-symbols-outlined text-xs text-primary-container">folder</span> Отпуск 2024
+              <button class="hover:text-error transition-colors leading-none" title="Убрать из альбома" type="button">×</button>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container border border-outline-variant text-[11px] text-on-surface">
+<span class="material-symbols-outlined text-xs text-primary-container">folder</span> Избранные пейзажи
+              <button class="hover:text-error transition-colors leading-none" title="Убрать из альбома" type="button">×</button>
+</span>
+<button class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded border border-dashed border-outline-variant hover:border-primary-container text-[11px] text-primary-container transition-colors" type="button">
+              + Добавить
+            </button>
+</div>
+</div>
+<!-- Section: Теги (ИИ и пользовательские) -->
+<div class="space-y-2">
+<div class="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+<span>Теги снимка</span>
+<span class="font-mono text-[10px] text-primary-container">CLIP 94%</span>
+</div>
+<div class="flex flex-wrap gap-1">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono text-[11px]">
+              #море
+              <button class="hover:text-error leading-none" type="button">×</button>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant text-on-surface font-mono text-[11px]">
+              #побережье
+              <button class="hover:text-error leading-none" type="button">×</button>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant text-on-surface font-mono text-[11px]">
+              #горы
+              <button class="hover:text-error leading-none" type="button">×</button>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant text-on-surface font-mono text-[11px]">
+              #скалы
+              <button class="hover:text-error leading-none" type="button">×</button>
+</span>
+</div>
+<!-- Inline Add Tag -->
+<div class="flex items-center bg-surface-container-high/40 border border-outline-variant/30 rounded px-2 h-7 focus-within:border-primary/60 focus-within:ring-0 transition-colors">
+<span class="text-xs text-on-surface-variant mr-1">#</span>
+<input class="bg-transparent text-xs text-on-surface font-mono w-full border-0 outline-none ring-0 focus:ring-0 focus:outline-none placeholder-on-surface-variant/50" placeholder="Добавить тег..." type="text">
+<button class="text-xs text-primary-container hover:underline font-medium" type="button">ОК</button>
+</div>
+</div>
+<!-- Section: Распознанный текст (Компактный коллапс) -->
+<details class="group rounded-lg bg-surface-container border border-outline-variant/60 text-xs">
+<summary class="px-2.5 py-2 font-medium text-on-surface-variant cursor-pointer flex items-center justify-between list-none">
+<span class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm">text_fields</span>
+              Текст на фото (OCR)
+            </span>
+<span class="material-symbols-outlined text-sm group-open:rotate-180 transition-transform">expand_more</span>
+</summary>
+<div class="px-2.5 pb-2.5 pt-1 text-[11px] text-on-surface-variant/80 font-mono italic">Текст на изображении не обнаружен или разрешение не содержит читаемых надписей.</div>
+</details>
+</div>
+</aside>
+</div>
+<!-- ======================================================== -->
+<!-- 5. MINIMAL, STREAMLINED STATUS FOOTER                    -->
+<!-- ======================================================== -->
+<footer class="h-6 w-full bg-surface-container-low border-t border-outline-variant/70 px-3 flex items-center justify-between font-mono text-[11px] text-on-surface-variant flex-shrink-0 z-40 overflow-hidden"><div class="flex items-center gap-2 min-w-0 truncate mr-3"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block flex-shrink-0"></span><span class="text-on-surface whitespace-nowrap flex-shrink-0">Готов к работе</span><span class="text-outline-variant flex-shrink-0">·</span><span class="whitespace-nowrap flex-shrink-0">Синхронизировано</span><span class="text-outline-variant flex-shrink-0">·</span><span class="text-primary-container font-medium whitespace-nowrap flex-shrink-0">14 альбомов</span><span class="text-outline-variant flex-shrink-0">·</span><span class="whitespace-nowrap flex-shrink-0">3 840 файлов (78.4 ГБ)</span><span class="text-outline-variant flex-shrink-0">·</span><span class="text-on-surface-variant bg-surface-container px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap flex-shrink-0">2 140 с EXIF</span><span class="text-error/80 bg-error-container/10 px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap flex-shrink-0">90 без даты</span></div><div class="flex items-center gap-2 flex-shrink-0 pl-2 text-right"><span class="text-primary-container font-medium truncate max-w-48 text-left">IMG_4821_RAW.CR2</span><span class="text-outline-variant">·</span><span class="whitespace-nowrap text-on-surface-variant/90">24 Мп (6000×4000)</span><span class="text-outline-variant">·</span><span class="whitespace-nowrap text-on-surface font-semibold">18.4 МБ</span></div></footer>
+<!-- Desktop Interactions -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Toggle inspector panel
+      const toggleBtn = document.getElementById('toggle-inspector');
+      const closeBtn = document.getElementById('close-inspector');
+      const inspector = document.getElementById('inspector-panel');
+
+      if (toggleBtn && inspector) {
+        toggleBtn.addEventListener('click', () => {
+          inspector.classList.toggle('hidden');
+        });
+      }
+      if (closeBtn && inspector) {
+        closeBtn.addEventListener('click', () => {
+          inspector.classList.add('hidden');
+        });
+      }
+
+      // Quick remove simulation for tags/chips
+      document.querySelectorAll('button').forEach(btn => {
+        if (btn.innerText === '×') {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const chip = btn.closest('span');
+            if (chip) {
+              chip.style.opacity = '0.2';
+              setTimeout(() => chip.remove(), 120);
+            }
+          });
+        }
+      });
+    });
+  </script>
+<div data-initialized="true" id="selection-manager-script" style="display: none;"><script>window.addEventListener('DOMContentLoaded',()=>{const bar=document.getElementById('selection-bar');const countLabel=document.getElementById('selection-count');const clearBtn=document.getElementById('clear-selection-btn');const photoCards=document.querySelectorAll('section .grid > div.group');const updateBar=()=>{const selected=document.querySelectorAll('section .grid > div.group.ring-2');if(selected.length===0){bar.classList.add('opacity-0','pointer-events-none','translate-y-3');}else{bar.classList.remove('opacity-0','pointer-events-none','translate-y-3');if(countLabel){countLabel.textContent=`Выбрано: ${selected.length}`;}}};photoCards.forEach(card=>{card.addEventListener('click',(e)=>{if(e.target.closest('button'))return;card.classList.toggle('ring-2');card.classList.toggle('ring-primary-container');card.classList.toggle('shadow-md');updateBar();});});if(clearBtn){clearBtn.addEventListener('click',(e)=>{e.stopPropagation();document.querySelectorAll('section .grid > div.group.ring-2').forEach(c=>{c.classList.remove('ring-2','ring-primary-container','shadow-md');});updateBar();});}});</script></div>
+<div class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4" id="global-settings-modal">
+<div class="w-full max-w-xl bg-surface-container-low border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden text-on-surface">
+<!-- Dialog Header -->
+<div class="px-4 py-3 bg-surface-container border-b border-outline-variant flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container text-base">settings</span>
+<h2 class="text-xs font-semibold uppercase tracking-wider text-on-surface">Настройки photocat</h2>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container-high transition-colors" id="close-settings-modal" title="Закрыть" type="button">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+<!-- Dialog Body Tabs/Sections -->
+<div class="p-4 space-y-4 max-h-[75vh] overflow-y-auto font-sans text-xs">
+<!-- Section 1: Каталоги и Архивация -->
+<div class="p-3 rounded-lg bg-surface-container border border-outline-variant/60 space-y-2">
+<div class="flex items-center justify-between text-[11px] font-semibold text-primary">
+<span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-xs text-primary-container">folder_special</span>Рабочие каталоги</span>
+<span class="font-mono text-[10px] text-on-surface-variant">3 каталога</span>
+</div>
+<div class="text-[11px] text-on-surface-variant leading-relaxed">Автоматический опрос изменений папок, фоновый импорт RAW-снимков и генерация превью высокого разрешения.</div>
+<div class="flex items-center gap-2 pt-1">
+<button class="px-2.5 py-1 rounded bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant text-[11px] font-mono flex items-center gap-1 text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-xs text-primary-container">add</span>Добавить папку
+</button>
+<button class="px-2.5 py-1 rounded bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant text-[11px] font-mono text-on-surface-variant hover:text-on-surface transition-colors" type="button">
+Индексировать заново
+</button>
+</div>
+</div>
+<!-- Section 2: ИИ & CLIP Семантика -->
+<div class="p-3 rounded-lg bg-surface-container border border-outline-variant/60 space-y-2">
+<div class="flex items-center justify-between text-[11px] font-semibold text-primary">
+<span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-xs text-primary-container">auto_awesome</span>Нейросеть и распознавание (CLIP &amp; OCR)</span>
+<span class="font-mono text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/30">Apple Neural Engine / GPU</span>
+</div>
+<div class="grid grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
+<div class="p-2 rounded bg-surface-container-lowest/60 border border-outline-variant/40">
+<div class="text-on-surface-variant/70 text-[9px] uppercase">Модель эмбеддингов</div>
+<div class="text-on-surface font-semibold mt-0.5">OpenCLIP ViT-B/32</div>
+</div>
+<div class="p-2 rounded bg-surface-container-lowest/60 border border-outline-variant/40">
+<div class="text-on-surface-variant/70 text-[9px] uppercase">Локальный OCR</div>
+<div class="text-on-surface font-semibold mt-0.5">Русский, English (Tesseract 5)</div>
+</div>
+</div>
+</div>
+<!-- Section 3: Кэш & Диск -->
+<div class="p-3 rounded-lg bg-surface-container border border-outline-variant/60 space-y-2">
+<div class="flex items-center justify-between text-[11px] font-semibold text-primary">
+<span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-xs text-primary-container">database</span>Хранилище и кэш превью</span>
+<span class="font-mono text-[10px] text-on-surface-variant">Кэш: 4.2 ГБ</span>
+</div>
+<div class="flex items-center justify-between text-[11px] font-mono text-on-surface-variant">
+<span>Диск базы данных: /Volumes/PhotoArchive_Master/.photocat</span>
+<button class="text-rose-400 hover:text-error hover:underline transition-colors" type="button">Очистить кэш</button>
+</div>
+</div>
+</div>
+<!-- Dialog Footer -->
+<div class="px-4 py-2.5 bg-surface-container border-t border-outline-variant flex items-center justify-end gap-2">
+<button class="px-3 py-1.5 rounded bg-surface-container-highest hover:bg-surface-bright text-xs font-medium text-on-surface transition-colors" id="dismiss-settings-btn" type="button">Закрыть</button>
+<button class="px-3 py-1.5 rounded bg-primary-container hover:bg-amber-400 text-xs font-semibold text-on-primary transition-colors" id="apply-settings-btn" type="button">Сохранить</button>
+</div>
+</div>
+</div><div id="settings-dialog-script" style="display: none;"><script>
+(() => {
+  const openBtn = document.getElementById('open-settings-modal');
+  const modal = document.getElementById('global-settings-modal');
+  const closeBtn = document.getElementById('close-settings-modal');
+  const dismissBtn = document.getElementById('dismiss-settings-btn');
+  const applyBtn = document.getElementById('apply-settings-btn');
+
+  const closeModal = () => {
+    if (modal) modal.classList.add('hidden');
+  };
+  const openModal = () => {
+    if (modal) modal.classList.remove('hidden');
+  };
+
+  if (openBtn) openBtn.addEventListener('click', openModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (dismissBtn) dismissBtn.addEventListener('click', closeModal);
+  if (applyBtn) applyBtn.addEventListener('click', closeModal);
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+  }
+})();
+</script></div>
+
+
+</body></html>

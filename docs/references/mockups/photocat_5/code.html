@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+
+<html class="dark h-full" lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>photocat — Полноэкранный просмотр медиа (Фото и Видео)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              amber: '#f59e0b',
+              amberHover: '#d97706',
+              amberDark: '#b45309',
+            },
+            surface: {
+              DEFAULT: '#111317',
+              dim: '#0c0e12',
+              card: '#16191f',
+              panel: '#1a1d24',
+              border: '#282c37',
+              borderLight: '#373c4a',
+              hover: '#222631',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      line-height: 1;
+    }
+    .material-symbols-outlined.fill {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #2a2e3b;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3c4253;
+    }
+    .strip-item:hover .strip-thumb {
+      transform: scale(1.04);
+    }
+  </style>
+</link></head>
+<body class="h-full bg-[#0a0b0e] text-[#e2e4ea] font-sans antialiased overflow-hidden select-none flex flex-col">
+<!-- TOP OVERLAY TOOLBAR -->
+<header class="h-14 bg-[#111317]/95 backdrop-blur-md border-b border-[#232732] px-4 flex items-center justify-between shrink-0 z-30">
+<!-- Left: Navigation Back & File Title -->
+<div class="flex items-center gap-3 min-w-0">
+<button class="h-9 px-3 rounded-md bg-[#1a1d24] hover:bg-[#232733] border border-[#2b303e] text-zinc-300 hover:text-white flex items-center gap-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/50" title="Назад к галерее (Esc)">
+<span class="material-symbols-outlined text-[19px]">arrow_back</span>
+<span class="text-xs font-medium">К сетке [Esc]</span>
+</button>
+<div class="h-4 w-px bg-zinc-800"></div>
+<!-- File info badge -->
+<div class="flex items-center gap-2.5 truncate">
+<span class="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+          RAW · 14-bit
+        </span>
+<span class="text-xs font-mono font-medium text-zinc-200 truncate">IMG_4821_RAW.CR2</span>
+<span class="text-[11px] text-zinc-400 font-mono hidden md:inline">18.4 МБ</span>
+<span class="text-zinc-600 hidden md:inline">•</span>
+<span class="text-[11px] text-zinc-400 font-mono hidden lg:inline">24 Мп (6000×4000)</span>
+</div>
+</div>
+<!-- Center: Media Switcher (Photo / Video mode demonstration & Index counter) -->
+<div class="flex items-center gap-3">
+<!-- Item index -->
+<div class="flex items-center gap-1 text-xs font-mono text-zinc-400 bg-[#161920] px-3 py-1 rounded-md border border-[#262b37]">
+<span class="text-zinc-200 font-bold">142</span>
+<span class="text-zinc-600">/</span>
+<span>326</span>
+<span class="text-[10px] text-zinc-500 ml-1">(Отпуск 2024)</span>
+</div>
+<!-- Quick Media Toggle (Demonstrating Photo / Video dual support) -->
+<div class="hidden md:flex items-center bg-[#14171f] p-0.5 rounded-lg border border-[#252a38]">
+<button class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-amber-500 text-zinc-950 font-semibold shadow-sm transition-all" title="Текущий кадр: Фото (RAW)">
+<span class="material-symbols-outlined text-[16px]">photo_camera</span>
+<span>Фото</span>
+</button>
+<button class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-[#1f2430] transition-all" title="Переключить на видео в этой серии">
+<span class="material-symbols-outlined text-[16px]">videocam</span>
+<span>Видео (4K 60p)</span>
+</button>
+</div>
+</div>
+<!-- Right: Viewer Controls & Inspector Toggle -->
+<div class="flex items-center gap-1.5 shrink-0">
+<!-- Zoom controls -->
+<div class="flex items-center bg-[#161920] rounded-md border border-[#262b37] px-1 py-0.5">
+<button class="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800/60 rounded" title="Уменьшить (-)">
+<span class="material-symbols-outlined text-[18px]">zoom_out</span>
+</button>
+<span class="text-[11px] font-mono px-2 text-zinc-300">100%</span>
+<button class="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800/60 rounded" title="Увеличить (+)">
+<span class="material-symbols-outlined text-[18px]">zoom_in</span>
+</button>
+<button class="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800/60 rounded ml-0.5" title="По размеру экрана (0)">
+<span class="material-symbols-outlined text-[18px]">fit_screen</span>
+</button>
+<button class="p-1 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 rounded" title="Масштаб 1:1 [Пиксель в пиксель]">
+<span class="text-[10px] font-mono font-bold px-1">1:1</span>
+</button>
+</div>
+<div class="h-4 w-px bg-zinc-800 mx-1"></div>
+<!-- Action buttons -->
+<button class="p-2 rounded-md text-zinc-400 hover:text-amber-400 hover:bg-[#1a1d24] transition-colors" title="Добавить в Избранное (L)">
+<span class="material-symbols-outlined text-[20px] fill text-amber-400">star</span>
+</button>
+<button class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1d24] transition-colors" title="Повернуть на 90° (R)">
+<span class="material-symbols-outlined text-[20px]">rotate_right</span>
+</button>
+<button class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1d24] transition-colors" title="Поделиться / Экспорт (E)">
+<span class="material-symbols-outlined text-[20px]">share</span>
+</button>
+<button class="p-2 rounded-md text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors" title="Переместить в корзину (Del)">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+<div class="h-4 w-px bg-zinc-800 mx-1"></div>
+<!-- Toggle metadata inspector -->
+<button class="h-9 px-3 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-400 hover:bg-amber-500/25 flex items-center gap-1.5 font-medium text-xs transition-colors" title="Инспектор метаданных EXIF / AI (I)">
+<span class="material-symbols-outlined text-[18px]">dock_to_left</span>
+<span>Инспектор (I)</span>
+</button>
+<!-- True Fullscreen Button -->
+<button class="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-[#1a1d24] transition-colors" title="Полноэкранный режим (F)">
+<span class="material-symbols-outlined text-[20px]">fullscreen</span>
+</button>
+</div>
+</header>
+<!-- MAIN VIEWER BODY -->
+<div class="flex-1 flex overflow-hidden relative">
+<!-- LEFT / CENTRAL VIEWPORT AREA -->
+<div class="flex-1 flex flex-col relative bg-[#090a0d] overflow-hidden">
+<!-- Canvas / Viewport Container -->
+<div class="flex-1 relative flex items-center justify-center p-4 overflow-hidden">
+<!-- Navigation Arrow: Previous -->
+<button class="absolute left-4 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-[#111317]/80 hover:bg-[#1b1f28] text-zinc-300 hover:text-white border border-[#2b303d] backdrop-blur-md flex items-center justify-center shadow-2xl transition-all hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-amber-500/60" title="Предыдущий файл (Стрелка влево [←])">
+<span class="material-symbols-outlined text-[28px]">chevron_left</span>
+</button>
+<!-- Navigation Arrow: Next -->
+<button class="absolute right-4 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-[#111317]/80 hover:bg-[#1b1f28] text-zinc-300 hover:text-white border border-[#2b303d] backdrop-blur-md flex items-center justify-center shadow-2xl transition-all hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-amber-500/60" title="Следующий файл (Стрелка вправо [→])">
+<span class="material-symbols-outlined text-[28px]">chevron_right</span>
+</button>
+<!-- The Image Display with Face Recognition Overlays -->
+<div class="relative max-w-full max-h-full flex items-center justify-center group shadow-2xl rounded-sm overflow-hidden border border-zinc-900">
+<img alt="Крым, мыс Айя — лазурное море, скалы и прибрежная волна" class="max-w-full max-h-[calc(100vh-230px)] object-contain rounded select-none shadow-2xl" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<!-- Quick Interactive Face / Object Detection Tag in Photo (InsightFace overlay preview) -->
+<div class="absolute bottom-6 left-6 z-10 bg-black/75 backdrop-blur-md border border-white/15 px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-zinc-300 pointer-events-auto">
+<div class="flex items-center gap-1.5 text-amber-400 font-mono font-medium">
+<span class="material-symbols-outlined text-[16px]">face</span>
+<span>Лица в кадре: 1</span>
+</div>
+<div class="h-3 w-px bg-zinc-700"></div>
+<div class="flex items-center gap-1 text-zinc-400">
+<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+<span>Фокус: 99.4% (Высокая резкость)</span>
+</div>
+</div>
+<!-- Video Play Overlay Pill (If switching or video mode active) -->
+<div class="absolute top-4 left-4 z-10 bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-1 rounded text-[11px] font-mono text-zinc-300 flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-amber-400"></span>
+<span>Canon EOS R6 Mark II · sRGB · ISO 100</span>
+</div>
+<!-- Zoom ratio indicator floating pill -->
+<div class="absolute top-4 right-4 z-10 bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-1 rounded text-[11px] font-mono text-zinc-400">
+            100% · Окно просмотра
+          </div>
+</div>
+</div>
+<!-- VIDEO PLAYER CONTROLS BAR (Integrated seamlessly for video files) -->
+<div class="bg-[#12141a] border-t border-[#222631] px-5 py-2.5 flex flex-col gap-2 shrink-0">
+<!-- Progress scrubber bar with buffer and time tags -->
+<div class="flex items-center gap-3">
+<span class="text-[11px] font-mono text-zinc-400 w-10 text-right">00:42</span>
+<div class="flex-1 relative py-1 cursor-pointer group">
+<!-- Background track -->
+<div class="h-1.5 w-full bg-[#202531] rounded-full overflow-hidden relative">
+<!-- Buffered bar -->
+<div class="absolute left-0 top-0 bottom-0 bg-[#2f3647] rounded-full" style="width: 78%;"></div>
+<!-- Played bar -->
+<div class="absolute left-0 top-0 bottom-0 bg-amber-500 rounded-full" style="width: 38%;"></div>
+</div>
+<!-- Scrubber thumb -->
+<div class="absolute top-1/2 left-[38%] -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-amber-400 border-2 border-zinc-950 rounded-full shadow-md scale-0 group-hover:scale-100 transition-transform"></div>
+</div>
+<span class="text-[11px] font-mono text-zinc-500 w-10">01:52</span>
+<span class="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+            4K 60 FPS
+          </span>
+</div>
+<!-- Video & Audio buttons row -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<!-- Play/Pause -->
+<button class="w-8 h-8 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center transition-colors shadow" title="Воспроизведение / Пауза [Пробел]">
+<span class="material-symbols-outlined text-[20px] fill">play_arrow</span>
+</button>
+<!-- Step backward 5 sec -->
+<button class="p-1.5 text-zinc-400 hover:text-white rounded hover:bg-[#1e222c] transition-colors" title="Назад на 5 секунд [J]">
+<span class="material-symbols-outlined text-[19px]">replay_5</span>
+</button>
+<!-- Step forward 5 sec -->
+<button class="p-1.5 text-zinc-400 hover:text-white rounded hover:bg-[#1e222c] transition-colors" title="Вперёд на 5 секунд [L]">
+<span class="material-symbols-outlined text-[19px]">forward_5</span>
+</button>
+<!-- Volume slider -->
+<div class="flex items-center gap-1.5 ml-2">
+<button class="text-zinc-400 hover:text-zinc-200" title="Без звука (M)">
+<span class="material-symbols-outlined text-[19px]">volume_up</span>
+</button>
+<input class="w-16 h-1 accent-amber-500 bg-[#282d3b] rounded-lg appearance-none cursor-pointer" max="100" min="0" type="range" value="80"/>
+</div>
+</div>
+<!-- Shortcuts Hint inside player -->
+<div class="hidden sm:flex items-center gap-3 text-[11px] text-zinc-500 font-mono">
+<span><kbd class="px-1 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">Space</kbd> Пауза</span>
+<span><kbd class="px-1 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">← / →</kbd> Кадр</span>
+<span><kbd class="px-1 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">F</kbd> Во весь экран</span>
+<span><kbd class="px-1 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">I</kbd> Инспектор</span>
+</div>
+<!-- Playback Speed -->
+<div class="flex items-center gap-2">
+<span class="text-[11px] font-mono text-zinc-400">Скорость:</span>
+<div class="flex items-center bg-[#171a22] rounded border border-[#272c39] p-0.5">
+<button class="px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-white">0.5x</button>
+<button class="px-1.5 py-0.5 text-[10px] font-mono bg-amber-500/20 text-amber-400 rounded font-bold">1.0x</button>
+<button class="px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-white">1.5x</button>
+<button class="px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-white">2.0x</button>
+</div>
+</div>
+</div>
+</div>
+<!-- BOTTOM FILMSTRIP (Лента миниатюр текущей серии / альбома) -->
+<div class="h-20 bg-[#0d0f14] border-t border-[#1d212b] px-3 py-2 flex items-center gap-2.5 overflow-x-auto shrink-0 z-20">
+<!-- Filmstrip Label -->
+<div class="flex flex-col justify-center px-1 shrink-0 text-zinc-500">
+<span class="text-[10px] font-mono uppercase tracking-wider">Серия</span>
+<span class="text-xs font-mono text-zinc-300 font-semibold">18 мая</span>
+</div>
+<div class="h-10 w-px bg-zinc-800 shrink-0 mx-1"></div>
+<!-- Thumb 1 -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 1" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">140</span>
+</div>
+<!-- Thumb 2 (Video file demonstration) -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 2" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<div class="absolute inset-0 bg-black/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-[18px] drop-shadow">play_circle</span>
+</div>
+<span class="absolute bottom-1 left-1 text-[8px] font-mono bg-amber-500 text-zinc-950 font-bold px-1 rounded">01:52</span>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">141</span>
+</div>
+<!-- Thumb 3 (CURRENT ACTIVE ITEM) -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border-2 border-amber-500 ring-2 ring-amber-500/30 transition-all">
+<img alt="Превью текущего кадра" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute top-1 left-1 w-2 h-2 rounded-full bg-amber-400"></span>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-amber-500 text-zinc-950 font-bold px-1 rounded">142</span>
+</div>
+<!-- Thumb 4 -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 4" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">143</span>
+</div>
+<!-- Thumb 5 -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 5" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">144</span>
+</div>
+<!-- Thumb 6 (Video file) -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 6" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<div class="absolute inset-0 bg-black/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-[18px] drop-shadow">play_circle</span>
+</div>
+<span class="absolute bottom-1 left-1 text-[8px] font-mono bg-amber-500 text-zinc-950 font-bold px-1 rounded">00:34</span>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">145</span>
+</div>
+<!-- Thumb 7 -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 7" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">146</span>
+</div>
+<!-- Thumb 8 -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 8" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">147</span>
+</div>
+<!-- Thumb 9 -->
+<div class="strip-item relative h-14 w-20 shrink-0 rounded overflow-hidden cursor-pointer border border-transparent hover:border-zinc-500 transition-all">
+<img alt="Превью 9" class="strip-thumb w-full h-full object-cover transition-transform duration-150" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<span class="absolute bottom-1 right-1 text-[9px] font-mono bg-black/70 px-1 rounded text-zinc-300">148</span>
+</div>
+</div>
+</div>
+<!-- RIGHT INSPECTOR PANEL (EXIF, AI Tags, Faces, OCR, Location) -->
+<aside class="w-[360px] bg-[#111317] border-l border-[#222631] flex flex-col shrink-0 z-20 overflow-y-auto">
+<!-- Inspector Header with File Title & Close Button -->
+<div class="px-4 py-3 border-b border-[#222631] flex items-center justify-between sticky top-0 bg-[#111317]/95 backdrop-blur-sm z-10">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-amber-400 text-[18px]">info</span>
+<span class="text-xs font-semibold uppercase tracking-wider text-zinc-200">Сведения о файле</span>
+</div>
+<button class="p-1 text-zinc-400 hover:text-white rounded hover:bg-[#1f232d] transition-colors" title="Скрыть инспектор (I)">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</div>
+<div class="p-4 space-y-5 text-xs">
+<!-- File Name & Path Section -->
+<div>
+<div class="flex items-center justify-between">
+<span class="font-mono font-semibold text-amber-400 text-sm">IMG_4821_RAW.CR2</span>
+<span class="font-mono text-[11px] text-zinc-400">18.4 МБ</span>
+</div>
+<div class="mt-1 font-mono text-[11px] text-zinc-400 break-all leading-relaxed bg-[#161920] p-2 rounded border border-[#232733]">
+            /Volumes/PhotoArchive_Master/2024/05_Crimea/IMG_4821_RAW.CR2
+          </div>
+</div>
+<!-- EXIF Camera Settings Badges -->
+<div>
+<div class="flex items-center gap-1.5 text-zinc-400 uppercase tracking-wider text-[10px] font-bold mb-2">
+<span class="material-symbols-outlined text-[15px] text-amber-400">photo_camera</span>
+<span>Параметры съёмки (EXIF)</span>
+</div>
+<div class="text-zinc-200 font-medium mb-2.5">
+            Canon EOS R6 Mark II · RF 24-70mm F2.8L IS USM
+          </div>
+<div class="grid grid-cols-4 gap-1.5 font-mono text-center">
+<div class="bg-[#171a22] p-2 rounded border border-[#252a37]">
+<div class="text-zinc-500 text-[9px] uppercase">Выдержка</div>
+<div class="text-zinc-200 font-bold text-xs mt-0.5">1/800s</div>
+</div>
+<div class="bg-[#171a22] p-2 rounded border border-[#252a37]">
+<div class="text-zinc-500 text-[9px] uppercase">Диафрагма</div>
+<div class="text-zinc-200 font-bold text-xs mt-0.5">f/5.6</div>
+</div>
+<div class="bg-[#171a22] p-2 rounded border border-[#252a37]">
+<div class="text-zinc-500 text-[9px] uppercase">ISO</div>
+<div class="text-zinc-200 font-bold text-xs mt-0.5">100</div>
+</div>
+<div class="bg-[#171a22] p-2 rounded border border-[#252a37]">
+<div class="text-zinc-500 text-[9px] uppercase">Фокусное</div>
+<div class="text-zinc-200 font-bold text-xs mt-0.5">35mm</div>
+</div>
+</div>
+</div>
+<!-- Date & Dimensions -->
+<div class="grid grid-cols-2 gap-2 font-mono text-[11px] bg-[#161920] p-2.5 rounded border border-[#232733]">
+<div>
+<span class="text-zinc-500 block text-[9px] uppercase">Дата и время</span>
+<span class="text-zinc-200 font-medium">18.05.2024 14:23</span>
+</div>
+<div>
+<span class="text-zinc-500 block text-[9px] uppercase">Разрешение</span>
+<span class="text-zinc-200 font-medium">6000×4000 (24 Мп)</span>
+</div>
+</div>
+<!-- Geo Location -->
+<div>
+<div class="flex items-center gap-1.5 text-zinc-400 uppercase tracking-wider text-[10px] font-bold mb-1.5">
+<span class="material-symbols-outlined text-[15px] text-amber-400">location_on</span>
+<span>Геолокация</span>
+</div>
+<div class="text-zinc-200 font-medium">Крым, мыс Айя, урочище Батилиман</div>
+<div class="text-[11px] font-mono text-zinc-400 mt-0.5">44.4021° N, 34.0532° E · Высота: 142 м</div>
+</div>
+<div class="h-px bg-[#222631]"></div>
+<!-- AI Detected Faces (InsightFace) -->
+<div>
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-1.5 text-zinc-400 uppercase tracking-wider text-[10px] font-bold">
+<span class="material-symbols-outlined text-[15px] text-amber-400">face</span>
+<span>Распознанные персоны (1)</span>
+</div>
+<span class="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+              InsightFace 98.2%
+            </span>
+</div>
+<div class="flex items-center gap-2.5 bg-[#171a22] p-2 rounded border border-[#252a37]">
+<img alt="Анна" class="w-9 h-9 rounded-full object-cover border border-amber-500/40" src="https://www.gstatic.com/labs-code/stitch/stitch-placeholder-300x300.svg"/>
+<div class="flex-1 min-w-0">
+<div class="text-xs font-semibold text-zinc-200 truncate">Анна (мама)</div>
+<div class="text-[10px] text-zinc-400 font-mono">Сходство дескриптора: 0.94</div>
+</div>
+<button class="p-1 text-zinc-400 hover:text-white rounded" title="Просмотреть все фото персоны">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+<!-- Albums Inclusion -->
+<div>
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-1.5 text-zinc-400 uppercase tracking-wider text-[10px] font-bold">
+<span class="material-symbols-outlined text-[15px] text-amber-400">folder_special</span>
+<span>В альбомах (2)</span>
+</div>
+<button class="text-[11px] text-amber-400 hover:underline">+ Добавить</button>
+</div>
+<div class="flex flex-wrap gap-1.5">
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#171a22] border border-[#282d3b] text-zinc-300 text-[11px]">
+<span class="material-symbols-outlined text-[13px] text-amber-400">folder</span>
+<span>Отпуск 2024</span>
+<button class="hover:text-rose-400 ml-0.5 text-zinc-500">×</button>
+</span>
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#171a22] border border-[#282d3b] text-zinc-300 text-[11px]">
+<span class="material-symbols-outlined text-[13px] text-amber-400">folder</span>
+<span>Избранные пейзажи</span>
+<button class="hover:text-rose-400 ml-0.5 text-zinc-500">×</button>
+</span>
+</div>
+</div>
+<!-- AI CLIP Tags -->
+<div>
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-1.5 text-zinc-400 uppercase tracking-wider text-[10px] font-bold">
+<span class="material-symbols-outlined text-[15px] text-amber-400">auto_awesome</span>
+<span>Семантические теги (CLIP)</span>
+</div>
+<span class="text-[10px] font-mono text-zinc-400">ViT-B/32 &gt; 85%</span>
+</div>
+<div class="flex flex-wrap gap-1.5">
+<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 text-[11px] font-mono">
+              #море <span class="text-[9px] text-amber-400/70">98%</span>
+</span>
+<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 text-[11px] font-mono">
+              #побережье <span class="text-[9px] text-amber-400/70">95%</span>
+</span>
+<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 text-[11px] font-mono">
+              #горы <span class="text-[9px] text-amber-400/70">92%</span>
+</span>
+<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 text-[11px] font-mono">
+              #скалы <span class="text-[9px] text-amber-400/70">89%</span>
+</span>
+<span class="px-2 py-0.5 rounded bg-[#171a22] text-zinc-400 border border-[#282d3b] text-[11px] font-mono hover:text-white cursor-pointer">
+              + Добавить тег...
+            </span>
+</div>
+</div>
+<!-- OCR Text recognition section -->
+<div>
+<div class="flex items-center justify-between mb-1.5">
+<div class="flex items-center gap-1.5 text-zinc-400 uppercase tracking-wider text-[10px] font-bold">
+<span class="material-symbols-outlined text-[15px] text-amber-400">text_fields</span>
+<span>Распознанный текст (OCR)</span>
+</div>
+<span class="text-[10px] font-mono text-zinc-500">tesseract</span>
+</div>
+<div class="text-[11px] text-zinc-400 italic bg-[#171a22] p-2 rounded border border-[#252a37]">
+            Текст на изображении не обнаружен (0 слов)
+          </div>
+</div>
+<!-- Quality & Integrity Check (Perceptual hash & Sharpness) -->
+<div class="p-2.5 rounded bg-[#161920] border border-[#252a37] space-y-1.5 font-mono text-[11px]">
+<div class="text-[10px] uppercase font-bold text-zinc-400">Контроль дубликатов &amp; Качество</div>
+<div class="flex justify-between text-zinc-300">
+<span class="text-zinc-500">dHash:</span>
+<span>f4a8b92c103e871a</span>
+</div>
+<div class="flex justify-between text-zinc-300">
+<span class="text-zinc-500">Дисперсия Лапласиана:</span>
+<span class="text-emerald-400 font-bold">1420.8 (Чёткий)</span>
+</div>
+<div class="flex justify-between text-zinc-300">
+<span class="text-zinc-500">Целостность SHA256:</span>
+<span class="text-emerald-400">Проверена ✓</span>
+</div>
+</div>
+</div>
+</aside>
+</div>
+<!-- PERSISTENT FOOTER STATUS BAR (photocat Desktop Signature) -->
+<footer class="h-7 bg-[#0c0e12] border-t border-[#1f222b] px-3 flex items-center justify-between text-[11px] font-mono text-zinc-400 shrink-0 z-30">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<span class="text-zinc-300">Полноэкранный просмотрщик photocat</span>
+</div>
+<span class="text-zinc-600">|</span>
+<span>Синхронизировано</span>
+<span class="text-zinc-600">|</span>
+<span class="text-amber-400 font-medium">Кадр 142 из 326</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-1.5">
+<span class="text-zinc-400">Цветовой профиль:</span>
+<span class="text-zinc-300">sRGB IEC61966-2.1</span>
+</div>
+<span class="text-zinc-600">|</span>
+<div class="flex items-center gap-1.5">
+<span class="text-zinc-400">Глубина цвета:</span>
+<span class="text-zinc-300">14-bit RAW (demosaiced)</span>
+</div>
+<span class="text-zinc-600">|</span>
+<span class="text-zinc-500">Горячие клавиши: [Esc] Выход • [← / →] Навигация • [F] Fullscreen • [I] Инспектор</span>
+</div>
+</footer>
+</body>
+</html>

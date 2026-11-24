@@ -2,10 +2,10 @@
 
 *Русская версия: [M22-ui-spec.ru.md](M22-ui-spec.ru.md).*
 
-Source: `/home/alx/Documents/stitch_photocat_desktop_ui_specification` — a mock-up set made outside the
-repository (Stitch). It holds seven HTML screens, two design-system files and one screenshot per
-screen. This document says what of it is adopted, what is refused and in what order the work goes.
-It is the source of truth for M22; `docs/UI.md` keeps the normative rules of the window.
+Source: [`docs/references/mockups/`](../docs/references/mockups/README.md) — the owner's mock-up set
+(Stitch export), committed on 2026-11-24. It holds seven HTML screens, two design-system files and one
+screenshot per screen. This document says what of it is adopted, what is refused and in what order the
+work goes. It is the source of truth for M22; `docs/UI.md` keeps the normative rules of the window.
 
 ## 1. What the mock-up set contains
 

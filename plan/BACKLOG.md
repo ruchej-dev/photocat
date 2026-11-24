@@ -1007,7 +1007,7 @@ was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 
 ## M22 — the desktop UI specification: two themes and screen-by-screen conformance
 
-**Goal.** The owner's mock-up set (outside the repository) becomes the interface: one token palette
+**Goal.** The owner's mock-up set (`docs/references/mockups/`) becomes the interface: one token palette
 with a dark and a light theme, the layout of the main screens, and the same rules for the screens the
 mock-up has no layout for.
 

@@ -1079,9 +1079,10 @@ further; keeping a dependency for a variant that lost.
 
 ## 0044. Two themes from the mock-up: one token palette, the mock-up's radii, amber as the only signal
 
-The owner brought a mock-up set made outside the repository (Stitch): seven screens in HTML, two
-design-system files (`functional_precision_desktop`, `functional_precision_light`) and the rule "for
-screens without a layout, build by the same rules". The code has had one theme since M16: colours
+The owner brought a mock-up set (Stitch): seven screens in HTML, two design-system files
+(`functional_precision_desktop`, `functional_precision_light`) and the rule "for screens without a
+layout, build by the same rules". The set was kept outside the repository then and moved into
+`docs/references/mockups/` on 2026-11-24 — a reference, never a build step. The code has had one theme since M16: colours
 came from `egui::Visuals`, the only own colour was the blue accent `rgb(90,170,255)`, the radius was
 4 px, the caption under a tile was 26 px with the date, and `docs/UI.md` listed "theme settings" as
 something the interface would not have.
