@@ -1032,3 +1032,39 @@ previews, so the numbers are comparable between models and between runs of the s
 with someone else's labelled set. The first run (M15.7) gives top-1 85.4 % / 82.6 %, top-3 97.6 % /
 97.7 %, confident-tag accuracy 79.7 % / 79.0 % on the two folders; the numbers are in
 `docs/ARCHITECTURE.md` § Measurements and § "Labelled check of the tags".
+
+## 0043. The fp16 towers of SigLIP 2 are not adopted: int8 costs no tag quality
+
+M15.6 left one question open: SigLIP 2 caught 69.0 % of the shots with recognized text against
+CLIP's 85.9 %, while its text tower is int8 (283.4 MiB) and `onnx-community` ships fp16 towers as
+well (vision 186.0 MiB, text 564.9 MiB). Part of the loss could have been the quantisation, so the
+answer had to be measured rather than guessed.
+
+**Decision.** Both fp16 towers were swapped into a bench copy of the SigLIP 2 entry (a symlink in the
+model folder and a temporary edit of the catalogue's file list during each run; nothing shipped) and
+the same numbers were measured on the same 2231 files, with the same tag dictionary, the same
+`tag_show` 0.22 / `tag_margin` 0.01 rule and the same calibration protocol as M15.6:
+
+| towers (vision + text) | model | confident tags | documents with text caught | false “document” without text |
+|---|---|---|---|---|
+| int8 + int8 (the catalogue entry) | 393.3 MiB | 55.2 % | 69.0 % | 10.0 % |
+| int8 + fp16 text | 661.6 MiB | 55.8 % | 64.8 % | 12.7 % |
+| fp16 + fp16 | 748.9 MiB | 55.4 % | 49.0 % | 3.6 % |
+
+int8 costs no tag quality: the confident share is the same in all three, the fp16 text tower is
+*worse* on documents, and the fully fp16 model only trades document recall for precision (49.0 %
+caught, 3.6 % false) — it is less document-biased, not better at finding documents. The document
+weakness belongs to SigLIP 2 itself, not to the 8-bit files.
+
+**Consequences.** SigLIP 2 stays a single int8 catalogue entry; no fp16 variant is added, the
+default stays the multilingual CLIP, and `models list` still shows four entries. No dependency
+remains either: ORT on CPU does run the fp16 graphs, and the only code needed was a 15-line reader of
+an `f16` output tensor (`ort` feature `half` plus `half::f16`), reverted with the temporary catalogue
+data once the numbers were in. The rejected variants would have cost 1.7–1.9× the weights on disk and
+in RAM and a slower model load for no gain; the `embed --refresh` time was the same (528.7 s against
+510.0 s). The fp16 weights are Apache-2.0, stay outside the repository and are named with their
+sha256 in `plan/STATUS.md` § M15.6 tail, so the experiment can be repeated.
+
+**What it forbids.** Adding an fp16 entry to the catalogue "because it is more precise" without the
+same measurement; treating a lower false-positive rate as a win while the true-positive rate falls
+further; keeping a dependency for a variant that lost.

@@ -5,7 +5,7 @@
 > С M21 этот файл пишется по-английски; записи M21 и новее остались на языке, на котором
 > писались. Русская документация — второй вариант (`*.ru.md`). См. `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042) → next:the open tail of M15.6 (an fp16 text tower against int8) if the owner wants SigLIP 2 at all, then the owner's review of the M15.7 labels. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043) → next:the owner's re-read of the M15.7 labels; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1627,8 +1627,9 @@ OCR (373 кандидата, 142 с текстом, 68 218 знаков, 83.1 с
 их метки совпадают в 629 случаях (77.2 %). Векторы четырёх моделей занимают 18.4 МиБ, БД — 62.8 МБ.
 
 **Не делали намеренно.** Сравнения с CLIP ViT-L/14 (свыше 500 МиБ, сверх любого разумного лимита);
-fp16-текстовой башни SigLIP 2 (538.7 МиБ), которая отделила бы потери int8 от свойств модели, — это
-открытый вопрос, а не баг. (Размеченная проверка, которой эти числа ждали, сделана в M15.7 ниже.)
+fp16-текстовой башни SigLIP 2 (538.7 МиБ), которая отделила бы потери int8 от свойств модели, — этот
+вопрос позже закрыт замером (§ Хвост M15.6 ниже: int8 не стоит качества). (Размеченная проверка,
+которой эти числа ждали, сделана в M15.7 ниже.)
 
 **Проверки.** `cargo test` — 207 прошло, 6 `#[ignore]` (новые: каталог четырёх моделей с уникальными
 id/каталогами, sha256, лицензией и калибровкой-тождеством только у CLIP; калибровка ставит обе
@@ -1708,5 +1709,53 @@ photocat eval --labels OUT/labels.csv                 # цифры
 за лист); `cargo clippy --all-targets` — чисто; `check.sh` — 52 проверки, 0 нарушений; те же метки
 после `embed --refresh` воспроизводят таблицу.
 
-**Дальше.** `plan/SESSION.md` — очередь: перечитка меток владельцем, затем открытый хвост M15.6
-(fp16 текстовая башня), если SigLIP 2 вообще нужен.
+**Дальше.** `plan/SESSION.md` — очередь: перечитка меток владельцем; хвост M15.6 закрыт (см.
+ниже), SigLIP 2 остаётся моделью по выбору.
+
+## Хвост M15.6 — башни fp16 против int8 (2026-11-24) ✅
+
+От M15.6 осталось честное сомнение: SigLIP 2 ловил 69.0 % снимков с распознанным текстом там, где
+CLIP ловил 85.9 %, а `onnx-community` рядом с int8-файлами выкладывает и fp16-башни — часть потерь
+могла быть квантованием. Вопрос решён замером, а не мнением, и ответ — нет.
+
+**Как.** Копия папки модели для замера (`/tmp`, симлинки) и временная правка списка файлов каталога
+на время прогона; записи в каталоге не появилось, модель по умолчанию не менялась. Те же 2231
+файлов, тот же словарь тегов, то же правило `tag_show` 0.22 / `tag_margin` 0.01, тот же протокол
+калибровки, что в M15.6 (сырые косинусы восстанавливаются коэффициентами, медианы сводятся к CLIP
+0.263 / 0.0118):
+
+| башни (зрение + текст) | модель | уверенных тегов | документов с текстом найдено | ложный «документ» без текста | `embed --refresh` |
+|---|---|---|---|---|---|
+| int8 + int8 (запись каталога) | 393.3 МиБ | 55.2 % (1231) | 69.0 % (100/145) | 10.0 % (183/1828) | 510.0 с |
+| int8 + fp16 текст | 661.6 МиБ | 55.8 % (1246) | 64.8 % (94/145) | 12.7 % (232/1828) | — (`--retag` 8.3 с) |
+| fp16 + fp16 | 748.9 МиБ | 55.4 % (1235) | 49.0 % (71/145) | 3.6 % (65/1828) | 528.7 с |
+
+**Ответ.** int8 не стоит качества тегов. Доля уверенных одинакова у всех трёх вариантов; одна
+fp16-текстовая башня **хуже** по документам (64.8 % против 69.0 %) и чаще ставит ложный «документ»
+(12.7 % против 10.0 %); полностью fp16-модель сохраняет долю уверенных, но меняет полноту на
+точность (найдено 49.0 %, ложно 3.6 %) — она меньше смещена к документам, а не лучше их находит.
+Слабость по документам — свойство самой SigLIP 2, а не 8-битных файлов, поэтому вывод M15.6
+остаётся: по умолчанию мультиязычная CLIP, SigLIP 2 — модель по выбору.
+
+Три калибровки выходят такими, какими и должны быть у работающего отображения — `(1.4434, 0.1381)`
+для int8, `(1.1803, 0.1528)` для int8-зрения с fp16-текстом, `(0.7827, 0.1902)` для fp16 — и каждая
+ставит медианы туда, где у CLIP; каталожные `(1.42, 0.14)` для int8 воспроизводят 55.2 % / 69.0 % /
+10.0 % — у M15.6 было 54.8 % уверенных на этом каталоге, 69.0 % найденных документов и 9.7 %
+ложных на объединённом наборе. Ценой fp16 были бы 1.9× весов на диске и в памяти (748.9 против
+393.3 МиБ) и более медленная загрузка модели без выигрыша; `search` на уровне процесса (загрузка
+модели и sha256 каждого файла весов включены) занимает 2.8–5.1 с у любого варианта, само кодирование
+текста — миллисекунды.
+
+**Что пробовали и не оставили.** ORT на CPU fp16-графы исполняет; из кода понадобился только
+читатель выхода `f16` на 15 строк (`ort` с фичей `half` и `half::f16`). Ни один вариант не выиграл,
+поэтому читатель, зависимость и временные данные каталога откатаны — исходники этой задачей не
+изменены. Веса (Apache-2.0) скачаны руками, мимо приложения и мимо репозитория, в `/tmp`:
+`vision_model_fp16.onnx` 186 039 516 Б, sha256
+`a1959f7bd3993a607e48839f6d01e25b876fe76afda301b028b78eef68aabd95`; `text_model_fp16.onnx`
+564 862 230 Б, sha256 `711da56ada0a4aa11c7dd3320df741081a3cae4f0ae1b5e5c6d5b294738d0eb0`; оба из
+`onnx-community/siglip2-base-patch16-224-ONNX`. В каталоге их нет: `models list` по-прежнему
+показывает четыре записи, и приложение ничего нового не скачивает.
+
+**Проверки.** Замерная БД воспроизводит все числа выше (`/tmp/m156/bench.db`, копия БД M15.7);
+`cargo test` — 216 прошло, 6 `#[ignore]`; `cargo clippy --all-targets` — чисто; `check.sh` — 52
+проверки, 0 нарушений, прогнан после отката. ADR 0043.

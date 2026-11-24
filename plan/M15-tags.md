@@ -255,8 +255,10 @@ from 0 % confident tags to 55.6 % — the M12 tail is closed. SigLIP 2 is **wors
 document category and 2.7× slower, so the default stays `clip-vit-b32-multilingual`. Numbers and the
 files — `plan/STATUS.md` § M15.6, ADR 0041.
 
-**Left open.** CLIP ViT-L/14 (over 500 MiB) was not tried; neither was the fp16 SigLIP 2 text tower
-(538.7 MiB), so it is unknown how much of the loss is int8 quantisation. The old models and vectors
+**Left open.** CLIP ViT-L/14 (over 500 MiB) was not tried. The fp16 tail is closed (2026-11-24): the
+fp16 towers are not better than int8 — the confident share is the same, the fp16 text tower catches
+fewer documents (64.8 % against 69.0 %), and the fully fp16 model only trades recall for precision
+(49.0 % / 3.6 %) at 748.9 MiB; ADR 0043, `plan/STATUS.md` § M15.6 tail. The old models and vectors
 are not mixed: `embeddings` is keyed by `(file_id, model)`, `tags` by `(file_id, tag, source)`, and
 the calibration version is part of the source.
 

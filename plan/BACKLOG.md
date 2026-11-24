@@ -599,8 +599,11 @@ questions — `plan/M15-tags.md`.
    vector. Measured on two folders: SigLIP 2 55.3 % confident tags (CLIP 55.6 %), documents with text
    caught 69.0 % (CLIP 85.9 %), false "document" on photos without text 9.7 % (CLIP 3.3 %), 0.170 s
    per file against 0.063 — so the default stays the multilingual CLIP. `plan/STATUS.md` § M15.6.
-   Open tail: the fp16 text tower (538.7 MiB) was not tried, so it is unknown how much of the loss is
-   int8.
+   **The tail is closed** (2026-11-24): the fp16 towers were measured on the same 2231 files. int8
+   costs no tag quality — 55.2 % confident and 69.0 % of the documents with text caught, the M15.6
+   picture for this folder; the fp16 text tower alone is worse on documents (64.8 %), and the fully
+   fp16 model trades recall for precision (49.0 % caught, 3.6 % false) at 748.9 MiB. Nothing was kept:
+   no fp16 entry, no dependency, the tree is unchanged. ADR 0043, `plan/STATUS.md` § M15.6 tail.
 7. ✅ **A check on two independent folders with a labelled sample** (≥100 shots including
    renders/screenshots): top-1/top-3, how many "furniture" shots at the 100 %/70 % percentile, the
    embedding time and the DB size — with the date, the folder and the model in

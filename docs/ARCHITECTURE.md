@@ -370,6 +370,14 @@ older calibration are never mixed into the new distribution; ADR 0041.
 270 MiB is the 256k-token Gemma text tower), it is 2.7× slower than CLIP on the same CPU, and on
 the owner's archive it is **worse** than CLIP on the document category (see § Measurements).
 
+**The 8-bit files are not the reason.** The open tail of M15.6 was whether the int8 quantisation,
+not the model, costs the document recall; the fp16 towers (vision 186.0 MiB + text 564.9 MiB) were
+measured on the same 2231 files and made it **no better**: the confident share stays at 55.2–55.8 %,
+the fp16 text tower catches fewer documents (64.8 % against 69.0 %), and the fully fp16 model only
+trades recall for precision (49.0 % caught, 3.6 % false against 69.0 % / 10.0 %). Full fp16 would
+cost 748.9 MiB and a slower load for nothing, so it is not a catalogue entry; the decision and the
+numbers are in ADR 0043 and `plan/STATUS.md` § M15.6 tail.
+
 ## Labelled check of the tags (M15.7)
 
 Tags are hints, so the only honest way to tell whether a change helped is a sample labelled by a
@@ -525,6 +533,10 @@ not with a different labelled set.
 | 2026-11-24 | 13 labelled “furniture” shots of the phone corpus (of 120) | percentile filter of the tag, whole index 2229 files | 70 %: found 13/13, threshold 0.235, the filter shows 676 of 2229 shots; 100 %: found 0/13, threshold 0.306 — by construction it keeps the single strongest shot of the tag |
 | 2026-11-24 | phone corpus 2231 files | `embed --refresh --jobs 8 --batch 8`, release, CLIP multilingual | 126.1 s (56.5 ms/file, two frames), 0 errors, DB 30 MB together with OCR and faces |
 | 2026-11-24 | `фото с Wats app от Лизы`, 289 files, 49.1 MiB | `index --jobs 16` + `embed --refresh` | indexing 1.8 s, embedding 16.7 s (57.8 ms/file), DB 2.3 MB, previews in the cache |
+| 2026-11-24 | phone corpus, 2231 files with tags, 145 with recognized text, `/tmp` bench DB (M15.6 tail) | `embed --refresh`, SigLIP 2 int8 vision + int8 text, release | 510.0 s; 55.2 % confident tags, 69.0 % (100/145) of the documents with text caught, false “document” on images without text 10.0 % (183/1828); model 393.3 MiB |
+| 2026-11-24 | the same DB and the same image vectors | temporary int8 vision + fp16 text, `embed --retag` | 8.3 s including the model load; 55.8 % confident, 64.8 % (94/145) documents caught, false “document” 12.7 % (232/1828); model 661.6 MiB |
+| 2026-11-24 | the same files, image vectors recomputed | temporary fp16 vision + fp16 text, `embed --refresh` | 528.7 s; 55.4 % confident, 49.0 % (71/145) documents caught, false “document” 3.6 % (65/1828); model 748.9 MiB |
+| 2026-11-24 | each of the three variants, the same DB | process-level `search "документ"` | 2.8–4.6 s int8, 4.2–5.1 s int8+fp16 text, 3.9–4.0 s fp16 — dominated by the sha256 of the weight files and the ONNX session load; the query itself is milliseconds |
 
 Rule: numbers without a corpus and a date do not enter the table.
 

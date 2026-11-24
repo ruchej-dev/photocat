@@ -10,8 +10,9 @@
 > tiles**, **M17: the grid layout and the sort order**, **M16: the interface after the PhotoPrism
 > model** (`plan/M16-interface.md`, ADR 0033). **M15.6 — the multilingual SigLIP 2 model and the
 > calibration of the tag weight** is done as well (ADR 0041). **M15.7 — a blind labelled check on two
-> folders** is done too (`photocat eval`, 240 labelled shots; ADR 0042). The queue: the owner's re-read
-> of the labels, then the open tail of M15.6 (the fp16 text tower against int8) if SigLIP 2 is wanted.
+> folders** is done too (`photocat eval`, 240 labelled shots; ADR 0042), and the open tail of M15.6 is
+> closed: the fp16 towers cost no tag quality (ADR 0043), so SigLIP 2 stays opt-in. The queue: the
+> owner's re-read of the M15.7 labels.
 > The owner cancelled renaming the originals (2026-11-23). The entry point: `plan/STATUS.md`.
 > Below is the historical log of M13–M14c, not the current status.
 
