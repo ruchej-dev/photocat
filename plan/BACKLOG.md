@@ -1051,7 +1051,7 @@ mock-up's EXIF/GPU/tray/update functions, a network call, a file operation.
 
 ---
 
-## M23 — English is the language of the code 🔄 (M23.1 done)
+## M23 — English is the language of the code 🔄 (M23.1–M23.4 done)
 
 **Goal.** The repository is English in the code as well as in the documents: identifiers, comments,
 logs, errors and the source text of the interface. Russian survives only as a translation
@@ -1065,14 +1065,20 @@ logs, errors and the source text of the interface. Russian survives only as a tr
    changed no behaviour. ✅ (M23.1: `cargo test` 234 passed)
 4. Every module is converted: `PENDING` in `tests/source_language.rs` is empty, so a Russian
    comment or string in `src/` fails the guard (the model prompts of `embed.rs` stay exempt).
+   ✅ (M23.4: `PENDING` is empty; comments and literals in `src/` are English)
 5. `plan/I18N.md`, `docs/ARCHITECTURE.md` and `AGENTS.md` §6 describe the new direction. ✅ (M23.1)
 
 **Steps.** M23.1 — identifiers, the inverted table, the guard, the documents (done). M23.2 — L0/L1:
 `i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs` (done: no Cyrillic left, the size units
-moved into `i18n::units`, `db::human` speaks English and the GUI uses `human_in`). M23.3 — L2: `dupes`, `embed`, `eval`,
-`ocr`, `faces`, `organize`, `verify`, `recycle`, `index`, `player`. M23.4 — `app.rs` (the bulk:
-comments and the remaining labels). M23.5 — `main.rs`, the tests and `scripts/`. M23.6 — the
-corpus pass and the numbers in `docs/ARCHITECTURE.md`.
+moved into `i18n::units`, `db::human` speaks English and the GUI uses `human_in`). M23.3 — L2:
+`dupes`, `eval`, `ocr`, `faces`, `organize`, `verify`, `recycle`, `index`, `player`, `embed` (done;
+the CLIP prompts stay Russian as data, the default tag labels became English and reach the Russian
+window through `i18n::word`). M23.4 — `app.rs` (done: 720 comment lines, 200 literals through the
+table, the 40 hand-written `match lang` blocks replaced by one English source and one translation).
+M23.5 — `main.rs` (done), the test messages and `scripts/` (the message strings inside `#[cfg(test)]`
+are still Russian: they are allowed by the guard, but the rule is English; the data — album names,
+queries, expected Russian UI text — stays). M23.6 — the corpus pass and the numbers in
+`docs/ARCHITECTURE.md`.
 
 **Not doing.** Translating the owner's own data (album and face names, user tags, `labels.csv`);
 a third language; gettext/fluent; changing the language mechanism decided in ADR 0040.
