@@ -1471,6 +1471,20 @@ const PAIRS: &[(&str, &str)] = &[
         "tesseract не запускается ({}) — установите tesseract и языковые пакеты ({}) или укажите путь в настройках; остальной функционал работает без него",
     ),
 
+    (
+        "downloading the face weights needs an explicit consent (the checkbox in the settings or --yes)",
+        "скачивание весов лиц требует явного согласия (галочка в «Настройках» или --yes)",
+    ),
+    (
+        "the face model {} is bigger than the limit of {} MiB — raise the limit in the settings",
+        "модель лиц {} больше лимита {} МиБ — поднимите лимит в «Настройках»",
+    ),
+    ("faces: model {}, threads {}", "лица: моделей {}, потоков {}"),
+    ("faces: stopped", "лица: остановлено"),
+    ("faces: clusters", "лица: кластеры"),
+    ("the face write thread died", "поток записи лиц упал"),
+    ("faces {}: {}", "лица {}: {}"),
+
 ];
 
 #[cfg(test)]

@@ -14,10 +14,7 @@ use std::path::Path;
 /// Modules that still carry Russian comments or strings (the refactor works them off one by one).
 const PENDING: &[&str] = &[
     "app.rs",
-    "dupes.rs",
     "embed.rs",
-    "eval.rs",
-    "faces.rs",
     "i18n.rs",
     "main.rs",
     "organize.rs",
@@ -27,7 +24,14 @@ const PENDING: &[&str] = &[
 
 /// Files whose string literals are legitimate Russian *data*: the translation table itself and the
 /// prompts for the multilingual model. Their comments are still English like everywhere else.
-const RUSSIAN_DATA: &[&str] = &["i18n.rs", "embed.rs"];
+const RUSSIAN_DATA: &[&str] = &[
+    "i18n.rs",
+    // The prompts of the multilingual CLIP model and its default tag labels.
+    "embed.rs",
+    // `labels.csv` is the owner's file: the parser keeps accepting the old Russian keywords
+    // `пропуск` and `другое` next to `skip` and `other`.
+    "eval.rs",
+];
 
 fn is_cyrillic(c: char) -> bool {
     matches!(c, '\u{0400}'..='\u{04FF}')

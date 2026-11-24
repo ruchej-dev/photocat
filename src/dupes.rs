@@ -1,5 +1,5 @@
-//! Поиск дублей: точные (sha256) и похожие снимки (расстояние Хэмминга по dHash),
-//! совет «что оставить» и экспорт плана решения. Оригиналы не трогаем.
+//! Duplicate search: exact copies (sha256) and similar shots (Hamming distance over dHash),
+//! the "what to keep" advice and the export of the decision plan. The originals are untouched.
 
 use crate::db::{self, FileRow};
 use crate::i18n::{self, Lang};
@@ -8,8 +8,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Почему файлы попали в одну группу. Метка переводится на месте (M21.6):
-/// сам признак — данные, слова — отчёт.
+/// Why the files landed in one group. The label is translated on the spot (M21.6):
+/// the feature itself is data, the words belong to the report.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Reason {
     Exact,
@@ -28,8 +28,8 @@ impl Reason {
     }
 }
 
-/// Из чего сложился совет «что оставить»: числа и признаки без слов, чтобы отчёт
-/// и интерфейс переводились, а не хранили готовую русскую фразу (M21.6).
+/// What the "what to keep" advice is made of: numbers and features without words, so the
+/// report and the interface are translated instead of storing a ready-made Russian phrase (M21.6).
 #[derive(Clone, PartialEq, Debug)]
 pub enum AdvicePart {
     SharperBy(f64),
@@ -40,13 +40,13 @@ pub enum AdvicePart {
 
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Advice {
-    /// Все файлы — копии одного содержимого: выбирать нечего.
+    /// Every file is a copy of one content: there is nothing to choose.
     pub same_content: bool,
     pub parts: Vec<AdvicePart>,
 }
 
 impl Advice {
-    /// Совет словами на языке отчёта: части соединяются точкой-разделителем.
+    /// The advice in words in the language of the report: the parts are joined by a middle dot.
     pub fn label(&self, lang: Lang) -> String {
         if self.same_content {
             return i18n::t(lang, "exact copies — no difference").to_string();
@@ -75,13 +75,13 @@ pub struct Group {
     pub members: Vec<usize>,
     pub waste: i64,
     pub reason: Reason,
-    /// Индекс в `rows`: кадр, который советуем оставить.
+    /// The index in `rows`: the frame we advise to keep.
     pub suggested: usize,
-    /// Почему именно он — признаки, слова собираются на языке отчёта.
+    /// Why exactly that one — the features; the words are built in the language of the report.
     pub advice: Advice,
 }
 
-/// Что уже решено по найденным группам.
+/// What has been decided about the groups found.
 #[derive(Default)]
 pub struct Summary {
     pub groups: usize,
@@ -112,14 +112,14 @@ impl Uf {
     }
 }
 
-/// Выше этого числа хешей попарный перебор заменяется индексом по блокам: на 2230
-/// файлах перебор — 0.03 с, а на 20 тыс. это уже ~200 млн сравнений. Порог — не
-/// магия в цикле, а именованная константа.
+/// Above this number of hashes the pairwise scan gives way to a block index: on 2230
+/// files the scan takes 0.03 s, while on 20 thousand it is already ~200 million comparisons.
+/// The threshold is a named constant, not magic inside a loop.
 const INDEX_MIN: usize = 20_000;
 
-/// Блоков по 8 бит. Если расстояние Хэмминга меньше числа блоков, хотя бы один
-/// блок совпадает целиком — это и есть точный фильтр кандидатов (принцип ящиков).
-/// Восемь блоков дают гарантию для радиуса 0–7; больше — попарный перебор.
+/// Eight-bit blocks. If the Hamming distance is smaller than the number of blocks, at least
+/// one block matches whole — that is the exact candidate filter (the pigeonhole principle).
+/// Eight blocks guarantee radii 0–7; beyond that the pairwise scan takes over.
 const INDEX_BLOCKS: usize = 8;
 const INDEX_MAX_RADIUS: u32 = INDEX_BLOCKS as u32 - 1;
 
@@ -127,13 +127,13 @@ fn chunk(value: u64, block: usize) -> u8 {
     (value >> (8 * block)) as u8
 }
 
-/// Кластеры: сначала склеиваем точные копии по sha256, затем изображения по dHash.
+/// Clusters: exact copies merge by sha256 first, then images by dHash.
 pub fn find_groups(rows: &[FileRow], max_dist: u32) -> Vec<Group> {
     find_groups_with(rows, max_dist, INDEX_MIN)
 }
 
-/// Общая реализация с явным порогом: тесты сравнивают индекс и перебор на одних
-/// данных, передавая 0 или `usize::MAX`.
+/// The shared implementation with an explicit threshold: the tests compare the index and the
+/// scan on the same data, passing 0 or `usize::MAX`.
 fn find_groups_with(rows: &[FileRow], max_dist: u32, index_from: usize) -> Vec<Group> {
     let mut uf = Uf::new(rows.len());
 
@@ -195,7 +195,7 @@ fn find_groups_with(rows: &[FileRow], max_dist: u32, index_from: usize) -> Vec<G
     groups
 }
 
-/// Прежний попарный перебор: O(n²), ниже порога он дешевле индекса.
+/// The former pairwise scan: O(n²); below the threshold it is cheaper than the index.
 fn union_similar_pairwise(rows: &[FileRow], hashed: &[usize], max_dist: u32, uf: &mut Uf) {
     for (a, &i) in hashed.iter().enumerate() {
         let hi = rows[i].dhash.unwrap() as u64;
@@ -208,16 +208,16 @@ fn union_similar_pairwise(rows: &[FileRow], hashed: &[usize], max_dist: u32, uf:
     }
 }
 
-/// То же через многоблочный индекс по 8-битным кускам dHash. Для радиуса ≤ 7
-/// совпадение хотя бы одного блока обязательно, поэтому кандидатов в разы меньше,
-/// чем файлов; полное расстояние Хэмминга всё равно проверяется по u64.
-/// Метрическое дерево (BK-tree) здесь не спасает: на 64-битных хешах при радиусе 6
-/// почти все точки лежат на расстоянии ~32, и неравенство треугольника не отсекает
-/// ничего — на 50 тыс. это 17.2 с вместо долей секунды (ADR 0038).
+/// The same through a multi-block index over 8-bit pieces of the dHash. For a radius ≤ 7
+/// a match in at least one block is certain, so the candidates are many times fewer than the
+/// files; the full Hamming distance is still checked over the u64.
+/// A metric tree (BK-tree) does not help here: on 64-bit hashes at radius 6 almost every
+/// point sits at a distance of ~32, the triangle inequality filters nothing out, and 50
+/// thousand hashes take 17.2 s instead of fractions of a second (ADR 0038).
 fn union_similar_indexed(rows: &[FileRow], hashed: &[usize], max_dist: u32, uf: &mut Uf) {
-    // Один запрос на уникальный dHash: одинаковые кадры (чёрные кадры видео,
-    // серии) не должны давать n² проверок сами с собой. Уникальным значениям
-    // даём плотные номера — дальше дедупликация кандидатов массивом меток.
+    // One query per unique dHash: identical frames (black video frames, series) must not
+    // produce n² checks against themselves. Unique values get dense numbers — the candidates
+    // are deduplicated with a label array afterwards.
     let mut index: HashMap<u64, usize> = HashMap::new();
     let mut values: Vec<u64> = Vec::new();
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -277,7 +277,7 @@ fn pixels_of(r: &FileRow) -> i64 {
     r.width.max(0) * r.height.max(0)
 }
 
-/// Лучший кадр: резкость → разрешение → размер файла. При равенстве — любой.
+/// The best frame: sharpness → resolution → file size. On a tie — any of them.
 fn pick_best(rows: &[FileRow], members: &[usize]) -> usize {
     *members
         .iter()
@@ -293,7 +293,7 @@ fn pick_best(rows: &[FileRow], members: &[usize]) -> usize {
         .unwrap_or(&members[0])
 }
 
-/// Совет: почему этот кадр лучше остальных (без слов — слова собирает `Advice::label`).
+/// The advice: why this frame is better than the rest (no words — `Advice::label` builds them).
 fn advice_of(rows: &[FileRow], members: &[usize], best: usize) -> Advice {
     let same_content = !rows[best].sha256.is_empty()
         && members.iter().all(|&i| rows[i].sha256 == rows[best].sha256);
@@ -340,7 +340,7 @@ fn advice_of(rows: &[FileRow], members: &[usize], best: usize) -> Advice {
     }
 }
 
-/// Кадр, который считается оставленным: решение владельца, иначе совет.
+/// The frame considered kept: the owner's decision, otherwise the advice.
 pub fn keep_of(rows: &[FileRow], g: &Group) -> usize {
     g.members
         .iter()
@@ -349,7 +349,7 @@ pub fn keep_of(rows: &[FileRow], g: &Group) -> usize {
         .unwrap_or(g.suggested)
 }
 
-/// Счётчик для панели: сколько помечено лишним и сколько байт это освободит.
+/// A counter for the panel: how many are marked spare and how many bytes that frees.
 pub fn summary(rows: &[FileRow], groups: &[Group]) -> Summary {
     let mut s = Summary {
         groups: groups.len(),
@@ -366,8 +366,8 @@ pub fn summary(rows: &[FileRow], groups: &[Group]) -> Summary {
     s
 }
 
-/// План решения без удаления: одна строка на каждый «лишний» файл.
-/// `wasted_bytes` — сколько освободится, если убрать все помеченные файлы группы.
+/// The decision plan without a deletion: one row per spare file.
+/// `wasted_bytes` — how much is freed if every marked file of the group goes away.
 pub fn plan_csv(rows: &[FileRow], groups: &[Group], lang: Lang) -> String {
     let mut s = String::from("group,keep_path,drop_path,reason,wasted_bytes\n");
     for (n, g) in groups.iter().enumerate() {
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(g.advice.label(Lang::Ru), "точные копии — разницы нет");
     }
 
-    /// Нормализованное разбиение на группы: сравнение «тот же набор групп».
+    /// A normalized partition: comparing "the same set of groups".
     fn partition(groups: &[Group]) -> Vec<Vec<usize>> {
         let mut p: Vec<Vec<usize>> = groups
             .iter()
@@ -615,7 +615,7 @@ mod tests {
         p
     }
 
-    /// Детерминированный xorshift: тесты не зависят от внешнего `rand`.
+    /// A deterministic xorshift: the tests do not depend on an external `rand`.
     fn random_rows(n: usize, seed: u64) -> Vec<FileRow> {
         let mut x = seed | 1;
         (0..n)
@@ -630,11 +630,11 @@ mod tests {
             .collect()
     }
 
-    /// M11: индекс даёт ровно те же группы, что и попарный перебор, на случайных
-    /// наборах и на краевых случаях. Порог не влияет на результат, только на способ.
+    /// M11: the index gives exactly the same groups as the pairwise scan on random sets and
+    /// on edge cases. The threshold changes the way, not the result.
     #[test]
     fn the_index_and_a_plain_scan_give_the_same_groups() {
-        // Пусто, один элемент, все одинаковые, все далёкие.
+        // Empty, one element, all equal, all far apart.
         for rows in [
             Vec::new(),
             random_rows(1, 1),
@@ -655,7 +655,7 @@ mod tests {
                 assert_eq!(tree, brute, "max_dist {max_dist}, {} строк", rows.len());
             }
         }
-        // Случайные наборы: разных размеров и порогов, с одинаковыми хешами тоже.
+        // Random sets: of different sizes and thresholds, with equal hashes too.
         for (seed, n) in [(1, 8), (2, 40), (3, 80), (4, 160)] {
             let mut rows = random_rows(n, seed);
             for k in (0..n).step_by(17) {
@@ -669,7 +669,7 @@ mod tests {
         }
     }
 
-    /// M11: точные копии по sha256 склеиваются независимо от dHash и способа поиска.
+    /// M11: exact copies merge by sha256 regardless of dHash and of the search method.
     #[test]
     fn sha_copies_merge_through_the_index_too() {
         let mut rows = random_rows(4, 7);
@@ -686,8 +686,8 @@ mod tests {
         }
     }
 
-    /// M11: замер на синтетике — 20 тыс. и 50 тыс. хешей, `max_dist 6`. Гонять
-    /// release-сборкой: `cargo test --release --bin photocat синтетике -- --ignored --nocapture`.
+    /// M11: a measurement on synthetic data — 20 and 50 thousand hashes, `max_dist 6`. Run it
+    /// in a release build: `cargo test --release --bin photocat synthetic -- --ignored --nocapture`.
     #[test]
     #[ignore = "замер: 20k/50k синтетических хешей, нужен release"]
     fn the_index_is_measured_on_synthetic_data() {
@@ -702,8 +702,8 @@ mod tests {
                 .unwrap_or_else(|| "VmHWM недоступен".into())
         }
         for n in [20_000usize, 50_000] {
-            // Половина хешей — почти копия соседа: так в наборе есть группы, а не
-            // только далёкие пары, и запрос не вырождается в пустой.
+            // Half the hashes are an almost copy of a neighbour: the set then holds groups,
+            // not only far-apart pairs, and the query does not degenerate into an empty one.
             let mut rows = random_rows(n, 42);
             for i in (1..n).step_by(2) {
                 let base = rows[i - 1].dhash.unwrap() as u64;

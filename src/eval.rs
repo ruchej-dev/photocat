@@ -17,25 +17,25 @@ use image::{Rgb, RgbImage};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Сколько снимков в выборке по умолчанию (критерий M15.7 — не меньше ста).
+/// How many photos the sample holds by default (criterion M15.7 — at least a hundred).
 pub const SAMPLE_DEFAULT: u64 = 120;
-/// Сколько плиток на контактном листе: 4×4 по 320 px — читается человеком и не режется.
+/// How many tiles a contact sheet holds: 4×4 at 320 px — readable by a person and not cut.
 pub const SHEET_PER: usize = 16;
 const TILE: u32 = 320;
 const PAD: u32 = 6;
 const HEADER: u32 = 26;
 
-/// Отобранный файл выборки.
+/// A file picked into the sample.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub id: i64,
     pub path: String,
     pub sha256: String,
-    /// Путь превью относительно `<кэш>/photocat/thumbs` — из индекса, не из sha256 в коде.
+/// The preview path relative to `<cache>/photocat/thumbs` — from the index, not from a sha256 in code.
     pub thumb: Option<String>,
 }
 
-/// Что получилось при выгрузке выборки.
+/// What the sample export produced.
 #[derive(Debug)]
 pub struct Export {
     pub labels: PathBuf,
@@ -44,8 +44,8 @@ pub struct Export {
     pub rows: usize,
 }
 
-/// Разложить файлы по sha256 и взять каждый k-й: выборка не зависит от имён и дат и
-/// повторяется один в один. Меньше `n` файлов — берётся всё, что есть.
+/// Lay the files out by sha256 and take every k-th one: the sample does not depend on names
+/// or dates and repeats exactly. Fewer than `n` files — everything there is is taken.
 pub fn pick(candidates: &[Row], n: usize) -> Vec<Row> {
     if n == 0 || candidates.is_empty() {
         return Vec::new();
@@ -58,8 +58,8 @@ pub fn pick(candidates: &[Row], n: usize) -> Vec<Row> {
         .collect()
 }
 
-/// Кандидаты в выборку из каталога `dir`: изображения, не в корзине, с превью и с тегами
-/// активной модели. Порядок — по sha256 (см. `db::tagged_files`).
+/// The candidates for the sample from the folder `dir`: images, not in the trash, with a preview
+/// and with tags of the active model. The order is by sha256 (see `db::tagged_files`).
 pub fn candidates(conn: &rusqlite::Connection, dir: &Path, source: &str) -> Result<Vec<Row>> {
     Ok(db::tagged_files(conn, source)?
         .into_iter()
@@ -73,12 +73,12 @@ pub fn candidates(conn: &rusqlite::Connection, dir: &Path, source: &str) -> Resu
         .collect())
 }
 
-/// Выгрузить выборку: `labels.csv` для разметки, `guesses.csv` с подсказками модели и
-/// контактные листы с номерами. Метки из уже существующего `labels.csv` переносятся —
-/// так выборку можно перевыгрузить, не потеряв работу.
+/// Export the sample: `labels.csv` for labelling, `guesses.csv` with the model's hints and
+/// contact sheets with numbers. Labels from an existing `labels.csv` are carried over, so the
+/// sample can be exported again without losing the work.
 pub fn export(out_dir: &Path, rows: &[(Row, Vec<(String, f32)>)], thumbs: &Path) -> Result<Export> {
     std::fs::create_dir_all(out_dir)
-        .with_context(|| format!("не создать каталог {}", out_dir.display()))?;
+        .with_context(|| format!("cannot create the folder {}", out_dir.display()))?;
     let labels = out_dir.join("labels.csv");
     let guesses = out_dir.join("guesses.csv");
     let old = read_labels(&labels).unwrap_or_default();
@@ -134,7 +134,7 @@ pub fn export(out_dir: &Path, rows: &[(Row, Vec<(String, f32)>)], thumbs: &Path)
     })
 }
 
-/// Одна метка из `labels.csv`.
+/// One label from `labels.csv`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelRow {
     pub path: String,
@@ -144,12 +144,12 @@ pub struct LabelRow {
 }
 
 impl LabelRow {
-    /// Пустая метка — снимок ещё не размечен.
+    /// An empty label means the photo is not labelled yet.
     pub fn unlabelled(&self) -> bool {
         !self.skip && !self.other && self.labels.is_empty()
     }
 
-    /// Обратно в текст для `labels.csv`: нормализованный вид, порядок меток сохранён.
+    /// Back to text for `labels.csv`: the normalized form, the order of the labels kept.
     pub fn as_text(&self) -> String {
         if self.skip {
             return "skip".into();
@@ -161,8 +161,8 @@ impl LabelRow {
     }
 }
 
-/// Разметка одного снимка из строки CSV. Пусто — не размечено, `skip` — пропустить,
-/// `other` — ни один из тегов словаря не подходит; несколько допустимых меток — `a|b`.
+/// The labelling of one photo from a CSV row. Empty means unlabelled, `skip` means skip,
+/// `other` means none of the dictionary tags fits; several allowed labels are `a|b`.
 pub fn parse_label(s: &str) -> LabelRow {
     let raw = s.trim().to_ascii_lowercase();
     let mut row = LabelRow {
@@ -184,23 +184,23 @@ pub fn parse_label(s: &str) -> LabelRow {
         }
     }
     if row.other || row.skip {
-        // `other|furniture` — противоречие; сильнее пропуск, затем «другое».
+        // `other|furniture` is a contradiction; skip wins, then "other".
         row.labels.clear();
     }
     row
 }
 
-/// Прочитать `labels.csv`: `path` во втором столбце, `label` — в последнем.
+/// Read `labels.csv`: `path` in the second column, `label` in the last one.
 pub fn read_labels(path: &Path) -> Result<Vec<LabelRow>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
     let text = std::fs::read_to_string(path)
-        .with_context(|| format!("не прочитать {}", path.display()))?;
+        .with_context(|| format!("cannot read {}", path.display()))?;
     let mut rows = Vec::new();
     for (i, fields) in csv_parse(&text).into_iter().enumerate() {
         if i == 0 {
-            continue; // шапка
+            continue; // the header
         }
         let Some(file) = fields.get(1) else { continue };
         let mut row = parse_label(fields.get(2).map(String::as_str).unwrap_or(""));
@@ -210,7 +210,7 @@ pub fn read_labels(path: &Path) -> Result<Vec<LabelRow>> {
     Ok(rows)
 }
 
-/// Один размеченный снимок в цифрах.
+/// One labelled photo in numbers.
 #[derive(Debug, Default, Clone)]
 pub struct TagScore {
     pub label: String,
@@ -219,17 +219,17 @@ pub struct TagScore {
     pub top3: usize,
 }
 
-/// Сколько размеченных «мебельных» снимков нашёл процентильный фильтр этого тега.
+/// How many labelled "furniture" photos the percentile filter of that tag finds.
 #[derive(Debug, Clone, Copy)]
 pub struct PercentileRecall {
     pub pct: i32,
     pub threshold: f32,
-    /// Сколько размеченных снимков этого тега всего.
+    /// How many labelled photos of this tag exist in all.
     pub n: usize,
     pub found: usize,
 }
 
-/// Итог размеченной проверки.
+/// The result of the labelled check.
 #[derive(Debug, Default)]
 pub struct Score {
     pub rows: usize,
@@ -238,15 +238,15 @@ pub struct Score {
     pub missing: usize,
     pub labelled: usize,
     pub other: usize,
-    /// Сколько размеченных снимков допускают больше одной метки словаря.
+    /// How many labelled photos allow more than one dictionary label.
     pub multi: usize,
     pub top1: usize,
     pub top3: usize,
-    /// Снимки, где модель сказала «уверенно» (вес ≥ порога и отрыв от второго).
+    /// Photos where the model said "confidently" (weight ≥ the threshold and a margin).
     pub confident: usize,
-    /// Из них с меткой словаря — первый тег угадан.
+    /// Of those with a dictionary label — the first tag hit.
     pub confident_ok: usize,
-    /// Из них без метки словаря («другое») — уверенно, но мимо.
+    /// Of those without a dictionary label ("other") — confident, but wrong.
     pub confident_other: usize,
     pub per_tag: Vec<TagScore>,
     pub furniture: Vec<PercentileRecall>,
@@ -259,7 +259,7 @@ impl Score {
     pub fn top3_share(&self) -> f32 {
         share(self.top3, self.labelled)
     }
-    /// Точность уверенного тега: доля правильных среди тех, где модель была уверена.
+    /// The accuracy of the confident tag: the share of right answers among the confident ones.
     pub fn confident_precision(&self) -> f32 {
         share(self.confident_ok, self.confident_ok + self.confident_other)
     }
@@ -269,8 +269,8 @@ fn share(a: usize, b: usize) -> f32 {
     if b == 0 { 0.0 } else { a as f32 / b as f32 }
 }
 
-/// Посчитать метрики по разметке и тегам из БД. `tags` — путь → [(метка, вес)] по убыванию.
-/// Всё, что нужно для отчёта, считается здесь, без интерфейса и без SQL.
+/// Compute the metrics from the labels and the tags in the DB. `tags` is path → [(label, weight)] by descending weight.
+/// Everything the report needs is computed here, without the interface and without SQL.
 pub fn score(
     labels: &[LabelRow],
     tags: &HashMap<String, Vec<(String, f32)>>,
@@ -365,7 +365,7 @@ pub fn score(
             }
         }
     }
-    // Фильтр по «мебели»: сколько размеченных мебельных снимков он находит.
+    // The "furniture" filter: how many labelled furniture photos it finds.
     let furniture = by_id.get("furniture").copied();
     if let (Some(label), Some(dist)) = (furniture, furniture.and_then(|l| dists.get(l))) {
         let mut found_rows: Vec<(&str, f32)> = Vec::new();
@@ -419,10 +419,10 @@ pub fn write_csv(path: &Path, rows: &[Vec<String>]) -> Result<()> {
         out.push_str(&line.join(","));
         out.push('\n');
     }
-    std::fs::write(path, out).with_context(|| format!("не записать {}", path.display()))
+    std::fs::write(path, out).with_context(|| format!("cannot write {}", path.display()))
 }
 
-/// Разбор CSV с кавычками: запятая и перевод строки внутри кавычек — часть поля.
+/// CSV parsing with quotes: a comma and a newline inside quotes are part of the field.
 pub fn csv_parse(text: &str) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     let mut row: Vec<String> = Vec::new();
@@ -468,8 +468,8 @@ pub fn csv_parse(text: &str) -> Vec<Vec<String>> {
 
 // ------------------------------------------------------------------ sheets
 
-/// Контактный лист: плитки 320 px в сетке 4×4 с номером снимка в рамке.
-/// Подсказок модели на листе нет: разметка должна быть слепой.
+/// A contact sheet: 320 px tiles in a 4×4 grid with the photo number in a frame.
+/// There are no model hints on the sheet: the labelling must be blind.
 fn render_sheet(
     out: &Path,
     rows: &[(Row, Vec<(String, f32)>)],
@@ -494,7 +494,7 @@ fn render_sheet(
             3,
             Rgb([255, 220, 120]),
         );
-        // Само превью: лежит в кэше, к архиву не обращаемся.
+        // The preview itself: it lies in the cache, the archive is not touched.
         if let Some(rel) = &row.thumb {
             let p = thumbs.join(rel);
             match image::open(&p) {
@@ -513,7 +513,7 @@ fn render_sheet(
                     image::imageops::overlay(&mut sheet, &img, dx as i64, dy as i64);
                 }
                 Err(e) => {
-                    // Битая плитка не рушит лист: номер остаётся, превью — пустое.
+                    // A broken tile does not ruin the sheet: the number stays, the preview is empty.
                     eprintln!("{}: {e}", p.display());
                 }
             }
@@ -521,10 +521,10 @@ fn render_sheet(
     }
     sheet
         .save_with_format(out, image::ImageFormat::Png)
-        .with_context(|| format!("не записать {}", out.display()))
+        .with_context(|| format!("cannot write {}", out.display()))
 }
 
-/// Цифры 3×5, увеличенные в `scale` раз: номер на листе должен читаться без шрифта.
+/// 3×5 digits enlarged `scale` times: the number on the sheet must read without a font.
 fn draw_digits(img: &mut RgbImage, x: u32, y: u32, mut n: usize, scale: u32, color: Rgb<u8>) {
     const GLYPHS: [[u8; 5]; 10] = [
         [0b111, 0b101, 0b101, 0b101, 0b111],
@@ -638,7 +638,7 @@ mod tests {
         let two = parse_label("Furniture | interior");
         assert_eq!(two.labels, vec!["furniture", "interior"]);
         assert!(!two.other && !two.skip);
-        // Противоречие «другое + метка» решается в пользу «другого».
+        // The "other + label" contradiction is resolved in favour of "other".
         let odd = parse_label("other|furniture");
         assert!(odd.other);
         assert!(odd.labels.is_empty());
@@ -694,8 +694,8 @@ mod tests {
         assert_eq!(s.multi, 0);
         assert_eq!(s.top1, 1, "near.jpg is top-2, not top-1");
         assert_eq!(s.top3, 2);
-        // ok.jpg — уверенно и в цель; bad.jpg и odd.jpg — уверенно мимо («другое»);
-        // near.jpg при отрыве 0.01 не считается уверенным — ровно на пороге.
+        // ok.jpg — confident and right; bad.jpg and odd.jpg — confident but wrong ("other");
+        // near.jpg with a 0.01 margin does not count as confident — exactly at the threshold.
         assert_eq!(s.confident, 3);
         assert_eq!(s.confident_ok, 1);
         assert_eq!(s.confident_other, 2);
@@ -767,10 +767,10 @@ mod tests {
         .unwrap();
         assert_eq!(s.furniture.len(), 2);
         assert_eq!(s.furniture[0].n, 2);
-        // 100 % — только самый сильный снимок каталога (0.40): a.jpg.
+        // 100 % — only the strongest photo of the folder (0.40): a.jpg.
         assert_eq!(s.furniture[0].pct, 100);
         assert_eq!(s.furniture[0].found, 1);
-        // 70 % — верхние 30 % (ceil(1.5)=2) → порог 0.35, по-прежнему a.jpg.
+        // 70 % — the top 30 % (ceil(1.5)=2) → threshold 0.35, still a.jpg.
         assert_eq!(s.furniture[1].pct, 70);
         assert_eq!(s.furniture[1].found, 1);
     }
@@ -779,7 +779,7 @@ mod tests {
     fn the_number_is_drawn_within_the_sheet() {
         let mut img = RgbImage::from_pixel(20, 20, Rgb([0, 0, 0]));
         draw_digits(&mut img, 0, 0, 101, 3, Rgb([255, 255, 255]));
-        // Три цифры по 4*3 px — 36 px: за границей листа пиксель не появляется.
+        // Three digits of 4*3 px — 36 px: no pixel appears outside the sheet.
         assert_eq!(img.width(), 20);
         let lit = img.pixels().filter(|p| p[0] > 0).count();
         assert!(lit > 0 && lit < 20 * 20);

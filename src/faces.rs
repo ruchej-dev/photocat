@@ -1,7 +1,7 @@
-//! Лица: детекция SCRFD, выравнивание по 5 точкам, ArcFace-эмбеддинги и кластеры.
+//! Faces: SCRFD detection, alignment by 5 points, ArcFace embeddings and clusters.
 //!
-//! Модели лежат в `<models_dir>/faces/`, скачиваются только по согласию и проверяются по sha256.
-//! Наружу не уходит ни одно лицо, ни один эмбеддинг и ни один путь (ADR 0011, 0021).
+//! The models live in `<models_dir>/faces/`, are downloaded on consent only and checked by sha256.
+//! No face, no embedding and no path ever leaves the machine (ADR 0011, 0021).
 
 use crate::db::{self, FaceRow, Progress};
 use crate::derive;
@@ -20,14 +20,14 @@ use std::sync::{Arc, Mutex, mpsc};
 
 pub const MODEL_ID: &str = "buffalo_l";
 pub const MODEL_DIR: &str = "faces";
-/// Вход детектора: 640×640 с сохранением пропорций и чёрными полями.
+/// The detector input: 640×640 keeping the proportions, with black margins.
 pub const DET_SIDE: u32 = 640;
-/// Вход ArcFace: выровненный кадр 112×112.
+/// The ArcFace input: an aligned 112×112 frame.
 pub const FACE_SIDE: u32 = 112;
 pub const EMBED_DIM: usize = 512;
 pub const DET_THRESHOLD: f32 = 0.5;
 const NMS_IOU: f32 = 0.4;
-/// Совсем маленькие лица не дают пригодного эмбеддинга — их не считаем.
+/// Very small faces give no usable embedding — they are not counted.
 const MIN_FACE_PX: f32 = 28.0;
 
 const FILES: [ModelFile; 2] = [
@@ -45,7 +45,7 @@ const FILES: [ModelFile; 2] = [
     },
 ];
 
-/// Канонические точки ArcFace: глаза, нос, углы рта в кадре 112×112.
+/// The canonical ArcFace points: eyes, nose, mouth corners in a 112×112 frame.
 const ARC_DST: [[f32; 2]; 5] = [
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -75,16 +75,16 @@ pub fn check_model(settings: &db::Settings) -> Result<()> {
         let path = model_dir(settings).join(f.name);
         if !path.is_file() {
             bail!(
-                "нет файлов модели лиц: {}\nскачайте в «Настройках» (с согласием) или: \
+                "the face model files are missing: {}\ndownload them in the settings (with consent) or: \
                  ./target/release/photocat faces download --yes",
                 path.display()
             );
         }
         let got = derive::sha256_file(&path)
-            .with_context(|| format!("не прочитать {}", path.display()))?;
+            .with_context(|| format!("cannot read {}", path.display()))?;
         if got != f.sha256 {
             bail!(
-                "файл модели лиц повреждён ({}): {}\nsha256 {got}, ожидался {}",
+                "the face model file is damaged ({}): {}\nsha256 {got}, expected {}",
                 f.name,
                 path.display(),
                 f.sha256
@@ -97,7 +97,7 @@ pub fn check_model(settings: &db::Settings) -> Result<()> {
 #[derive(Debug, Clone)]
 pub struct DownloadReport {
     pub files: usize,
-    /// Язык отчёта (M21.6): английский по умолчанию.
+    /// The language of the report (M21.6): English by default.
     pub lang: Lang,
 }
 
@@ -115,27 +115,30 @@ impl std::fmt::Display for DownloadReport {
     }
 }
 
-/// Загрузка весов лиц — тем же путём, что CLIP: только по согласию, curl, sha256.
+/// Downloading the face weights the same way as CLIP: consent only, curl, sha256.
 pub fn download_model(
     settings: &db::Settings,
     consent: bool,
     progress: Option<Arc<Progress>>,
 ) -> Result<DownloadReport> {
     if !consent {
-        bail!("скачивание весов лиц требует явного согласия (галочка в «Настройках» или --yes)");
+        bail!("{}", i18n::t(settings.lang, "downloading the face weights needs an explicit consent (the checkbox in the settings or --yes)"));
     }
     let bytes: u64 = FILES.iter().map(|f| f.bytes).sum();
     if bytes > settings.max_model_mb.saturating_mul(1024 * 1024) {
         bail!(
-            "модель лиц {} больше лимита {} МиБ — поднимите лимит в «Настройках»",
-            db::human(bytes as i64),
-            settings.max_model_mb
+            "{}",
+            i18n::fill(
+                settings.lang,
+                "the face model {} is bigger than the limit of {} MiB — raise the limit in the settings",
+                &[db::human(bytes as i64), settings.max_model_mb.to_string()]
+            )
         );
     }
     let files = embed::download_files(
         settings,
         &model_dir(settings),
-        "лица buffalo_l",
+        "faces buffalo_l",
         &FILES,
         progress,
     )?;
@@ -146,17 +149,17 @@ pub fn download_model(
 }
 
 fn oe<R>(e: ort::Error<R>) -> anyhow::Error {
-    anyhow::anyhow!("модель лиц: {e}")
+    anyhow::anyhow!("face model: {e}")
 }
 
-/// Одна модель на процесс: общий ONNX-контекст и два сеанса.
+/// One model per process: a shared ONNX context and two sessions.
 pub struct FaceModel {
     _env: Environment,
     det: Session,
     rec: Session,
 }
 
-/// Найденное лицо до записи в БД: рамка в пикселях оригинала и выровненный кадр.
+/// A detected face before the DB write: the box in original pixels and the aligned frame.
 pub struct DetectedFace {
     pub x: i32,
     pub y: i32,
@@ -189,7 +192,7 @@ impl FaceModel {
         Ok(Self { _env: env, det, rec })
     }
 
-    /// Лица на кадре: детекция, NMS, выравнивание, эмбеддинг. Кадр уже повёрнут по EXIF.
+    /// Faces on a frame: detection, NMS, alignment, embedding. The frame is already EXIF-rotated.
     pub fn analyze(&mut self, img: &DynamicImage) -> Result<Vec<DetectedFace>> {
         let (w, h) = (img.width(), img.height());
         if w < 64 || h < 64 {
@@ -205,7 +208,7 @@ impl FaceModel {
             .map_err(oe)?])
             .map_err(oe)?;
 
-        // SCRFD отдаёт по три головы на шаг: score [N,1], bbox [N,4], kps [N,10].
+        // SCRFD gives three heads per stride: score [N,1], bbox [N,4], kps [N,10].
         let mut levels: HashMap<usize, [Option<Vec<f32>>; 3]> = HashMap::new();
         for (_, value) in outputs.iter() {
             let (shape, data) = value.try_extract_tensor::<f32>().map_err(oe)?;
@@ -222,13 +225,13 @@ impl FaceModel {
         }
         drop(outputs);
         let mut counts: Vec<usize> = levels.keys().copied().collect();
-        counts.sort_unstable_by(|a, b| b.cmp(a)); // крупная карта (шаг 8) первой
+        counts.sort_unstable_by(|a, b| b.cmp(a)); // the coarse map (stride 8) first
         let mut boxes: Vec<RawBox> = Vec::new();
         for (level, count) in counts.into_iter().enumerate() {
             let Some([Some(scores), Some(bbox), Some(kps)]) = levels.get(&count).cloned() else {
                 continue;
             };
-            // SCRFD использует 2 anchor'а на ячейку: N = 2·(640/stride)².
+            // SCRFD uses 2 anchors per cell: N = 2·(640/stride)².
             let stride = 8.0 * 2f32.powi(level as i32);
             let fw = (DET_SIDE as f32 / stride).round().max(1.0) as usize;
             let cells = fw * fw;
@@ -286,11 +289,11 @@ impl FaceModel {
         let (_, value) = outputs
             .iter()
             .next()
-            .context("ArcFace не вернула вектор")?;
+            .context("ArcFace returned no vector")?;
         let (shape, data) = value.try_extract_tensor::<f32>().map_err(oe)?;
         let dim = *shape.last().unwrap_or(&0) as usize;
         if dim != EMBED_DIM {
-            bail!("ArcFace вернула {dim} признаков, ожидалось {EMBED_DIM}");
+            bail!("ArcFace returned {dim} features, {EMBED_DIM} expected");
         }
         let mut v = data.to_vec();
         normalize(&mut v);
@@ -298,7 +301,7 @@ impl FaceModel {
     }
 }
 
-/// Письмо в 640×640 с сохранением пропорций: чёрные поля снизу и справа, как в insightface.
+/// A letterbox into 640×640 keeping the proportions: black margins right and bottom, as in insightface.
 fn detect_blob(img: &DynamicImage) -> (Vec<f32>, f32) {
     let (w, h) = (img.width().max(1), img.height().max(1));
     let scale = DET_SIDE as f32 / w.max(h) as f32;
@@ -312,7 +315,7 @@ fn detect_blob(img: &DynamicImage) -> (Vec<f32>, f32) {
     for (x, y, px) in rgb.enumerate_pixels() {
         let i = y as usize * side + x as usize;
         for c in 0..3 {
-            // BGR здесь не нужен: модель обучена на RGB (blobFromImage + swapRB).
+            // BGR is not needed here: the model was trained on RGB (blobFromImage + swapRB).
             data[c * plane + i] = (px[c] as f32 - 127.5) / 128.0;
         }
     }
@@ -325,7 +328,7 @@ struct RawBox {
     kps: [[f32; 2]; 5],
 }
 
-/// Разобрать одну голову SCRFD: anchor-центры, distance2bbox, ключевые точки.
+/// Parse one SCRFD head: anchor centres, distance2bbox, key points.
 #[allow(clippy::too_many_arguments)]
 fn decode_level(
     count: usize,
@@ -405,8 +408,8 @@ fn nms(mut boxes: Vec<RawBox>, threshold: f32) -> Vec<RawBox> {
     kept
 }
 
-/// Матрица подобия (масштаб + поворот без отражения), переводящая `src` в `dst`.
-/// Возвращает `(a, b, tx, ty)`: x' = a·x − b·y + tx, y' = b·x + a·y + ty.
+/// The similarity matrix (scale and rotation, no reflection) that maps `src` onto `dst`.
+/// Returns `(a, b, tx, ty)`: x' = a·x − b·y + tx, y' = b·x + a·y + ty.
 fn similarity(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> (f32, f32, f32, f32) {
     let n = src.len() as f32;
     let mp = src.iter().fold([0f32; 2], |m, p| [m[0] + p[0] / n, m[1] + p[1] / n]);
@@ -422,7 +425,7 @@ fn similarity(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> (f32, f32, f32, f32) 
         num += px * qy - py * qx;
         den += px * qx + py * qy;
     }
-    // Комплексное частное: (den + i·num) / Σ|p|².
+    // The complex quotient: (den + i·num) / Σ|p|².
     let norm = src
         .iter()
         .map(|p| (p[0] - mp[0]).powi(2) + (p[1] - mp[1]).powi(2))
@@ -436,7 +439,7 @@ fn similarity(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> (f32, f32, f32, f32) 
     (c, s, tx, ty)
 }
 
-/// Выровнять лицо по 5 точкам в кадр 112×112 билинейной выборкой.
+/// Align a face by its 5 points into a 112×112 frame with bilinear sampling.
 fn align_face(src: &RgbImage, kps: &[[f32; 2]; 5]) -> RgbImage {
     let (a, b, tx, ty) = similarity(kps, &ARC_DST);
     let det = (a * a + b * b).max(1e-6);
@@ -446,7 +449,7 @@ fn align_face(src: &RgbImage, kps: &[[f32; 2]; 5]) -> RgbImage {
         for u in 0..FACE_SIDE {
             let dx = u as f32 + 0.5 - tx;
             let dy = v as f32 + 0.5 - ty;
-            // Обратная матрица подобия: 1/(a²+b²) · [a  b; −b  a].
+            // The inverse similarity matrix: 1/(a²+b²) · [a  b; −b  a].
             let x = (a * dx + b * dy) / det;
             let y = (-b * dx + a * dy) / det;
             out.put_pixel(u, v, bilinear(src, x, y, sw, sh));
@@ -511,7 +514,7 @@ pub struct Stats {
     pub errors: usize,
     pub seconds: f64,
     pub cancelled: bool,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -550,7 +553,7 @@ impl std::fmt::Display for Stats {
     }
 }
 
-/// Проход по снимкам без лиц в БД, затем кластеризация. Видео не участвуют.
+/// A pass over the photos without faces in the DB, then clustering. Videos do not take part.
 pub fn run(
     db_path: &Path,
     jobs: usize,
@@ -605,7 +608,11 @@ pub fn run(
     std::fs::create_dir_all(&faces_dir)?;
     if let Some(p) = &progress {
         p.set_total(todo.len());
-        p.set_msg(format!("лица: моделей {}, потоков {jobs}", MODEL_ID));
+        p.set_msg(i18n::fill(
+            settings.lang,
+            "faces: model {}, threads {}",
+            &[MODEL_ID.to_string(), jobs.to_string()],
+        ));
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -638,12 +645,12 @@ pub fn run(
                 }
                 Err(e) => {
                     errors.fetch_add(1, Ordering::Relaxed);
-                    eprintln!("\nлица {}: {e:#}", f.path);
+                    eprintln!("\n{}", i18n::fill(settings.lang, "faces {}: {}", &[f.path.clone(), format!("{e:#}")]));
                     if let Some(p) = &progress {
                         p.error();
                     }
-                    // Битый/нечитаемый снимок — тоже результат: не возвращаемся к нему каждый раз.
-                    // Ошибка видна в счётчике, а лиц у него ноль.
+                    // A broken or unreadable photo is a result too: we do not come back to it every time.
+                    // The counter shows the error, and its face count is zero.
                     let _ = tx.send((f.id, f.sha256.clone(), Vec::new()));
                 }
             }
@@ -652,10 +659,19 @@ pub fn run(
             }
         })
     });
-    let done = writer.join().map_err(|_| anyhow::anyhow!("поток записи лиц упал"))??;
+    let done = writer
+        .join()
+        .map_err(|_| anyhow::anyhow!(i18n::t(settings.lang, "the face write thread died")))??;
     let cancelled = progress.as_ref().is_some_and(|p| p.cancelled());
     if let Some(p) = &progress {
-        p.set_msg(if cancelled { "лица: остановлено" } else { "лица: кластеры" });
+        p.set_msg(i18n::t(
+            settings.lang,
+            if cancelled {
+                "faces: stopped"
+            } else {
+                "faces: clusters"
+            },
+        ));
     }
     let clusters = if cancelled {
         db::face_summary(&conn).map(|(_, _, c)| c as usize).unwrap_or(0)
@@ -664,7 +680,7 @@ pub fn run(
     };
     let faces: i64 = db::open(db_path)?.query_row("SELECT COUNT(*) FROM faces", [], |r| r.get(0))?;
     if let Some(p) = &progress {
-        p.set_msg("готово");
+        p.set_msg(i18n::t(settings.lang, "done"));
         p.finish();
     }
     Ok(Stats {
@@ -689,7 +705,7 @@ fn scan_one(
     let detected = {
         let mut m = model
             .lock()
-            .map_err(|_| anyhow::anyhow!("модель лиц занята и не отвечает"))?;
+            .map_err(|_| anyhow::anyhow!("the face model is busy and does not answer"))?;
         m.analyze(&img)?
     };
     let mut rows = Vec::with_capacity(detected.len());
@@ -699,11 +715,11 @@ fn scan_one(
         let path = faces_dir.join(&rel);
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)
-                .with_context(|| format!("не создать {}", dir.display()))?;
+                .with_context(|| format!("cannot create {}", dir.display()))?;
         }
         d.aligned
             .save_with_format(&path, image::ImageFormat::Jpeg)
-            .with_context(|| format!("запись лица {}", path.display()))?;
+            .with_context(|| format!("writing the face {}", path.display()))?;
         rows.push(FaceRow {
             id: 0,
             x: d.x,
@@ -726,7 +742,7 @@ pub struct ClusterStats {
     pub clusters: usize,
     pub fixed: usize,
     pub seconds: f64,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -746,7 +762,7 @@ impl std::fmt::Display for ClusterStats {
     }
 }
 
-/// Пересобрать группы по эмбеддингам. Кластеры с подписью и ручные правки не пересобираются.
+/// Rebuild the groups from the embeddings. Named clusters and manual edits are kept.
 pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
     let t0 = std::time::Instant::now();
     let mut conn = db::open(db_path)?;
@@ -804,7 +820,7 @@ pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
     })
 }
 
-/// Компоненты графа «косинус ≥ порога». Возвращает корень для каждого вектора.
+/// The components of the "cosine ≥ threshold" graph. Returns the root of every vector.
 fn components(vectors: &[&[f32]], threshold: f32) -> Vec<usize> {
     let n = vectors.len();
     let mut parent: Vec<usize> = (0..n).collect();
@@ -833,13 +849,13 @@ pub fn label(db_path: &Path, cluster_id: i64, label: &str) -> Result<()> {
     db::label_face_cluster(&conn, cluster_id, label)
 }
 
-/// Пакетное назначение: отмеченные лица уезжают в одну группу с именем.
+/// A batch assignment: the picked faces go into one group with one name.
 pub fn group_picked(db_path: &Path, face_ids: &[i64], label: &str) -> Result<i64> {
     let conn = db::open(db_path)?;
     db::group_faces(&conn, face_ids, label)
 }
 
-/// Разъединить ложную склейку: одно лицо уезжает в новую группу.
+/// Split a false merge: one face moves into a new group.
 pub fn split(db_path: &Path, face_id: i64) -> Result<i64> {
     let mut conn = db::open(db_path)?;
     let cid = db::split_face(&mut conn, face_id)?;
@@ -866,7 +882,7 @@ mod tests {
         let comps = components(&vectors, 0.8);
         assert_eq!(comps[0], comps[1]);
         assert_ne!(comps[0], comps[2]);
-        // Высокий порог разъединяет даже похожие.
+        // A high threshold splits even similar ones.
         let comps = components(&vectors, 0.9999);
         assert_ne!(comps[0], comps[1]);
     }
@@ -899,7 +915,7 @@ mod tests {
 
     #[test]
     fn alignment_moves_points_to_arc_dst() {
-        // Точки повёрнуты и сдвинуты: матрица должна вернуть их к каноническим.
+        // The points are rotated and shifted: the matrix must bring them back to the canonical ones.
         let (a, b, tx, ty) = similarity(&ARC_DST, &ARC_DST);
         for p in ARC_DST {
             let x = a * p[0] - b * p[1] + tx;
@@ -913,7 +929,7 @@ mod tests {
     #[ignore = "нужны скачанные веса CLIP и лиц"]
     fn clip_and_faces_share_one_onnx_environment() {
         let settings = db::Settings::default();
-        // ORT разрешает одно окружение на процесс: CLIP не должен блокировать лица.
+        // ORT allows one environment per process: CLIP must not block the faces.
         let _clip = embed::Model::load(&settings, 1).unwrap();
         let _faces = FaceModel::load(&settings, 1).unwrap();
     }
