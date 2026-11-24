@@ -86,12 +86,24 @@ impl Lang {
     }
 }
 
-/// The Russian text of an English interface string; `None` — not translated yet.
-pub fn russian(en: &'static str) -> Option<&'static str> {
+/// The translation table as a lookup by the English string.
+fn map() -> &'static HashMap<&'static str, &'static str> {
     static MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     MAP.get_or_init(|| PAIRS.iter().copied().collect())
-        .get(en)
-        .copied()
+}
+
+/// The Russian text of an English interface string; `None` — not translated yet.
+pub fn russian(en: &'static str) -> Option<&'static str> {
+    map().get(en).copied()
+}
+
+/// A word that comes from data — a tag label, a model title, a duplicate reason: the table may know
+/// it (the default set does), while the owner's own wording has no translation and stays as it is.
+pub fn word(lang: Lang, text: &str) -> &str {
+    match lang {
+        Lang::En => text,
+        Lang::Ru => map().get(text).copied().unwrap_or(text),
+    }
 }
 
 /// Interface text: the English source as written, or its Russian translation.
@@ -1736,6 +1748,22 @@ const PAIRS: &[(&str, &str)] = &[
     ("{}, {} s", "{}, {} с"),
     ("{}: keep {} — {}", "{}: оставить {} — {}"),
 
+    // The default tag labels: English in the source, translated for the Russian window.
+    ("beach", "пляж"),
+    ("document", "документ"),
+    ("screenshot", "скриншот"),
+    ("food", "еда"),
+    ("animals", "животные"),
+    ("children", "дети"),
+    ("celebration", "праздник"),
+    ("furniture", "мебель"),
+    ("interior", "интерьер"),
+    ("clothes", "одежда"),
+    ("nature", "природа"),
+    ("city", "город"),
+    ("transport", "транспорт"),
+    ("plants", "растения"),
+
 ];
 
 #[cfg(test)]
@@ -1905,6 +1933,16 @@ mod tests {
     /// Every English string the code passes to `t()` or `fill()` is in the table: a forgotten pair
     /// would otherwise leave the Russian interface with an English label. Modules that still pass
     /// Russian source strings are pending the M23 refactor and are skipped here.
+    /// A word from data: the default tag labels are English in the source, the Russian window
+    /// reads them from the table, and the owner's own label stays exactly as typed.
+    #[test]
+    fn a_data_word_is_translated_but_an_own_label_is_not() {
+        assert_eq!(word(Lang::En, "beach"), "beach");
+        assert_eq!(word(Lang::Ru, "beach"), "пляж");
+        assert_eq!(word(Lang::Ru, "document"), "документ");
+        assert_eq!(word(Lang::Ru, "Шкаф"), "Шкаф");
+    }
+
     #[test]
     fn every_report_string_is_in_the_table() {
         let sources = [

@@ -41,85 +41,85 @@ pub const DEFAULT_TAG_VERSION: i64 = 2;
 pub const DEFAULT_TAGS: [TagDefault; 14] = [
     TagDefault {
         id: "beach",
-        label: "пляж",
+        label: "beach",
         prompts_ru: &["фотография пляжа и моря", "на снимке песчаный пляж и вода", "пляж, море и песок"],
         prompts_en: &["a photo of a beach and the sea", "a sandy beach by the water", "beach, sea and sand"],
     },
     TagDefault {
         id: "document",
-        label: "документ",
+        label: "document",
         prompts_ru: &["фотография документа, лист бумаги с текстом", "на снимке лист бумаги с напечатанным текстом", "страница документа крупным планом"],
         prompts_en: &["a photo of a document, a sheet of paper with text", "a sheet of paper with printed text", "a close-up of a document page"],
     },
     TagDefault {
         id: "screenshot",
-        label: "скриншот",
+        label: "screenshot",
         prompts_ru: &["снимок экрана, интерфейс программы", "на снимке экран компьютера или телефона", "скриншот интерфейса приложения"],
         prompts_en: &["a screenshot of a computer screen", "a screen of a computer or a phone", "a screenshot of an app interface"],
     },
     TagDefault {
         id: "food",
-        label: "еда",
+        label: "food",
         prompts_ru: &["фотография еды, тарелка с едой", "на снимке еда на тарелке", "блюдо на столе крупным планом"],
         prompts_en: &["a photo of food, a plate with food", "food on a plate", "a close-up of a dish on the table"],
     },
     TagDefault {
         id: "animals",
-        label: "животные",
+        label: "animals",
         prompts_ru: &["фотография животного, кошка или собака", "на снимке домашнее животное", "кошка или собака крупным планом"],
         prompts_en: &["a photo of an animal, a cat or a dog", "a pet at home", "a close-up of a cat or a dog"],
     },
     TagDefault {
         id: "children",
-        label: "дети",
+        label: "children",
         prompts_ru: &["фотография детей, ребёнок", "на снимке ребёнок", "дети на фотографии"],
         prompts_en: &["a photo of children, a child", "a child in the picture", "children on a photo"],
     },
     TagDefault {
         id: "holiday",
-        label: "праздник",
+        label: "celebration",
         prompts_ru: &["праздник, торт со свечами, вечеринка", "на снимке праздник и торт", "люди празднуют день рождения"],
         prompts_en: &["a party, a birthday cake with candles", "a celebration with a cake", "people celebrating a birthday"],
     },
     TagDefault {
         id: "furniture",
-        label: "мебель",
+        label: "furniture",
         prompts_ru: &["фотография мебели, шкаф, стол, диван", "на снимке мебель в комнате", "шкаф, стол или диван крупным планом"],
         prompts_en: &["a photo of furniture, a cupboard, table or sofa", "furniture inside a room", "a close-up of a cupboard, table or sofa"],
     },
     TagDefault {
         id: "interior",
-        label: "интерьер",
+        label: "interior",
         prompts_ru: &["фотография комнаты, интерьер квартиры", "на снимке интерьер комнаты", "вид комнаты внутри"],
         prompts_en: &["a photo of a room interior", "the interior of a room", "a view inside a room"],
     },
     TagDefault {
         id: "clothes",
-        label: "одежда",
+        label: "clothes",
         prompts_ru: &["фотография одежды, куртка, платье", "на снимке одежда", "куртка или платье крупным планом"],
         prompts_en: &["a photo of clothes, a jacket or a dress", "clothes in the picture", "a close-up of a jacket or a dress"],
     },
     TagDefault {
         id: "nature",
-        label: "природа",
+        label: "nature",
         prompts_ru: &["фотография природы, лес, поле, небо", "на снимке лес, поле или небо", "пейзаж с лесом и полем"],
         prompts_en: &["a photo of nature, forest, field or sky", "forest, field or sky", "a landscape with forest and field"],
     },
     TagDefault {
         id: "city",
-        label: "город",
+        label: "city",
         prompts_ru: &["фотография улицы и домов, город", "на снимке городская улица", "дома и улица города"],
         prompts_en: &["a photo of a city street and buildings", "a city street", "buildings and a street in a city"],
     },
     TagDefault {
         id: "transport",
-        label: "транспорт",
+        label: "transport",
         prompts_ru: &["фотография транспорта, автомобиль, автобус", "на снимке автомобиль или автобус", "транспорт на дороге"],
         prompts_en: &["a photo of a vehicle, car or bus", "a car or a bus", "vehicles on the road"],
     },
     TagDefault {
         id: "plants",
-        label: "растения",
+        label: "plants",
         prompts_ru: &["фотография растений, цветы и деревья", "на снимке цветы и деревья", "растения крупным планом"],
         prompts_en: &["a photo of plants, flowers and trees", "flowers and trees", "a close-up of plants"],
     },
@@ -1821,7 +1821,7 @@ mod tests {
         assert_eq!(ru.len(), en.len());
         assert_eq!(ru.len(), sig.len());
         assert!(sig[0].prompts[0].starts_with("a photo"));
-        assert_eq!(ru[0].label, "пляж");
+        assert_eq!(ru[0].label, "beach");
         assert!(ru[0].prompts[0].starts_with("фотография"));
         assert!(en[0].prompts[0].starts_with("a photo"));
         for d in &ru {

@@ -5537,7 +5537,7 @@ impl App {
                     .selected_text(
                         self.tag_filter
                             .clone()
-                            .map(|tag| format!("{}: {tag}", t(lang, "tag")))
+                            .map(|tag| format!("{}: {}", t(lang, "tag"), i18n::word(lang, &tag)))
                             .unwrap_or_else(|| t(lang, "all tags").into()),
                     )
                     .show_ui(ui, |ui| {
@@ -5552,7 +5552,7 @@ impl App {
                                 .selectable_value(
                                     &mut self.tag_filter,
                                     Some(label.clone()),
-                                    format!("{label} · {n}"),
+                                    format!("{} · {n}", i18n::word(lang, label)),
                                 )
                                 .clicked()
                             {
@@ -7912,7 +7912,11 @@ fn tag_row(
         } else {
             ui.visuals().text_color()
         };
-        ui.label(egui::RichText::new(tag).size(12.0).color(color));
+        ui.label(
+            egui::RichText::new(i18n::word(lang, tag))
+                .size(12.0)
+                .color(color),
+        );
         ui.label(
             egui::RichText::new(match pct {
                 Some(p) => format!("{score:.2} · {p}%"),
@@ -12618,7 +12622,7 @@ mod tests {
                 .unwrap_or(0)
         ));
         let mut app = App::new(path);
-        assert!(app.tag_labels().iter().any(|l| l == "пляж"), "дефолт засеян");
+        assert!(app.tag_labels().iter().any(|l| l == "beach"), "дефолт засеян");
         app.tag_defs.push(db::TagDef {
             model: "m".into(),
             id: "custom-1".into(),
@@ -12640,17 +12644,17 @@ mod tests {
         // The minimum percentile of a tag raises its threshold above the common slider.
         app.tags.clear();
         for id in 0..120 {
-            app.tags.insert(id, vec![("пляж".to_string(), id as f32 / 120.0)]);
+            app.tags.insert(id, vec![("beach".to_string(), id as f32 / 120.0)]);
         }
         app.tag_dists = embed::tag_distributions(&app.tags);
         app.settings.tag_show_pct = 0;
-        if let Some(d) = app.tag_defs.iter_mut().find(|d| d.label == "пляж") {
+        if let Some(d) = app.tag_defs.iter_mut().find(|d| d.label == "beach") {
             d.min_percentile = 90;
         }
-        let thr = app.tag_threshold("пляж");
+        let thr = app.tag_threshold("beach");
         assert!(thr > 0.8, "порог 90% должен быть высоким, получено {thr}");
-        app.tag_defs.retain(|d| d.label != "пляж");
-        assert!(app.tag_threshold("пляж").abs() < 1e-6, "без словаря — общий ползунок");
+        app.tag_defs.retain(|d| d.label != "beach");
+        assert!(app.tag_threshold("beach").abs() < 1e-6, "без словаря — общий ползунок");
     }
 
     #[test]
