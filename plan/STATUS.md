@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports) → next:M21.7 (`docs/`), then M21.8 (`plan/`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document) → next:M21.7b (`docs/UI.md`), M21.7c (`docs/DECISIONS.md`), then M21.8 (`plan/`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -380,7 +380,7 @@ OCR и лица.
   внутри ffplay, без ручного потока кадров.
 
 Проверено: `cargo test` — 79 passed, 3 ignored, `clippy` — чисто, `check.sh` — 38/0. Замеры
-TurboJPEG — в § M13b и `docs/ARCHITECTURE.md`.
+TurboJPEG — в § M13b и `docs/ARCHITECTURE.ru.md`.
 
 ## M14 — встроенный плеер видео (2026-11-23)
 
@@ -643,7 +643,7 @@ TurboJPEG — в § M13b и `docs/ARCHITECTURE.md`.
 - **Пути проверяются до запуска:** один и тот же путь в A и B, несуществующий каталог, файл
   слепка-каталог или отсутствующий слепок — красная строка с причиной и ноль записей на диск.
 - **Документы:** `docs/UI.md` (экран, состояния, метрики, «шесть видов»),
-  `docs/ARCHITECTURE.md` § «Целостность», карта слоёв `check.sh` (`app` может `verify`).
+  `docs/ARCHITECTURE.ru.md` § «Целостность», карта слоёв `check.sh` (`app` может `verify`).
 
 Проверки: `cargo test` — 165 passed, 4 `#[ignore]` (новые: экран показывает поля
 и три кнопки; два одинаковых пути — отказ без потока; фоновая сверка возвращает отчёт через
@@ -711,7 +711,7 @@ sha256. Не-UTF-8 имена в слепке теряют байты через
   отсчёта: архив только что прочитан целиком. Ошибка и отмена прохода не трогают прошлый
   успешный отчёт и дату. CLI `verify --manifest` для cron/systemd не менялся, приложение
   системных таймеров не ставит (пример — в README).
-- **Документы:** `docs/UI.md` (баннер, строка напоминания, состояния), `docs/ARCHITECTURE.md`
+- **Документы:** `docs/UI.md` (баннер, строка напоминания, состояния), `docs/ARCHITECTURE.ru.md`
   § «Напоминание о проверке», ADR 0037, README (§ расписание).
 
 Проверки: `cargo test` — 170 passed, 4 `#[ignore]` (новые: расчёт срока во всех шести случаях,
@@ -747,7 +747,7 @@ headless-кадром, потому что на экране его видит �
 - **Результат тот же:** `find_groups_with(..., index_from)` даёт тестам оба пути на одних
   данных; `union-find`, совет по кадру, `plan_csv` и CSV не менялись; точные копии по `sha256`
   по-прежнему склеиваются до поиска похожих. Новых зависимостей нет.
-- **Документы:** `docs/ARCHITECTURE.md` § «Дубли: индекс по блокам» и § «Замеры», ADR 0038.
+- **Документы:** `docs/ARCHITECTURE.ru.md` § «Дубли: индекс по блокам» и § «Замеры», ADR 0038.
 
 Проверки: `cargo test` — 172 passed, 5 `#[ignore]` (новые: индекс и перебор совпадают на пустом
 наборе, одном элементе, всех одинаковых, всех далёких и случайных наборах 8/40/80/160 при
@@ -781,7 +781,7 @@ headless-кадром, потому что на экране его видит �
 - **Поиск/теги/кластеры** читают только активную модель; `retag` пересчитывает только её словарь.
   GUI и `models list` показывают признаки, лицензию, размер и статус; лимит 250 МиБ вмещает
   SigLIP (203.5), прежний 160 — нет.
-- **Документы:** `docs/ARCHITECTURE.md` § «Каталог моделей», `docs/UI.md` (настройки модели и
+- **Документы:** `docs/ARCHITECTURE.ru.md` § «Каталог моделей», `docs/UI.md` (настройки модели и
   переключение), `README.md`, ADR 0039.
 
 Проверки: `cargo test` — 176 passed, 6 `#[ignore]` (новые: каталог с уникальными id/каталогами,
@@ -819,7 +819,7 @@ headless-кадром, потому что на экране его видит �
 9. ~~Шаблон имени по умолчанию~~ Решено: **`{n}_{orig}`**; ширина номера по числу файлов.
 10. ~~Один снимок дважды в одном альбоме~~ Решено: **один раз** (в разных альбомах — можно).
 
-Все решения по M17–M20 приняты и закрыты; замеры M20 — в § M20 и `docs/ARCHITECTURE.md`.
+Все решения по M17–M20 приняты и закрыты; замеры M20 — в § M20 и `docs/ARCHITECTURE.ru.md`.
 
 ## Известные дефекты
 
@@ -1401,3 +1401,25 @@ no panic.
 
 **Next.** M21.7: translate `docs/ARCHITECTURE.md`, `docs/UI.md`, `docs/DECISIONS.md` and move the
 Russian originals to `*.ru.md`. Then M21.8 (`plan/`) and M21.9 (`.pi/`), then M15.6/M15.7.
+
+## M21.7a — the architecture document in English (2026-11-24)
+
+`docs/ARCHITECTURE.md` now speaks English; the Russian original moved to `docs/ARCHITECTURE.ru.md`
+with a link from both files (`README.md`/`README.ru.md` keep the same shape). The document is a
+translation, not a rewrite: the layer table, the indexing flow, the SQL schema block, the video,
+export, integrity, reminder, duplicate-index and model-catalogue sections, and all **89 measurement
+rows** are the same, with dates and numbers untouched. Real paths and names stay as data
+(`Фотографии с телефона`, `8.jpg`, `Дача 2024 → Май → Неделя 1`, the Russian search queries).
+
+**Renamed headings.** «Замеры» → "Measurements", «Схема БД» → "DB schema", «Поток индексации» →
+"Indexing flow", «Долгие проходы» → "Long passes", «Кросс-платформенность» → "Cross-platform".
+`AGENTS.md` already cites § "Measurements", so the English heading is the one the constitution
+expects. The Russian plan documents that point at these sections were retargeted to
+`docs/ARCHITECTURE.ru.md` in the same change, so no link now leads to a heading that does not exist.
+Units in the tables are `MB`/`MiB`/`GiB`, as in `README.md`; the one place where both spellings
+matter (`stats` in two languages) keeps `ГиБ`/`GiB` as the observation.
+
+**Checks.** Both files have 89 measurement rows and the same section count; no code was touched, so
+`cargo test`/`clippy`/`check.sh` are unaffected by this commit.
+
+**Next.** M21.7b: `docs/UI.md`.

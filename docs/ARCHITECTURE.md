@@ -1,472 +1,497 @@
-# Архитектура photocat
+# photocat architecture
 
-## Слои
+*Русская версия: [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).*
+
+## Layers
 
 ```
-L3  main.rs ── app.rs            CLI и GUI
+L3  main.rs ── app.rs            CLI and GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   ocr.rs   faces.rs   recycle.rs   player.rs
 L1  db.rs   storage.rs
 L0  i18n.rs   derive.rs   tools.rs
 ```
 
-| Слой | Знает про | Не знает про |
+| Layer | Knows about | Must not know about |
 |---|---|---|
-| L0 `i18n` | только `std`; `Lang`, таблица «русская строка → английская», `t(lang, …)`, `fill(lang, шаблон, значения)` | БД, UI, декодирование |
-| L0 `derive` | файлы, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | БД, UI, параллелизм |
-| L0 `tools` | `std::process`, `PATH`, `anyhow` | БД, UI, декодирование |
-| L1 `db` | `rusqlite`, `anyhow`, `tools` (тип настроек), `i18n` (тип языка) | декодирование, egui |
+| L0 `i18n` | `std` only; `Lang`, the "Russian string → English" table, `t(lang, …)`, `fill(lang, template, values)` | DB, UI, decoding |
+| L0 `derive` | files, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | DB, UI, parallelism |
+| L0 `tools` | `std::process`, `PATH`, `anyhow` | DB, UI, decoding |
+| L1 `db` | `rusqlite`, `anyhow`, `tools` (the settings type), `i18n` (the language type) | decoding, egui |
 | L2 `index` / `dupes` / `organize` / `verify` | L0/L1 + `rayon`, `walkdir`, `tools` | egui |
-| L2 `embed` | L0/L1 + `ort`, `tokenizers`, `serde_json`, `tools` | egui, SQL-строки |
-| L2 `ocr` | L0/L1 + `rayon`, `tools`; процесс `tesseract` | egui, SQL-строки |
-| L2 `faces` | L0/L1 + `ort`, `rayon`, `image`; ONNX SCRFD и ArcFace | egui, SQL-строки |
-| L1 `storage` | `db` для путей БД, `walkdir`; удаляет только `<кэш>/photocat/` | архив, egui |
-| L2 `recycle` | `db`, крейт `trash`; перенос в системную корзину по подтверждению | превью, egui |
-| L2 `player` | `rff-format-*`/`rff-codec-*` (демукс, декод H.264/HEVC/AAC), `cpal` (звук), `rayon` (конверсия кадра) | БД, egui, `tools` (внешний ffplay — забота `app`) |
-| L3 `app` | всё ниже + `eframe`/`egui` | прямые SQL-строки, декодирование в UI-потоке |
+| L2 `embed` | L0/L1 + `ort`, `tokenizers`, `serde_json`, `tools` | egui, SQL strings |
+| L2 `ocr` | L0/L1 + `rayon`, `tools`; the `tesseract` process | egui, SQL strings |
+| L2 `faces` | L0/L1 + `ort`, `rayon`, `image`; ONNX SCRFD and ArcFace | egui, SQL strings |
+| L1 `storage` | `db` for the DB paths, `walkdir`; removes only `<cache>/photocat/` | archive, egui |
+| L2 `recycle` | `db`, the `trash` crate; moves to the OS trash after confirmation | previews, egui |
+| L2 `player` | `rff-format-*`/`rff-codec-*` (demux, H.264/HEVC/AAC decode), `cpal` (sound), `rayon` (frame conversion) | DB, egui, `tools` (the external ffplay is `app`'s business) |
+| L3 `app` | everything below + `eframe`/`egui` | direct SQL strings, decoding on the UI thread |
 
-Язык (M21) — такой же слой, как всё остальное: `i18n` разрешён только тем, кто говорит с
-владельцем, — L1 `db`, L0 `tools` и L2-модулям, которые печатают отчёты (`index`, `dupes`,
-`organize`, `verify`, `embed`, `ocr`, `faces`, `recycle`), плюс L3 `app`/`main`. Язык передаётся
-явно: аргументом `lang` или полем `lang` в структуре отчёта; глобальной переменной языка нет.
+Language (M21) is a layer like everything else: `i18n` is allowed only to those who talk to the
+owner — L1 `db`, L0 `tools` and the L2 modules that print reports (`index`, `dupes`, `organize`,
+`verify`, `embed`, `ocr`, `faces`, `recycle`), plus L3 `app`/`main`. The language is passed
+explicitly: as a `lang` argument or as a `lang` field in a report struct; there is no global
+language variable.
 
-Граница проверяется скриптом `.pi/skills/enforce-architecture/scripts/check.sh` (grep по `use
-crate::`), он же запрещает вызовы `fs::remove_*` и `fs::rename` в `src/`. Исключение одно —
-`src/storage.rs`: он удаляет только внутри `<кэш>/photocat/` после проверки канонического пути;
-архив и модели не трогает.
+The boundary is checked by `.pi/skills/enforce-architecture/scripts/check.sh` (a grep over
+`use crate::`); it also forbids `fs::remove_*` and `fs::rename` calls in `src/`. There is one
+exception — `src/storage.rs`: it removes only inside `<cache>/photocat/` after checking the
+canonical path; it does not touch the archive or the models.
 
-## Поток индексации
+## Indexing flow
 
 ```
-walkdir → Vec<PathBuf> → rayon(par_iter, jobs потоков)
-   по файлу: metadata → sha256 → (image: decode → dHash + превью 320) → exif → дата
-        → db::FileRow ──mpsc──► поток-писатель: одна транзакция на весь прогон
+walkdir → Vec<PathBuf> → rayon(par_iter, jobs threads)
+   per file: metadata → sha256 → (image: decode → dHash + preview 320) → exif → date
+        → db::FileRow ──mpsc──► writer thread: one transaction for the whole run
 ```
 
-- Один декод на файл: размеры, dHash, резкость и превью считаются из одного `DynamicImage` (`derive::analyze_image`).
-- **Повторный проход не читает неизменённые файлы.** Ключ — путь + размер + mtime. Если строка
-  есть в БД, sha256 не пуст, вид совпадает и превью на месте, файл пропускается. Видео без
-  обложки или длительности обрабатывается заново: это старый индекс. На корпусе 2230 файлов
-  старую БД догоняют 259 файлов (258 видео + 1 битый JPEG) за 10.2 с, повтор — 0.024 с.
-  `Stats.skipped` и строка «без изменений N» показывают это в GUI и CLI.
-- `Progress` — атомики + `Mutex<String>`; GUI и консоль читают его, не блокируя воркеров.
-- Ошибка одного файла не валит прогон: счётчик `errors`, файл пропускается. Если файл удалось
-  проиндексировать, но без превью/метаданных (битый JPEG, нет `ffmpeg`), он остаётся в БД, а
-  счётчик ошибок всё равно растёт — иначе слепая зона была бы невидимой.
+- One decode per file: dimensions, dHash, sharpness and the preview come from a single
+  `DynamicImage` (`derive::analyze_image`).
+- **A repeated pass does not read unchanged files.** The key is path + size + mtime. If the row is
+  in the DB, sha256 is not empty, the kind matches and the preview is in place, the file is
+  skipped. A video without a cover or a duration is processed again: that is an old index. On the
+  corpus of 2230 files an old DB is caught up by 259 files (258 videos + 1 broken JPEG) in 10.2 s;
+  a repeat takes 0.024 s. `Stats.skipped` and the line "unchanged N" show this in the GUI and the
+  CLI.
+- `Progress` is atomics + a `Mutex<String>`; the GUI and the console read it without blocking the
+  workers.
+- An error in one file does not sink the run: the `errors` counter grows and the file is skipped.
+  If the file was indexed but without a preview or metadata (broken JPEG, no `ffmpeg`), it stays in
+  the DB while the error counter still grows — otherwise the blind spot would be invisible.
 
-## Схема БД
+## DB schema
 
 ```sql
 files(id, path UNIQUE, size, mtime, sha256, kind, width, height,
       taken_at, taken_src, lat, lon, camera, dhash, sharpness, duration_s,
       thumb, decision, trashed_at, indexed_at)
-tags(file_id, tag, score, source)      -- PK(file_id,tag,source); source='clip:<model_id>': по весу на каждый тег словаря
+tags(file_id, tag, score, source)      -- PK(file_id,tag,source); source='clip:<model_id>': one weight per dictionary tag
 tag_defs(model, tag_id, label, prompts, enabled, position, min_pct)
-                                       -- словарь тегов модели: метка и промпты (M15.4)
-tag_hidden(file_id, tag, hidden_at)    -- владелец убрал тег у фото
-user_tags(file_id, tag, created_at)    -- свои теги владельца, вручную
+                                       -- the model's tag dictionary: label and prompts (M15.4)
+tag_hidden(file_id, tag, hidden_at)    -- the owner removed a tag from a photo
+user_tags(file_id, tag, created_at)    -- the owner's own tags, by hand
 embeddings(file_id, model, sha256, dim, vec, PRIMARY KEY(file_id, model))
-settings(key, value)                   -- модель, путь, лимит, пороги (дубли, теги, лица),
-                                       -- потоки, языки OCR, пути к программам, roots, tile_size,
-                                       -- verify_*: напоминание о проверке (M10)
-ocr(file_id, sha256, lang, text, chars, created_at)   -- текст с фото; PRIMARY KEY(file_id)
+settings(key, value)                   -- model, path, limit, thresholds (dupes, tags, faces),
+                                       -- threads, OCR languages, program paths, roots, tile_size,
+                                       -- verify_*: the check reminder (M10)
+ocr(file_id, sha256, lang, text, chars, created_at)   -- text from a photo; PRIMARY KEY(file_id)
 ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='file_id'
 faces(id, file_id, sha256, x, y, w, h, score, quality, thumb,
       embedding, cluster_id, manual, created_at)
 face_clusters(id, label, created_at)
-face_scans(file_id, sha256, faces, created_at)       -- снимок уже просканирован
+face_scans(file_id, sha256, faces, created_at)       -- the photo has already been scanned
 albums(id, parent_id, position, name, name_key, note, created_at, updated_at)
 album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id))
 ```
 
 - `kind`: `image` | `video` | `other`.
-- `taken_src`: `exif` | `filename` | `mtime` — источник даты, чтобы никогда не путать точное с
-  догадкой.
-- `dhash`: `u64` как `i64` (SQLite INTEGER). У видео — по кадру-обложке, `NULL` только если кадр
-  не извлёкся.
-- `sharpness`: дисперсия лапласиана по серому кадру или превью (≤512 px), `NULL` у старых строк до
-  переиндексации и у файлов без кадра. Мера сравнительная: между файлами одного корпуса, не
-  абсолютная.
-- `duration_s`: длительность видео в секундах из `ffprobe`; `NULL` у фото и у видео, для которых
-  `ffprobe` не сработал. Разрешение хранится с учётом поворота кадра.
-- `decision`: `keep` | `drop` | `NULL` — решение владельца по группе дублей. Переживает
-  перезапуск и переиндексацию; сбрасывается, только если у файла изменился `sha256`.
-- `trashed_at`: время помещения в корзину приложения; обычные виды читают `WHERE trashed_at IS NULL`.
-  Это не физическое удаление: файл на диске цел, `Вернуть` обнуляет поле. `Очистить корзину`
-  переносит файл в системную корзину ОС и только потом удаляет строку (`recycle.rs`).
-- `user_tags`: свои теги владельца. Не смешиваются с CLIP: фильтр проверяет оба источника, в
-  карточке они в отдельном блоке. Смена `sha256` свои теги не стирает — это решение человека.
-- `thumb`: путь относительно `~/.cache/photocat/thumbs/`, ключ — `sha256[..24]` (одинаковые файлы
-  делят одно превью).
-- `faces.embedding`: ArcFace-вектор 512 f32 (2 КиБ) выровненного лица; `thumb` — кроп 112 px
-  в кэше, ключ `<sha256[..24]>-<номер лица>`. `manual=1` — владелец отделил лицо кнопкой «не он»;
-  такие группы не пересобираются. Подмена `files.sha256` триггером стирает лица и отметку прохода.
-- `faces.cluster_id`: группа; `face_clusters.label` — имя, поставленное вручную. Непустая подпись
-  тоже закрепляет группу при пересборке.
-- `ocr.text`: текст с фото из `tesseract`. Одна строка на файл, `sha256` — содержимое на момент
-  распознавания; триггер `invalidate_ocr_after_sha_change` стирает текст, если файл подменили.
-  `ocr_fts` — FTS5 (`tokenize='unicode61'`), синхронизируется триггерами на `ocr`.
-- `albums` / `album_files`: дерево альбомов и порядок файлов в них (M19). `parent_id = 0` —
-  корень (не `NULL`: `NULL` в `UNIQUE` не сравнивается). Имя уникально **среди соседей** без учёта
-  регистра (`parent_id, name_key`), поэтому «2023/Дача» и «2024/Дача» — разные альбомы.
-  `position` — плотный 0..n−1 у файлов и у подальбомов; `db` перенумеровывает его после вставки,
-  перемещения и удаления. Это данные, а не представление: сортировка сетки порядок не меняет.
-  Альбом хранит только `files.id`; один снимок может быть в нескольких альбомах, но в одном —
-  только раз (`PRIMARY KEY(album_id, file_id)`). Обложка не хранится: ею считается превью первого
-  неудалённого файла по `position` (`albums_tree().cover`).
-- `PRAGMA foreign_keys` не включён, поэтому каскадов нет: `delete_album` рекурсивно чистит
-  поддерево (`album_files` → `albums`) в одной транзакции, а удаление строк `files` (сброс индекса,
-  «убрать каталог») чистит `album_files` и сжимает `position`. Файлы на диске при этом не
-  меняются: альбом — это строки.
-- `embeddings.vec`: f32 little-endian, `dim` чисел из модели (512 — 2 КиБ, 768 — 3 КиБ на фото);
-  `dim` — свойство `ModelEntry`, а не константа; `sha256` — содержимое файла на
-  момент расчёта. Если `files.sha256` меняется, триггер `invalidate_clip_after_sha_change` удаляет
-  векторы и CLIP-теги этого файла; остальные теги не трогаются.
-- `tags.score`: косинус «фото ↔ промпт». Хранится по весу на каждый включённый тег словаря;
-  уверенным считается только первый,
-  если он ≥ 0.22 (`settings.tag_show`) и опережает второй на 0.01 (`settings.tag_margin`,
-  `embed::confident_tag`). Это про карточку, OCR и `{tag}` в витрине.
-- `tag_defs`: словарь тегов **на модель** (`model` = `embeddings.model`), ключ строки —
-  `(model, tag_id)`. `label` — русская подпись, она же ключ в `tags.tag`; уникальна внутри модели
-  (`UNIQUE(model, label)`), иначе две строки `tags` с одним ключом. `prompts` — переводы строк,
-  один шаблон на строку; метка может иметь 2–3 общих шаблона, и её вес — **лучший** из шаблонов
-  (не среднее: описание может совпасть только с одной формулировкой, среднее её размывает).
-  `enabled=0` — тег не считается и не показывается в фильтре. `position` —
-  порядок в фильтре и редакторе, `min_pct` — минимальный процентиль показа поверх ползунка.
-  Дефолт (`embed::DEFAULT_TAGS`, 14 общих меток, 2–3 шаблона на метку) засевается, только если у
-  модели нет строк; правки владельца повторный запуск не перезаписывает. Версия набора
-  (`settings.tag_defs_version`) поднимается вместе с дефолтом, а `settings.tag_defs_sig` —
-  отпечаток засеянного словаря: новый дефолт заменяет старый только при совпадении отпечатка
-  (никто не правил), иначе словарь остаётся; импорт помечается версией 0 и автообновлению не подлежит.
-  Векторы фото не зависят от словаря, поэтому правка метки/промптов — это `embed --retag`:
-  прогон одной текстовой башни по сохранённым `embeddings` (2229 файлов за 1.0–1.2 с), без CLIP по фото.
-- Порог **фильтра** по тегу — отдельная настройка `settings.tag_show_pct`, процентиль 0–100
-  (ADR 0032). Он считается по каждому тегу отдельно: 100% — самый сильный снимок этого тега,
-  0% — все, 70% — верхние 30%. На 100% у выбранного тега всегда есть хотя бы один снимок,
-  а чужой меньший максимум его не обнуляет. Распределения (`embed::tag_distributions`) строятся
-  при загрузке тегов, а не на каждый кадр. Меньше 100 файлов — процентиль шумный, в ход идёт
-  сырой `tag_show`. В карточке уверенный тег подсвечен; если отрыва нет — «тег: не уверен»,
-  топ-3 с весами и процентилями, остальные веса под «все теги (N)», без выдуманного ответа. Вход модели — ансамбль двух кадров:
-  центр-кроп 224×224 и весь кадр с полями (letterbox, поля — средний цвет кадра), векторы
-  усредняются и снова нормализуются. Превью декодируется один раз на оба кадра, в БД остаётся
-  один вектор. `embed --refresh` сбрасывает векторы активной модели: без него ключ sha256 считает
-  старый расчёт актуальным. Кроп уводит «документ» из лидеров, но нужный top-1 не гарантирует —
-  завышенная база общих промптов остаётся (см. § Замеры, `8.jpg`); порог-процентиль и явное
-  «не уверен» — M15.2–M15.3, общие промпты — M15.5 (`plan/M15-tags.md`).
+- `taken_src`: `exif` | `filename` | `mtime` — the source of the date, so that an exact date is
+  never confused with a guess.
+- `dhash`: `u64` stored as `i64` (SQLite INTEGER). For videos it comes from the cover frame;
+  `NULL` only when no frame could be extracted.
+- `sharpness`: the variance of the Laplacian over the grey frame or preview (≤512 px), `NULL` for
+  old rows before re-indexing and for files without a frame. It is a comparative measure: between
+  files of one corpus, not absolute.
+- `duration_s`: video duration in seconds from `ffprobe`; `NULL` for photos and for videos where
+  `ffprobe` failed. The resolution is stored with the frame rotation applied.
+- `decision`: `keep` | `drop` | `NULL` — the owner's decision for a duplicate group. It survives a
+  restart and re-indexing and is reset only when the file's `sha256` changes.
+- `trashed_at`: the time the file was put into the app trash; ordinary views read
+  `WHERE trashed_at IS NULL`. This is not a physical delete: the file on disk is intact and
+  `Restore` clears the field. `Empty the trash` moves the file to the OS trash and only then deletes
+  the row (`recycle.rs`).
+- `user_tags`: the owner's own tags. They are not mixed with CLIP: the filter checks both sources
+  and the card shows them in a separate block. A change of `sha256` does not wipe own tags — that is
+  a human decision.
+- `thumb`: a path relative to `~/.cache/photocat/thumbs/`, the key is `sha256[..24]` (identical
+  files share one preview).
+- `faces.embedding`: the ArcFace vector, 512 f32 (2 KiB), of an aligned face; `thumb` is the 112 px
+  crop in the cache, key `<sha256[..24]>-<face number>`. `manual=1` means the owner split the face
+  off with the "not him" button; such groups are not rebuilt. Replacing `files.sha256` via a trigger
+  wipes the faces and the pass mark.
+- `faces.cluster_id`: the group; `face_clusters.label` is the name given by hand. A non-empty label
+  also pins the group during a rebuild.
+- `ocr.text`: text from a photo produced by `tesseract`. One row per file, `sha256` is the content
+  at the moment of recognition; the trigger `invalidate_ocr_after_sha_change` wipes the text if the
+  file was replaced. `ocr_fts` is FTS5 (`tokenize='unicode61'`), kept in sync by triggers on `ocr`.
+- `albums` / `album_files`: the album tree and the order of files in it (M19). `parent_id = 0` is the
+  root (not `NULL`: `NULL` is not compared in `UNIQUE`). A name is unique **among siblings**
+  case-insensitively (`parent_id, name_key`), so "2023/Dacha" and "2024/Dacha" are different
+  albums. `position` is dense 0..n−1 for files and for subalbums; `db` renumbers it after an
+  insert, a move and a delete. This is data, not a view: the grid sort does not change the order.
+  An album stores only `files.id`; one snapshot can be in several albums but only once in one
+  (`PRIMARY KEY(album_id, file_id)`). No cover is stored: the preview of the first non-trashed file
+  by `position` serves as one (`albums_tree().cover`).
+- `PRAGMA foreign_keys` is not enabled, so there are no cascades: `delete_album` recursively clears
+  the subtree (`album_files` → `albums`) in one transaction, and deleting `files` rows (index
+  reset, "remove the folder") clears `album_files` and compacts `position`. The files on disk do not
+  change: an album is rows.
+- `embeddings.vec`: f32 little-endian, `dim` numbers from the model (512 — 2 KiB, 768 — 3 KiB per
+  photo); `dim` is a property of `ModelEntry`, not a constant; `sha256` is the file content at the
+  moment of the computation. If `files.sha256` changes, the trigger
+  `invalidate_clip_after_sha_change` deletes the vectors and CLIP tags of that file; other tags are
+  untouched.
+- `tags.score`: the cosine "photo ↔ prompt". One weight is stored per enabled dictionary tag; only
+  the first tag is considered confident, if it is ≥ 0.22 (`settings.tag_show`) and leads the second
+  by 0.01 (`settings.tag_margin`, `embed::confident_tag`). This is about the card, OCR and `{tag}` in
+  the showcase.
+- `tag_defs`: the tag dictionary **per model** (`model` = `embeddings.model`), the row key is
+  `(model, tag_id)`. `label` is the Russian caption and also the key in `tags.tag`; it is unique
+  within the model (`UNIQUE(model, label)`), otherwise two `tags` rows would share one key.
+  `prompts` is one template per line; a label may have 2–3 common templates, and its weight is the
+  **best** of them (not the average: a description may match only one wording, the average blurs
+  it). `enabled=0` means the tag is neither computed nor shown in the filter. `position` is the
+  order in the filter and the editor, `min_pct` is the minimum display percentile on top of the
+  slider. The default (`embed::DEFAULT_TAGS`, 14 common labels, 2–3 templates per label) is seeded
+  only if the model has no rows; a rerun does not overwrite the owner's edits. The set version
+  (`settings.tag_defs_version`) is bumped together with the default, and `settings.tag_defs_sig` is
+  the fingerprint of the seeded dictionary: a new default replaces the old one only when the
+  fingerprint matches (nobody edited it), otherwise the dictionary stays; an import is marked with
+  version 0 and is not subject to auto-update. Photo vectors do not depend on the dictionary, so
+  editing a label or prompts is `embed --retag`: one pass of the text tower over the stored
+  `embeddings` (2229 files in 1.0–1.2 s), without CLIP over the photos.
+- The **filter** threshold by tag is a separate setting, `settings.tag_show_pct`, a percentile 0–100
+  (ADR 0032). It is computed per tag: 100% is the strongest snapshot of that tag, 0% is all of them,
+  70% is the top 30%. At 100% a selected tag always has at least one snapshot, and a lower maximum
+  of another tag does not zero it. The distributions (`embed::tag_distributions`) are built when the
+  tags are loaded, not per frame. Below 100 files the percentile is noisy, so the raw `tag_show` is
+  used. In the card a confident tag is highlighted; when there is no gap it says "tag: not sure",
+  shows the top-3 with weights and percentiles, and puts the rest of the weights under "all tags
+  (N)", without inventing an answer. The model input is an ensemble of two frames: a centre crop
+  224×224 and the whole frame with margins (letterbox, the margins are the average colour of the
+  frame); the vectors are averaged and normalised again. The preview is decoded once for both
+  frames, and one vector stays in the DB. `embed --refresh` resets the vectors of the active model:
+  without it the sha256 key treats the old computation as current. The crop moves "document" out of
+  the leaders but does not guarantee the right top-1 — the inflated base of common prompts remains
+  (see § Measurements, `8.jpg`); the percentile threshold and the explicit "not sure" are
+  M15.2–M15.3, the common prompts are M15.5 (`plan/M15-tags.md`).
 
-Изменение схемы — только через `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE` в `db::init`, данные
-сохраняются. У схемы есть `PRAGMA user_version` (`db::SCHEMA_VERSION`): пока версия совпадает,
-`open` не выполняет ни одной записи. Это важно не для красоты — иначе каждый `open` (выбор файла,
-`stats`, поиск) пытался бы взять блокировку записи и ждал долгий прогон: до этой правки чтение
-во время OCR висело 5 с и падало с «database is locked».
+A schema change happens only through `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE` in `db::init`, and
+the data is preserved. The schema has a `PRAGMA user_version` (`db::SCHEMA_VERSION`): while the
+version matches, `open` performs no write at all. That matters not for beauty — otherwise every
+`open` (opening a file, `stats`, a search) would try to take a write lock and wait for a long run:
+before this fix, reads during OCR hung for 5 s and failed with "database is locked".
 
-## Видео
+## Video
 
-`derive::analyze_video`: `ffprobe -of json` даёт длительность, ширину и высоту; поворот из
-`side_data_list`/`tags.rotate` на 90/270 меняет ширину и высоту местами. Кадр-обложка — внешний
-`ffmpeg` (ADR 0010): `-ss 10%` до `-i` (быстрый seek), один кадр, `scale=320:320` с
-`force_original_aspect_ratio=decrease`; если seek не дал кадра, повтор с нуля. По сохранённому
-кадру считаются `dhash`, `sharpness`; превью лежит в том же кэше под `sha256[..24]`, что и фото.
-Ошибка `ffmpeg`/`ffprobe` — мягкая: строка попадает в БД без превью, счётчик `errors` растёт.
-Консольное окно на Windows подавляется (`CREATE_NO_WINDOW`), на Unix — обычный `Command`.
+`derive::analyze_video`: `ffprobe -of json` gives the duration, width and height; a rotation from
+`side_data_list`/`tags.rotate` of 90/270 swaps width and height. The cover frame comes from the
+external `ffmpeg` (ADR 0010): `-ss 10%` before `-i` (a fast seek), one frame, `scale=320:320` with
+`force_original_aspect_ratio=decrease`; if the seek yields no frame, the command is repeated from
+zero. `dhash` and `sharpness` are computed from the saved frame; the preview lies in the same cache
+under `sha256[..24]` as the photos. An `ffmpeg`/`ffprobe` error is soft: the row lands in the DB
+without a preview and the `errors` counter grows. The console window is suppressed on Windows
+(`CREATE_NO_WINDOW`), on Unix it is a plain `Command`.
 
-**Воспроизведение видео.** С M14 видео играет встроенный плеер (`src/player.rs`, ADR 0030):
-кадр рисуется в окне приложения, звук идёт через `cpal`. Внешних программ для просмотра больше не
-нужно; `ffplay` остался запасным путём, если файл плееру не по зубам (кодек вне области, битый
-контейнер) — тогда `app` вызывает `tools::ffplay` и честно пишет это в статусе.
+**Video playback.** Since M14 a video plays in the built-in player (`src/player.rs`, ADR 0030): the
+frame is drawn in the app window, the sound goes through `cpal`. External programs are no longer
+needed for viewing; `ffplay` remains the fallback path when the player cannot handle a file (a codec
+out of scope, a broken container) — then `app` calls `tools::ffplay` and says so honestly in the
+status.
 
-Три потока, и каждый отвечает за одно:
+Three threads, each responsible for one thing:
 
 ```
-photocat-video    свой демуксер + декод кадров → очередь (3 кадра вперёд)
-photocat-audio    свой демуксер + декод звука  → кольцо (~2 с) → cpal
-photocat-player   часы и показ: кадр → RGBA (1280 px) → Shared.frame
+photocat-video    its own demuxer + frame decode → queue (3 frames ahead)
+photocat-audio    its own demuxer + audio decode → ring (~2 s) → cpal
+photocat-player   clock and presentation: frame → RGBA (1280 px) → Shared.frame
 ```
 
-- **Почему три, а не один.** Первая версия декодировала кадры и звук в одном потоке: пока шёл
-  кадр, кольцо звука пустело, звук захлёбывался, а часы, считавшиеся по проигранным сэмплам,
-  замедлялись — и видео «еле шевелилось» вместе со звуком. Теперь звук кормится своим потоком и
-  от декода видео не зависит.
-- **Часы.** Мастер — звук, но только пока он реально идёт: в кольце есть хотя бы 20 мс данных.
-  Если звук голодает (или устройства нет), идут настенные часы, и видео продолжается. Поэтому
-  «просевший» звук больше не останавливает картинку.
-- **Опоздание.** Без звука кадры не выбрасываются: часы идут за декодером, видео играет медленнее,
-  но плавно. Со звуком допускается опоздание до 0.5 с; если декодер отстал больше 1.2 с, показ
-  просит видео-поток перескочить на текущую позицию (не чаще раза в 1.5 с). Два таких догона за
-  4 с означают, что декодер не тянет: звук выключается, видео идёт как может — это видно в статусе.
-- **Размер кадра.** Кадр уменьшается до 1280 px по ширине (`Options::max_width`): экран не
-  показывает 2520 пикселей в строке, а каждая лишняя тысяча — это мегабайты на кадр. Конверсия
-  YUV→RGBA — целая арифметика в 8.8 по матрице из контейнера, с учётом полного/ограниченного
-  диапазона и поворота (`rotation` из MP4), строки считаются параллельно (rayon).
-- **Seek.** По индексу сэмплов (`SampleIndex::sync_at_or_before`): декодеры с нуля, курсоры на
-  ключевой кадр, очередь и кольцо очищаются. Замер: переход на 10 с — первый кадр через 0.11 с.
-- **Стоп.** `Player::stop` не ждёт потоки (`join` вешал окно: владелец не мог закрыть программу).
-  Потоки видят флаг и выходят сами; проверено — выход после пяти кадров занимает 0.42 с.
-- **Память.** Очередь 3 кадра (YUV), кольцо звука ~2 с, один кадр для показа. Отставание
-  выбрасывается, а не копится.
-- **Кодеки.** H.264 (весь корпус), HEVC Main 8/10 бит, AAC-LC. Прочие форматы кадра и кодеки
-  (VP9, Opus) плеер отвергает по имени и уступает `ffplay`.
-- **Сборка.** Декодер в чистом debug-профиле даёт 2.2 к/с вместо 41.9 — `cargo run` превращал
-  видео в слайд-шоу. В `Cargo.toml` dev-профиль настроен: зависимости `opt-level = 3`, свой код
-  `opt-level = 1`; после этого `cargo run` показывает 1080p на 29.2 к/с. Release по-прежнему
-  быстрее всех и остаётся тем, чем меряют.
-- **Проверка без экрана:** `photocat play ФАЙЛ [--frames N] [--seek S] [--no-audio]
-  [--decode-only] [--max-width W] [--dump кадр.ppm]`.
+- **Why three and not one.** The first version decoded frames and sound in one thread: while a
+  frame was being decoded the audio ring drained, the sound choked, and the clock, counted from
+  played samples, slowed down — and the video "barely moved" together with the sound. Now the audio
+  is fed by its own thread and does not depend on the video decode.
+- **The clock.** The master is the sound, but only while it actually plays: the ring holds at least
+  20 ms of data. If the audio is starved (or there is no device), the wall clock takes over and the
+  video continues. So a "sagging" sound no longer stops the picture.
+- **Lag.** Without sound frames are not dropped: the clock follows the decoder, the video plays
+  slower but smoothly. With sound a lag of up to 0.5 s is allowed; if the decoder falls more than
+  1.2 s behind, presentation asks the video thread to jump to the current position (at most once in
+  1.5 s). Two such catch-ups in 4 s mean the decoder cannot keep up: the sound is turned off and
+  the video plays as well as it can — this is visible in the status.
+- **Frame size.** The frame is downscaled to 1280 px in width (`Options::max_width`): the screen
+  does not show 2520 pixels in a row, and every extra thousand costs megabytes per frame. The
+  YUV→RGBA conversion is 8.8 fixed-point integer arithmetic by the matrix from the container,
+  honouring the full/limited range and the rotation (`rotation` from MP4); rows are computed in
+  parallel (rayon).
+- **Seek.** By the sample index (`SampleIndex::sync_at_or_before`): the decoders restart from zero,
+  the cursors go to a keyframe, the queue and the ring are cleared. Measured: a jump to 10 s gives
+  the first frame in 0.11 s.
+- **Stop.** `Player::stop` does not wait for the threads (`join` hung the window: the owner could
+  not close the program). The threads see the flag and exit on their own; verified — exiting after
+  five frames takes 0.42 s.
+- **Memory.** A queue of 3 frames (YUV), an audio ring of ~2 s, one frame for presentation. Lag is
+  dropped, not accumulated.
+- **Codecs.** H.264 (the whole corpus), HEVC Main 8/10 bit, AAC-LC. Other frame formats and codecs
+  (VP9, Opus) are rejected by name and yield to `ffplay`.
+- **Build.** The decoder in a plain debug profile gives 2.2 fps instead of 41.9 — `cargo run`
+  turned video into a slideshow. In `Cargo.toml` the dev profile is tuned: dependencies
+  `opt-level = 3`, our own code `opt-level = 1`; after that `cargo run` shows 1080p at 29.2 fps.
+  Release is still the fastest and remains what we measure with.
+- **Checking without a screen:** `photocat play FILE [--frames N] [--seek S] [--no-audio]
+  [--decode-only] [--max-width W] [--dump frame.ppm]`.
 
-**Просмотр в полном экране.** У снимка и видео разные пути, и это записано в коде явно. У видео
-нет «полного кадра» (его никто не декодирует), поэтому показывается кадр-обложка 320 px с большой
-кнопкой ▶ по центру; предыдущий кадр снимка держится на экране только для `kind == "image"` —
-раньше он оставался поверх видео, и листание выглядело как «ничего не показывает». Кадр плеера
-рисуется, лишь пока `video_id` совпадает с открытым файлом. Листание (←/→, кнопки-иконки панели,
-слайд-шоу) сначала вызывает `viewer_step`: он останавливает плеер и только потом меняет
-`Viewer::idx`; слайд-шоу не ждёт декода следующего видео, потому что ждать нечего. Пробел у видео —
-пуск/пауза (в том числе по клику на кадр), у снимка — слайд-шоу. Когда видео доиграло,
-`poll_video` ставит `video_ended`, и просмотр сам открывает следующий файл; на последнем файле
-остаётся кадр-обложка, чтобы просмотр не начинался заново.
+**Full-screen viewing.** A snapshot and a video have different paths, and the code says so
+explicitly. A video has no "full frame" (nobody decodes it), so the 320 px cover frame is shown with
+a big ▶ button in the centre; the previous snapshot frame stays on screen only for
+`kind == "image"` — before, it stayed on top of the video and paging looked like "it shows nothing".
+The player frame is drawn only while `video_id` matches the open file. Paging (←/→, the panel icon
+buttons, the slideshow) first calls `viewer_step`: it stops the player and only then changes
+`Viewer::idx`; the slideshow does not wait for the next video's decode, because there is nothing to
+wait for. Space on a video is play/pause (also by clicking the frame), on a snapshot it is the
+slideshow. When a video has finished, `poll_video` sets `video_ended`, and the viewer opens the next
+file itself; on the last file the cover frame stays so that viewing does not start over.
 
-**Свои теги и лица вместе.** `user_tags` добавляются вручную в карточке и участвуют в фильтре.
-В «Лицах» группы можно отметить галочками и попросить «Фото, где все вместе»: снимок попадает в
-выборку, только если на нём есть хотя бы по одному лицу из каждой отмеченной группы. Отмеченные
-лица можно пакетно назначить одной группе (`db::group_faces`, `manual=1`).
+**Own tags and faces together.** `user_tags` are added by hand in the card and take part in the
+filter. In "Faces" groups can be ticked and "Photos where everyone is together" can be requested: a
+photo enters the selection only if it has at least one face from each ticked group. The ticked faces
+can be assigned to one group in a batch (`db::group_faces`, `manual=1`).
 
-## Выгрузка альбома (M20)
+## Album export (M20)
 
-`organize::plan_album` превращает дерево альбомов в план: `--out/<альбом>/<подальбом>/…`, имена
-файлов по шаблону (`{n}_{orig}` по умолчанию, `{n}` — позиция в своём альбоме, ширина 2 знака до
-99, 3 до 999, дальше по числу знаков). Каталоги подальбомов без номеров: файловая система не
-знает `position`, на диске они идут по алфавиту, а порядок остаётся в приложении и виден по
-номерам файлов. Планирование только читает БД и ничего не создаёт.
+`organize::plan_album` turns the album tree into a plan: `--out/<album>/<subalbum>/…`, file names by
+template (`{n}_{orig}` by default, `{n}` is the position in its own album, 2 digits up to 99, 3 up
+to 999, then by the number of digits). Subalbum directories have **no numbers**: the file system
+does not know `position`, on disk they go alphabetically, and the order stays in the app and is
+visible through the file numbers. Planning only reads the DB and creates nothing.
 
-`organize::apply_export` — единственное место, где приложение пишет в пользовательский каталог
-вне `organize --apply`: копии `std::fs::copy`, не ссылки и не hardlink (inode отличается), режим
-`--mode` у `export` нет. Файлы в корзине приложения в план не попадают. В цели ничего не
-перезаписывается и не удаляется: имя, занятое другим содержимым, получает `-2`; файл с тем же
-`sha256` пропускается (прогон идемпотентен); тот же снимок под старым номером — «порядок в цели
-устарел» (переупорядочивание не переименовывает уже выгруженное). Санитайзер имён — общий
-`organize::tidy`/`component`; имена каталогов дополнительно чистятся `tidy_sep` (запрещённый
-символ становится `_`), пустое имя → `album-<id>`, имена устройств Windows получают `_`.
+`organize::apply_export` is the only place where the app writes into a user directory outside
+`organize --apply`: copies via `std::fs::copy`, not links and not hardlinks (the inode differs);
+`export` has no `--mode`. Files in the app trash do not enter the plan. Nothing in the target is
+overwritten or deleted: a name taken by other content gets `-2`; a file with the same `sha256` is
+skipped (the run is idempotent); the same snapshot under an old number is "target order is stale"
+(reordering does not rename what has already been exported). The name sanitiser is the shared
+`organize::tidy`/`component`; directory names are additionally cleaned by `tidy_sep` (a forbidden
+character becomes `_`), an empty name becomes `album-<id>`, and Windows device names get `_`.
 
-Существующие файлы цели сверяются по размеру, затем по `sha256` (это чтение, не запись). Кэш
-`<кэш>/photocat/exports/<album>-<хеш каталога>.txt` хранит `sha256`, размер, mtime и относительный
-путь прошлой выгрузки: если совпали размер и mtime, файл не перечитывается. Кэш живёт в кэше
-приложения, а не в `--out`: цель остаётся чистым каталогом без служебных файлов. Коды CLI: 0 — план/успех, 1 — были ошибки
-копирования, 2 — аргументы, отсутствующий `--out` или `--out` внутри `settings.roots`.
+Existing target files are compared by size, then by `sha256` (this is reading, not writing). The
+cache `<cache>/photocat/exports/<album>-<directory hash>.txt` stores the `sha256`, size, mtime and
+relative path of the previous export: if the size and mtime match, the file is not read again. The
+cache lives in the app cache, not in `--out`: the target stays a clean directory without service
+files. CLI codes: 0 — plan/success, 1 — there were copy errors, 2 — arguments, a missing `--out` or
+an `--out` inside `settings.roots`.
 
-## Целостность: сверка и слепок (M8, GUI — M9)
+## Integrity: comparison and manifest (M8, GUI — M9)
 
-`verify::verify`, `verify::manifest` и `verify::check_manifest` — общие для CLI и экрана
-«Целостность»: GUI не переписывает ни обход, ни сравнение, ни текст отчёта. Отчёт собирают
-`verify_report`, `check_report` и `manifest_report`; CLI печатает их через `print!`, экран
-показывает тот же текст в прокрутке и отдаёт его в буфер по «Скопировать отчёт».
+`verify::verify`, `verify::manifest` and `verify::check_manifest` are shared by the CLI and the
+"Integrity" screen: the GUI rewrites neither the traversal, nor the comparison, nor the report text.
+The report is assembled by `verify_report`, `check_report` and `manifest_report`; the CLI prints
+them with `print!`, the screen shows the same text in a scroll area and copies it to the clipboard
+with "Copy the report".
 
-Все три прохода только читают. Единственная запись — файл слепка по явному полю и кнопке;
-существующий файл не затирается без второго нажатия («Перезаписать слепок»). Отменённый или
-неудачный проход не пишет неполный слепок: иначе проверка объявила бы непрочитанные файлы
-«лишними». Прогресс — `db::Progress` (файлы, которым нужен sha256, а не все подряд), «Стоп» —
-тот же флаг `cancel`, что у индексации: начатый файл доводится, `cancelled`/`unchecked` попадают
-в отчёт и не считаются совпадением. Фоновый поток один: новый проход не запускается, пока идёт
-предыдущий.
+All three passes only read. The only write is the manifest file by an explicit field and button; an
+existing file is not overwritten without a second press ("Overwrite the manifest"). A cancelled or
+failed pass does not write an incomplete manifest: otherwise a later check would declare unread
+files "extra". Progress is `db::Progress` (the files that need a sha256, not all of them), "Stop" is
+the same `cancel` flag as in indexing: the started file is finished, `cancelled`/`unchecked` land in
+the report and are not counted as a match. There is one background thread: a new pass is not
+started while the previous one runs.
 
-## Напоминание о проверке (M10)
+## Reminder to check (M10)
 
-Срок проверки — это данные, а не таймер: `settings.verify_root`, `verify_manifest`,
-`verify_interval_days` (30 по умолчанию, 0 — выключено), `verify_last_at` (RFC3339 UTC),
-`verify_last_ok`, `verify_last_report`. Одну функцию `db::verify_due(&settings, now)` берут
-баннер, экран «Целостность» и тесты; `now` передаётся явно, поэтому «ровно срок», «просрочено»,
-«ещё рано» и «часы назад» проверяются без ожидания. Дата в будущем не паникует и не делает
-«пора»: срок просто ещё не наступил. Пустая/испорченная дата — «пора».
+The check deadline is data, not a timer: `settings.verify_root`, `verify_manifest`,
+`verify_interval_days` (30 by default, 0 — off), `verify_last_at` (RFC3339 UTC), `verify_last_ok`,
+`verify_last_report`. One function `db::verify_due(&settings, now)` is used by the banner, the
+"Integrity" screen and the tests; `now` is passed explicitly, so "exactly due", "overdue", "too
+early" and "the clock went back" are tested without waiting. A date in the future does not panic and
+does not make it "due": the deadline simply has not come. An empty or broken date means "due".
 
-GUI при запуске показывает баннер «Пора проверить архив» с «Проверить» и «Напомнить позже»;
-«Напомнить позже» живёт только в памяти до перезапуска. Автоматического прохода нет: «Проверить»
-открывает экран «Целостность» и запускает ту же фоновую проверку по слепку, что и кнопка на
-экране (`verify::check_manifest`), с прогрессом и «Стоп». Интервал правится на экране
-«Целостность» и пишется в `settings` по изменению.
+On start the GUI shows the banner "Time to check the archive" with "Check" and "Remind later";
+"Remind later" lives only in memory until a restart. There is no automatic pass: "Check" opens the
+"Integrity" screen and starts the same background check against the manifest as the button on that
+screen (`verify::check_manifest`), with progress and "Stop". The interval is edited on the
+"Integrity" screen and written to `settings` on change.
 
-Завершённый слепок или проверка пишут дату, «ок» и полный отчёт в `settings` и в
-`<кэш>/photocat/verify-last.txt`; в каталог архива — ничего. Запись слепка тоже ставит точку
-отсчёта: архив только что прочитан целиком. Отмена и ошибка (битый слепок, пропавший файл) не
-трогают прошлый успешный отчёт и дату — иначе напоминание теряло бы последнее хорошее
-состояние. CLI-путь `verify --manifest` для cron/systemd не менялся; приложение системных
-таймеров не ставит.
+A finished manifest or check writes the date, "ok" and the full report to `settings` and to
+`<cache>/photocat/verify-last.txt`; nothing goes into the archive directory. Writing a manifest also
+sets the reference point: the archive has just been read in full. A cancel or an error (a broken
+manifest, a missing file) does not touch the previous successful report and date — otherwise the
+reminder would lose the last good state. The CLI path `verify --manifest` for cron/systemd is
+unchanged; the app sets no system timers.
 
-## Дубли: индекс по блокам (M11)
+## Duplicates: the block index (M11)
 
-`dupes::find_groups` сначала склеивает точные копии по `sha256`, затем ищет пары снимков по
-dHash. До 20 000 хешей (`INDEX_MIN`) работает прежний попарный перебор: на 2230 файлах он
-занимает 0.017–0.025 с. Выше порога строится индекс из восьми бакетов по байтам dHash: если расстояние
-≤ 7, хотя бы один байт совпадает целиком, поэтому кандидаты — объединение восьми бакетов, и
-только они проверяются полным Хэммингом по `u64`. Для радиуса 8–64 остаётся перебор (индекс без
-гарантии, а такие пороги склеивают почти всё). `find_groups_with(..., index_from)` —
-единственный выбор пути; тест сравнивает оба на одних случайных наборах.
+`dupes::find_groups` first merges exact copies by `sha256`, then looks for snapshot pairs by dHash.
+Up to 20 000 hashes (`INDEX_MIN`) the old pairwise pass runs: on 2230 files it takes 0.017–0.025 s.
+Above the threshold an index of eight buckets by dHash bytes is built: if the distance is ≤ 7, at
+least one byte matches entirely, so the candidates are the union of the eight buckets, and only they
+are checked with the full Hamming distance over `u64`. For a radius of 8–64 the pairwise pass
+remains (the index gives no guarantee, and such thresholds glue almost everything together).
+`find_groups_with(..., index_from)` is the only path selection; a test compares both on the same
+random sets.
 
-Голый BK-tree на этой задаче отвергнут после замера: при радиусе 6 на 64-битных хешах почти все
-точки лежат на расстоянии ~32, и неравенство треугольника не отсекает основную массу — 20 тыс.
-за 2.58 с, 50 тыс. за 17.2 с (ADR 0038). Пустой dHash в поиск не входит; `union-find`, совет по
-кадру и `plan_csv` не изменились, новых зависимостей нет.
+A bare BK-tree was rejected for this task after measuring: at radius 6 on 64-bit hashes almost all
+points lie at a distance of ~32, and the triangle inequality does not cut off the bulk — 20k in
+2.58 s, 50k in 17.2 s (ADR 0038). An empty dHash does not enter the search; union-find, the frame
+advice and `plan_csv` are unchanged, and there are no new dependencies.
 
-## Каталог моделей (M12)
+## Model catalogue (M12)
 
-Модель — запись данных, а не константа: `ModelEntry` содержит `id`, каталог, название,
-лицензию, `dim`, сторону входного кадра, максимум токенов, нормализацию, число кадров и имена
-выходов ONNX. `DIM` из кода убран: размерность берётся из модели, проверяется по метаданным
-ONNX при загрузке и по фактическому выходу на первом прогоне; несовпадение — ошибка с обоими
-числами, а не молчаливое сравнение векторов разной длины.
+A model is a data record, not a constant: `ModelEntry` holds the `id`, the directory, the name, the
+licence, `dim`, the input frame side, the token maximum, the normalisation, the number of frames and
+the ONNX output names. `DIM` is gone from the code: the dimension comes from the model and is
+checked against the ONNX metadata at load time and against the actual output on the first run; a
+mismatch is an error with both numbers, not a silent comparison of vectors of different lengths.
 
-В каталоге три модели:
+The catalogue holds three models:
 
-| id | архитектура | вектор | текст | кадров | размер | лицензия |
+| id | architecture | vector | text | frames | size | licence |
 |---|---|---|---|---|---|---|
-| `clip-vit-b32-multilingual` | CLIP ViT-B/32 + DistilBERT+Dense | 512 | русский/английский | 2 (кроп+кадр) | 217.5 МиБ | MIT + Apache-2.0 |
-| `clip-vit-b32-en` | CLIP ViT-B/32 | 512 | английский | 2 (кроп+кадр) | 148.6 МиБ | MIT |
-| `siglip-base-224-en` | SigLIP base patch16-224 | 768 | английский | 1 (весь кадр в квадрат) | 203.5 МиБ | Apache-2.0 |
+| `clip-vit-b32-multilingual` | CLIP ViT-B/32 + DistilBERT+Dense | 512 | Russian/English | 2 (crop+frame) | 217.5 MiB | MIT + Apache-2.0 |
+| `clip-vit-b32-en` | CLIP ViT-B/32 | 512 | English | 2 (crop+frame) | 148.6 MiB | MIT |
+| `siglip-base-224-en` | SigLIP base patch16-224 | 768 | English | 1 (whole frame squared) | 203.5 MiB | Apache-2.0 |
 
-`TextKind` описывает, как читать текстовую башню: `Projected` — hidden states + dense 768→dim,
-`Direct` — CLIP `text_embeds`, `Pooler` — SigLIP `pooler_output`; SigLIP паддится до 64 токенов
-токеном `</s>` (pooler берёт последний токен). У SigLIP своя нормализация mean/std 0.5 и
-bicubic-ресайз; кадр не режется и не получает полей, а растягивается в 224×224, как в его
-processor. Векторы и теги разных моделей лежат рядом: `embeddings` ключ `(file_id, model)`,
-`tags` — `(file_id, tag, source)` (схема 7). Поиск, теги и кластеры читают только активную
-модель; переключение не стирает чужие векторы. У SigLIP шкала косинуса ниже CLIP: порог
-уверенного тега по умолчанию 0.22 означает «почти нет уверенных», поэтому теги SigLIP
-показываются через процентильный фильтр или при опущенном пороге; это не смешивание моделей.
+`TextKind` describes how to read the text tower: `Projected` — hidden states + dense 768→dim,
+`Direct` — CLIP `text_embeds`, `Pooler` — SigLIP `pooler_output`; SigLIP is padded to 64 tokens
+with `</s>` (the pooler takes the last token). SigLIP has its own mean/std 0.5 normalisation and a
+bicubic resize; the frame is neither cropped nor padded but stretched to 224×224, as in its
+processor. Vectors and tags of different models live side by side: `embeddings` keyed by
+`(file_id, model)`, `tags` by `(file_id, tag, source)` (schema 7). Search, tags and clusters read
+only the active model; switching does not wipe the other vectors. SigLIP's cosine scale is lower
+than CLIP's: the default confident-tag threshold of 0.22 means "almost no confident tags", so SigLIP
+tags are shown through the percentile filter or with a lowered threshold; this is not a mixing of
+models.
 
-## Замеры
+## Measurements
 
-| Дата | Корпус | Операция | Результат |
+| Date | Corpus | Operation | Result |
 |---|---|---|---|
-| 2026-11-22 | 2230 файлов, 21.2 ГиБ (`Фотографии с телефона`) | `index --jobs 16`, release | 64.9 с, 0 ошибок, БД 1.2 МБ, превью 29 МБ |
-| 2026-11-22 | копия БД корпуса, 2230 файлов | `index --jobs 16`, старый индекс | 1971 без изменений, 259 обработано (258 видео + 1 битый JPEG), 10.2 с; обложки видео 258/258 |
-| 2026-11-22 | та же БД | повторный `index --jobs 16` | 0.021 с, 2229 без изменений, 1 битый JPEG перечитывается |
-| 2026-11-22 | JPEG 108 МП, 36 МБ (12032×9024) | старый путь: полный декод + thumbnail 1920 | 1.33 с |
-| 2026-11-22 | тот же JPEG | новый путь: TurboJPEG DCT 1/4 → 3008 px | 0.54 с; 320 px превью показывается сразу |
-| 2026-11-22 | 2230 файлов, 21.2 ГиБ | `index --jobs 16`, release, с резкостью | 60.2 с, 0 ошибок, БД 1.3 МБ — резкость в цене не видна (шум загрузки машины больше) |
-| 2026-11-22 | 1972 фото | `dupes --max-dist 6 --csv --plan` | 103 группы, 238 файлов, 214.1 МиБ; `sharpness` заполнен у всех 238 строк |
-| 2026-11-22 | 122 файла (жёсткие ссылки на корпус) | `index --jobs 16`, release | 1.5 с (~80 фото/с) |
-| 2026-11-22 | 1972 фото | `dupes --max-dist 6` | 0.03 с, 103 группы, 238 файлов, 214.1 МиБ |
-| 2026-11-23 | копия БД корпуса, 2230 файлов | `dupes --max-dist 6`, release | 0.017–0.025 с, те же 103 группы, 238 файлов, 214.1 МиБ |
-| 2026-11-24 | копия БД корпуса, 2230 файлов | `dupes --max-dist 6`, release, англ. отчёт (M21.6) | 0.023 с, те же 103 группы, 238 файлов, 214.1 МиБ — перевод строк логику не тронул |
-| 2026-11-24 | та же БД | `stats` на обоих языках (M21.6) | 2230 файлов, 21.2 ГиБ, 258 видео, 3:19:46; числа совпадают, меняются только подписи и единицы (`ГиБ`/`GiB`) |
-| 2026-11-23 | синтетика 20 тыс. хешей, пары с 1 изменённым битом | `find_groups` release-тест, `max_dist 6` | 0.082 с, 10 000 групп, пик RSS теста 27.1 МБ |
-| 2026-11-23 | синтетика 50 тыс. хешей, пары с 1 изменённым битом | `find_groups` release-тест, `max_dist 6` | 0.446 с, 25 000 групп, пик RSS теста 48.2 МБ |
-| 2026-11-23 | синтетика 20 тыс. / 50 тыс. хешей | отвергнутый BK-tree, release-тест | 2.58 с / 17.2 с (нерабочий вариант, ADR 0038) |
-| 2026-11-22 | 1971 фото с превью (корпус 2230) | `embed --jobs 8 --batch 8`, release | 66.9 с (34 мс/фото), 0 ошибок, векторы 3.85 МиБ, тегов 13 797, модель 217.5 МиБ |
-| 2026-11-22 | тот же корпус | повторный `embed` | 0.025 с: 1971 пропущен по sha256 |
-| 2026-11-22 | 20 120 векторов (1971 реальных + синтетика) | `search «кошка» --repeat 4` | 48–51 мс на запрос, включая чтение 40 МиБ из SQLite |
-| 2026-11-22 | 1971 фото, 30 кластеров | `clusters --k 30` | 1.6 с, отчёт 30 кластеров × 12 примеров |
-| 2026-11-22 | 122 файла | `index --jobs 8`, **debug** | 48 с — debug-сборка для картинок непригодна |
-| 2026-11-22 | 2230 файлов, 21.2 ГиБ, вкл. 258 видео (17.4 ГиБ) | `index --jobs 16`, release, с ffmpeg | 84.7 с (+20 с к базе), 1 ошибка (известный битый JPEG), БД 1.3 МБ, превью 33 МБ (+4 МБ на обложки) |
-| 2026-11-22 | 258 видео | `ffprobe` + кадр-обложка 320 px | 258/258 с превью, dHash и длительностью; суммарно 3:19:46; 0 отказов ffmpeg |
-| 2026-11-22 | 3 видео (оригинал + перекодировка + чужое) | `dupes --max-dist 6` | перекодировка склеена с оригиналом: 1 группа, Δ2, 1.4 МиБ «лишнего» |
-| 2026-11-22 | корпус 2230 файлов, фото + 258 видео | `embed --jobs 8 --batch 8` | 2229/2229 за 77.3 с (34.7 мс/файл), 0 ошибок, векторы 4.35 МиБ, тегов 15 603, БД 12 МБ |
-| 2026-11-22 | та же БД, 2229 векторов | `search «торт»` (модель уже загружена) | 11 мс, первыми видео и фото с тортом |
-| 2026-11-22 | 2229 файлов, k=30 | `clusters --k 30` | 1.0 с |
-| 2026-11-22 | сеть, 155 МБ | `models download --id clip-vit-b32-en --yes` | 18.8 с, 148.6 МиБ, sha256 всех 3 файлов совпал |
-| 2026-11-22 | лимит 100 МиБ | `models download` | обе модели отклонены по размеру, ошибка с числами |
-| 2026-11-22 | лимит 160 МиБ, запрошена несуществующая | `models download --id nonexistent --yes` | выбран и проверен `clip-vit-b32-en` (148.6 МиБ) |
-| 2026-11-22 | 1972 снимка корпуса | `ocr --dry-run` | 435 кандидатов: без EXIF-камеры или уверенный тег «документ»/«скриншот»; 1 мс |
-| 2026-11-22 | 435 кандидатов (tesseract 5.5.4, rus+eng) | `ocr --jobs 8`, release | 106.2 с (0.24 с/файл), 434/435 (1 известный битый JPEG), 66 444 знака у 146 файлов |
-| 2026-11-22 | 435 кандидатов | `ocr --jobs 4`, release | 169.8 с — в 1.6 раза медленнее, текст тот же (66 444 знака) |
-| 2026-11-22 | 434 распознанных текста | повторный `ocr`, release | 0.0 с, 434 пропущено по sha256 |
-| 2026-11-22 | 434 текста, 66 444 знака | `search --text` («сбербанк», «счет-фактура», «2023») | 2–3 мс на запрос |
-| 2026-11-22 | БД 2230 файлов | до / после OCR | 12.4 → 12.7 МБ (+276 КиБ: текст и FTS5) |
-| 2026-11-22 | 10 документов | качество глазами | чек Сбербанка, счёт-фактура, страница книги читаются целиком; прайс-лист с бликами — частично |
-| 2026-11-22 | 1972 снимка корпуса | `faces --jobs 4` (SCRFD+ArcFace, порог 0.45) | 630.2 с, просканировано 1972/1972 (1 ошибка — битый JPEG), лиц 2498 на 856 снимках, 617 групп, БД 11.1 → 22 МБ, кропы лиц 11 МБ |
-| 2026-11-22 | 2498 лиц | `faces --recluster --threshold 0.45` | 1.2 с, 617 групп; крупнейшие 362, 252 и 225 лиц |
-| 2026-11-22 | 2498 лиц | порог 0.40 / 0.50 / 0.60 | 534 / 710 / 1006 групп — порог меняет склейку; подписи и ручные разъединения закреплены |
-| 2026-11-22 | сеть 182.4 МиБ | `faces download --yes` | 31.3 с, sha256 обоих файлов совпал |
-| 2026-11-22 | 2230 файлов, 21.2 ГиБ | `organize --out /tmp/show-day` (dry-run) | 0.017 с, 2230 файлов с датой, 0 без даты, 573 каталога дней |
-| 2026-11-22 | тот же корпус | `organize --by month` (dry-run) | 0.019 с, 76 каталогов месяцев |
-| 2026-11-22 | тот же корпус | `organize --by event` (dry-run) | 0.021 с, 576 каталогов: 573 дня + 3 места, 7 снимков с GPS |
-| 2026-11-22 | тот же корпус, шаблон `{date}_{time}_{camera}_{tag}_{orig}` | `organize --name …` (dry-run) | 0.037 с; теги (13 797 строк) читаются только под `{tag}`; пустые камера/тег не оставляют `__` |
-| 2026-11-22 | тот же корпус | `organize --apply` (hardlink) | 2230 ссылок за 0.065 с, 0 ошибок, 583 каталога; inode совпадает с оригиналом, link count 2, занято 0 байт |
-| 2026-11-22 | копия БД, 135 снимков помечены лишними по плану дублей | `organize --exclude-dup` (dry-run) | 0.015 с: включено 2095, исключено 135 |
-| 2026-11-22 | корпус 2230 файлов, 21.2 ГиБ, две reflink-копии | `verify --jobs 8`, release | 19.9 с; 2230/2230 совпало, sha256 прочитано 2 × 21.2 ГиБ, 0 ошибок |
-| 2026-11-22 | тот же корпус с 1 изменённым, 1 дописанным, 1 удалённым и 1 лишним файлом | `verify --jobs 8`, release | 16.1 с; совпало 2227, размер 1, содержимое 1, только в A 1, только в B 1; код 1 |
-| 2026-11-22 | корпус 2230 файлов, 21.2 ГиБ | `manifest --out corpus.sha256 --jobs 8`, release | 10.1 с; 2230 строк, файл 193 КиБ, 0 ошибок |
-| 2026-11-22 | тот же слепок, 2230 строк | `verify --manifest corpus.sha256 --jobs 8` | 11.4 с; 2230/2230 совпало; `sha256sum -c` читает слепок без ошибок |
-| 2026-11-22 | слепок корпуса против копии с 1 изменённым, 1 дописанным, 1 удалённым и 1 лишним файлом | `verify --manifest` | 8.9 с; совпало 2227, изменено 2, нет в каталоге 1, нет в слепке 1; код 1 |
-| 2026-11-23 | 2230 файлов, 21.2 ГиБ | `manifest --out /tmp/...sha256`, release | 8.9 с; 2230 строк, 196 789 Б, 0 ошибок |
-| 2026-11-23 | тот же корпус и слепок | `verify --manifest`, release | 10.0 с; 2230/2230 совпало; код 0 |
-| 2026-11-23 | копия реальной БД (2230 файлов), срок просрочен на день | `gui --db /tmp/...` под `timeout 6` | баннер «Пора проверить архив», автозапуска нет; код 124, падений нет |
-| 2026-11-23 | сеть, SigLIP base 224 | `models download --id siglip-base-224-en --yes` | 36.7 с, 3 файла, 203.5 МиБ, sha256 всех совпал |
-| 2026-11-23 | корпус 2227 файлов (2 в корзине) | `embed --refresh --jobs 8 --batch 8`, release, SigLIP | 418.2 с (0.188 с/файл, один кадр 224), 2227/2227, 0 ошибок; векторы 6.8 МиБ, БД 25.4 → 40.1 МБ вместе с CLIP-векторами |
-| 2026-11-23 | 2227 векторов SigLIP | `embed --retag` | 2.4 с, 14 тегов на модель, теги обеих моделей в БД (31 206 + 31 178) |
-| 2026-11-23 | 2227 векторов SigLIP | `search` (модель загружена), 3 запроса | 35–40 мс на запрос; релевантные верхние кадры; «red/blue» на контрольных квадратах — правильный порядок |
-| 2026-11-23 | 2227 векторов SigLIP | `clusters --k 30` | 1.5 с, отчёт 30 кластеров × 12 примеров |
-| 2026-11-23 | 640×480 Baseline, 300 кадров | `play --decode-only` | 331.5 к/с, конверсия RGBA 0.5 мс/кадр |
-| 2026-11-23 | 1280×720 Baseline, 153 кадра | `play --decode-only` | 71.6 к/с, конверсия 1.0 мс/кадр |
-| 2026-11-23 | 1920×1080 Baseline, 300 кадров | `play --decode-only` | 49.9 к/с, конверсия 2.6 мс/кадр |
-| 2026-11-23 | 2520×1080 High, 300 кадров | `play --decode-only` | 27.7 к/с, конверсия 2.9 мс/кадр |
-| 2026-11-23 | HEVC Main 1920×1080, 140 кадров | `play --decode-only` | 25.3 к/с, конверсия 2.9 мс/кадр |
-| 2026-11-23 | 1920×1080, 30 к/с, 900 кадров | `play` (встроенный плеер, со звуком) | 29.8 к/с — реальное время, звук играет, позиция 29.95 с за 30.2 с |
-| 2026-11-23 | 1280×720, 9 к/с источник, 150 кадров | `play` (встроенный плеер) | 9.2 к/с — ровно реальное время |
-| 2026-11-23 | 2520×1080 High, 30 к/с, 200 кадров | `play` (встроенный плеер, со звуком) | 22.9 к/с: декод 27.7 к/с, опоздание ограничено 0.5 с, звук остаётся |
-| 2026-11-23 | тот же файл до правки (один поток декода) | `play` | 6.7–11 к/с, звук и картинка «еле шевелились» |
-| 2026-11-23 | 1920×1080, seek на 10 с | `play --seek 10 --frames 60` | первый кадр 0.11 с, позиция 11.96 с, 60 кадров за 2.23 с |
-| 2026-11-23 | выход после 5 кадров | `play --frames 5` | 0.42 с — `stop` больше не ждёт потоки |
-| 2026-11-23 | 1920×1080, 100 кадров | `play --decode-only`, **чистый debug** | 2.2 к/с — `cargo run` без правки профиля даёт слайд-шоу |
-| 2026-11-23 | тот же файл, 300 кадров | `play --decode-only`, dev-профиль (`opt-level` 1 / 3) | 39.0 к/с; показ со звуком — 29.2 к/с |
-| 2026-11-23 | кадр 2520×1080 против `ffmpeg` | `play --dump` + PPM | ориентация и цвет совпали: средняя \|Δ\| по каналам 0.63, max 3 |
-| 2026-11-23 | `8.jpg`, CLIP ViT-B/32 multilingual, 224 px | центр-кроп vs весь кадр (letterbox), один кадр | центр: документ 0.267 / мебель 0.254; весь кадр: мебель 0.254 / документ 0.252. предварительная диагностика; повторный замер ниже уточнил вывод — кроп необходим, но не достаточен |
-| 2026-11-23 | `8.jpg` 433×800, CLIP ViT-B/32 multilingual | центр / весь кадр / ансамбль, полный кадр | центр: скриншот 0.278 / документ 0.275 / интерьер 0.271 / мебель 0.257; весь: интерьер 0.274 / мебель 0.262 / скриншот 0.261 / документ 0.257; ансамбль: интерьер 0.278 / скриншот 0.275 / документ 0.272 / мебель 0.265. Кроп уводит «документ» вниз, но «мебель» первой не становится — нужны M15.3 и M15.5 |
-| 2026-11-23 | корпус 2229 файлов, два кадра на снимок | `embed --refresh --jobs 8 --batch 8` | 176.6 с (79 мс/файл, 2.3× от 77.3 с), 0 ошибок; «мебель» ≥0.22: 717→1029; top-1 «документ» 266→248; уверенный тег 1284→1285; у 1263 из 1284 старых уверенных top-1 тот же (98.4%); векторы 4.35 МиБ, БД не выросла |
-| 2026-11-23 | копия реальной БД, 2230 файлов, 25.4 МБ | открытие `albums list` (миграция схемы 4 → 5) | данные целы: 2230 файлов; БД 25 403 392 → 25 411 584 Б (+8 КиБ на две таблицы) |
-| 2026-11-23 | та же БД, дерево 3 уровней: «Дача 2024 → Май → Неделя 1», ещё 3 узла | `albums add --id 2` 500 путями | 25 мс, добавлено 500, позиции 0..499; БД 25 411 584 → 25 440 256 Б (+28 КиБ) |
-| 2026-11-23 | те же 500 строк | повторный `albums add` | 19 мс, добавлено 0, «уже было 500»; порядок и БД не изменились |
-| 2026-11-23 | копия реальной БД, дерево 3 уровней, 500 файлов (2.4 ГиБ), `/tmp` | `export --album 1 --out /tmp/m20-500a` (dry-run) | 14 мс; 4 каталога, 500 файлов, 2.4 ГиБ, 0 коллизий, 0 длинных путей |
-| 2026-11-23 | те же 500 файлов, цель пустая | `export --apply` | 2045 мс, 500 копий, 2.4 ГиБ, 0 ошибок; inode отличается, sha256 совпал; вложенность `Дача_2024/Май/Неделя_1` |
-| 2026-11-23 | та же цель после первой выгрузки | повторный `export --apply` | 20 мс: выгружено 0, пропущено 500, файлов в цели 500; кэш в `exports/` — 500 строк |
-| 2026-11-23 | копия реальной БД, 2230 файлов (21.2 ГиБ) в одном альбоме | `export --album 5 --out ~/pctest-m20-all` (dry-run) | 21 мс; 1 каталог, 2230 файлов, 21.2 ГиБ |
-| 2026-11-23 | те же 2230 файлов, цель пустая | `export --apply` | 111 мс, 2230 копий, 21.2 ГиБ, 0 ошибок; ФС отдала `copy_file_range` (reflink/extent copy), на ФС без него время будет ближе к записи объёма |
-| 2026-11-23 | та же цель | повторный `export --apply` | 45 мс: выгружено 0, пропущено 2230, файлов в цели 2230; 5 проверенных копий — sha256 совпал, inode другой |
-| 2026-11-23 | копия реальной БД, 2229 векторов, CLIP ViT-B/32 multilingual | `tags --add «Шкаф» --prompt …` + `embed --retag` | 1.0–1.2 с на пересчёт весов всех 2229 файлов (модель уже на диске), фото не читались; в БД 15 тегов, «Шкаф» 0.187–0.292, top-1 у 218 снимков |
-| 2026-11-23 | те же 15 тегов, «Шкаф» | процентиль 70% (`tag_show_pct`) | порог 0.2454, проходит 669 снимков — как и у остальных тегов при том же процентиле |
-| 2026-11-23 | корпус телефона, 2229 файлов; 145 с распознанным текстом, 1655 фото с камерой без текста | промпты v1 (1 на метку) → v2 (2–3 общих шаблона, лучший вес), `embed --retag` на копиях БД | уверенных 1285 (57.6%) → 1242 (55.7%); top-1 тот же у 1855 (83.2%); «документ» в top-3 804 → 534, «мебель» 392 → 407, «интерьер» 849 → 905; ложный «документ/скриншот» на фото с камерой 270/1655 (16.3%) → 225/1655 (13.6%), у снимков с текстом 123/145 (84.8%) — без потерь |
-| 2026-11-23 | «день рожденья», 110 файлов (второй независимый каталог), CLIP ViT-B/32 multilingual | то же: v1 → v2 | уверенных 66 (60.0%) → 69 (62.7%); top-1 тот же у 95 (86.4%); «документ» в top-3 38 → 21, «скриншот» 39 → 38; `8.jpg` корпуса телефона: документ 0.274 / мебель 0.273 — «не уверен» (отрыв 0.001) |
+| 2026-11-22 | 2230 files, 21.2 GiB (`Фотографии с телефона`) | `index --jobs 16`, release | 64.9 s, 0 errors, DB 1.2 MB, previews 29 MB |
+| 2026-11-22 | a copy of the corpus DB, 2230 files | `index --jobs 16`, old index | 1971 unchanged, 259 processed (258 videos + 1 broken JPEG), 10.2 s; video covers 258/258 |
+| 2026-11-22 | the same DB | repeated `index --jobs 16` | 0.021 s, 2229 unchanged, 1 broken JPEG read again |
+| 2026-11-22 | JPEG 108 MP, 36 MB (12032×9024) | old path: full decode + thumbnail 1920 | 1.33 s |
+| 2026-11-22 | the same JPEG | new path: TurboJPEG DCT 1/4 → 3008 px | 0.54 s; the 320 px preview is shown immediately |
+| 2026-11-22 | 2230 files, 21.2 GiB | `index --jobs 16`, release, with sharpness | 60.2 s, 0 errors, DB 1.3 MB — sharpness is invisible in the cost (machine load noise is larger) |
+| 2026-11-22 | 1972 photos | `dupes --max-dist 6 --csv --plan` | 103 groups, 238 files, 214.1 MiB; `sharpness` filled for all 238 rows |
+| 2026-11-22 | 122 files (hardlinks to the corpus) | `index --jobs 16`, release | 1.5 s (~80 photos/s) |
+| 2026-11-22 | 1972 photos | `dupes --max-dist 6` | 0.03 s, 103 groups, 238 files, 214.1 MiB |
+| 2026-11-23 | a copy of the corpus DB, 2230 files | `dupes --max-dist 6`, release | 0.017–0.025 s, the same 103 groups, 238 files, 214.1 MiB |
+| 2026-11-24 | a copy of the corpus DB, 2230 files | `dupes --max-dist 6`, release, English report (M21.6) | 0.023 s, the same 103 groups, 238 files, 214.1 MiB — translating strings did not touch the logic |
+| 2026-11-24 | the same DB | `stats` in both languages (M21.6) | 2230 files, 21.2 GiB, 258 videos, 3:19:46; the numbers match, only labels and units change (`ГиБ`/`GiB`) |
+| 2026-11-23 | synthetic 20k hashes, pairs differing by 1 bit | `find_groups` release test, `max_dist 6` | 0.082 s, 10 000 groups, test peak RSS 27.1 MB |
+| 2026-11-23 | synthetic 50k hashes, pairs differing by 1 bit | `find_groups` release test, `max_dist 6` | 0.446 s, 25 000 groups, test peak RSS 48.2 MB |
+| 2026-11-23 | synthetic 20k / 50k hashes | the rejected BK-tree, release test | 2.58 s / 17.2 s (a non-working variant, ADR 0038) |
+| 2026-11-22 | 1971 photos with previews (corpus 2230) | `embed --jobs 8 --batch 8`, release | 66.9 s (34 ms/photo), 0 errors, vectors 3.85 MiB, 13 797 tags, model 217.5 MiB |
+| 2026-11-22 | the same corpus | repeated `embed` | 0.025 s: 1971 skipped by sha256 |
+| 2026-11-22 | 20 120 vectors (1971 real + synthetic) | `search "кошка" --repeat 4` | 48–51 ms per query, including reading 40 MiB from SQLite |
+| 2026-11-22 | 1971 photos, 30 clusters | `clusters --k 30` | 1.6 s, a report of 30 clusters × 12 examples |
+| 2026-11-22 | 122 files | `index --jobs 8`, **debug** | 48 s — a debug build is unusable for images |
+| 2026-11-22 | 2230 files, 21.2 GiB, incl. 258 videos (17.4 GiB) | `index --jobs 16`, release, with ffmpeg | 84.7 s (+20 s over the base), 1 error (the known broken JPEG), DB 1.3 MB, previews 33 MB (+4 MB for covers) |
+| 2026-11-22 | 258 videos | `ffprobe` + a 320 px cover frame | 258/258 with a preview, dHash and duration; 3:19:46 in total; 0 ffmpeg failures |
+| 2026-11-22 | 3 videos (original + transcode + an unrelated one) | `dupes --max-dist 6` | the transcode glued to the original: 1 group, Δ2, 1.4 MiB of "extra" |
+| 2026-11-22 | corpus 2230 files, photos + 258 videos | `embed --jobs 8 --batch 8` | 2229/2229 in 77.3 s (34.7 ms/file), 0 errors, vectors 4.35 MiB, 15 603 tags, DB 12 MB |
+| 2026-11-22 | the same DB, 2229 vectors | `search "торт"` (the model already loaded) | 11 ms, videos and photos with cake first |
+| 2026-11-22 | 2229 files, k=30 | `clusters --k 30` | 1.0 s |
+| 2026-11-22 | network, 155 MB | `models download --id clip-vit-b32-en --yes` | 18.8 s, 148.6 MiB, the sha256 of all 3 files matched |
+| 2026-11-22 | limit 100 MiB | `models download` | both models rejected by size, an error with the numbers |
+| 2026-11-22 | limit 160 MiB, a non-existent model requested | `models download --id nonexistent --yes` | `clip-vit-b32-en` (148.6 MiB) picked and verified |
+| 2026-11-22 | 1972 corpus snapshots | `ocr --dry-run` | 435 candidates: no EXIF camera or a confident "document"/"screenshot" tag; 1 ms |
+| 2026-11-22 | 435 candidates (tesseract 5.5.4, rus+eng) | `ocr --jobs 8`, release | 106.2 s (0.24 s/file), 434/435 (1 known broken JPEG), 66 444 characters in 146 files |
+| 2026-11-22 | 435 candidates | `ocr --jobs 4`, release | 169.8 s — 1.6× slower, the same text (66 444 characters) |
+| 2026-11-22 | 434 recognized texts | repeated `ocr`, release | 0.0 s, 434 skipped by sha256 |
+| 2026-11-22 | 434 texts, 66 444 characters | `search --text` ("сбербанк", "счет-фактура", "2023") | 2–3 ms per query |
+| 2026-11-22 | DB of 2230 files | before / after OCR | 12.4 → 12.7 MB (+276 KiB: text and FTS5) |
+| 2026-11-22 | 10 documents | quality by eye | a Sberbank receipt, an invoice and a book page read in full; a price list with glare — partially |
+| 2026-11-22 | 1972 corpus snapshots | `faces --jobs 4` (SCRFD+ArcFace, threshold 0.45) | 630.2 s, 1972/1972 scanned (1 error — a broken JPEG), 2498 faces in 856 snapshots, 617 groups, DB 11.1 → 22 MB, face crops 11 MB |
+| 2026-11-22 | 2498 faces | `faces --recluster --threshold 0.45` | 1.2 s, 617 groups; the largest 362, 252 and 225 faces |
+| 2026-11-22 | 2498 faces | threshold 0.40 / 0.50 / 0.60 | 534 / 710 / 1006 groups — the threshold changes the glue; labels and manual splits stay pinned |
+| 2026-11-22 | network 182.4 MiB | `faces download --yes` | 31.3 s, the sha256 of both files matched |
+| 2026-11-22 | 2230 files, 21.2 GiB | `organize --out /tmp/show-day` (dry run) | 0.017 s, 2230 files with a date, 0 without, 573 day directories |
+| 2026-11-22 | the same corpus | `organize --by month` (dry run) | 0.019 s, 76 month directories |
+| 2026-11-22 | the same corpus | `organize --by event` (dry run) | 0.021 s, 576 directories: 573 days + 3 places, 7 snapshots with GPS |
+| 2026-11-22 | the same corpus, template `{date}_{time}_{camera}_{tag}_{orig}` | `organize --name …` (dry run) | 0.037 s; tags (13 797 rows) are read only under `{tag}`; an empty camera/tag leaves no `__` |
+| 2026-11-22 | the same corpus | `organize --apply` (hardlink) | 2230 links in 0.065 s, 0 errors, 583 directories; the inode matches the original, link count 2, 0 bytes used |
+| 2026-11-22 | DB copy, 135 snapshots marked extra by the duplicate plan | `organize --exclude-dup` (dry run) | 0.015 s: 2095 included, 135 excluded |
+| 2026-11-22 | corpus 2230 files, 21.2 GiB, two reflink copies | `verify --jobs 8`, release | 19.9 s; 2230/2230 matched, sha256 read 2 × 21.2 GiB, 0 errors |
+| 2026-11-22 | the same corpus with 1 changed, 1 appended, 1 deleted and 1 extra file | `verify --jobs 8`, release | 16.1 s; 2227 matched, size 1, content 1, only in A 1, only in B 1; code 1 |
+| 2026-11-22 | corpus 2230 files, 21.2 GiB | `manifest --out corpus.sha256 --jobs 8`, release | 10.1 s; 2230 lines, file 193 KiB, 0 errors |
+| 2026-11-22 | the same manifest, 2230 lines | `verify --manifest corpus.sha256 --jobs 8` | 11.4 s; 2230/2230 matched; `sha256sum -c` reads the manifest without errors |
+| 2026-11-22 | the corpus manifest against a copy with 1 changed, 1 appended, 1 deleted and 1 extra file | `verify --manifest` | 8.9 s; 2227 matched, 2 changed, 1 missing from the directory, 1 missing from the manifest; code 1 |
+| 2026-11-23 | 2230 files, 21.2 GiB | `manifest --out /tmp/...sha256`, release | 8.9 s; 2230 lines, 196 789 B, 0 errors |
+| 2026-11-23 | the same corpus and manifest | `verify --manifest`, release | 10.0 s; 2230/2230 matched; code 0 |
+| 2026-11-23 | a copy of the real DB (2230 files), deadline overdue by a day | `gui --db /tmp/...` under `timeout 6` | the banner "Time to check the archive", no auto-start; code 124, no crashes |
+| 2026-11-23 | network, SigLIP base 224 | `models download --id siglip-base-224-en --yes` | 36.7 s, 3 files, 203.5 MiB, the sha256 of all matched |
+| 2026-11-23 | corpus 2227 files (2 in the trash) | `embed --refresh --jobs 8 --batch 8`, release, SigLIP | 418.2 s (0.188 s/file, one 224 frame), 2227/2227, 0 errors; vectors 6.8 MiB, DB 25.4 → 40.1 MB together with the CLIP vectors |
+| 2026-11-23 | 2227 SigLIP vectors | `embed --retag` | 2.4 s, 14 tags per model, the tags of both models in the DB (31 206 + 31 178) |
+| 2026-11-23 | 2227 SigLIP vectors | `search` (the model loaded), 3 queries | 35–40 ms per query; the relevant top frames; "red/blue" on control squares — the right order |
+| 2026-11-23 | 2227 SigLIP vectors | `clusters --k 30` | 1.5 s, a report of 30 clusters × 12 examples |
+| 2026-11-23 | 640×480 Baseline, 300 frames | `play --decode-only` | 331.5 fps, RGBA conversion 0.5 ms/frame |
+| 2026-11-23 | 1280×720 Baseline, 153 frames | `play --decode-only` | 71.6 fps, conversion 1.0 ms/frame |
+| 2026-11-23 | 1920×1080 Baseline, 300 frames | `play --decode-only` | 49.9 fps, conversion 2.6 ms/frame |
+| 2026-11-23 | 2520×1080 High, 300 frames | `play --decode-only` | 27.7 fps, conversion 2.9 ms/frame |
+| 2026-11-23 | HEVC Main 1920×1080, 140 frames | `play --decode-only` | 25.3 fps, conversion 2.9 ms/frame |
+| 2026-11-23 | 1920×1080, 30 fps, 900 frames | `play` (built-in player, with sound) | 29.8 fps — real time, the sound plays, position 29.95 s in 30.2 s |
+| 2026-11-23 | 1280×720, 9 fps source, 150 frames | `play` (built-in player) | 9.2 fps — exactly real time |
+| 2026-11-23 | 2520×1080 High, 30 fps, 200 frames | `play` (built-in player, with sound) | 22.9 fps: decode 27.7 fps, the lag is capped at 0.5 s, the sound stays |
+| 2026-11-23 | the same file before the fix (single decode thread) | `play` | 6.7–11 fps, the sound and the picture "barely moved" |
+| 2026-11-23 | 1920×1080, seek to 10 s | `play --seek 10 --frames 60` | first frame 0.11 s, position 11.96 s, 60 frames in 2.23 s |
+| 2026-11-23 | exit after 5 frames | `play --frames 5` | 0.42 s — `stop` no longer waits for the threads |
+| 2026-11-23 | 1920×1080, 100 frames | `play --decode-only`, **plain debug** | 2.2 fps — `cargo run` without the profile fix gives a slideshow |
+| 2026-11-23 | the same file, 300 frames | `play --decode-only`, dev profile (`opt-level` 1 / 3) | 39.0 fps; presentation with sound — 29.2 fps |
+| 2026-11-23 | a 2520×1080 frame against `ffmpeg` | `play --dump` + PPM | orientation and colour matched: mean \|Δ\| per channel 0.63, max 3 |
+| 2026-11-23 | `8.jpg`, CLIP ViT-B/32 multilingual, 224 px | centre crop vs the whole frame (letterbox), one frame | centre: document 0.267 / furniture 0.254; whole frame: furniture 0.254 / document 0.252. Preliminary diagnostics; the rerun below refined the conclusion — the crop is necessary but not sufficient |
+| 2026-11-23 | `8.jpg` 433×800, CLIP ViT-B/32 multilingual | centre / whole frame / ensemble, full frame | centre: screenshot 0.278 / document 0.275 / interior 0.271 / furniture 0.257; whole: interior 0.274 / furniture 0.262 / screenshot 0.261 / document 0.257; ensemble: interior 0.278 / screenshot 0.275 / document 0.272 / furniture 0.265. The crop pushes "document" down, but "furniture" does not become first — M15.3 and M15.5 are needed |
+| 2026-11-23 | corpus 2229 files, two frames per snapshot | `embed --refresh --jobs 8 --batch 8` | 176.6 s (79 ms/file, 2.3× over 77.3 s), 0 errors; "furniture" ≥0.22: 717→1029; top-1 "document" 266→248; confident tag 1284→1285; for 1263 of the 1284 old confident ones the top-1 is the same (98.4%); vectors 4.35 MiB, the DB did not grow |
+| 2026-11-23 | a copy of the real DB, 2230 files, 25.4 MB | opening `albums list` (schema migration 4 → 5) | data intact: 2230 files; DB 25 403 392 → 25 411 584 B (+8 KiB for two tables) |
+| 2026-11-23 | the same DB, a 3-level tree: "Дача 2024 → Май → Неделя 1", 3 more nodes | `albums add --id 2` with 500 paths | 25 ms, 500 added, positions 0..499; DB 25 411 584 → 25 440 256 B (+28 KiB) |
+| 2026-11-23 | the same 500 rows | repeated `albums add` | 19 ms, 0 added, "already had 500"; the order and the DB did not change |
+| 2026-11-23 | a copy of the real DB, a 3-level tree, 500 files (2.4 GiB), `/tmp` | `export --album 1 --out /tmp/m20-500a` (dry run) | 14 ms; 4 directories, 500 files, 2.4 GiB, 0 collisions, 0 long paths |
+| 2026-11-23 | the same 500 files, an empty target | `export --apply` | 2045 ms, 500 copies, 2.4 GiB, 0 errors; the inode differs, sha256 matched; nesting `Дача_2024/Май/Неделя_1` |
+| 2026-11-23 | the same target after the first export | repeated `export --apply` | 20 ms: 0 exported, 500 skipped, 500 files in the target; the cache in `exports/` — 500 lines |
+| 2026-11-23 | a copy of the real DB, 2230 files (21.2 GiB) in one album | `export --album 5 --out ~/pctest-m20-all` (dry run) | 21 ms; 1 directory, 2230 files, 21.2 GiB |
+| 2026-11-23 | the same 2230 files, an empty target | `export --apply` | 111 ms, 2230 copies, 21.2 GiB, 0 errors; the FS gave `copy_file_range` (reflink/extent copy), on a FS without it the time will be closer to writing the volume |
+| 2026-11-23 | the same target | repeated `export --apply` | 45 ms: 0 exported, 2230 skipped, 2230 files in the target; 5 checked copies — sha256 matched, the inode is different |
+| 2026-11-23 | a copy of the real DB, 2229 vectors, CLIP ViT-B/32 multilingual | `tags --add "Шкаф" --prompt …` + `embed --retag` | 1.0–1.2 s to recompute the weights of all 2229 files (the model already on disk), the photos were not read; 15 tags in the DB, "Шкаф" 0.187–0.292, top-1 for 218 snapshots |
+| 2026-11-23 | the same 15 tags, "Шкаф" | percentile 70% (`tag_show_pct`) | threshold 0.2454, 669 snapshots pass — the same as the other tags at the same percentile |
+| 2026-11-23 | the phone corpus, 2229 files; 145 with recognized text, 1655 photos with a camera and no text | prompts v1 (1 per label) → v2 (2–3 common templates, the best weight), `embed --retag` on DB copies | confident 1285 (57.6%) → 1242 (55.7%); top-1 the same for 1855 (83.2%); "document" in top-3 804 → 534, "furniture" 392 → 407, "interior" 849 → 905; a false "document/screenshot" on photos with a camera 270/1655 (16.3%) → 225/1655 (13.6%), on snapshots with text 123/145 (84.8%) — no losses |
+| 2026-11-23 | "день рожденья", 110 files (a second independent directory), CLIP ViT-B/32 multilingual | the same: v1 → v2 | confident 66 (60.0%) → 69 (62.7%); top-1 the same for 95 (86.4%); "document" in top-3 38 → 21, "screenshot" 39 → 38; `8.jpg` of the phone corpus: document 0.274 / furniture 0.273 — "not sure" (gap 0.001) |
 
-Правило: числа без корпуса и даты в таблицу не попадают.
+Rule: numbers without a corpus and a date do not enter the table.
 
-## Долгие проходы: отмена и продолжение
+## Long passes: cancel and resume
 
-Индексация, CLIP и OCR идут в фоновом потоке и держат одну транзакцию на прогон. Читать БД при
-этом можно (`WAL` + `SCHEMA_VERSION`), а прервать — кнопкой «Стоп»: `Progress::cancel()` ставит
-флаг, воркеры проверяют его между файлами (OCR — и внутри партии документов), уже начатый файл
-доводится, транзакция коммитится, `Stats.cancelled` говорит «остановлено». Продолжение — тот же
-проход заново: неизменённые `sha256` пропускаются, поэтому «Продолжить (N)» доделывает остаток.
-Процесс `tesseract` запускается с `OMP_THREAD_LIMIT=1`, чтобы N воркеров не занимали все ядра и
-окно не подвисало.
+Indexing, CLIP and OCR run in a background thread and hold one transaction per run. The DB can be
+read meanwhile (`WAL` + `SCHEMA_VERSION`), and the pass can be interrupted with "Stop":
+`Progress::cancel()` sets the flag, the workers check it between files (OCR — also inside a batch of
+documents), the started file is finished, the transaction is committed, and `Stats.cancelled` says
+"stopped". Resuming is the same pass again: unchanged `sha256` values are skipped, so "Resume (N)"
+finishes the remainder. The `tesseract` process runs with `OMP_THREAD_LIMIT=1`, so that N workers do
+not take all cores and the window does not stutter.
 
-## Внешние программы
+## External programs
 
-Приложение — один Rust-бинарник; всё, что требует C-стека, работает процессами (ADR 0019).
-Путь к каждой программе — настройка (ADR 0020): пустое поле — поиск в `PATH`, непустое — запуск по
-указанному пути. Поиск, запуск и подавление консольного окна на Windows собраны в `src/tools.rs`:
-`derive` и `embed` просят `Tool::Ffmpeg`/`Tool::Tesseract`/`Tool::Curl`, а не имя строкой.
+The app is one Rust binary; everything that needs a C stack runs as a process (ADR 0019). The path
+to each program is a setting (ADR 0020): an empty field means a `PATH` lookup, a non-empty one means
+starting that file. The lookup, the launch and the Windows console suppression live in
+`src/tools.rs`: `derive` and `embed` ask for `Tool::Ffmpeg`/`Tool::Tesseract`/`Tool::Curl`, not for a
+name as a string.
 
-| Программа | Модуль работы | Настройка | Без неё |
+| Program | Module it works for | Setting | Without it |
 |---|---|---|---|
-| `ffmpeg` | `derive::analyze_video` | `tool_ffmpeg` | видео в индексе без превью и dHash, ошибка в счётчике |
-| `ffprobe` | `derive::video_probe` | `tool_ffprobe` | видео без длительности и разрешения |
-| `tesseract` | `derive::ocr_image` | `tool_tesseract` | OCR выключен (кнопка погашена, `ocr` подсказывает путь) |
-| `curl` | `embed::download_model` | `tool_curl` | веса модели кладутся вручную |
+| `ffmpeg` | `derive::analyze_video` | `tool_ffmpeg` | a video in the index without a preview and dHash, an error in the counter |
+| `ffprobe` | `derive::video_probe` | `tool_ffprobe` | a video without duration and resolution |
+| `tesseract` | `derive::ocr_image` | `tool_tesseract` | OCR is off (the button is greyed out, `ocr` suggests a path) |
+| `curl` | `embed::download_model` | `tool_curl` | model weights have to be put in place by hand |
 
-**Проверка пути.** При сохранении программа запускается с флагом версии (`-version` у
-ffmpeg/ffprobe, `--version` у tesseract/curl). GUI пишет итог или ошибку в статус-строку и не
-сохраняет неработающий путь; CLI `settings --tesseract PATH` при ошибке завершается с кодом 2 и
-ничего не пишет в БД. Пустой путь проверять нечего — программа ищется в `PATH` в момент работы.
+**Checking a path.** On save the program is started with its version flag (`-version` for
+ffmpeg/ffprobe, `--version` for tesseract/curl). The GUI writes the outcome or the error to the
+status line and does not save a non-working path; `settings --tesseract PATH` in the CLI exits with
+code 2 on an error and writes nothing to the DB. There is nothing to check for an empty path — the
+program is looked up in `PATH` at work time.
 
-**`doctor`** печатает для каждой программы версию, откуда взят путь (настройки или `PATH`),
-найденный файл, зачем она нужна и что сломается без неё; затем языки tesseract против
-`settings.ocr_lang` (`rus+eng` по умолчанию), модель CLIP и размер БД. Отсутствие программы —
-состояние, а не падение: отключается только её вид работы.
+**`doctor`** prints for each program the version, where the path comes from (settings or `PATH`),
+the file it found, why it is needed and what breaks without it; then the tesseract languages against
+`settings.ocr_lang` (`rus+eng` by default), the CLIP model and the DB size. A missing program is a
+state, not a crash: only its own kind of work is disabled.
 
-## Кросс-платформенность
+## Cross-platform
 
-Цель — Linux (ADR 0014), но код не содержит тупиков: кэш ищется через `XDG_CACHE_HOME` /
-`LOCALAPPDATA` / `HOME`, симлинки — с `#[cfg(unix)]` и `#[cfg(windows)]`, внешние
-`ffmpeg`/`ffprobe`/`curl`/`tesseract` берутся из настроек или `PATH` (`tools::Tools`) и
-запускаются без консольного окна на Windows.
-Известное ограничение: не-UTF-8 имена (в Linux допустимы) теряются при записи пути в SQLite через
-`to_string_lossy`; для видео, загрузки модели и OCR нужны соответствующие программы в `PATH`
-(без tesseract пропадает только OCR — остальное работает). Что именно есть на машине, печатает
-`photocat doctor`; пакеты ставятся штатным пакетным менеджером ОС (Arch: `tesseract` +
-`tesseract-data-rus` + `tesseract-data-eng`, Windows/macOS — свои сборки ffmpeg и tesseract).
+The target is Linux (ADR 0014), but the code has no dead ends: the cache is found through
+`XDG_CACHE_HOME` / `LOCALAPPDATA` / `HOME`, symlinks use `#[cfg(unix)]` and `#[cfg(windows)]`, and
+`ffmpeg`/`ffprobe`/`curl`/`tesseract` come from the settings or `PATH` (`tools::Tools`) and are
+started without a console window on Windows. A known limitation: non-UTF-8 names (allowed on Linux)
+are lost when the path is written to SQLite via `to_string_lossy`; video, model download and OCR need
+the respective programs in `PATH` (without tesseract only OCR is lost — everything else works).
+What exactly is present on the machine is printed by `photocat doctor`; packages are installed with
+the OS package manager (Arch: `tesseract` + `tesseract-data-rus` + `tesseract-data-eng`,
+Windows/macOS — their own ffmpeg and tesseract builds).
