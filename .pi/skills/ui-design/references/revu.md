@@ -17,7 +17,7 @@ met or not; "generally fine" does not count.
 | 6 | One model | a tile = a file; a click = selection; the same words | "the tile is different here" |
 | 7 | Numbers have units | "214.1 MiB wasted", "238 files" | "214.1", "pcs.", "file(s)" |
 | 8 | Nothing is destroyed | search for the words "delete/move/clear" | even one word |
-| 9 | No modal windows and confirmations | errors in the status; actions reversible | a "Are you sure?" dialog |
+| 9 | No extra modal windows or confirmations | errors in the status; actions reversible; the only confirmations are "Empty the trash" and the cache/index cleanup | a "Are you sure?" dialog for a reversible action |
 | 10 | Hover is only a hint | turn the mouse off: every action is still available | a button only in a tooltip |
 | 11 | The keyboard is not mandatory, but works | Tab/Enter/Esc, focus visible | focus is not visible, Tab does not move |
 | 12 | The metrics are untouched | 150+26, 260, 320, 1240×840, ≥4 columns | a "better" tile of one's own |

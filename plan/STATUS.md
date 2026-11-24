@@ -1661,7 +1661,7 @@ while the checks and thresholds are unchanged. `bash -n` passes on both; `check.
 **Made true by the translation (both variants).** The placement map says seven views, not "four";
 the navigation rule lists `All files`, `Albums`, `Calendar`, `Faces`, `Duplicates`, `Integrity`,
 `Trash`; the review's honest list dropped "multi-selection does not exist" (M18 added it) and keeps
-the remaining five items; the interaction rules name the two real confirmations — "Empty the trash"
+the remaining five items; the interaction rules and the review rubric name the two real confirmations — "Empty the trash"
 (the OS trash) and cleaning the cache/index — instead of "there are no confirmations". The
 references still describe the interface of their last revision; the current behavior document is
 `docs/UI.md`.
