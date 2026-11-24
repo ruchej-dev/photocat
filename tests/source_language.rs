@@ -15,7 +15,6 @@ use std::path::Path;
 const PENDING: &[&str] = &[
     "app.rs",
     "embed.rs",
-    "player.rs",
 ];
 
 /// Files whose string literals are legitimate Russian *data*: the translation table itself and the
