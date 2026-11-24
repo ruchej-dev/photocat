@@ -617,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn выборка_идёт_равномерно_и_повторяется() {
+    fn the_sample_is_even_and_repeatable() {
         let all: Vec<Row> = (0..100).map(row).collect();
         let picked = pick(&all, 10);
         assert_eq!(picked.len(), 10);
@@ -630,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn разметка_понимает_пустое_пропуск_и_несколько_меток() {
+    fn the_labels_read_empty_skip_and_several_labels() {
         assert!(parse_label("").unlabelled());
         assert!(parse_label("  ").unlabelled());
         assert!(parse_label("skip").skip);
@@ -645,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn csv_переживает_запятые_и_кавычки() {
+    fn the_csv_survives_commas_and_quotes() {
         let rows = vec![
             vec!["n".to_string(), "path".to_string(), "label".to_string()],
             vec!["1".into(), "a,\"b\".jpg".into(), "other".into()],
@@ -661,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn метрики_считают_top1_top3_и_уверенную_ошибку() {
+    fn the_metrics_count_top1_top3_and_the_confident_mistake() {
         let d = defs();
         let t = tags(&[
             (
@@ -709,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn несколько_допустимых_меток_засчитываются_как_попадание() {
+    fn several_allowed_labels_count_as_a_hit() {
         let d = defs();
         let t = tags(&[("a.jpg", &[("interior-label", 0.30), ("food-label", 0.10)])]);
         let s = score(
@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    fn неизвестная_метка_останавливает_счёт() {
+    fn an_unknown_label_stops_the_count() {
         let err = score(
             &[label("a.jpg", "unicorn")],
             &tags(&[("a.jpg", &[("food-label", 0.3)])]),
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn процентиль_мебели_считает_найденные_снимки() {
+    fn the_furniture_percentile_counts_the_found_shots() {
         let d = defs();
         let t = tags(&[
             ("a.jpg", &[("furniture-label", 0.40)]),
@@ -776,7 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn номер_рисуется_в_пределах_листа() {
+    fn the_number_is_drawn_within_the_sheet() {
         let mut img = RgbImage::from_pixel(20, 20, Rgb([0, 0, 0]));
         draw_digits(&mut img, 0, 0, 101, 3, Rgb([255, 255, 255]));
         // Три цифры по 4*3 px — 36 px: за границей листа пиксель не появляется.

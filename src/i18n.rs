@@ -1440,7 +1440,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn английский_перевод_находится_а_русский_остаётся() {
+    fn the_english_translation_is_found_and_the_russian_stays() {
         assert_eq!(t(Lang::En, "Настройки"), "Settings");
         assert_eq!(t(Lang::Ru, "Настройки"), "Настройки");
         assert_eq!(t(Lang::Ru, "строка без перевода"), "строка без перевода");
@@ -1448,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn код_языка_переживает_разбор_и_неизвестное_даёт_основной() {
+    fn the_language_code_survives_parsing_and_unknown_gives_the_main_one() {
         assert_eq!(Lang::parse("ru"), Lang::Ru);
         assert_eq!(Lang::parse(" RU "), Lang::Ru);
         assert_eq!(Lang::parse("en"), Lang::En);
@@ -1460,7 +1460,7 @@ mod tests {
     }
 
     #[test]
-    fn локаль_системы_даёт_язык_или_молчит() {
+    fn the_system_locale_gives_a_language_or_stays_silent() {
         assert_eq!(Lang::from_tag("ru_RU.UTF-8"), Some(Lang::Ru));
         assert_eq!(Lang::from_tag("ru-RU"), Some(Lang::Ru));
         assert_eq!(Lang::from_tag("en_US.utf8"), Some(Lang::En));
@@ -1474,7 +1474,7 @@ mod tests {
     }
 
     #[test]
-    fn счётчик_позиции_и_интервал_на_двух_языках() {
+    fn the_position_counter_and_the_interval_in_both_languages() {
         assert_eq!(position(Lang::En, 3, 12), "3 of 12");
         assert_eq!(position(Lang::Ru, 3, 12), "3 из 12");
         assert_eq!(seconds(Lang::En, 5), "5 s");
@@ -1482,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn счётчик_ставит_правильное_число_на_обоих_языках() {
+    fn the_counter_puts_the_right_number_in_both_languages() {
         let ru = ["файл", "файла", "файлов"];
         assert_eq!(count(Lang::Ru, 1, ru, "file", "files"), "1 файл");
         assert_eq!(count(Lang::Ru, 2, ru, "file", "files"), "2 файла");
@@ -1494,7 +1494,7 @@ mod tests {
     }
 
     #[test]
-    fn месяцы_на_двух_языках_и_без_паники() {
+    fn months_in_both_languages_and_no_panic() {
         assert_eq!(month_name(Lang::En, 5), "May");
         assert_eq!(month_name(Lang::Ru, 5), "май");
         assert_eq!(month_name(Lang::En, 12), "December");
@@ -1503,7 +1503,7 @@ mod tests {
     }
 
     #[test]
-    fn дни_недели_на_двух_языках() {
+    fn weekdays_in_both_languages() {
         assert_eq!(weekday(Lang::En, 0), "Mon");
         assert_eq!(weekday(Lang::En, 6), "Sun");
         assert_eq!(weekday(Lang::Ru, 0), "Пн");
@@ -1513,7 +1513,7 @@ mod tests {
     }
 
     #[test]
-    fn таблица_без_пустых_и_повторных_ключей() {
+    fn the_table_has_no_empty_or_duplicate_keys() {
         let mut seen = std::collections::HashSet::new();
         for (ru, en) in PAIRS {
             assert!(!ru.trim().is_empty(), "пустой ключ");
@@ -1524,7 +1524,7 @@ mod tests {
     }
 
     #[test]
-    fn каждая_переведённая_строка_действительно_русская() {
+    fn every_translated_string_is_really_russian() {
         for (ru, _) in PAIRS {
             assert!(
                 ru.chars().any(|c| c.is_alphabetic() && !c.is_ascii()),
@@ -1536,7 +1536,7 @@ mod tests {
     /// `fill` подставляет значения по порядку и не теряет текст, если значений
     /// меньше, чем заполнителей: отчёт остаётся читаемым, а не пустым.
     #[test]
-    fn fill_подставляет_значения_по_порядку() {
+    fn fill_substitutes_values_in_order() {
         let values = ["2".to_string(), "3".to_string()];
         assert_eq!(
             fill(Lang::Ru, "проиндексировано {}/{} файлов", &values),
@@ -1557,7 +1557,7 @@ mod tests {
     /// Заполнители в переводе должны совпадать с оригиналом по числу: иначе
     /// английский отчёт потеряет число или оставит `{}` на месте.
     #[test]
-    fn в_переводах_столько_же_заполнителей() {
+    fn the_translations_have_the_same_number_of_placeholders() {
         for (ru, en) in PAIRS {
             let ru_n = ru.matches("{}").count();
             let en_n = en.matches("{}").count();
@@ -1569,7 +1569,7 @@ mod tests {
     /// забытая пара иначе молча показала бы русский текст в английском отчёте.
     /// Проверяются модули, которые печатают отчёты CLI (M21.6).
     #[test]
-    fn каждая_строка_отчётов_есть_в_таблице() {
+    fn every_report_string_is_in_the_table() {
         let sources = [
             ("main.rs", include_str!("main.rs")),
             ("db.rs", include_str!("db.rs")),

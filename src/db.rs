@@ -2480,7 +2480,7 @@ mod tests {
     }
 
     #[test]
-    fn корзина_приложения_скрывает_файл_из_обычных_видов() {
+    fn the_app_trash_hides_a_file_from_the_usual_views() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
@@ -2496,7 +2496,7 @@ mod tests {
     }
 
     #[test]
-    fn пакетное_назначение_лиц_собирает_группу_с_именем() {
+    fn the_batch_face_assignment_builds_a_named_group() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
@@ -2553,7 +2553,7 @@ mod tests {
 
     /// Схема 7: теги разных моделей живут рядом, а смена sha256 снимает все CLIP-теги.
     #[test]
-    fn миграция_7_не_смешивает_теги_моделей() {
+    fn migration_7_does_not_mix_the_tags_of_two_models() {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
             "CREATE TABLE files(
@@ -2704,7 +2704,7 @@ mod tests {
     }
 
     #[test]
-    fn старый_порог_тегов_мигрирует_в_процентиль() {
+    fn the_old_tag_threshold_migrates_to_a_percentile() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         // Старая база: ползунок фильтра увёл tag_show до 0.50, ключа процентиля нет.
@@ -2767,7 +2767,7 @@ mod tests {
     }
 
     #[test]
-    fn неизвестное_представление_сетки_берёт_умолчание() {
+    fn an_unknown_grid_layout_takes_the_default() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         save_settings(&c, &Settings::default()).unwrap();
@@ -2788,7 +2788,7 @@ mod tests {
     /// «Пора / не пора» — все случаи из M10: нет слепка, выключено, ровно срок,
     /// просрочено, ещё рано и часы назад.
     #[test]
-    fn напоминание_считает_срок_по_слепку() {
+    fn the_reminder_counts_the_due_date_from_the_manifest() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-11-24T12:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
@@ -2846,7 +2846,7 @@ mod tests {
     }
 
     #[test]
-    fn напоминание_переживает_перезапуск() {
+    fn the_reminder_survives_a_restart() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         let s = Settings {
@@ -2948,7 +2948,7 @@ mod tests {
         insert(&c, &changed).unwrap(); // файл подменили — решение устарело
         assert_eq!(load_all(&c).unwrap()[0].decision, None);
     }
-    fn три_файла(c: &Connection) -> Vec<i64> {
+    fn three_files(c: &Connection) -> Vec<i64> {
         for (path, sha) in [("/a.jpg", "aa"), ("/b.jpg", "bb"), ("/c.jpg", "cc")] {
             insert(c, &row(path, sha, 1.0)).unwrap();
         }
@@ -2956,70 +2956,70 @@ mod tests {
     }
 
     #[test]
-    fn дерево_альбомов_идёт_в_порядке_и_считает_файлы() {
+    fn the_album_tree_follows_the_order_and_counts_files() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let ids = три_файла(&c);
-        let дача = create_album(&c, 0, "Дача 2024", "").unwrap();
-        let май = create_album(&c, дача, "Май", "").unwrap();
-        let июнь = create_album(&c, дача, "Июнь", "").unwrap();
-        let год = create_album(&c, май, "1 год", "").unwrap();
-        let печать = create_album(&c, 0, "На печать", "").unwrap();
-        add_to_album(&c, дача, &[ids[0], ids[1]]).unwrap();
-        add_to_album(&c, июнь, &[ids[2]]).unwrap();
+        let ids = three_files(&c);
+        let dacha = create_album(&c, 0, "Дача 2024", "").unwrap();
+        let may = create_album(&c, dacha, "Май", "").unwrap();
+        let june = create_album(&c, dacha, "Июнь", "").unwrap();
+        let year = create_album(&c, may, "1 год", "").unwrap();
+        let to_print = create_album(&c, 0, "На печать", "").unwrap();
+        add_to_album(&c, dacha, &[ids[0], ids[1]]).unwrap();
+        add_to_album(&c, june, &[ids[2]]).unwrap();
 
         let tree = albums_tree(&c).unwrap();
         let names: Vec<&str> = tree.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, ["Дача 2024", "Май", "1 год", "Июнь", "На печать"]);
         let depths: Vec<usize> = tree.iter().map(|n| n.depth).collect();
         assert_eq!(depths, [0, 1, 2, 1, 0]);
-        let root = tree.iter().find(|n| n.id == дача).unwrap();
+        let root = tree.iter().find(|n| n.id == dacha).unwrap();
         assert_eq!((root.files, root.subalbums), (2, 2));
-        assert!(tree.iter().any(|n| n.id == год && n.files == 0));
-        assert_eq!(album_path(&c, год).unwrap(), "Дача 2024 / Май / 1 год");
+        assert!(tree.iter().any(|n| n.id == year && n.files == 0));
+        assert_eq!(album_path(&c, year).unwrap(), "Дача 2024 / Май / 1 год");
         assert_eq!(
             albums_of_file(&c, ids[0]).unwrap(),
             vec!["Дача 2024".to_string()]
         );
 
         // Порядок подальбомов — данные: «Май» можно опустить ниже «Июня».
-        move_album(&c, май, дача, Some(1)).unwrap();
+        move_album(&c, may, dacha, Some(1)).unwrap();
         let tree = albums_tree(&c).unwrap();
         let siblings: Vec<&str> = tree
             .iter()
-            .filter(|n| n.parent_id == дача)
+            .filter(|n| n.parent_id == dacha)
             .map(|n| n.name.as_str())
             .collect();
         assert_eq!(siblings, ["Июнь", "Май"]);
         // Ветвь «На печать» осталась на месте.
         assert_eq!(
-            tree.iter().find(|n| n.id == печать).unwrap().position,
+            tree.iter().find(|n| n.id == to_print).unwrap().position,
             1
         );
     }
 
     #[test]
-    fn имя_уникально_среди_соседей_и_не_ломается_на_пустом() {
+    fn the_name_is_unique_among_siblings_and_survives_an_empty_one() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let дача23 = create_album(&c, 0, "Дача 2024", "").unwrap();
-        let дача24 = create_album(&c, 0, "Дача 2025", "").unwrap();
+        let dacha_2024 = create_album(&c, 0, "Дача 2024", "").unwrap();
+        let dacha_2025 = create_album(&c, 0, "Дача 2025", "").unwrap();
         assert!(create_album(&c, 0, "дача 2024", "").is_err());
         // В разных ветвях одинаковые имена разрешены.
-        create_album(&c, дача23, "Май", "").unwrap();
-        create_album(&c, дача24, "Май", "").unwrap();
-        assert!(create_album(&c, дача23, "  ", "").is_err());
+        create_album(&c, dacha_2024, "Май", "").unwrap();
+        create_album(&c, dacha_2025, "Май", "").unwrap();
+        assert!(create_album(&c, dacha_2024, "  ", "").is_err());
         assert!(create_album(&c, 0, &"я".repeat(81), "").is_err());
         // 80 символов — уже допустимо; хвостовые пробелы срезаются.
         let id = create_album(&c, 0, &format!("  {}  ", "я".repeat(80)), "").unwrap();
         assert_eq!(album_path(&c, id).unwrap().chars().count(), 80);
-        assert!(rename_album(&c, дача23, "Дача 2025").is_err());
-        rename_album(&c, дача23, "Дача на даче").unwrap();
-        assert_eq!(album_path(&c, дача23).unwrap(), "Дача на даче");
+        assert!(rename_album(&c, dacha_2024, "Дача 2025").is_err());
+        rename_album(&c, dacha_2024, "Дача на даче").unwrap();
+        assert_eq!(album_path(&c, dacha_2024).unwrap(), "Дача на даче");
     }
 
     #[test]
-    fn перемещение_запрещает_цикл_и_перенумеровывает_соседей() {
+    fn moving_refuses_a_cycle_and_renumbers_the_siblings() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         let a = create_album(&c, 0, "A", "").unwrap();
@@ -3056,22 +3056,22 @@ mod tests {
     }
 
     #[test]
-    fn удаление_поддерева_трогает_только_строки() {
+    fn deleting_a_subtree_touches_rows_only() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let ids = три_файла(&c);
-        let дача = create_album(&c, 0, "Дача", "").unwrap();
-        let май = create_album(&c, дача, "Май", "").unwrap();
-        let июнь = create_album(&c, дача, "Июнь", "").unwrap();
-        add_to_album(&c, май, &ids[..2]).unwrap();
-        add_to_album(&c, июнь, &ids[2..]).unwrap();
-        let печать = create_album(&c, 0, "На печать", "").unwrap();
-        add_to_album(&c, печать, &ids).unwrap();
+        let ids = three_files(&c);
+        let dacha = create_album(&c, 0, "Дача", "").unwrap();
+        let may = create_album(&c, dacha, "Май", "").unwrap();
+        let june = create_album(&c, dacha, "Июнь", "").unwrap();
+        add_to_album(&c, may, &ids[..2]).unwrap();
+        add_to_album(&c, june, &ids[2..]).unwrap();
+        let to_print = create_album(&c, 0, "На печать", "").unwrap();
+        add_to_album(&c, to_print, &ids).unwrap();
 
-        assert_eq!(delete_album(&c, дача).unwrap(), 3);
+        assert_eq!(delete_album(&c, dacha).unwrap(), 3);
         assert!(albums_tree(&c).unwrap().iter().all(|n| n.name != "Май"));
-        assert_eq!(album_items(&c, май).unwrap().len(), 0);
-        assert_eq!(album_items(&c, печать).unwrap().len(), 3);
+        assert_eq!(album_items(&c, may).unwrap().len(), 0);
+        assert_eq!(album_items(&c, to_print).unwrap().len(), 3);
         // Файлы на диске не наши: строки files целы.
         assert_eq!(load_all(&c).unwrap().len(), 3);
         // «На печать» остался единственным корнем с позицией 0.
@@ -3080,10 +3080,10 @@ mod tests {
     }
 
     #[test]
-    fn добавление_идемпотентно_и_порядок_плотный() {
+    fn adding_is_idempotent_and_the_order_is_dense() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let ids = три_файла(&c);
+        let ids = three_files(&c);
         let album = create_album(&c, 0, "Май", "").unwrap();
         assert_eq!(add_to_album(&c, album, &ids).unwrap(), (3, 0));
         assert_eq!(add_to_album(&c, album, &ids).unwrap(), (0, 3));
@@ -3117,10 +3117,10 @@ mod tests {
     }
 
     #[test]
-    fn файл_в_корзине_остаётся_строкой_альбома() {
+    fn a_file_in_the_trash_stays_an_album_row() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let ids = три_файла(&c);
+        let ids = three_files(&c);
         let album = create_album(&c, 0, "Май", "").unwrap();
         add_to_album(&c, album, &ids).unwrap();
         c.execute("UPDATE files SET trashed_at=1 WHERE id=?1", [ids[1]])
@@ -3137,10 +3137,10 @@ mod tests {
     }
 
     #[test]
-    fn удаление_строк_файла_чистит_альбом_и_сжимает_порядок() {
+    fn deleting_the_rows_of_a_file_clears_the_album_and_compacts_the_order() {
         let mut c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        let ids = три_файла(&c);
+        let ids = three_files(&c);
         let album = create_album(&c, 0, "Май", "").unwrap();
         add_to_album(&c, album, &ids).unwrap();
         // Так же, как «убрать каталог» и сброс индекса: строки files → album_files.
@@ -3161,7 +3161,7 @@ mod tests {
 
     /// Словарь тегов: правка сохраняется на месте, метка уникальна, удаление чистит одну строку.
     #[test]
-    fn словарь_тегов_хранится_в_бд_по_модели() {
+    fn the_tag_dictionary_is_stored_in_the_db_per_model() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         let mk = |id: &str, label: &str, pos: i64| TagDef {
@@ -3205,7 +3205,7 @@ mod tests {
     }
 
     #[test]
-    fn старая_база_получает_альбомы_и_не_теряет_файлы() {
+    fn an_old_db_gains_albums_and_keeps_its_files() {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
             "CREATE TABLE files(

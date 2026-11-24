@@ -325,19 +325,19 @@ mod tests {
     }
 
     #[test]
-    fn неизменённый_файл_пропускается() {
+    fn an_unchanged_file_is_skipped() {
         assert!(can_skip(Some(&e()), 10, 100, "image"));
     }
 
     #[test]
-    fn изменённый_размер_или_время_перечитывается() {
+    fn a_changed_size_or_time_is_reread() {
         assert!(!can_skip(Some(&e()), 11, 100, "image"));
         assert!(!can_skip(Some(&e()), 10, 101, "image"));
         assert!(!can_skip(None, 10, 100, "image"));
     }
 
     #[test]
-    fn видео_без_обложки_или_длительности_перечитывается() {
+    fn a_video_without_a_cover_or_duration_is_reread() {
         let mut v = e();
         v.kind = "video".into();
         v.thumb = false;

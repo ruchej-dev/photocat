@@ -1130,7 +1130,7 @@ mod tests {
     }
 
     #[test]
-    fn разные_размеры_не_читаются() {
+    fn different_sizes_are_not_read() {
         let a = scan_of(&[("x.jpg", "/a/x.jpg", 10, "")]);
         let b = scan_of(&[("x.jpg", "/b/x.jpg", 20, "")]);
         let calls = AtomicUsize::new(0);
@@ -1144,7 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn одинаковый_размер_сверяется_по_sha256() {
+    fn an_equal_size_is_checked_by_sha256() {
         let a = scan_of(&[
             ("same.jpg", "/a/same.jpg", 10, ""),
             ("diff.jpg", "/a/diff.jpg", 20, ""),
@@ -1167,7 +1167,7 @@ mod tests {
     }
 
     #[test]
-    fn файлы_только_в_одной_копии_видны_по_именам() {
+    fn files_in_only_one_copy_show_by_name() {
         let a = scan_of(&[
             ("a.jpg", "/a/a.jpg", 1, ""),
             ("both.jpg", "/a/both.jpg", 2, ""),
@@ -1184,7 +1184,7 @@ mod tests {
     }
 
     #[test]
-    fn ошибка_чтения_попадает_в_отчёт_а_не_валит_сверку() {
+    fn a_read_error_goes_into_the_report_and_does_not_fail_the_check() {
         let a = scan_of(&[("x.jpg", "/a/x.jpg", 10, "")]);
         let b = scan_of(&[("x.jpg", "/b/x.jpg", 10, "")]);
         let r = compare(&a, &b, 1, None, |p| {
@@ -1195,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn отмена_не_считает_файлы_проверенными() {
+    fn a_cancel_does_not_count_files_as_checked() {
         let a = scan_of(&[("x.jpg", "/a/x.jpg", 10, "")]);
         let b = scan_of(&[("x.jpg", "/b/x.jpg", 10, "")]);
         let p = Arc::new(Progress::default());
@@ -1213,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn слепок_совместим_с_sha256sum_и_экранирует_имена() {
+    fn the_manifest_matches_sha256sum_and_escapes_names() {
         let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         assert_eq!(
             manifest_line(hash, "2024/2024-05-17/a.jpg"),
@@ -1228,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn разбор_слепка_поддерживает_бинарный_режим_и_отвергает_мусор() {
+    fn manifest_parsing_supports_binary_mode_and_refuses_garbage() {
         let hash = "a".repeat(64);
         let ok = parse_manifest(&format!("{hash} *file.jpg\n")).unwrap();
         assert_eq!(ok[0].rel, "file.jpg");
@@ -1242,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn слепок_и_проверка_каталога_работают_на_диске() {
+    fn the_manifest_and_the_folder_check_work_on_disk() {
         let root = temp_dir("roundtrip");
         std::fs::create_dir_all(root.join("2024")).unwrap();
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
@@ -1275,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_двух_каталогов_находит_размер_и_содержимое() {
+    fn verifying_two_folders_finds_the_size_and_the_content() {
         let a = temp_dir("verify-a");
         let b = temp_dir("verify-b");
         for dir in [&a, &b] {
@@ -1300,7 +1300,7 @@ mod tests {
     }
 
     #[test]
-    fn отмена_не_пишет_неполный_слепок() {
+    fn a_cancel_writes_no_incomplete_manifest() {
         let root = temp_dir("cancelled");
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
         let out = root.join("list.sha256");
@@ -1317,7 +1317,7 @@ mod tests {
 
     /// Один и тот же текст видят CLI и экран «Целостность»: счётчики, пути и вердикт.
     #[test]
-    fn отчёт_сверки_пишет_счётчики_пути_и_вердикт() {
+    fn the_check_report_writes_the_counters_the_paths_and_the_verdict() {
         let r = Report {
             files_a: 2,
             files_b: 2,
@@ -1354,7 +1354,7 @@ mod tests {
     /// Путь слепка в отчёте появляется только тогда, когда файл действительно записан:
     /// отменённый или неудачный проход не должен выглядеть как успех.
     #[test]
-    fn отчёт_слепка_не_выдаёт_отмену_за_запись() {
+    fn the_manifest_report_does_not_pass_a_cancel_for_a_write() {
         let stats = ManifestStats {
             files: 3,
             bytes: 30,
@@ -1389,7 +1389,7 @@ mod tests {
     }
 
     #[test]
-    fn отчёт_проверки_по_слепку_называет_расхождения() {
+    fn the_manifest_check_report_names_the_mismatches() {
         let r = CheckReport {
             missing: vec!["gone.jpg".into()],
             extra: Vec::new(),

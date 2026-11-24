@@ -122,9 +122,29 @@ else
   note "ok" "all dependencies are explained"
 fi
 
-# ---------------------------------------------------------------- 6. build
+# ---------------------------------------------------------------- 6. source language
+# Identifiers, comments and the source text of the interface are English (AGENTS.md §6). The full
+# scan lives in tests/source_language.rs; here it runs without a build, and a Cyrillic letter in a
+# declaration is caught even before the test is compiled.
+echo "6. the code speaks English"
+bad=$(grep -nP '\b(fn|let|struct|enum|trait|const|static|mod|type)\s+(mut\s+)?[A-Za-z0-9_]*[\x{0400}-\x{04FF}]' src/*.rs 2>/dev/null || true)
+if [[ -n $bad ]]; then
+  err "a Cyrillic identifier in src/ (AGENTS.md §6):"
+  echo "$bad" | sed 's/^/      /'
+else
+  pass
+fi
+if cargo test --quiet --test source_language >/tmp/photocat-source-language.txt 2>&1; then
+  pass
+  note "ok" "identifiers are English; the converted modules hold no Russian"
+else
+  err "tests/source_language.rs does not pass:"
+  tail -12 /tmp/photocat-source-language.txt | sed 's/^/      /'
+fi
+
+# ---------------------------------------------------------------- 7. build
 if [[ ${1:-} == --build ]]; then
-  echo "6. cargo check"
+  echo "7. cargo check"
   if cargo check --all-targets --quiet 2>&1 | tail -5; then
     pass
     note "ok" "the build passes"

@@ -809,7 +809,7 @@ mod tests {
     /// M22: телефонный портрет физически лежит на боку, а EXIF говорит «повернуть».
     /// Превью, размеры и хеш обязаны считаться по тому кадру, который видит владелец.
     #[test]
-    fn превью_учитывает_exif_поворот() {
+    fn the_preview_respects_the_exif_orientation() {
         let mut jpeg = Vec::new();
         let img = image::RgbImage::from_pixel(40, 20, image::Rgb([120, 130, 140]));
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     #[ignore = "нужен PHOTOCAT_BIG_JPEG: путь к тяжёлому JPEG"]
-    fn fast_view_быстрее_полного_декода_большого_jpeg() {
+    fn fast_view_beats_a_full_decode_of_a_big_jpeg() {
         let Some(path) = std::env::var_os("PHOTOCAT_BIG_JPEG").map(std::path::PathBuf::from)
         else {
             return;
@@ -906,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn letterbox_сохраняет_пропорции_и_заливает_поля_средним_цветом() {
+    fn letterbox_keeps_the_proportions_and_fills_the_margins_with_the_mean_colour() {
         // Вертикальный кадр 100×200: в квадрат 20 он войдёт как 10×20 по центру.
         let tall = image::RgbImage::from_pixel(100, 200, image::Rgb([255, 0, 0]));
         let out = letterbox(&tall, 20);
@@ -925,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn вход_clip_даёт_два_кадра_одного_размера() {
+    fn the_clip_input_gives_two_frames_of_one_size() {
         // Временный файл перезаписывается, но не удаляется: архив неприкосновенен,
         // а удаление файлов в `src/` запрещено проверкой границ.
         let path = std::env::temp_dir().join("photocat-clip-inputs.png");

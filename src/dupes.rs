@@ -633,7 +633,7 @@ mod tests {
     /// M11: индекс даёт ровно те же группы, что и попарный перебор, на случайных
     /// наборах и на краевых случаях. Порог не влияет на результат, только на способ.
     #[test]
-    fn индекс_и_перебор_дают_одинаковые_группы() {
+    fn the_index_and_a_plain_scan_give_the_same_groups() {
         // Пусто, один элемент, все одинаковые, все далёкие.
         for rows in [
             Vec::new(),
@@ -671,7 +671,7 @@ mod tests {
 
     /// M11: точные копии по sha256 склеиваются независимо от dHash и способа поиска.
     #[test]
-    fn sha_копии_склеиваются_и_через_индекс() {
+    fn sha_copies_merge_through_the_index_too() {
         let mut rows = random_rows(4, 7);
         rows[0].sha256 = "same".into();
         rows[3].sha256 = "same".into();
@@ -690,7 +690,7 @@ mod tests {
     /// release-сборкой: `cargo test --release --bin photocat синтетике -- --ignored --nocapture`.
     #[test]
     #[ignore = "замер: 20k/50k синтетических хешей, нужен release"]
-    fn индекс_замер_на_синтетике() {
+    fn the_index_is_measured_on_synthetic_data() {
         fn peak_rss() -> String {
             std::fs::read_to_string("/proc/self/status")
                 .ok()

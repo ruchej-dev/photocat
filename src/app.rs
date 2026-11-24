@@ -11592,7 +11592,7 @@ mod tests {
     /// Щелчок колеса по умолчанию был 40 px на сетке в 2000 строк — 50 щелчков до месяца.
     /// Теперь один щелчок — треть окна по умолчанию, и профиль один на обе темы.
     #[test]
-    fn колесо_шагает_треть_экрана() {
+    fn wheel_scrolls_a_third_of_the_screen() {
         let ctx = egui::Context::default();
         super::style(&ctx);
         let fallback_h = 840.0;
@@ -11616,7 +11616,7 @@ mod tests {
     /// Тачпад: после отрыва пальцев жест продолжается выбегом и останавливается сам.
     /// Короткий жест — 200–300 px, а не «полстроки» и не полэкрана.
     #[test]
-    fn тачпад_катится_после_отрыва_пальцев() {
+    fn trackpad_coasts_after_the_fingers_lift() {
         let ctx = egui::Context::default();
         super::style(&ctx);
         let mut scroll = Scroll::default();
@@ -11632,7 +11632,7 @@ mod tests {
     /// Профиль прокрутки проверен выше по числам; здесь важно, что добавка не пропадает
     /// по дороге к `ScrollArea`, а выбег идёт уже без событий тачпада и сам затихает.
     #[test]
-    fn колесо_и_тачпад_двигают_сетку() {
+    fn wheel_and_trackpad_move_the_grid() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-scroll.db"));
         app.settings.grid_layout = db::GridLayout::Flat;
         app.settings.lang = i18n::Lang::En;
@@ -11704,7 +11704,7 @@ mod tests {
 
     /// Смена направления не даёт скачка: новое касание гасит выбег в тот же кадр.
     #[test]
-    fn новый_жест_отменяет_выбег() {
+    fn a_new_gesture_cancels_the_coast() {
         let ctx = egui::Context::default();
         super::style(&ctx);
         let mut scroll = Scroll::default();
@@ -11734,7 +11734,7 @@ mod tests {
 
     /// Колесо и любой другой способ прокрутки тоже обрывают выбег тачпада.
     #[test]
-    fn колесо_отменяет_выбег_тачпада() {
+    fn the_wheel_cancels_the_trackpad_coast() {
         let ctx = egui::Context::default();
         super::style(&ctx);
         let mut scroll = Scroll::default();
@@ -11747,7 +11747,7 @@ mod tests {
 
     /// Ctrl/Cmd + жест — это зум, а не прокрутка: после него сетка не должна катиться.
     #[test]
-    fn жест_с_ctrl_не_выбегает() {
+    fn a_ctrl_gesture_does_not_coast() {
         let ctx = egui::Context::default();
         super::style(&ctx);
         let mut scroll = Scroll::default();
@@ -11780,7 +11780,7 @@ mod tests {
 
     /// В покое профиль молчит: idle-кадры не запрашиваются, окно не перерисовывается зря.
     #[test]
-    fn в_покое_кадры_не_просятся() {
+    fn frames_are_not_requested_at_rest() {
         let ctx = egui::Context::default();
         super::style(&ctx);
         let mut scroll = Scroll::default();
@@ -11794,7 +11794,7 @@ mod tests {
     /// Правило «один профиль на все области»: ни один `ScrollArea` не ставит свои
     /// множители колеса и не включает/выключает источники прокрутки.
     #[test]
-    fn области_прокрутки_не_ставят_свои_множители() {
+    fn scroll_areas_do_not_set_their_own_multipliers() {
         let src = include_str!("app.rs");
         for needle in [concat!("wheel_scroll", "_multiplier"), concat!(".scroll_", "source(")] {
             assert!(!src.contains(needle), "найдено своё правило прокрутки: {needle}");
@@ -11807,7 +11807,7 @@ mod tests {
     /// cargo test --release -- --ignored замер_прокрутки --nocapture`.
     #[test]
     #[ignore]
-    fn замер_прокрутки_сетки() {
+    fn grid_scroll_measurement() {
         use std::time::Instant;
         let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
             eprintln!("PHOTOCAT_BENCH_DB не задан — замер пропущен");
@@ -11884,7 +11884,7 @@ mod tests {
     /// Владелец: «сверху документ, ниже скриншот, а мебель потом». При близких весах
     /// карточка обязана сказать «не уверен», показать топ-3 и ничего не подсвечивать.
     #[test]
-    fn карточка_пишет_не_уверен_при_близких_тегах() {
+    fn card_writes_not_sure_when_tags_are_close() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.items = vec![file_row(1, "image", "8.jpg")];
         app.selected = Some(1);
@@ -11914,7 +11914,7 @@ mod tests {
     }
 
     #[test]
-    fn карточка_подсвечивает_уверенный_тег() {
+    fn card_highlights_a_confident_tag() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
         app.selected = Some(1);
@@ -11935,7 +11935,7 @@ mod tests {
     /// M21.3: карточка и инспектор переводятся целиком — заголовок, подписи, источник
     /// даты, теги, свои теги и блок распознавания. Данные (имя файла, сами теги) не трогаем.
     #[test]
-    fn английский_язык_переводит_карточку_файла() {
+    fn english_translates_the_file_card() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-card-i18n.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
         app.items[0].camera = Some("Canon".into());
@@ -11993,7 +11993,7 @@ mod tests {
     /// плиток и строка группы; названия форматов дублей (`reason`, `advice`) — данные
     /// модуля `dupes`, их переводит M21.6 вместе с отчётами CLI.
     #[test]
-    fn английский_язык_переводит_экран_дублей() {
+    fn english_translates_the_duplicates_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-dupes-i18n.db"));
         let mut a = file_row(1, "image", "a.jpg");
         let mut b = file_row(2, "image", "b.jpg");
@@ -12041,7 +12041,7 @@ mod tests {
     /// M21.4b: календарь переводится целиком — слои, месяцы, дни недели, навигация и
     /// подписи пустых дней. Названия месяцев и дней недели живут в `i18n`, а не в `app`.
     #[test]
-    fn английский_язык_переводит_календарь() {
+    fn english_translates_the_calendar() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-calendar-i18n.db"));
         app.items = vec![file_row(1, "image", "may.jpg")];
         app.settings.lang = i18n::Lang::En;
@@ -12078,7 +12078,7 @@ mod tests {
     /// M21.4c: экран «Лица» переводится целиком — панель порога, список групп, плитки
     /// лиц и поля имени. Имена людей и пороги — данные и не переводятся.
     #[test]
-    fn английский_язык_переводит_экран_лиц() {
+    fn english_translates_the_faces_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-faces-i18n.db"));
         app.face_faces = 2;
         app.face_photos = 1;
@@ -12151,7 +12151,7 @@ mod tests {
     /// M21.4d: корзина переводится целиком — экран, плитка и диалог подтверждения.
     /// Модальное окно на первом кадре ещё не знает своего размера, поэтому кадров два.
     #[test]
-    fn английский_язык_переводит_корзину() {
+    fn english_translates_the_trash() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-trash-i18n.db"));
         let mut row = file_row(1, "image", "trashed.jpg");
         row.trashed_at = Some(1_700_000_000);
@@ -12200,7 +12200,7 @@ mod tests {
     /// M21.4e: экран «Целостность» переводится целиком — поля, три кнопки, напоминание
     /// и вердикт. Текст отчёта — вывод модуля `verify` (как у CLI), его переводит M21.6.
     #[test]
-    fn английский_язык_переводит_целостность() {
+    fn english_translates_the_integrity_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity-i18n.db"));
         app.settings.lang = i18n::Lang::En;
         app.view = View::Integrity;
@@ -12278,7 +12278,7 @@ mod tests {
     /// M21.4f: левая панель переведена целиком — блок модели, блок текста и сводка.
     /// Названия моделей, теги и пути — данные и остаются как есть.
     #[test]
-    fn английский_язык_переводит_левую_панель() {
+    fn english_translates_the_left_panel() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-left-i18n.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
         // Пустой каталог моделей: блок говорит «не скачана» на обоих языках.
@@ -12328,7 +12328,7 @@ mod tests {
     /// M21.4f: разделы диалога «Настройки» переведены целиком: модель, индексация,
     /// теги со словарём, лица, хранилище и внешние программы.
     #[test]
-    fn английский_язык_переводит_разделы_настроек() {
+    fn english_translates_the_settings_panes() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-settings-i18n.db"));
         app.settings.models_dir =
             std::env::temp_dir().join("photocat-test-models-never-downloaded");
@@ -12456,7 +12456,7 @@ mod tests {
     /// M21.5: полный экран и управление плеером переведены целиком: заголовок,
     /// листание, слайд-шоу, масштаб, текст на фото и подпись поверх кадра видео.
     #[test]
-    fn английский_язык_переводит_полный_экран() {
+    fn english_translates_the_full_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-viewer-i18n.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
         app.settings.lang = i18n::Lang::En;
@@ -12512,7 +12512,7 @@ mod tests {
     /// M21.5: каталоги архива и встроенный выбор папки переведены вместе:
     /// открыть каталог без перевода родительского диалога — это полуперевод.
     #[test]
-    fn английский_язык_переводит_каталоги_и_выбор_папки() {
+    fn english_translates_the_folders_and_the_folder_picker() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-picker-i18n.db"));
         app.settings.lang = i18n::Lang::En;
         let ctx = egui::Context::default();
@@ -12568,7 +12568,7 @@ mod tests {
 
     /// M21.5: подтверждение очистки кэша и индекса переведено — все три варианта.
     #[test]
-    fn английский_язык_переводит_подтверждение_очистки() {
+    fn english_translates_the_emptying_confirmation() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-storage-i18n.db"));
         app.settings.lang = i18n::Lang::En;
         let ctx = egui::Context::default();
@@ -12597,7 +12597,7 @@ mod tests {
     }
 
     #[test]
-    fn листание_идёт_по_кругу_и_сбрасывает_таймер_слайдшоу() {
+    fn paging_wraps_around_and_resets_the_slideshow_timer() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         let mut v = viewer_with(vec![7, 8, 9], 0);
         app.viewer_step(&mut v, 1);
@@ -12614,7 +12614,7 @@ mod tests {
     /// Смена файла останавливает плеер: без этого `video_id` остаётся от старого
     /// кадра, и `poll_video` продолжает рисовать его поверх нового снимка.
     #[test]
-    fn смена_файла_останавливает_видео() {
+    fn changing_the_file_stops_the_video() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.video_id = Some(7);
         let mut v = viewer_with(vec![7, 8], 0);
@@ -12626,7 +12626,7 @@ mod tests {
     /// Владелец: «листание вперёд-назад ничего не показывает». Видео должно
     /// показываться кадром-обложкой с кнопкой ▶, а стрелка — открывать следующий файл.
     #[test]
-    fn просмотр_видео_рисует_кнопку_и_листается_стрелкой() {
+    fn the_video_view_draws_the_button_and_pages_with_arrows() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.items = vec![
             file_row(1, "image", "a.jpg"),
@@ -12658,7 +12658,7 @@ mod tests {
     /// «следующего кадра» нет — иначе после листания на видео оставался старый снимок,
     /// а владелец видел «ничего не показывает».
     #[test]
-    fn переход_на_видео_не_оставляет_прошлый_снимок() {
+    fn switching_to_a_video_keeps_no_previous_photo() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.items = vec![file_row(1, "image", "a.jpg"), file_row(2, "video", "b.mp4")];
         app.settings.lang = i18n::Lang::Ru;
@@ -12686,7 +12686,7 @@ mod tests {
     }
 
     #[test]
-    fn листание_одного_файла_ничего_не_делает() {
+    fn paging_a_single_file_does_nothing() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         let mut v = viewer_with(vec![7], 0);
         app.viewer_step(&mut v, 1);
@@ -12696,7 +12696,7 @@ mod tests {
     /// M13d: при масштабе больше 100 % кадр таскается мышью, а при «вписать»
     /// сдвиг сбрасывается — иначе новый снимок открывался бы обрезанным.
     #[test]
-    fn смена_файла_возвращает_кадр_в_центр() {
+    fn changing_the_file_centres_the_frame() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         let mut v = viewer_with(vec![7, 8], 0);
         v.pan = egui::vec2(40.0, -10.0);
@@ -12707,7 +12707,7 @@ mod tests {
     /// Сдвиг не отрывает кадр от краёв области; сторона, которая вписана,
     /// стоит по центру.
     #[test]
-    fn сдвиг_кадра_не_отрывает_его_от_краёв() {
+    fn panning_keeps_the_frame_off_the_edges() {
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
         // Вписанный кадр: сдвигать нечего.
         assert_eq!(
@@ -12729,7 +12729,7 @@ mod tests {
     /// Подсказка о перетаскивании видна только тогда, когда есть что таскать:
     /// при «вписать» она была бы обещанием, которого код не выполняет.
     #[test]
-    fn подсказка_о_сдвиге_видна_только_при_увеличении() {
+    fn the_pan_hint_shows_only_when_zoomed() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
         app.settings.lang = i18n::Lang::Ru;
@@ -12753,7 +12753,7 @@ mod tests {
     }
 
     #[test]
-    fn портрет_вписан_по_высоте_и_по_центру() {
+    fn a_portrait_fits_by_height_and_centre() {
         let r = fit_rect(bounds(), egui::vec2(320.0, 640.0));
         assert!((r.height() - 150.0).abs() < 0.01);
         assert!((r.width() - 75.0).abs() < 0.01);
@@ -12762,34 +12762,34 @@ mod tests {
     }
 
     #[test]
-    fn панорама_вписана_по_ширине() {
+    fn a_panorama_fits_by_width() {
         let r = fit_rect(bounds(), egui::vec2(1200.0, 400.0));
         assert!((r.width() - 150.0).abs() < 0.01);
         assert!((r.height() - 50.0).abs() < 0.01);
     }
 
     #[test]
-    fn квадрат_занимает_всю_плитку() {
+    fn a_square_fills_the_whole_tile() {
         let r = fit_rect(bounds(), egui::vec2(320.0, 320.0));
         assert!((r.width() - 150.0).abs() < 0.01);
         assert!((r.height() - 150.0).abs() < 0.01);
     }
 
     #[test]
-    fn нулевой_размер_не_ломает_раскладку() {
+    fn a_zero_size_does_not_break_the_layout() {
         let r = fit_rect(bounds(), egui::vec2(0.0, 0.0));
         assert_eq!(r, bounds());
     }
 
     #[test]
-    fn месяц_листается_через_границы_года() {
+    fn months_page_across_year_boundaries() {
         assert_eq!(shift_month(2024, 12, 1), (2025, 1));
         assert_eq!(shift_month(2024, 1, -1), (2023, 12));
         assert_eq!(shift_month(2024, 5, 0), (2024, 5));
     }
 
     #[test]
-    fn длина_месяца_учитывает_високосный_год() {
+    fn the_month_length_respects_a_leap_year() {
         assert_eq!(days_in_month(2024, 2), 29);
         assert_eq!(days_in_month(2023, 2), 28);
         assert_eq!(days_in_month(2024, 5), 31);
@@ -12800,7 +12800,7 @@ mod tests {
     }
 
     #[test]
-    fn пустые_месяцы_пропускаются_при_листании() {
+    fn empty_months_are_skipped_when_paging() {
         let m = months(&["2024-01", "2024-05", "2024-09"]);
         assert_eq!(shift_to_file_month(&m, 2024, 1, 1), Some((2024, 5)));
         assert_eq!(shift_to_file_month(&m, 2024, 5, -1), Some((2024, 1)));
@@ -12811,7 +12811,7 @@ mod tests {
     }
 
     #[test]
-    fn сегодня_уходит_в_ближайший_месяц_с_файлами() {
+    fn today_jumps_to_the_nearest_month_with_files() {
         let m = months(&["2024-01", "2024-07"]);
         assert_eq!(nearest_file_month(&m, 2024, 3), Some((2024, 1)));
         assert_eq!(nearest_file_month(&m, 2024, 6), Some((2024, 7)));
@@ -12819,7 +12819,7 @@ mod tests {
     }
 
     #[test]
-    fn дата_из_строки_и_понедельник_недели() {
+    fn the_date_from_a_string_and_the_monday_of_the_week() {
         let d = parse_date("2024-05-15T12:30:00").unwrap();
         assert_eq!(d.to_string(), "2024-05-15");
         assert_eq!(monday_of(d).to_string(), "2024-05-13");
@@ -12828,7 +12828,7 @@ mod tests {
     }
 
     #[test]
-    fn неделя_календаря_начинается_с_понедельника() {
+    fn the_calendar_week_starts_on_monday() {
         assert_eq!(first_weekday_monday(2024, 1), 0); // 1 января 2024 — понедельник
         assert_eq!(first_weekday_monday(2024, 5), 2); // 1 мая 2024 — среда
     }
@@ -12836,7 +12836,7 @@ mod tests {
     /// Порог фильтра — процентиль своего тега, а не глобальный максимум:
     /// на 100% у «мебели» остаётся её самый сильный снимок, на 0% — все.
     #[test]
-    fn фильтр_тега_идёт_по_процентилю_своего_тега() {
+    fn a_tag_filter_follows_its_own_percentile() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
         app.tags.clear();
         for id in 0..120 {
@@ -12868,7 +12868,7 @@ mod tests {
     /// Фильтр берёт метки из словаря, но не прячет уже посчитанные теги,
     /// которых в словаре больше нет, и слушает минимальный процентиль тега.
     #[test]
-    fn фильтр_берёт_метки_из_словаря_и_уважает_минимальный_процентиль() {
+    fn the_filter_takes_labels_from_the_dictionary_and_respects_the_percentile() {
         let path = std::env::temp_dir().join(format!(
             "photocat-app-tags-{}-{}.db",
             std::process::id(),
@@ -12914,7 +12914,7 @@ mod tests {
     }
 
     #[test]
-    fn процентиль_веса_считает_долю_слабейших() {
+    fn the_weight_percentile_counts_the_share_of_the_weakest() {
         let d = [0.30, 0.20, 0.10];
         assert_eq!(score_percentile(&d, 0.30), Some(67));
         assert_eq!(score_percentile(&d, 0.20), Some(33));
@@ -12924,7 +12924,7 @@ mod tests {
     }
 
     #[test]
-    fn календарь_проваливается_до_дня() {
+    fn the_calendar_drills_down_to_a_day() {
         assert_eq!(CalScale::Year.deeper(), Some(CalScale::Month));
         assert_eq!(CalScale::Month.deeper(), Some(CalScale::Week));
         assert_eq!(CalScale::Week.deeper(), Some(CalScale::Day));
@@ -12934,7 +12934,7 @@ mod tests {
     /// Сетка — «моменты»: свежий месяц первым, внутри месяца свежие сверху,
     /// файлы без даты — последней группой (M16, ADR 0033).
     #[test]
-    fn сетка_группирует_по_месяцам_от_свежих() {
+    fn the_grid_groups_by_month_from_the_newest() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-ui.db"));
         let mut may_old = file_row(1, "image", "may-old.jpg");
         may_old.taken_at = Some("2024-05-01T08:00".into());
@@ -12986,7 +12986,7 @@ mod tests {
     }
 
     #[test]
-    fn порядок_по_дате_и_без_даты_в_конце_в_обе_стороны() {
+    fn date_order_keeps_undated_last_in_both_directions() {
         let mut app = m17_app();
         let visible: Vec<usize> = (0..app.items.len()).collect();
         app.settings.grid_sort = db::GridSort::DateDesc;
@@ -12996,7 +12996,7 @@ mod tests {
     }
 
     #[test]
-    fn месяцы_переворачиваются_а_без_даты_остаётся_последней() {
+    fn months_flip_while_undated_stays_last() {
         let mut app = m17_app();
         let visible: Vec<usize> = (0..app.items.len()).collect();
         app.settings.grid_sort = db::GridSort::DateDesc;
@@ -13016,7 +13016,7 @@ mod tests {
     }
 
     #[test]
-    fn имя_и_размер_сортируются() {
+    fn name_and_size_are_sorted() {
         let mut app = m17_app();
         app.items[0].path = "/tmp/b.jpg".into();
         app.items[1].path = "/tmp/A.jpg".into();
@@ -13034,7 +13034,7 @@ mod tests {
     }
 
     #[test]
-    fn при_смысловом_поиске_порядок_задаёт_поиск() {
+    fn with_semantic_search_the_search_sets_the_order() {
         let mut app = m17_app();
         app.settings.grid_sort = db::GridSort::SizeDesc;
         app.semantic_hits = Some(vec![4, 1, 3]);
@@ -13048,7 +13048,7 @@ mod tests {
     }
 
     #[test]
-    fn подряд_рисует_сетку_без_заголовков_месяцев() {
+    fn the_flat_view_draws_the_grid_without_month_headers() {
         let mut app = m17_app();
         app.settings.grid_layout = db::GridLayout::Flat;
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -13070,7 +13070,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_и_shift_клик_меняют_выделение() {
+    fn ctrl_and_shift_click_change_the_selection() {
         let mut app = m17_app();
         let order = m18_order(&app);
         assert_eq!(order, vec![2, 1, 3, 4], "порядок: свежие сверху, без даты в конце");
@@ -13108,7 +13108,7 @@ mod tests {
     }
 
     #[test]
-    fn выбрать_всё_берёт_только_видимое() {
+    fn select_all_takes_only_what_is_visible() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-m18.db"));
         let mut a = file_row(1, "image", "a.jpg");
         a.size = 10;
@@ -13125,7 +13125,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_снимает_выделение_и_пишет_в_статус() {
+    fn esc_drops_the_selection_and_writes_to_the_status() {
         let mut app = m17_app();
         app.pick_all();
         assert_eq!(app.picked.len(), 4);
@@ -13136,7 +13136,7 @@ mod tests {
     }
 
     #[test]
-    fn смена_фильтра_и_порядка_снимают_выделение_с_причиной() {
+    fn a_new_filter_or_order_drops_the_selection_with_a_reason() {
         let mut app = m17_app();
         app.pick_all();
         app.query = "мая".into();
@@ -13166,7 +13166,7 @@ mod tests {
     }
 
     #[test]
-    fn строка_чипов_показывает_выбрано_и_кнопки() {
+    fn the_chips_row_shows_the_selection_and_the_buttons() {
         let mut app = m17_app();
         app.picked = BTreeSet::from([1, 2]);
         app.selected = Some(2);
@@ -13182,7 +13182,7 @@ mod tests {
     /// M22.2a: список масштабируется тем же ползунком «Плитки», что плитка и
     /// ряды. Высота строки — 24 + 0.16 × значение, кегли 12–14 / 10–12 px.
     #[test]
-    fn список_масштабируется_ползунком_плиток() {
+    fn the_list_scales_with_the_tiles_slider() {
         assert!(
             (list_row_height(100.0) - 40.0).abs() < 0.01,
             "{}",
@@ -13253,7 +13253,7 @@ mod tests {
     /// M22.2a: список масштабируется вместе с ползунком — две строки выше при 260,
     /// чем при 100, и ни одна строка не обрезает текст по вертикали.
     #[test]
-    fn список_рисует_строки_выше_с_большим_ползунком() {
+    fn the_list_draws_taller_rows_with_a_bigger_slider() {
         let small = list_frame_height(100.0);
         let big = list_frame_height(260.0);
         // 40 px и 65.6 px на строку, плюс зазор под ними: важна разница, а не
@@ -13266,7 +13266,7 @@ mod tests {
     /// M22.2a: ползунок размера виден в шапке во всех трёх видах ячейки —
     /// в списке он тоже есть, поэтому шапка не прыгает при переключении.
     #[test]
-    fn ползунок_размера_виден_во_всех_трёх_видах() {
+    fn the_size_slider_shows_in_all_three_views() {
         let mut app = m17_app();
         app.settings.lang = i18n::Lang::Ru;
         app.tile_size = 200.0;
@@ -13281,7 +13281,7 @@ mod tests {
     }
 
     #[test]
-    fn карточка_пишет_сколько_в_выделении() {
+    fn the_card_writes_how_many_are_selected() {
         let mut app = m17_app();
         app.picked = BTreeSet::from([1, 2]);
         app.selected = Some(2);
@@ -13293,7 +13293,7 @@ mod tests {
         );
     }
     #[test]
-    fn сетка_альбома_показывает_только_его_файлы_и_порядок_альбома() {
+    fn the_album_grid_shows_only_its_files_and_the_album_order() {
         let mut app = m17_app();
         app.view = View::Albums;
         app.album_selected = Some(7);
@@ -13317,7 +13317,7 @@ mod tests {
     }
 
     #[test]
-    fn чип_альбома_показывает_имя_и_снимается() {
+    fn the_album_chip_shows_the_name_and_clears() {
         let mut app = m17_app();
         app.view = View::Albums;
         app.album_selected = Some(7);
@@ -13349,7 +13349,7 @@ mod tests {
     }
 
     #[test]
-    fn окно_рисует_альбом_дерево_и_кнопки_добавления() {
+    fn the_window_draws_the_album_tree_and_the_add_buttons() {
         let path = std::env::temp_dir().join(format!(
             "photocat-album-frame-{}.db",
             std::process::id()
@@ -13388,7 +13388,7 @@ mod tests {
     }
 
     #[test]
-    fn диалог_выгрузки_строит_план_и_не_выгружает_в_архив() {
+    fn the_export_dialog_builds_a_plan_and_writes_nothing_into_the_archive() {
         let path = std::env::temp_dir().join(format!(
             "photocat-export-frame-{}.db",
             std::process::id()
@@ -13434,7 +13434,7 @@ mod tests {
 
     /// Экран «Целостность» существует без терминала: поля, три действия, подсказка.
     #[test]
-    fn экран_целостности_показывает_поля_и_кнопки() {
+    fn the_integrity_screen_shows_the_fields_and_the_buttons() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
         app.settings.lang = i18n::Lang::Ru;
         app.view = View::Integrity;
@@ -13459,7 +13459,7 @@ mod tests {
     /// Сверка одного и того же каталога с самим собой — не проверка, а трата времени:
     /// отказ приходит до запуска фонового потока.
     #[test]
-    fn сверка_отказывается_от_одного_пути_дважды() {
+    fn the_check_refuses_one_path_twice() {
         let dir = std::env::temp_dir().join(format!(
             "photocat-integrity-same-{}",
             std::process::id()
@@ -13481,7 +13481,7 @@ mod tests {
     /// Существующий слепок не затирается первым нажатием: сначала подтверждение,
     /// и только оно открывает запуск. Файл до подтверждения остаётся целым.
     #[test]
-    fn слепок_требует_подтверждения_перезаписи() {
+    fn the_manifest_requires_a_confirmation_to_overwrite() {
         let dir = std::env::temp_dir().join(format!(
             "photocat-integrity-manifest-{}",
             std::process::id()
@@ -13508,7 +13508,7 @@ mod tests {
     /// Фоновый проход — не заглушка: поток считает sha256 и возвращает отчёт через `mpsc`,
     /// который потом забирает кадр окна.
     #[test]
-    fn сверка_идёт_в_фоне_и_возвращает_отчёт() {
+    fn the_check_runs_in_the_background_and_returns_a_report() {
         let base = std::env::temp_dir().join(format!(
             "photocat-integrity-bg-{}",
             std::process::id()
@@ -13540,7 +13540,7 @@ mod tests {
     /// Готовый отчёт виден словами: вердикт, счётчики и кнопка копирования
     /// берут текст из `verify`, а не собирают свой.
     #[test]
-    fn результат_сверки_виден_на_экране() {
+    fn the_check_result_shows_on_the_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
         app.settings.lang = i18n::Lang::Ru;
         app.view = View::Integrity;
@@ -13579,7 +13579,7 @@ mod tests {
     /// M10: срок вышел — есть баннер со словами и две кнопки, но сам проход не
     /// запускается. «Напомнить позже» скрывает баннер до следующего запуска.
     #[test]
-    fn баннер_напоминает_о_проверке_и_не_запускает_её() {
+    fn the_banner_reminds_about_the_check_and_does_not_start_it() {
         // Имя уникально, а не «поверх прошлой БД»: тесты не удаляют файлов.
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -13637,7 +13637,7 @@ mod tests {
     /// M21, ADR 0040: язык — поле настроек, а не глобальная переменная, поэтому тест
     /// задаёт его сам. Остов окна (навигация, верхняя панель, фильтр) переводится целиком.
     #[test]
-    fn английский_язык_переводит_остов_окна() {
+    fn english_translates_the_window_shell() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-i18n.db"));
         app.settings.lang = i18n::Lang::En;
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -13664,7 +13664,7 @@ mod tests {
     /// Плитки идут строками по пропорциям кадра: превью заполняет плитку целиком,
     /// ширина следует кадру, высота строки — ползунок «Плитки».
     #[test]
-    fn строки_сетки_собираются_по_пропорциям() {
+    fn grid_rows_are_built_by_proportions() {
         use super::{frame_aspect, row_fit};
         // 10 кадров 4:3 в 700 px при целевой высоте 150: в строке 4, высота ~130.
         let a = [4.0 / 3.0; 10];
@@ -13697,7 +13697,7 @@ mod tests {
     /// M22, ADR 0044: две палитры макета и выбор в настройках. Тема — данные
     /// настроек, а не глобальная переменная, поэтому тест задаёт её сам.
     #[test]
-    fn тема_переключает_палитру_и_сохраняется() {
+    fn the_theme_switches_the_palette_and_persists() {
         let ctx = egui::Context::default();
         super::apply_theme(&ctx, db::ThemeMode::Light);
         assert_eq!(ctx.theme(), egui::Theme::Light);
@@ -13747,7 +13747,7 @@ mod tests {
     /// Выбор языка живёт в БД (`settings.lang`), а не в памяти процесса: после
     /// перезапуска окно открывается на том языке, который выбрал владелец.
     #[test]
-    fn язык_интерфейса_сохраняется_в_бд() {
+    fn the_interface_language_is_saved_in_the_db() {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -13785,7 +13785,7 @@ mod tests {
     /// M10: успешный слепок и проверка пишут дату, итог и отчёт в настройки и в
     /// `<кэш>/photocat/verify-last.txt`; напоминание после этого не срабатывает.
     #[test]
-    fn успешная_проверка_пишет_итог_и_снимает_напоминание() {
+    fn a_successful_check_writes_the_result_and_clears_the_reminder() {
         let base = std::env::temp_dir().join(format!(
             "photocat-reminder-ok-{}",
             std::process::id()
@@ -13846,7 +13846,7 @@ mod tests {
 
     /// M10: ошибка проверки (битый слепок) не стирает прошлый успешный отчёт и дату.
     #[test]
-    fn ошибка_проверки_не_стирает_прошлый_отчёт() {
+    fn a_failed_check_keeps_the_previous_report() {
         let base = std::env::temp_dir().join(format!(
             "photocat-reminder-error-{}",
             std::process::id()

@@ -124,6 +124,8 @@ cargo build --release           # ~3 min from scratch, seconds afterwards
 cargo run                       # dev profile: dependencies at opt-level 3, our code at 1 —
                                 # video plays in `cargo run` too (plain debug was 2.2 fps)
 cargo clippy --all-targets      # before every commit
+rust-analyzer diagnostics .     # the LSP pass: types and lints over the whole crate
+cargo test --test source_language  # identifiers, comments and strings are English
 bash .pi/skills/enforce-architecture/scripts/check.sh   # layer bounds; the archive stays untouched
 ./target/release/photocat index <folder>     # indexing (writes to the cache)
 ./target/release/photocat stats
@@ -177,13 +179,26 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   moved to `NAME.ru.md`, not deleted.
 - **Communication with the owner is Russian.** The owner reads Russian; the repository speaks
   English.
-- **UI strings are translated, not duplicated.** A Russian source string goes through
-  `i18n::t(lang, "…")`; the English text is added to the `PAIRS` table in `src/i18n.rs`. A CLI report
+- **The code speaks English.** Identifiers (functions, variables, fields, types, test names),
+  comments, doc comments, log and error text, and the source text of the interface are English.
+  Cyrillic appears only as a translation: the Russian column of the `PAIRS` table in `src/i18n.rs`,
+  the `*.ru.md` documents, and model prompt data (`embed.rs`). Nothing else in `src/` may hold a
+  Cyrillic letter.
+- **UI strings are translated, not duplicated.** An English source string goes through
+  `i18n::t(lang, "…")`, which returns the Russian text when `Lang::Ru` is chosen. A CLI report
   carries its language in a `lang` field and builds sentences with `i18n::fill` (M21.6). A screen is
-  considered translated only when every label on it goes through `t()`. Untranslated screens keep
-  showing Russian — that is a visible state, not an error, and `plan/I18N.md` tracks the coverage.
+  considered translated only when every label on it goes through `t()`. A string missing from the
+  table is shown as written — in English, which is the source and stays readable; `plan/I18N.md`
+  tracks the coverage.
+- Error messages are English in the code and reach the owner in the interface language; a failure
+  the owner cannot act on (SQL, decoding, a broken file) may stay English.
 - UI identifiers are English, UI labels are translated; numbers with units in the GUI go through
   `db::human_in(lang, n)` (`КиБ/МиБ` or `KiB/MiB`), CLI reports keep `db::human()`.
+- **The LSP is part of the check.** `rust-analyzer diagnostics .` (the same rust-analyzer that
+  serves the editor) and `cargo clippy --all-targets` — not grep alone. `tests/source_language.rs`
+  bans non-English identifiers and, for the modules already converted, Russian comments and strings;
+  until M23 is closed its `PENDING` list names the modules still holding Russian. The list shrinks
+  and ends empty: adding a module to it is forbidden.
 - A new view or panel follows the `add-view` skill. A new screen follows the `ui-design` skill.
 - Do not add a dependency until `docs/DECISIONS.md` records why it is there and what we would do
   without it, and that its license fits Apache-2.0.
@@ -193,7 +208,9 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
 ## 7. How to verify
 
 1. **Headless always**: `index` on a test corpus, `stats`, `dupes`, `organize` (dry run) — they check
-   the logic without a single pixel.
+   the logic without a single pixel. The source itself is checked by `cargo test --test
+   source_language` and `rust-analyzer diagnostics .` before anything else: a Russian identifier, a
+   Russian comment in a converted module or a stale `PENDING` entry stops the task there.
 2. **Corpus**: the real 2230 files from `~/Documents/nasty/mail_media/Фотографии с телефона` (see
    `corpus-bench`). Expected: indexing ~85 s (photos + video covers via ffmpeg), 103 duplicate
    groups, 238 files, 214 MiB; `embed` over photos and videos ~77 s, 2229 files.

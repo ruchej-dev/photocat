@@ -1734,7 +1734,7 @@ mod cli_i18n_tests {
     /// строк: английская и русская из одного и того же поля `lang`, чтобы было видно,
     /// что язык не глобальный и оба варианта живы.
     #[test]
-    fn английский_язык_переводит_отчёты_команд() {
+    fn english_translates_the_command_reports() {
         // index
         let mut index = index::Stats {
             total: 3,
@@ -1858,7 +1858,7 @@ mod cli_i18n_tests {
     /// M21.6: дубли отдают не готовую русскую фразу, а признак и части совета —
     /// один и тот же набор печатается на двух языках.
     #[test]
-    fn английский_язык_переводит_советы_дублей() {
+    fn english_translates_the_duplicate_advice() {
         assert_eq!(dupes::Reason::Exact.label(Lang::En), "exact copy");
         assert_eq!(dupes::Reason::Similar.label(Lang::Ru), "похожий снимок");
 
@@ -1888,7 +1888,7 @@ mod cli_i18n_tests {
     /// M21.6: текст сверки, проверки по слепку и итог записи слепка — тот же
     /// источник слов, что и у CLI, и он переводится по полю `lang`.
     #[test]
-    fn английский_язык_переводит_отчёты_сверки() {
+    fn english_translates_the_verification_reports() {
         let mut report = verify::Report {
             files_a: 2,
             files_b: 2,
@@ -1972,7 +1972,7 @@ mod cli_i18n_tests {
     /// M21.6: `--help` — часть CLI и переводится вместе с ним; английский текст
     /// не содержит кириллицы, а русский остаётся русским.
     #[test]
-    fn справка_cli_переведена() {
+    fn the_cli_help_is_translated() {
         let en = i18n::t(Lang::En, i18n::USAGE.0);
         assert!(en.starts_with("photocat — media archive cataloguer"), "{en}");
         assert!(en.contains("subcommands:"));

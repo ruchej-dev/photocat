@@ -1787,7 +1787,7 @@ mod tests {
 
     /// Дефолт: русские подписи, промпты на языке модели; ни одного слова из конкретного архива.
     #[test]
-    fn дефолтный_словарь_общий_и_на_языке_модели() {
+    fn the_default_dictionary_is_shared_and_speaks_the_model_language() {
         let ru = default_defs("m", TextKind::Projected);
         let en = default_defs("m", TextKind::Direct);
         let sig = default_defs("m", TextKind::Pooler);
@@ -1811,7 +1811,7 @@ mod tests {
 
     /// Словарь переживает экспорт/импорт без потерь; теги без id получают уникальные ключи.
     #[test]
-    fn словарь_переживает_json_roundtrip() {
+    fn the_dictionary_survives_a_json_roundtrip() {
         let defs = default_defs("m", TextKind::Projected);
         let json = tag_defs_to_json(&defs);
         let back = tag_defs_from_json("m", &json).unwrap();
@@ -1836,7 +1836,7 @@ mod tests {
 
     /// Дефолт засевается один раз: правка владельца не перезатирается повторным запуском.
     #[test]
-    fn словарь_засевается_один_раз_и_не_перезаписывает_правки() {
+    fn the_dictionary_is_seeded_once_and_keeps_the_edits() {
         let path = std::env::temp_dir().join(format!(
             "photocat-tagdefs-{}-{}.db",
             std::process::id(),
@@ -1859,7 +1859,7 @@ mod tests {
 
     /// Дефолт обновляется только в нетронутом словаре: правки владельца и импорт не трогаются.
     #[test]
-    fn обновление_дефолта_не_затирает_правки_и_импорт() {
+    fn a_default_update_keeps_the_edits_and_the_import() {
         let path = std::env::temp_dir().join(format!(
             "photocat-tagup-{}-{}.db",
             std::process::id(),
@@ -1927,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn процентиль_оставляет_верхнюю_долю_и_всегда_хотя_бы_один() {
+    fn the_percentile_keeps_the_top_share_and_at_least_one() {
         let scores = [0.30, 0.20, 0.10, 0.05];
         assert_eq!(percentile_threshold(&scores, 100), Some(0.30));
         assert_eq!(percentile_threshold(&scores, 0), Some(0.05));
@@ -1939,7 +1939,7 @@ mod tests {
     }
 
     #[test]
-    fn распределение_тегов_отсортировано_по_убыванию() {
+    fn the_tag_distribution_is_sorted_descending() {
         let mut tags = HashMap::new();
         tags.insert(1, vec![("мебель".to_string(), 0.1), ("дети".to_string(), 0.3)]);
         tags.insert(2, vec![("мебель".to_string(), 0.4), ("дети".to_string(), 0.2)]);
@@ -1954,7 +1954,7 @@ mod tests {
     }
 
     #[test]
-    fn два_кадра_усредняются_и_снова_нормируются() {
+    fn two_frames_are_averaged_and_renormalised() {
         // Два единичных вектора под 90°: среднее должно стать 45°, длина 1.
         let values = [1.0f32, 0.0, 0.0, 1.0];
         let out = average_pairs(&values, 1, 2);
@@ -1966,7 +1966,7 @@ mod tests {
     }
 
     #[test]
-    fn близкие_веса_дают_не_уверен_а_отрыв_даёт_тег() {
+    fn close_weights_read_not_sure_while_a_gap_gives_the_tag() {
         let close = vec![
             ("документ".to_string(), 0.276),
             ("интерьер".to_string(), 0.271),
@@ -1982,7 +1982,7 @@ mod tests {
     }
 
     #[test]
-    fn фильтр_по_тегу_берёт_любой_вес_выше_порога() {
+    fn the_tag_filter_takes_any_weight_above_the_threshold() {
         let scores = vec![
             ("одежда".to_string(), 0.24),
             ("дети".to_string(), 0.23),
@@ -1996,7 +1996,7 @@ mod tests {
 
     #[test]
     #[ignore = "нужен PHOTOCAT_TAG_THUMB: путь к превью и веса модели"]
-    fn диагностика_кадров_и_ансамбля() {
+    fn the_diagnostics_of_frames_and_the_ensemble() {
         let Some(path) = std::env::var_os("PHOTOCAT_TAG_THUMB").map(PathBuf::from) else {
             return;
         };
@@ -2055,7 +2055,7 @@ mod tests {
     /// и превью: `PHOTOCAT_SIGLIP_MODELS` (папка моделей) и `PHOTOCAT_SIGLIP_THUMB`.
     #[test]
     #[ignore = "нужны веса SigLIP и превью: PHOTOCAT_SIGLIP_MODELS, PHOTOCAT_SIGLIP_THUMB"]
-    fn siglip_даёт_768_признаков() {
+    fn siglip_gives_768_features() {
         let (Some(dir), Some(thumb)) = (
             std::env::var_os("PHOTOCAT_SIGLIP_MODELS").map(PathBuf::from),
             std::env::var_os("PHOTOCAT_SIGLIP_THUMB").map(PathBuf::from),
@@ -2096,7 +2096,7 @@ mod tests {
     /// M12: каталог — данные. id и каталог уникальны, все поля заполнены,
     /// sha256 настоящие, а размерность не спрятана в глобальной константе.
     #[test]
-    fn каталог_моделей_описан_данными() {
+    fn the_model_catalogue_is_described_by_data() {
         let mut ids = HashSet::new();
         let mut dirs = HashSet::new();
         let mut dims = HashSet::new();
@@ -2151,7 +2151,7 @@ mod tests {
     /// M15.6: каждая модель каталога названа и описана на обоих языках — иначе в английском
     /// окне строка модели молча остаётся русской (хвост M21.6).
     #[test]
-    fn каталог_моделей_переведён() {
+    fn the_model_catalogue_is_translated() {
         let en = crate::i18n::Lang::En;
         for e in catalog() {
             assert_ne!(
@@ -2173,7 +2173,7 @@ mod tests {
     /// в одних и тех же порогах значат одно и то же. Числа — медианы двух наборов
     /// (2340 файлов, `docs/ARCHITECTURE.md` § Measurements).
     #[test]
-    fn калибровка_веса_тега_уравнивает_шкалы() {
+    fn the_tag_weight_calibration_equalises_the_scales() {
         let clip = entry(DEFAULT_MODEL).unwrap();
         assert_eq!(clip.score(0.086), 0.086, "у CLIP калибровка тождественная");
         // Медианы top-1: CLIP 0.263, SigLIP 2 0.086, SigLIP 1 0.059.
@@ -2199,7 +2199,7 @@ mod tests {
     /// M15.6: добивка текста. Пулер SigLIP 2 читает последний токен, поэтому EOS
     /// обязан остаться последним, а пады токенизатора — уйти влево.
     #[test]
-    fn добивка_текста_держит_eos_последним() {
+    fn text_padding_keeps_eos_last() {
         let eos = 1;
         let pad = 0;
         // Токенизатор SigLIP 2 уже добил строку до 8 справа: [5, 6, eos, pad, pad, ...].
@@ -2222,7 +2222,7 @@ mod tests {
     /// M12: размер приходит из модели, а ошибка называет оба числа и подсказывает,
     /// что векторы разных моделей не смешиваются.
     #[test]
-    fn ошибка_размерности_называет_числа() {
+    fn a_dimension_error_names_the_numbers() {
         assert!(ensure_dim("текстовая", 768, 768).is_ok());
         let e = ensure_dim("текстовая", 512, 768).unwrap_err().to_string();
         assert!(e.contains("512") && e.contains("768"), "нет чисел: {e}");
@@ -2231,7 +2231,7 @@ mod tests {
 
     /// M12: скачивание без согласия не начинается, даже если модель в каталоге.
     #[test]
-    fn скачивание_без_согласия_отклоняется() {
+    fn a_download_without_consent_is_refused() {
         let settings = db::Settings::default();
         let res = download_model(&settings, "siglip-base-224-en", false, None);
         assert!(res.is_err(), "без согласия скачивания нет");

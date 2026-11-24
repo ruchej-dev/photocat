@@ -51,6 +51,9 @@ What is checked:
 4. The network is only for model weights: `Cargo.toml` has no HTTP clients, `curl` runs only in
    `src/embed.rs` and without data-upload flags — ADR 0015, 0016.
 5. Every dependency is mentioned in `docs/DECISIONS.md` (a warning, not an error).
+6. The code speaks English (AGENTS.md §6): no Cyrillic identifier in `src/`, and
+   `cargo test --test source_language` passes — the converted modules hold no Russian comment or
+   string, and the `PENDING` list has no stale entry.
 
 ## A manual checklist by module
 

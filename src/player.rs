@@ -1620,7 +1620,7 @@ mod tests {
     }
 
     #[test]
-    fn черный_кадр_остаётся_чёрным() {
+    fn a_black_frame_stays_black() {
         // Ограниченный диапазон: Y=16, Cb=Cr=128 — это чёрный.
         let f = yuv420(4, 2, 16, 128, 128);
         let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited), 0).unwrap();
@@ -1631,7 +1631,7 @@ mod tests {
     }
 
     #[test]
-    fn белый_кадр_остаётся_белым() {
+    fn a_white_frame_stays_white() {
         let f = yuv420(4, 2, 235, 128, 128);
         let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited), 0).unwrap();
         for px in out.rgba.chunks(4) {
@@ -1640,7 +1640,7 @@ mod tests {
     }
 
     #[test]
-    fn полный_диапазон_читается_по_другому() {
+    fn the_full_range_reads_differently() {
         let f = yuv420(2, 2, 16, 128, 128);
         let limited = to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited), 0).unwrap();
         let full = to_rgba(&f, &stream(2, 2, 1, ColorRange::Full), 0).unwrap();
@@ -1649,7 +1649,7 @@ mod tests {
     }
 
     #[test]
-    fn поворот_на_90_меняет_стороны_местами() {
+    fn a_90_degree_rotation_swaps_the_sides() {
         let f = yuv420(4, 2, 128, 128, 128);
         let mut s = stream(4, 2, 1, ColorRange::Limited);
         s.display_matrix = Some([0, 1 << 16, 0, -(1 << 16), 0, 0, 0, 0, 1 << 30]);
@@ -1658,7 +1658,7 @@ mod tests {
     }
 
     #[test]
-    fn карта_поворота_согласована_с_размерами() {
+    fn the_rotation_map_agrees_with_the_sizes() {
         // 90°: левый нижний угол исходника становится левым верхним.
         assert_eq!(map_rot(90, 4, 2, 0, 0), (0, 1));
         assert_eq!(map_rot(90, 4, 2, 1, 3), (3, 0));
@@ -1668,14 +1668,14 @@ mod tests {
     }
 
     #[test]
-    fn неизвестный_формат_кадра_не_обещаем() {
+    fn an_unknown_frame_format_is_not_promised() {
         let mut f = yuv420(2, 2, 128, 128, 128);
         f.format = PixelFormat::Yuv444p;
         assert!(to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited), 0).is_none());
     }
 
     #[test]
-    fn матрица_из_контейнера_важнее_размера() {
+    fn the_matrix_from_the_container_beats_the_size() {
         let hd = stream(1920, 1080, 2, ColorRange::Limited);
         let sd = stream(640, 480, 2, ColorRange::Limited);
         assert_eq!(coefficients(&hd).rv, 459, "HD без метки — BT.709");
@@ -1685,7 +1685,7 @@ mod tests {
     }
 
     #[test]
-    fn ресемплер_без_изменений_копирует() {
+    fn a_resampler_without_changes_copies() {
         let mut r = Resampler::new(48_000, 2, 48_000, 2);
         let mut out = Vec::new();
         r.push(&[0.1, 0.2, 0.3, 0.4], &mut out);
@@ -1693,7 +1693,7 @@ mod tests {
     }
 
     #[test]
-    fn ресемплер_удваивает_частоту() {
+    fn the_resampler_doubles_the_rate() {
         let mut r = Resampler::new(24_000, 1, 48_000, 1);
         let mut out = Vec::new();
         r.push(&[0.0, 1.0, 0.0, 1.0], &mut out);
@@ -1702,7 +1702,7 @@ mod tests {
     }
 
     #[test]
-    fn каналы_раскладываются_по_устройству() {
+    fn channels_are_laid_out_by_the_device() {
         let mut mono = [0.0];
         map_channels(&[0.5], &mut mono);
         assert_eq!(mono[0], 0.5);
@@ -1715,7 +1715,7 @@ mod tests {
     }
 
     #[test]
-    fn пакет_звука_f32_читается_как_есть() {
+    fn an_f32_audio_packet_reads_as_is() {
         let f = rff_core::AudioFrame {
             sample_rate: 48_000,
             channels: 1,
@@ -1730,7 +1730,7 @@ mod tests {
     }
 
     #[test]
-    fn s16_звук_переводится_в_f32() {
+    fn s16_audio_is_converted_to_f32() {
         let f = rff_core::AudioFrame {
             sample_rate: 44_100,
             channels: 1,
@@ -1744,7 +1744,7 @@ mod tests {
     }
 
     #[test]
-    fn часы_считают_позицию_и_паузу() {
+    fn the_clock_counts_the_position_and_the_pause() {
         let mut w = WallClock::new();
         w.set(10.0);
         assert!((w.position() - 10.0).abs() < 1e-6);
@@ -1758,7 +1758,7 @@ mod tests {
     }
 
     #[test]
-    fn реестр_знает_кодеки_корпуса() {
+    fn the_registry_knows_the_corpus_codecs() {
         let reg = codec_registry();
         for id in [CodecId::H264, CodecId::Hevc, CodecId::Aac] {
             assert!(reg.find_decoder(id).is_ok(), "нет декодера {id:?}");
@@ -1766,7 +1766,7 @@ mod tests {
     }
 
     #[test]
-    fn длительность_берётся_из_контейнера() {
+    fn the_duration_comes_from_the_container() {
         let mut s = stream(1920, 1080, 1, ColorRange::Limited);
         s.duration = Some(90); // 90 тиков по 1/30 с = 3 с
         let media = Media {

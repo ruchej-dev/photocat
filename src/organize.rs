@@ -1518,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn по_дням_и_по_месяцам_разная_глубина() {
+    fn days_and_months_give_a_different_depth() {
         let rows = [row(1, "/a/IMG_1.jpg", Some("2024-05-17T14:42:43"))];
         let mut opts = Options::new("/out");
         let day = plan_of(&rows, &opts);
@@ -1529,7 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn событие_делит_день_по_месту_а_без_gps_оставляет_в_дне() {
+    fn an_event_splits_a_day_by_place_and_no_gps_keeps_it_in_the_day() {
         let mut a = row(1, "/a/a.jpg", Some("2024-05-17T10:00:00"));
         a.lat = Some(55.751_244);
         a.lon = Some(37.617_494);
@@ -1551,13 +1551,13 @@ mod tests {
     }
 
     #[test]
-    fn гпс_ячейка_знает_юг_и_запад() {
+    fn the_gps_cell_knows_south_and_west() {
         assert_eq!(gps_cell(-33.868_8, -151.209_3), "33.87S_151.21W");
         assert_eq!(gps_cell(-0.001, 0.000_1), "0.00N_0.00E");
     }
 
     #[test]
-    fn шаблон_имени_подставляет_дату_время_камеру_и_расширение() {
+    fn the_name_template_fills_date_time_camera_and_extension() {
         let mut r = row(1, "/a/DSC_0001.JPG", Some("2024-05-17T14:42:43"));
         r.camera = Some("Xiaomi Redmi Note 8 Pro".into());
         let mut opts = Options::new("/out");
@@ -1570,7 +1570,7 @@ mod tests {
     }
 
     #[test]
-    fn тег_в_имени_только_если_он_уверенный() {
+    fn a_tag_goes_into_the_name_only_when_confident() {
         let r = row(1, "/a/x.jpg", Some("2024-05-17T14:42:43"));
         let mut opts = Options::new("/out");
         opts.name = Some("{date}_{tag}_{orig}".into());
@@ -1585,7 +1585,7 @@ mod tests {
     }
 
     #[test]
-    fn пустые_подстановки_не_оставляют_разделителей() {
+    fn empty_substitutions_leave_no_separators() {
         let r = row(1, "/a/x.jpg", Some("2024-05-17T14:42:43"));
         let mut opts = Options::new("/out");
         opts.name = Some("{tag}_{date}_{camera}_{orig}".into());
@@ -1594,7 +1594,7 @@ mod tests {
     }
 
     #[test]
-    fn недопустимые_символы_заменяются_а_коллизии_нумеруются() {
+    fn forbidden_characters_are_replaced_and_collisions_numbered() {
         let a = row(1, "/a/photo 1.jpg", Some("2024-05-17T14:42:43"));
         let b = row(2, "/b/photo 1.jpg", Some("2024-05-17T15:00:00"));
         let mut opts = Options::new("/out");
@@ -1605,14 +1605,14 @@ mod tests {
     }
 
     #[test]
-    fn без_шаблона_имя_остаётся_оригинальным() {
+    fn without_a_template_the_name_stays_original() {
         let rows = [row(1, "/a/IMG_20240517_144243.jpg", Some("2024-05-17T14:42:43"))];
         let plan = plan_of(&rows, &Options::new("/out"));
         assert_eq!(dst(&plan, 0), "/out/2024/2024-05-17/IMG_20240517_144243.jpg");
     }
 
     #[test]
-    fn переименование_совместимо_со_старым_форматом() {
+    fn the_renaming_stays_compatible_with_the_old_format() {
         let rows = [row(1, "/a/IMG_1.jpg", Some("2024-05-17T14:42:43"))];
         let mut opts = Options::new("/out");
         opts.name = Some(RENAME_TEMPLATE.into());
@@ -1621,7 +1621,7 @@ mod tests {
     }
 
     #[test]
-    fn лишние_исключаются_а_без_даты_считаются() {
+    fn the_spare_are_excluded_while_undated_are_counted() {
         let mut a = row(1, "/a/a.jpg", Some("2024-05-17T14:42:43"));
         a.decision = Some("drop".into());
         let mut b = row(2, "/a/b.jpg", Some("2024-05-17T14:42:44"));
@@ -1642,7 +1642,7 @@ mod tests {
     }
 
     #[test]
-    fn шаблон_с_неизвестной_подстановкой_отвергается() {
+    fn a_template_with_an_unknown_placeholder_is_refused() {
         assert!(validate_template("{date}_{foo}").is_err());
         assert!(validate_template("{date}_{").is_err());
         assert!(validate_template(RENAME_TEMPLATE).is_ok());
@@ -1650,7 +1650,7 @@ mod tests {
     }
 
     #[test]
-    fn раскладка_без_apply_ничего_не_создаёт() {
+    fn the_plan_creates_nothing_without_apply() {
         let dir = std::env::temp_dir().join(format!("photocat-organize-{}", std::process::id()));
         let rows = [row(1, "/a/IMG_1.jpg", Some("2024-05-17T14:42:43"))];
         let _ = build_plan(&rows, &Options::new(&dir));
@@ -1658,7 +1658,7 @@ mod tests {
     }
 
     #[test]
-    fn номер_коллизии_не_ломает_файл_без_расширения() {
+    fn a_collision_number_does_not_break_a_file_without_an_extension() {
         let dst = PathBuf::from("/out/2024/2024-05-17/file");
         assert_eq!(numbered(&dst, 2), PathBuf::from("/out/2024/2024-05-17/file-2"));
         let dst = PathBuf::from("/out/file.jpg");
@@ -1695,7 +1695,7 @@ mod tests {
     }
 
     #[test]
-    fn выгрузка_повторяет_дерево_и_нумерует_файлы() {
+    fn the_export_repeats_the_tree_and_numbers_the_files() {
         let albums = [
             album(
                 1,
@@ -1735,7 +1735,7 @@ mod tests {
     }
 
     #[test]
-    fn ширина_номера_растёт_с_числом_файлов() {
+    fn the_number_width_grows_with_the_file_count() {
         assert_eq!(number_width(1), 2);
         assert_eq!(number_width(99), 2);
         assert_eq!(number_width(100), 3);
@@ -1743,7 +1743,7 @@ mod tests {
     }
 
     #[test]
-    fn имена_каталогов_чистятся_и_не_совпадают_у_соседей() {
+    fn folder_names_are_cleaned_and_stay_unique_among_siblings() {
         let albums = [
             album(1, 0, "Дача/2024", Vec::new()),
             album(2, 1, "Дача:2024", Vec::new()),
@@ -1761,7 +1761,7 @@ mod tests {
     }
 
     #[test]
-    fn коллизия_имён_файлов_разводится_номером() {
+    fn a_file_name_collision_is_split_by_a_number() {
         let albums = [album(
             1,
             0,
@@ -1780,7 +1780,7 @@ mod tests {
     }
 
     #[test]
-    fn шаблон_выгрузки_знает_n_и_hash8() {
+    fn the_export_template_knows_n_and_hash8() {
         assert!(validate_export_template(EXPORT_TEMPLATE).is_ok());
         assert!(validate_export_template("{n}_{date}_{time}_{camera}_{tag}_{orig}_{ext}").is_ok());
         assert!(validate_export_template("{hash8}").is_ok());
@@ -1791,7 +1791,7 @@ mod tests {
     }
 
     #[test]
-    fn имя_из_шаблона_несёт_позицию_дату_и_хеш() {
+    fn a_name_from_the_template_carries_the_position_date_and_hash() {
         let r = export_row(1, "/a/IMG 1.jpg", Some("2024-05-17T14:42:43"));
         let opts = ExportOptions::new("/out");
         let name = export_name("{n}_{date}_{time}_{orig}_{hash8}", &r, &opts, 7, 2);
@@ -1799,7 +1799,7 @@ mod tests {
     }
 
     #[test]
-    fn корзина_и_длинный_путь_считаются_и_не_выгружаются() {
+    fn the_trash_and_a_long_path_are_counted_and_not_exported() {
         let mut trashed = export_row(2, "/a/b.jpg", Some("2024-05-17T10:00:00"));
         trashed.trashed_at = Some(1_716_000_000);
         let albums = [album(
@@ -1826,7 +1826,7 @@ mod tests {
     }
 
     #[test]
-    fn выгрузка_копирует_а_не_ссылается_и_повтор_идемпотентен() {
+    fn the_export_copies_rather_than_links_and_a_repeat_is_idempotent() {
         let dir = tmp_dir("copy");
         let out = dir.join("out");
         std::fs::create_dir_all(&out).unwrap();
@@ -1861,7 +1861,7 @@ mod tests {
     }
 
     #[test]
-    fn занятое_другим_содержимым_имя_получает_два_и_не_перезаписывается() {
+    fn a_name_taken_by_other_content_gets_two_and_is_not_overwritten() {
         let dir = tmp_dir("collision");
         let out = dir.join("out");
         std::fs::create_dir_all(out.join("На_печать")).unwrap();
@@ -1885,7 +1885,7 @@ mod tests {
     }
 
     #[test]
-    fn перестановка_порядка_даёт_устаревший_порядок_а_не_дубли() {
+    fn reordering_gives_a_stale_order_and_no_duplicates() {
         let dir = tmp_dir("stale");
         let out = dir.join("out");
         std::fs::create_dir_all(&out).unwrap();
@@ -1920,7 +1920,7 @@ mod tests {
     }
 
     #[test]
-    fn пустой_альбом_создаёт_пустой_каталог() {
+    fn an_empty_album_creates_an_empty_folder() {
         let dir = tmp_dir("empty");
         let out = dir.join("out");
         std::fs::create_dir_all(&out).unwrap();
@@ -1933,7 +1933,7 @@ mod tests {
     }
 
     #[test]
-    fn отсутствующий_файл_не_валит_проход() {
+    fn a_missing_file_does_not_fail_the_pass() {
         let dir = tmp_dir("missing");
         let out = dir.join("out");
         std::fs::create_dir_all(&out).unwrap();
@@ -1952,7 +1952,7 @@ mod tests {
     }
 
     #[test]
-    fn отмена_до_старта_ничего_не_создаёт_и_помнит_созданное() {
+    fn a_cancel_before_the_start_creates_nothing_and_remembers_what_was_created() {
         let dir = tmp_dir("cancel");
         let out = dir.join("out");
         std::fs::create_dir_all(&out).unwrap();
@@ -1975,7 +1975,7 @@ mod tests {
     }
 
     #[test]
-    fn out_внутри_архива_отвергается() {
+    fn an_out_inside_the_archive_is_refused() {
         let root = tmp_dir("roots");
         let inside = root.join("photos");
         std::fs::create_dir_all(&inside).unwrap();
@@ -1988,7 +1988,7 @@ mod tests {
     }
 
     #[test]
-    fn глубина_три_и_порядок_соседей_сохраняются() {
+    fn depth_three_and_the_sibling_order_are_kept() {
         let albums = [
             album(1, 0, "Дача 2024", Vec::new()),
             album(2, 1, "Май", Vec::new()),
