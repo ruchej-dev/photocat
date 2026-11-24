@@ -1,15 +1,17 @@
-//! Корзина: файл уходит в системную корзину только после явного подтверждения.
+//! The trash: a file goes to the OS trash only after an explicit confirmation.
 //!
-//! Это единственное место, где архив покидает свой каталог. Безвозвратного удаления
-//! внутри приложения нет: ОС хранит файл в корзине, пока владелец сам её не очистит.
-//! Строка БД удаляется только после успешного переноса.
+//! This is the only place where the archive leaves its folder. There is no permanent deletion
+//! inside the application: the OS keeps the file in its trash until the owner empties it.
+//! The DB row is removed only after a successful move.
 
 use crate::db::{self, Progress};
+use crate::i18n::{self, Lang};
 use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
 
 pub struct Report {
+    pub lang: Lang,
     pub moved: usize,
     pub errors: usize,
     pub bytes: i64,
@@ -19,18 +21,21 @@ pub struct Report {
 
 impl std::fmt::Display for Report {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}в системную корзину: {}, ошибок {}, {}",
-            if self.cancelled {
-                "stopped: "
-            } else {
-                ""
-            },
-            self.moved,
-            self.errors,
-            db::human(self.bytes)
-        )?;
+        let stopped = if self.cancelled {
+            i18n::t(self.lang, "stopped: ")
+        } else {
+            ""
+        };
+        let body = i18n::fill(
+            self.lang,
+            "to the OS trash: {}, errors {}, {}",
+            &[
+                self.moved.to_string(),
+                self.errors.to_string(),
+                db::human(self.bytes),
+            ],
+        );
+        write!(f, "{stopped}{body}")?;
         if let Some(first) = self.details.first() {
             write!(f, " · {first}")?;
         }
@@ -38,18 +43,20 @@ impl std::fmt::Display for Report {
     }
 }
 
-/// Перенести помеченные файлы в системную корзину и убрать их строки из индекса.
-/// `items` — `(file_id, путь, размер)`.
+/// Move the marked files into the OS trash and drop their rows from the index.
+/// `items` is `(file_id, path, size)`.
 pub fn empty(
     db_path: &Path,
     items: &[(i64, String, i64)],
+    lang: Lang,
     progress: Option<Arc<Progress>>,
 ) -> Result<Report> {
     if let Some(p) = &progress {
         p.set_total(items.len());
-        p.set_msg("корзина: переношу в системную корзину…");
+        p.set_msg(i18n::t(lang, "trash: moving to the OS trash…"));
     }
     let mut report = Report {
+        lang,
         moved: 0,
         errors: 0,
         bytes: 0,
@@ -63,13 +70,13 @@ pub fn empty(
         }
         match trash::delete(Path::new(path)) {
             Ok(()) => {
-                // Файл уже в системной корзине; только теперь убираем строку индекса.
+                // The file is in the OS trash already; only now is the index row dropped.
                 if let Err(e) = db::purge_file(db_path, *id) {
                     report.errors += 1;
                     if report.details.len() < 3 {
                         report
                             .details
-                            .push(format!("{path}: индекс не очищен: {e}"));
+                            .push(format!("{path}: the index was not cleared: {e}"));
                     }
                 } else {
                     report.moved += 1;
@@ -91,11 +98,18 @@ pub fn empty(
         }
     }
     if let Some(p) = &progress {
-        p.set_msg("корзина: готово");
+        p.set_msg(i18n::t(lang, "trash: done"));
         p.finish();
     }
     if report.moved == 0 && report.errors > 0 && !report.cancelled {
-        anyhow::bail!("ни один файл не перенесён: {}", report.details.join("; "));
+        anyhow::bail!(
+            "{}",
+            i18n::fill(
+                lang,
+                "not a single file was moved: {}",
+                &[report.details.join("; ")]
+            )
+        );
     }
     Ok(report)
 }

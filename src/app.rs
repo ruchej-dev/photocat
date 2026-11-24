@@ -3636,7 +3636,7 @@ impl App {
             ),
         };
         std::thread::spawn(move || {
-            let r = recycle::empty(&db_path, &items, Some(progress));
+            let r = recycle::empty(&db_path, &items, lang, Some(progress));
             let _ = tx.send(r);
         });
     }
@@ -7830,7 +7830,7 @@ impl App {
             let mut cancelled = false;
             for root in roots {
                 progress.reset();
-                match index::run(&root, jobs, &db_path, &tools, Some(progress.clone())) {
+                match index::run(&root, jobs, &db_path, &tools, lang, Some(progress.clone())) {
                     Ok(st) => {
                         total += st.total;
                         indexed += st.indexed;

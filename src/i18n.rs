@@ -1455,6 +1455,22 @@ const PAIRS: &[(&str, &str)] = &[
     ("smaller, English queries only", "меньше по размеру, запросы только по-английски"),
     ("768 features, SigLIP architecture; English queries", "768 признаков, архитектура SigLIP; запросы по-английски"),
     ("768 features, 100+ languages; needs a 400 MiB limit", "768 признаков, тексты на 100+ языках; нужен лимит 400 МиБ"),
+    // --- M23: the modules converted to the English source -----------------------
+    ("to the OS trash: {}, errors {}, {}", "в системную корзину: {}, ошибок {}, {}"),
+    ("not a single file was moved: {}", "ни один файл не перенесён: {}"),
+    ("trash: moving to the OS trash…", "корзина: переношу в системную корзину…"),
+    ("trash: done", "корзина: готово"),
+    ("the walk over the folder is done", "обход каталога завершён"),
+    ("done", "готово"),
+    ("error {}: {}", "ошибка {}: {}"),
+    ("the writing thread died", "поток записи упал"),
+    ("does not decode {}: {}", "не декодируется {}: {}"),
+    ("a video without a preview {}: {}", "видео без превью {}: {}"),
+    (
+        "tesseract does not start ({}) — install tesseract and the language packs ({}) or give its path in the settings; the rest works without it",
+        "tesseract не запускается ({}) — установите tesseract и языковые пакеты ({}) или укажите путь в настройках; остальной функционал работает без него",
+    ),
+
 ];
 
 #[cfg(test)]

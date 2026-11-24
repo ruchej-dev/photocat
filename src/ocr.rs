@@ -1,6 +1,6 @@
-//! OCR документов и скриншотов: отдельный проход `tesseract` по кандидатам.
+//! OCR of documents and screenshots: a separate `tesseract` pass over the candidates.
 //!
-//! Текст живёт в БД (`ocr`) и ищется через FTS5; рядом с оригиналом ничего не пишется.
+//! The text lives in the DB (`ocr`) and is searched through FTS5; nothing is written next to the original.
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
-/// Длинная сторона кадра, который уходит в tesseract: больше не нужно, а декод дорожает.
+/// The long side of the frame handed to tesseract: more is not needed and the decode gets pricier.
 pub const MAX_SIDE: u32 = 2000;
 
 pub struct Stats {
@@ -24,9 +24,9 @@ pub struct Stats {
     pub errors: usize,
     pub chars: i64,
     pub seconds: f64,
-    /// Проход прерван владельцем: остальные файлы остались на следующий раз.
+    /// The pass was stopped by the owner: the remaining files are left for next time.
     pub cancelled: bool,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -70,8 +70,8 @@ impl std::fmt::Display for Stats {
     }
 }
 
-/// Уверенный верхний тег — та же формула, что `embed::confident_tag_with`.
-/// Продублирована нарочно: OCR не зависит от модели и её модуля.
+/// The confident top tag — the same formula as `embed::confident_tag_with`.
+/// Duplicated on purpose: OCR does not depend on the model or its module.
 fn confident(tags: &[(String, f32)], show: f32, margin: f32) -> Option<(&str, f32)> {
     let (tag, top) = tags.first()?;
     if *top < show {
@@ -85,13 +85,14 @@ fn confident(tags: &[(String, f32)], show: f32, margin: f32) -> Option<(&str, f3
     Some((tag.as_str(), *top))
 }
 
-/// Нужен ли текст: фото без EXIF-камеры (скан или скриншот) либо файл, которому CLIP
-/// уверенно дал тег «документ»/«скриншот». Решают метаданные и содержимое, а не имя файла.
+/// Whether the text is wanted: a photo without an EXIF camera (a scan or a screenshot) or a file
+/// the model confidently tagged "document"/"screenshot". Metadata and content decide, not the name.
 pub fn wants_text(
     f: &FileRow,
     tags: &HashMap<i64, Vec<(String, f32)>>,
     show: f32,
     margin: f32,
+    text_labels: &[String],
 ) -> bool {
     if f.kind != "image" {
         return false;
@@ -104,19 +105,30 @@ pub fn wants_text(
     };
     matches!(
         confident(list, show, margin).map(|(tag, _)| tag),
-        Some("документ" | "скриншот")
+        Some(tag) if text_labels.iter().any(|l| l == tag)
     )
 }
 
-/// Кандидаты прохода: снимки каталога и сколько из них попало под эвристику.
+/// The labels the dictionary uses for the tags `document` and `screenshot`: the ids are stable,
+/// the labels are the owner's (and follow the language of the defaults).
+fn text_labels(conn: &rusqlite::Connection, model: &str) -> Vec<String> {
+    db::load_tag_defs(conn, model)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|d| d.enabled && (d.id == "document" || d.id == "screenshot"))
+        .map(|d| d.label)
+        .collect()
+}
+
+/// The candidates of the pass: the images of the folder and how many the heuristic picked.
 pub struct Plan {
     pub images: usize,
     pub candidates: usize,
-    /// Из кандидатов: у кого текста ещё нет (или файл изменился).
+    /// Of the candidates: those without text yet (or whose file changed).
     pub todo: usize,
 }
 
-/// Только план, без OCR: каталог и БД читаются, текст не распознаётся.
+/// The plan only, no OCR: the folder and the DB are read, no text is recognized.
 pub fn plan(db_path: &Path, all: bool) -> Result<Plan> {
     let conn = db::open(db_path)?;
     let (images, selected) = select(&conn, all)?;
@@ -137,18 +149,20 @@ fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>
     let rows = db::load_all(conn)?;
     let tags = db::load_visible_tags(conn)?;
     let images = rows.iter().filter(|r| r.kind == "image").count();
+    let text = text_labels(conn, &settings.model_id);
     let selected = rows
         .into_iter()
-        // `--all` расширяет эвристику до всех снимков, но не трогает видео: кадр-обложка не документ.
+        // `--all` widens the heuristic to every image but leaves videos alone: a cover frame is no document.
         .filter(|r| {
             r.kind == "image"
-                && (all || wants_text(r, &tags, settings.tag_show, settings.tag_margin))
+                && (all
+                    || wants_text(r, &tags, settings.tag_show, settings.tag_margin, &text))
         })
         .collect();
     Ok((images, selected))
 }
 
-/// Пакетный проход по кандидатам: `all` — все изображения, а не только документы и скриншоты.
+/// A batch pass over the candidates: `all` means every image, not only documents and screenshots.
 pub fn run(
     db_path: &Path,
     jobs: usize,
@@ -158,8 +172,8 @@ pub fn run(
     run_selected(db_path, jobs, all, None, progress)
 }
 
-/// Распознать конкретные файлы (кнопка у выбранного снимка). Явный запрос — всегда заново:
-/// владелец мог попросить пересчитать текст, даже если sha256 не менялся.
+/// Recognize specific files (the button on the chosen photo). An explicit request always reruns:
+/// the owner may have asked for the text again even though the sha256 did not change.
 pub fn run_files(
     db_path: &Path,
     ids: &[i64],
@@ -180,7 +194,7 @@ fn run_selected(
     let settings = db::load_settings(&conn);
     let lang = settings.ocr_lang.clone();
     let tools = settings.tools.clone();
-    // Явно выбранный файл распознаём независимо от эвристики.
+    // An explicitly chosen file is recognized regardless of the heuristic.
     let (_, selected) = select(&conn, all || only.is_some())?;
     let selected: Vec<FileRow> = match only {
         Some(ids) => selected.into_iter().filter(|r| ids.contains(&r.id)).collect(),
@@ -197,7 +211,7 @@ fn run_selected(
     };
     let skipped = candidates - todo.len();
 
-    // «Стоп» нажат до старта: ничего не запускаем и не ищем tesseract зря.
+    // "Stop" was pressed before the start: nothing runs and tesseract is not probed for nothing.
     if progress.as_ref().is_some_and(|p| p.cancelled()) {
         if let Some(p) = &progress {
             p.finish();
@@ -216,15 +230,21 @@ fn run_selected(
 
     if !todo.is_empty() && tools.probe(Tool::Tesseract).is_none() {
         anyhow::bail!(
-            "tesseract не запускается ({}) — установите tesseract и языковые пакеты ({lang}) \
-             или укажите путь в настройках; остальной функционал работает без него",
-            tools.source(Tool::Tesseract, settings.lang)
+            "{}",
+            i18n::fill(
+                settings.lang,
+                "tesseract does not start ({}) — install tesseract and the language packs ({}) or give its path in the settings; the rest works without it",
+                &[
+                    tools.source(Tool::Tesseract, settings.lang).to_string(),
+                    settings.ocr_lang.clone()
+                ]
+            )
         );
     }
 
     if let Some(p) = &progress {
         p.set_total(todo.len());
-        p.set_msg(format!("OCR: {lang}"));
+        p.set_msg(format!("OCR: {}", settings.ocr_lang));
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -252,7 +272,7 @@ fn run_selected(
     let errors = AtomicUsize::new(0);
     pool.install(|| {
         todo.par_iter().for_each_with(tx, |tx, f| {
-            // «Стоп»: уже начатый файл доводим, остальные оставляем следующему запуску.
+            // "Stop": the file already started is finished, the rest wait for the next run.
             if progress.as_ref().is_some_and(|p| p.cancelled()) {
                 return;
             }
@@ -274,9 +294,11 @@ fn run_selected(
         })
     });
 
-    let (done, chars) = writer.join().map_err(|_| anyhow::anyhow!("поток записи упал"))??;
+    let (done, chars) = writer
+        .join()
+        .map_err(|_| anyhow::anyhow!(i18n::t(settings.lang, "the writing thread died")))??;
     if let Some(p) = &progress {
-        p.set_msg("готово");
+        p.set_msg(i18n::t(settings.lang, "done"));
         p.finish();
     }
     Ok(Stats {
@@ -294,6 +316,11 @@ fn run_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The labels of the default dictionary that make OCR look for text.
+    fn labels() -> Vec<String> {
+        vec!["документ".to_string(), "скриншот".to_string()]
+    }
 
     fn row(kind: &str, camera: Option<&str>) -> FileRow {
         FileRow {
@@ -328,28 +355,28 @@ mod tests {
 
     #[test]
     fn screenshots_and_scans_are_candidates_without_tags() {
-        assert!(wants_text(&row("image", None), &HashMap::new(), SHOW, MARGIN));
+        assert!(wants_text(&row("image", None), &HashMap::new(), SHOW, MARGIN, &labels()));
     }
 
     #[test]
     fn camera_photo_needs_confident_document_or_screenshot_tag() {
         let none = HashMap::new();
-        assert!(!wants_text(&row("image", Some("Pixel")), &none, SHOW, MARGIN));
-        assert!(!wants_text(&row("image", Some("Pixel")), &tags("дети", 0.30), SHOW, MARGIN));
-        assert!(wants_text(&row("image", Some("Pixel")), &tags("документ", 0.30), SHOW, MARGIN));
-        assert!(wants_text(&row("image", Some("Pixel")), &tags("скриншот", 0.24), SHOW, MARGIN));
-        // уверенности нет: низкий вес или отрыв от второго меньше порога
-        assert!(!wants_text(&row("image", Some("Pixel")), &tags("документ", 0.20), SHOW, MARGIN));
+        assert!(!wants_text(&row("image", Some("Pixel")), &none, SHOW, MARGIN, &labels()));
+        assert!(!wants_text(&row("image", Some("Pixel")), &tags("дети", 0.30), SHOW, MARGIN, &labels()));
+        assert!(wants_text(&row("image", Some("Pixel")), &tags("документ", 0.30), SHOW, MARGIN, &labels()));
+        assert!(wants_text(&row("image", Some("Pixel")), &tags("скриншот", 0.24), SHOW, MARGIN, &labels()));
+        // no confidence: the weight is low or the margin over the second tag is under the threshold
+        assert!(!wants_text(&row("image", Some("Pixel")), &tags("документ", 0.20), SHOW, MARGIN, &labels()));
         let flat = HashMap::from([(1, vec![
             ("документ".to_string(), 0.30),
             ("дети".to_string(), 0.295),
         ])]);
-        assert!(!wants_text(&row("image", Some("Pixel")), &flat, SHOW, MARGIN));
+        assert!(!wants_text(&row("image", Some("Pixel")), &flat, SHOW, MARGIN, &labels()));
     }
 
     #[test]
     fn cancelled_before_start_does_nothing() {
-        // Уникальное имя на прогон: файл теста не мешает и не удаляется (границы запрещают).
+        // A unique name per run: the test file does not interfere and is not deleted (the bounds forbid it).
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -377,7 +404,7 @@ mod tests {
 
     #[test]
     fn video_is_never_an_ocr_candidate() {
-        assert!(!wants_text(&row("video", None), &HashMap::new(), SHOW, MARGIN));
+        assert!(!wants_text(&row("video", None), &HashMap::new(), SHOW, MARGIN, &labels()));
     }
 
     #[test]

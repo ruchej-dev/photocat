@@ -19,12 +19,9 @@ const PENDING: &[&str] = &[
     "eval.rs",
     "faces.rs",
     "i18n.rs",
-    "index.rs",
     "main.rs",
-    "ocr.rs",
     "organize.rs",
     "player.rs",
-    "recycle.rs",
     "verify.rs",
 ];
 

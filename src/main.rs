@@ -99,7 +99,14 @@ fn main() -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
-            let mut stats = index::run(&root, jobs, &db_path, &settings.tools, Some(progress))?;
+            let mut stats = index::run(
+                &root,
+                jobs,
+                &db_path,
+                &settings.tools,
+                settings.lang,
+                Some(progress),
+            )?;
             stats.lang = lang;
             println!("{stats}");
             Ok(())

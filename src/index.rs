@@ -1,4 +1,4 @@
-//! Индексация каталога: обход, параллельная обработка, запись в SQLite.
+//! Folder indexing: the walk, parallel processing, writes into SQLite.
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
@@ -13,14 +13,14 @@ use std::sync::mpsc;
 pub struct Stats {
     pub total: usize,
     pub indexed: usize,
-    /// Файлы с тем же путём, размером и mtime: содержимое не читалось повторно.
+    /// Files with the same path, size and mtime: the content was not read again.
     pub skipped: usize,
     pub errors: usize,
     pub bytes: i64,
     pub seconds: f64,
-    /// Прогон прерван владельцем: остальные файлы не обработаны.
+    /// The pass was stopped by the owner: the remaining files were not processed.
     pub cancelled: bool,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -55,13 +55,14 @@ pub fn run(
     jobs: usize,
     db_path: &Path,
     tools: &tools::Tools,
+    lang: i18n::Lang,
     progress: Option<Arc<Progress>>,
 ) -> Result<Stats> {
     let t0 = std::time::Instant::now();
     let root = std::fs::canonicalize(root)?;
     let thumbs_dir = db::cache_dir().join("thumbs");
     std::fs::create_dir_all(&thumbs_dir)?;
-    // Повторная индексация не перечитывает неизменённые файлы: ключ — путь + размер + mtime.
+    // A repeated indexing does not re-read unchanged files: the key is path + size + mtime.
     let existing: std::collections::HashMap<String, Existing> = {
         let conn = db::open(db_path)?;
         let mut rows = db::load_all(&conn)?;
@@ -99,7 +100,7 @@ pub fn run(
     let total = files.len();
     if let Some(p) = &progress {
         p.set_total(total);
-        p.set_msg("обход каталога завершён");
+        p.set_msg(i18n::t(lang, "the walk over the folder is done"));
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -127,7 +128,7 @@ pub fn run(
     let skipped = std::sync::atomic::AtomicUsize::new(0);
     pool.install(|| {
         files.par_iter().for_each_with(tx, |tx, path| {
-            // «Стоп»: уже начатые файлы доводим, остальные не трогаем.
+            // "Stop": the files already started are finished, the rest are left alone.
             if progress.as_ref().is_some_and(|p| p.cancelled()) {
                 return;
             }
@@ -149,13 +150,13 @@ pub fn run(
                     return;
                 }
             }
-            let res = process(path, &root, &thumbs_dir, tools);
+            let res = process(path, &root, &thumbs_dir, tools, lang);
             match res {
                 Ok((rec, size, soft_error)) => {
                     bytes.fetch_add(size, std::sync::atomic::Ordering::Relaxed);
                     let _ = tx.send(rec);
                     if soft_error {
-                        // Файл в индексе, но без превью/метаданных: ошибка видна в счётчике.
+                        // The file is in the index but without a preview or metadata: the counter shows the error.
                         errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         if let Some(p) = &progress {
                             p.error();
@@ -164,7 +165,7 @@ pub fn run(
                 }
                 Err(e) => {
                     errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    eprintln!("\nошибка {}: {e}", path.display());
+                    eprintln!("\n{}", i18n::fill(lang, "error {}: {}", &[path.display().to_string(), e.to_string()]));
                     if let Some(p) = &progress {
                         p.error();
                     }
@@ -176,9 +177,11 @@ pub fn run(
         })
     });
 
-    let indexed = writer.join().map_err(|_| anyhow::anyhow!("поток записи упал"))??;
+    let indexed = writer
+        .join()
+        .map_err(|_| anyhow::anyhow!(i18n::t(lang, "the writing thread died")))??;
     if let Some(p) = &progress {
-        p.set_msg("готово");
+        p.set_msg(i18n::t(lang, "done"));
         p.finish();
     }
     Ok(Stats {
@@ -193,7 +196,7 @@ pub fn run(
     })
 }
 
-/// Что уже лежит в индексе по этому пути.
+/// What the index already holds for this path.
 struct Existing {
     size: i64,
     mtime: i64,
@@ -203,8 +206,8 @@ struct Existing {
     kind: String,
 }
 
-/// Файл не изменился — читать и декодировать заново не нужно.
-/// Видео без кадра-обложки или длительности обрабатывается заново: это старый индекс.
+/// The file is unchanged — no need to read and decode it again.
+/// A video without a cover frame or a duration is processed again: that is an old index.
 fn can_skip(e: Option<&Existing>, size: i64, mtime: i64, kind: &str) -> bool {
     let Some(e) = e else {
         return false;
@@ -222,6 +225,7 @@ fn process(
     _root: &Path,
     thumbs_dir: &Path,
     tools: &tools::Tools,
+    lang: i18n::Lang,
 ) -> Result<(FileRow, i64, bool)> {
     let md = std::fs::metadata(p)?;
     let size = md.len() as i64;
@@ -253,9 +257,12 @@ fn process(
                 thumb = Some(info.thumb);
             }
             Err(e) => {
-                // битый/нечитаемый файл: индексируем без хеша и превью
+                // a broken or unreadable file: indexed without a hash or a preview
                 soft_error = true;
-                eprintln!("\nне декодируется {}: {e:#}", p.display());
+                eprintln!(
+                    "\n{}",
+                    i18n::fill(lang, "does not decode {}: {}", &[p.display().to_string(), format!("{e:#}")])
+                );
             }
         }
     } else if kind == "video" {
@@ -269,9 +276,12 @@ fn process(
                 thumb = Some(info.thumb);
             }
             Err(e) => {
-                // Нет ffmpeg/битый файл: видео остаётся в индексе, но без превью и хеша.
+                // No ffmpeg or a broken file: the video stays in the index without a preview or a hash.
                 soft_error = true;
-                eprintln!("\nвидео без превью {}: {e:#}", p.display());
+                eprintln!(
+                    "\n{}",
+                    i18n::fill(lang, "a video without a preview {}: {}", &[p.display().to_string(), format!("{e:#}")])
+                );
             }
         }
     }
