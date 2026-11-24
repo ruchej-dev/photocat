@@ -18,7 +18,7 @@ the window shows exactly the same text as before in both languages. `tests/sourc
 guards the rule — a Cyrillic identifier anywhere and a Russian comment or string in a converted
 module fail — and its `PENDING` list names the 16 modules that still hold Russian (479 literals,
 mostly error messages and data). ADR 0046 reverses ADR 0040's direction and keeps its mechanism.
-Next: M23.3 (L2) — M23.2 (L0/L1) is done, M23.4 (`app.rs`), M23.5 (`main.rs`, tests, scripts), M23.6 (the
+Next: M23.3 (L2) — M23.2 (L0/L1) is done, and in L2 so far recycle, index, ocr, dupes, eval, faces, verify and organize are English; player, embed, app and main are left, M23.4 (`app.rs`), M23.5 (`main.rs`, tests, scripts), M23.6 (the
 corpus pass).
 
 Since M17 the owner chooses how he looks at the archive: "By months" (as in PhotoPrism) or "Flat",

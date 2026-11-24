@@ -15,11 +15,8 @@ use std::path::Path;
 const PENDING: &[&str] = &[
     "app.rs",
     "embed.rs",
-    "i18n.rs",
     "main.rs",
-    "organize.rs",
     "player.rs",
-    "verify.rs",
 ];
 
 /// Files whose string literals are legitimate Russian *data*: the translation table itself and the
@@ -31,6 +28,8 @@ const RUSSIAN_DATA: &[&str] = &[
     // `labels.csv` is the owner's file: the parser keeps accepting the old Russian keywords
     // `пропуск` and `другое` next to `skip` and `other`.
     "eval.rs",
+    // The CLI still accepts the Russian aliases `день`/`месяц`/`событие` for `--by`.
+    "organize.rs",
 ];
 
 fn is_cyrillic(c: char) -> bool {
@@ -245,7 +244,8 @@ fn converted_modules_hold_no_russian() {
         };
         let (_, comments, _) = split(&src);
         let (_, _, strings) = split(production);
-        let has_russian = comments.chars().any(is_cyrillic) || strings.chars().any(is_cyrillic);
+        let has_russian = comments.chars().any(is_cyrillic)
+            || (strings.chars().any(is_cyrillic) && !RUSSIAN_DATA.contains(&name.as_str()));
         if pending {
             if !has_russian {
                 pending_honest.push(name.clone());

@@ -1,9 +1,9 @@
-//! Сверка двух копий архива и слепок `sha256sum`.
+//! Comparing two copies of an archive and the `sha256sum` manifest.
 //!
-//! Обе команды только читают архив. Единственный созданный файл — слепок по явному `--out`.
-//! Сначала сравниваются размеры: если они различаются, читать файл незачем. sha256 считается
-//! только для файлов одинакового размера, поэтому `verify` двух копий читает оба дерева целиком,
-//! а не «на всякий случай» ещё и заведомо разные файлы.
+//! Both commands only read the archive. The only file created is a manifest on an explicit `--out`.
+//! Sizes are compared first: if they differ there is no point in reading the file. sha256 is
+//! computed only for files of equal size, so `verify` of two copies reads both trees whole
+//! instead of reading obviously different files "just in case".
 
 use crate::db::{self, Progress};
 use crate::derive;
@@ -23,11 +23,11 @@ pub struct Entry {
 
 #[derive(Default)]
 pub struct Scan {
-    /// Относительный путь → файл. BTreeMap даёт стабильный порядок отчёта.
+    /// Relative path → file. A BTreeMap gives the report a stable order.
     pub files: BTreeMap<String, Entry>,
-    /// Симлинки и другие не-файлы: не сравниваются.
+    /// Symlinks and other non-files: not compared.
     pub skipped: usize,
-    /// Каталоги/файлы, которые не удалось прочитать при обходе.
+    /// Folders or files that could not be read during the walk.
     pub errors: usize,
 }
 
@@ -36,23 +36,23 @@ pub struct Report {
     pub files_b: usize,
     pub only_a: Vec<String>,
     pub only_b: Vec<String>,
-    /// Путь и размеры в A и B; sha256 для них не считается.
+    /// The path and the sizes in A and B; no sha256 is computed for them.
     pub size_diff: Vec<(String, u64, u64)>,
     pub content_diff: Vec<String>,
     pub read_errors: Vec<String>,
     pub same: usize,
-    /// Сколько файлов одинакового размера реально прошло через sha256.
+    /// How many files of equal size actually went through sha256.
     pub hashed: usize,
-    /// Объём одной копии этих файлов (читается дважды — в A и B).
+    /// The size of one copy of those files (read twice — in A and in B).
     pub hashed_bytes: u64,
-    /// Файлы одинакового размера, не проверенные из-за отмены.
+    /// Files of equal size not checked because of the stop.
     pub unchecked: usize,
     pub scan_errors: usize,
     pub skipped_a: usize,
     pub skipped_b: usize,
     pub cancelled: bool,
     pub seconds: f64,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -77,22 +77,22 @@ pub struct ManifestStats {
     pub bytes: u64,
     pub skipped: usize,
     pub errors: usize,
-    /// Не проверено из-за отмены.
+    /// Not checked because of the stop.
     pub unchecked: usize,
     pub cancelled: bool,
-    /// Слепок записан целиком. При отмене или ошибке чтения — false.
+    /// The manifest was written whole. False on a stop or a read error.
     pub written: bool,
     pub seconds: f64,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
 pub struct CheckReport {
-    /// Есть в слепке, нет в каталоге.
+    /// In the manifest, missing from the folder.
     pub missing: Vec<String>,
-    /// Есть в каталоге, нет в слепке.
+    /// In the folder, missing from the manifest.
     pub extra: Vec<String>,
-    /// Есть в обоих, но sha256 другой.
+    /// In both, but with a different sha256.
     pub changed: Vec<String>,
     pub read_errors: Vec<String>,
     pub same: usize,
@@ -101,7 +101,7 @@ pub struct CheckReport {
     pub skipped: usize,
     pub cancelled: bool,
     pub seconds: f64,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -120,21 +120,21 @@ impl CheckReport {
     }
 }
 
-/// Обход дерева: только обычные файлы, путь относительно корня. Симлинки не разыменовываются.
+/// A tree walk: regular files only, the path relative to the root. Symlinks are not followed.
 pub fn scan(root: &Path) -> Result<Scan> {
     scan_excluding(root, None)
 }
 
 fn scan_excluding(root: &Path, exclude: Option<&Path>) -> Result<Scan> {
     let root = std::fs::canonicalize(root)
-        .with_context(|| format!("не открыть каталог {}", root.display()))?;
+        .with_context(|| format!("cannot open the folder {}", root.display()))?;
     let mut scan = Scan::default();
     for e in walkdir::WalkDir::new(&root).follow_links(false) {
         let e = match e {
             Ok(e) => e,
             Err(err) => {
                 scan.errors += 1;
-                eprintln!("пропущено при обходе: {err}");
+                eprintln!("skipped during the walk: {err}");
                 continue;
             }
         };
@@ -155,16 +155,16 @@ fn scan_excluding(root: &Path, exclude: Option<&Path>) -> Result<Scan> {
             Ok(m) => m.len(),
             Err(err) => {
                 scan.errors += 1;
-                eprintln!("не прочитать {}: {err}", e.path().display());
+                eprintln!("cannot read {}: {err}", e.path().display());
                 continue;
             }
         };
         let rel = rel_display(rel);
         if scan.files.contains_key(&rel) {
-            // Не-UTF-8 имена после to_string_lossy могут совпасть: молча затирать файл нельзя.
+            // Non-UTF-8 names can collide after to_string_lossy: a file must not be overwritten silently.
             scan.errors += 1;
             eprintln!(
-                "разные файлы дают одно имя после потери байтов: {}",
+                "different files give one name after the bytes are lost: {}",
                 e.path().display()
             );
             continue;
@@ -180,26 +180,39 @@ fn scan_excluding(root: &Path, exclude: Option<&Path>) -> Result<Scan> {
     Ok(scan)
 }
 
-/// Сверка двух каталогов. Прогресс — по файлам, которым нужен sha256.
-pub fn verify(a: &Path, b: &Path, jobs: usize, progress: Option<Arc<Progress>>) -> Result<Report> {
+/// Compare two folders. Progress is by the files that need a sha256.
+pub fn verify(
+    a: &Path,
+    b: &Path,
+    jobs: usize,
+    lang: Lang,
+    progress: Option<Arc<Progress>>,
+) -> Result<Report> {
     let t0 = std::time::Instant::now();
     if let Some(p) = &progress {
-        p.set_msg("обход двух каталогов");
+        p.set_msg(i18n::t(lang, "walking both folders"));
     }
     let sa = scan(a)?;
     let sb = scan(b)?;
-    let mut report = compare(&sa, &sb, jobs, progress.clone(), derive::sha256_file);
+    let mut report = compare(&sa, &sb, jobs, lang, progress.clone(), derive::sha256_file);
     report.seconds = t0.elapsed().as_secs_f64();
     if let Some(p) = &progress {
-        p.set_msg("сверка завершена");
+        p.set_msg(i18n::t(lang, "the comparison is done"));
         p.finish();
     }
     Ok(report)
 }
 
-/// Ядро сверки отдельно от файловой системы: в тестах `hash` подменяется, чтобы проверить,
-/// что при разных размерах содержимое вообще не читается.
-fn compare<F>(a: &Scan, b: &Scan, jobs: usize, progress: Option<Arc<Progress>>, hash: F) -> Report
+/// The core of the comparison split from the file system: the tests replace `hash` to check
+/// that with different sizes the content is not read at all.
+fn compare<F>(
+    a: &Scan,
+    b: &Scan,
+    jobs: usize,
+    lang: Lang,
+    progress: Option<Arc<Progress>>,
+    hash: F,
+) -> Report
 where
     F: Fn(&Path) -> Result<String> + Sync,
 {
@@ -227,7 +240,7 @@ where
 
     if let Some(p) = &progress {
         p.set_total(jobs_vec.len());
-        p.set_msg("sha256 по совпавшим размерам");
+        p.set_msg(i18n::t(lang, "sha256 over the matching sizes"));
     }
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.max(1))
@@ -261,7 +274,7 @@ where
                 .collect()
         }),
         Err(e) => {
-            // Пул не собрался — честно сообщаем об этом, а не делаем вид, что всё сверено.
+            // The pool could not be built — say so honestly instead of pretending everything was compared.
             return Report {
                 files_a: a.files.len(),
                 files_b: b.files.len(),
@@ -269,7 +282,7 @@ where
                 only_b,
                 size_diff,
                 content_diff: Vec::new(),
-                read_errors: vec![format!("не создать пул потоков: {e}")],
+                read_errors: vec![format!("cannot build the thread pool: {e}")],
                 same: 0,
                 hashed: 0,
                 hashed_bytes: 0,
@@ -332,26 +345,27 @@ enum Outcome {
     Skipped,
 }
 
-/// Слепок каталога в формате `sha256sum`: `<hash>  <относительный путь>`.
-/// Без `--out` печатается в stdout; при ошибке или отмене не пишется вовсе.
+/// A folder manifest in the `sha256sum` format: `<hash>  <relative path>`.
+/// Without `--out` it goes to stdout; on an error or a stop it is not written at all.
 pub fn manifest(
     root: &Path,
     out: Option<&Path>,
     jobs: usize,
+    lang: Lang,
     progress: Option<Arc<Progress>>,
 ) -> Result<ManifestStats> {
     let t0 = std::time::Instant::now();
     let root = std::fs::canonicalize(root)
-        .with_context(|| format!("не открыть каталог {}", root.display()))?;
+        .with_context(|| format!("cannot open the folder {}", root.display()))?;
     let exclude = out.map(resolve_new_path);
     if let Some(p) = &progress {
-        p.set_msg("обход каталога");
+        p.set_msg(i18n::t(lang, "walking the folder"));
     }
     let scan = scan_excluding(&root, exclude.as_deref())?;
     let entries: Vec<(String, Entry)> = scan.files.into_iter().collect();
     if let Some(p) = &progress {
         p.set_total(entries.len());
-        p.set_msg("sha256 всех файлов");
+        p.set_msg(i18n::t(lang, "sha256 of every file"));
     }
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.max(1))
@@ -365,7 +379,7 @@ pub fn manifest(
                 }
                 let res = derive::sha256_file(&e.path)
                     .map(|h| (rel.clone(), h, e.size))
-                    .with_context(|| format!("не прочитать {}", e.path.display()));
+                    .with_context(|| format!("cannot read {}", e.path.display()));
                 if res.is_err()
                     && let Some(p) = &progress
                 {
@@ -404,7 +418,7 @@ pub fn manifest(
         seconds: 0.0,
         lang: Lang::default(),
     };
-    // Неполный слепок опаснее отсутствующего: проверка объявит пропущенные файлы «лишними».
+    // A partial manifest is more dangerous than none: a check would call the missing files "extra".
     if errors == 0 && !cancelled {
         let mut text = String::new();
         for (rel, hash, _) in &hashed {
@@ -412,36 +426,37 @@ pub fn manifest(
         }
         match out {
             Some(p) => std::fs::write(p, text)
-                .with_context(|| format!("не записать слепок {}", p.display()))?,
+                .with_context(|| format!("cannot write the manifest {}", p.display()))?,
             None => print!("{text}"),
         }
         stats.written = true;
     }
     stats.seconds = t0.elapsed().as_secs_f64();
     if let Some(p) = &progress {
-        p.set_msg("слепок готов");
+        p.set_msg(i18n::t(lang, "the manifest is ready"));
         p.finish();
     }
     Ok(stats)
 }
 
-/// Проверка каталога по слепку. Сам файл слепка из обхода исключается, даже если лежит в архиве.
+/// Checking a folder against a manifest. The manifest file itself is excluded from the walk, even inside the archive.
 pub fn check_manifest(
     root: &Path,
     file: &Path,
     jobs: usize,
+    lang: Lang,
     progress: Option<Arc<Progress>>,
 ) -> Result<CheckReport> {
     let t0 = std::time::Instant::now();
     let text = std::fs::read_to_string(file)
-        .with_context(|| format!("не прочитать слепок {}", file.display()))?;
+        .with_context(|| format!("cannot read the manifest {}", file.display()))?;
     let entries = parse_manifest(&text)?;
     let expected: BTreeMap<String, String> = entries.into_iter().map(|e| (e.rel, e.hash)).collect();
     let root = std::fs::canonicalize(root)
-        .with_context(|| format!("не открыть каталог {}", root.display()))?;
+        .with_context(|| format!("cannot open the folder {}", root.display()))?;
     let exclude = resolve_new_path(file);
     if let Some(p) = &progress {
-        p.set_msg("обход каталога");
+        p.set_msg(i18n::t(lang, "walking the folder"));
     }
     let scan = scan_excluding(&root, Some(&exclude))?;
 
@@ -467,7 +482,7 @@ pub fn check_manifest(
 
     if let Some(p) = &progress {
         p.set_total(common.len());
-        p.set_msg("sha256 по слепку");
+        p.set_msg(i18n::t(lang, "sha256 against the manifest"));
     }
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(jobs.max(1))
@@ -523,7 +538,7 @@ pub fn check_manifest(
     }
     report.seconds = t0.elapsed().as_secs_f64();
     if let Some(p) = &progress {
-        p.set_msg("проверка слепка завершена");
+        p.set_msg(i18n::t(lang, "the manifest check is done"));
         p.finish();
     }
     Ok(report)
@@ -542,8 +557,8 @@ pub struct ManifestEntry {
     pub rel: String,
 }
 
-/// Разбор слепка `sha256sum`. Поддерживает экранированные имена (обратный слэш, перевод строки,
-/// возврат каретки) и бинарный режим `sha256sum -b` (`hash *имя`).
+/// Parsing a `sha256sum` manifest. Handles escaped names (backslash, newline, carriage return)
+/// and the binary mode of `sha256sum -b` (`hash *name`).
 pub fn parse_manifest(text: &str) -> Result<Vec<ManifestEntry>> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
@@ -557,34 +572,34 @@ pub fn parse_manifest(text: &str) -> Result<Vec<ManifestEntry>> {
             None => (false, raw),
         };
         if line.len() < 66 {
-            anyhow::bail!("слепок, строка {line_no}: слишком короткая");
+            anyhow::bail!("manifest, line {line_no}: too short");
         }
         let (hash, rest) = line.split_at(64);
         if !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-            anyhow::bail!("слепок, строка {line_no}: sha256 не из шестнадцатеричных цифр");
+            anyhow::bail!("manifest, line {line_no}: the sha256 is not hexadecimal");
         }
         let name = if let Some(rest) = rest.strip_prefix("  ") {
             rest
         } else if let Some(rest) = rest.strip_prefix(" *") {
             rest
         } else {
-            anyhow::bail!("слепок, строка {line_no}: после sha256 ожидается два пробела или « *»");
+            anyhow::bail!("manifest, line {line_no}: two spaces or “ *” are expected after the sha256");
         };
         if name.is_empty() {
-            anyhow::bail!("слепок, строка {line_no}: пустое имя файла");
+            anyhow::bail!("manifest, line {line_no}: an empty file name");
         }
         let rel = if escaped {
-            unescape_name(name).with_context(|| format!("слепок, строка {line_no}"))?
+            unescape_name(name).with_context(|| format!("manifest, line {line_no}"))?
         } else {
             name.to_string()
         };
         if !safe_rel(&rel) {
             anyhow::bail!(
-                "слепок, строка {line_no}: путь вне каталога или не относительный: «{rel}»"
+                "manifest, line {line_no}: the path is outside the folder or not relative: “{rel}”"
             );
         }
         if !seen.insert(rel.clone()) {
-            anyhow::bail!("слепок, строка {line_no}: файл «{rel}» указан дважды");
+            anyhow::bail!("manifest, line {line_no}: the file “{rel}” is listed twice");
         }
         out.push(ManifestEntry {
             hash: hash.to_ascii_lowercase(),
@@ -594,8 +609,8 @@ pub fn parse_manifest(text: &str) -> Result<Vec<ManifestEntry>> {
     Ok(out)
 }
 
-/// Одна строка слепка. Имена с обратным слэшем, переводом строки или возвратом каретки
-/// экранируются так же, как у GNU `sha256sum`; обычные имена остаются читаемыми.
+/// One manifest line. Names with a backslash, a newline or a carriage return are escaped the
+/// same way GNU `sha256sum` does it; ordinary names stay readable.
 pub fn manifest_line(hash: &str, rel: &str) -> String {
     let need_escape = rel.contains(['\\', '\n', '\r']);
     if need_escape {
@@ -618,8 +633,8 @@ fn escape_name(s: &str) -> String {
     out
 }
 
-/// В манифесте допустим только относительный путь без `..` и корней: проверка не должна
-/// выйти за пределы каталога, даже если файл слепка подсунули.
+/// The manifest allows a relative path only, with no `..` and no roots: a check must not
+/// leave the folder even if the manifest file was planted.
 fn safe_rel(rel: &str) -> bool {
     !rel.is_empty()
         && Path::new(rel)
@@ -639,14 +654,14 @@ fn unescape_name(s: &str) -> Result<String> {
             Some('\\') => out.push('\\'),
             Some('n') => out.push('\n'),
             Some('r') => out.push('\r'),
-            Some(other) => anyhow::bail!("неизвестная escape-последовательность «\\{other}»"),
-            None => anyhow::bail!("escape-последовательность в конце строки"),
+            Some(other) => anyhow::bail!("an unknown escape sequence “\\{other}”"),
+            None => anyhow::bail!("an escape sequence at the end of the line"),
         }
     }
     Ok(out)
 }
 
-/// Относительный путь с `/` на любой ОС: слепок можно переносить между Linux и Windows.
+/// A relative path with `/` on any OS: the manifest can move between Linux and Windows.
 fn rel_display(p: &Path) -> String {
     p.components()
         .filter_map(|c| match c {
@@ -658,7 +673,7 @@ fn rel_display(p: &Path) -> String {
         .join("/")
 }
 
-/// Путь, который ещё не существует (файл слепка), — канонизируем родителя.
+/// A path that does not exist yet (the manifest file) — its parent is canonicalized.
 fn resolve_new_path(p: &Path) -> PathBuf {
     if let Ok(c) = p.canonicalize() {
         return c;
@@ -689,7 +704,7 @@ pub fn cli(args: &[String], lang: Lang) -> Result<()> {
         let progress = Arc::new(Progress::default());
         let show = progress.clone();
         std::thread::spawn(move || status_line(i18n::t(lang, "checking"), lang, show));
-        let mut report = check_manifest(&root, Path::new(&file), jobs, Some(progress))?;
+        let mut report = check_manifest(&root, Path::new(&file), jobs, lang, Some(progress))?;
         report.lang = lang;
         print!("{}", check_report(Path::new(&file), &root, &report, all));
         if !report.identical() {
@@ -709,7 +724,7 @@ pub fn cli(args: &[String], lang: Lang) -> Result<()> {
     let progress = Arc::new(Progress::default());
     let show = progress.clone();
     std::thread::spawn(move || status_line(i18n::t(lang, "comparing"), lang, show));
-    let mut report = verify(&a, &b, jobs, Some(progress))?;
+    let mut report = verify(&a, &b, jobs, lang, Some(progress))?;
     report.lang = lang;
     print!("{}", verify_report(&a, &b, &report, all));
     if !report.identical() {
@@ -728,7 +743,7 @@ pub fn manifest_cli(args: &[String], lang: Lang) -> Result<()> {
     let progress = Arc::new(Progress::default());
     let show = progress.clone();
     std::thread::spawn(move || status_line(i18n::t(lang, "manifest"), lang, show));
-    let mut stats = manifest(&root, out.as_deref(), jobs, Some(progress))?;
+    let mut stats = manifest(&root, out.as_deref(), jobs, lang, Some(progress))?;
     stats.lang = lang;
     let summary = manifest_report(&root, out.as_deref(), &stats);
     if out.is_some() && stats.written {
@@ -784,8 +799,8 @@ fn positional(args: &[String]) -> Vec<String> {
     out
 }
 
-/// Текст отчёта сверки. Его печатает CLI и копирует GUI: слова и числа живут
-/// в одном месте, `app.rs` отчёт сам не собирает.
+/// The text of the comparison report. The CLI prints it and the GUI copies it: the words and
+/// the numbers live in one place, `app.rs` does not build the report itself.
 pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
     use std::fmt::Write;
     let lang = r.lang;
@@ -896,7 +911,7 @@ pub fn verify_report(a: &Path, b: &Path, r: &Report, all: bool) -> String {
     s
 }
 
-/// Текст проверки по слепку: тот же источник для CLI и экрана «Целостность».
+/// The text of the manifest check: the same source for the CLI and the "Integrity" screen.
 pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> String {
     use std::fmt::Write;
     let lang = r.lang;
@@ -989,7 +1004,7 @@ pub fn check_report(file: &Path, root: &Path, r: &CheckReport, all: bool) -> Str
     s
 }
 
-/// Итог записи слепка: путь дописывается только тогда, когда файл действительно записан.
+/// The result of writing a manifest: the path is added only when the file was really written.
 pub fn manifest_report(root: &Path, out: Option<&Path>, stats: &ManifestStats) -> String {
     let lang = stats.lang;
     let prefix = if stats.written {
@@ -1057,10 +1072,7 @@ fn write_size_diff(s: &mut String, lang: Lang, list: &[(String, u64, u64)], all:
             "{}{} {}",
             if delta >= 0 { "+" } else { "" },
             delta,
-            match lang {
-                Lang::En => "B",
-                Lang::Ru => "Б",
-            }
+            i18n::units(lang)[0]
         );
         let _ = writeln!(
             s,
@@ -1134,7 +1146,7 @@ mod tests {
         let a = scan_of(&[("x.jpg", "/a/x.jpg", 10, "")]);
         let b = scan_of(&[("x.jpg", "/b/x.jpg", 20, "")]);
         let calls = AtomicUsize::new(0);
-        let r = compare(&a, &b, 2, None, |_| {
+        let r = compare(&a, &b, 2, Lang::default(), None, |_| {
             calls.fetch_add(1, Ordering::Relaxed);
             Ok("h".into())
         });
@@ -1159,7 +1171,7 @@ mod tests {
             ("/a/diff.jpg", "h2"),
             ("/b/diff.jpg", "h3"),
         ]);
-        let r = compare(&a, &b, 2, None, |p| Ok(hashes[p].clone()));
+        let r = compare(&a, &b, 2, Lang::default(), None, |p| Ok(hashes[p].clone()));
         assert_eq!(r.same, 1);
         assert_eq!(r.content_diff, vec!["diff.jpg".to_string()]);
         assert_eq!(r.hashed, 2);
@@ -1176,7 +1188,7 @@ mod tests {
             ("b.jpg", "/b/b.jpg", 1, ""),
             ("both.jpg", "/b/both.jpg", 2, ""),
         ]);
-        let r = compare(&a, &b, 1, None, |_| Ok("same".into()));
+        let r = compare(&a, &b, 1, Lang::default(), None, |_| Ok("same".into()));
         assert_eq!(r.only_a, vec!["a.jpg".to_string()]);
         assert_eq!(r.only_b, vec!["b.jpg".to_string()]);
         assert_eq!(r.same, 1);
@@ -1187,7 +1199,7 @@ mod tests {
     fn a_read_error_goes_into_the_report_and_does_not_fail_the_check() {
         let a = scan_of(&[("x.jpg", "/a/x.jpg", 10, "")]);
         let b = scan_of(&[("x.jpg", "/b/x.jpg", 10, "")]);
-        let r = compare(&a, &b, 1, None, |p| {
+        let r = compare(&a, &b, 1, Lang::default(), None, |p| {
             anyhow::bail!("нет доступа: {}", p.display())
         });
         assert_eq!(r.read_errors.len(), 1);
@@ -1201,7 +1213,7 @@ mod tests {
         let p = Arc::new(Progress::default());
         p.cancel();
         let calls = AtomicUsize::new(0);
-        let r = compare(&a, &b, 1, Some(p), |_| {
+        let r = compare(&a, &b, 1, Lang::default(), Some(p), |_| {
             calls.fetch_add(1, Ordering::Relaxed);
             Ok("h".into())
         });
@@ -1248,7 +1260,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
         std::fs::write(root.join("2024/b.txt"), b"world").unwrap();
         let out = root.join("archive.sha256");
-        let stats = manifest(&root, Some(&out), 2, None).unwrap();
+        let stats = manifest(&root, Some(&out), 2, Lang::default(), None).unwrap();
         assert!(stats.written);
         assert_eq!(stats.files, 2);
         assert_eq!(stats.bytes, 10);
@@ -1259,17 +1271,17 @@ mod tests {
         let names: Vec<&str> = parsed.iter().map(|e| e.rel.as_str()).collect();
         assert_eq!(names, vec!["2024/b.txt", "a.txt"]);
 
-        let check = check_manifest(&root, &out, 2, None).unwrap();
+        let check = check_manifest(&root, &out, 2, Lang::default(), None).unwrap();
         assert!(check.identical(), "{:?}", check.changed);
         assert_eq!(check.same, 2);
 
         std::fs::write(root.join("a.txt"), b"changed").unwrap();
-        let check = check_manifest(&root, &out, 2, None).unwrap();
+        let check = check_manifest(&root, &out, 2, Lang::default(), None).unwrap();
         assert_eq!(check.changed, vec!["a.txt".to_string()]);
         assert!(!check.identical());
 
         std::fs::write(root.join("extra.txt"), b"x").unwrap();
-        let check = check_manifest(&root, &out, 2, None).unwrap();
+        let check = check_manifest(&root, &out, 2, Lang::default(), None).unwrap();
         assert_eq!(check.extra, vec!["extra.txt".to_string()]);
         assert!(!check.identical());
     }
@@ -1290,7 +1302,7 @@ mod tests {
         std::fs::write(a.join("only-a.jpg"), b"a").unwrap();
         std::fs::write(b.join("only-b.jpg"), b"b").unwrap();
 
-        let r = verify(&a, &b, 2, None).unwrap();
+        let r = verify(&a, &b, 2, Lang::default(), None).unwrap();
         assert_eq!(r.same, 1);
         assert_eq!(r.size_diff.len(), 1);
         assert_eq!(r.content_diff, vec!["sub/content.jpg".to_string()]);
@@ -1304,18 +1316,18 @@ mod tests {
         let root = temp_dir("cancelled");
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
         let out = root.join("list.sha256");
-        // Неполный слепок не должен появиться на диске: иначе проверка объявит
-        // непрочитанные файлы «лишними».
+        // A partial manifest must not appear on disk: otherwise the check would call
+        // the unread files "extra".
         let p = Arc::new(Progress::default());
         p.cancel();
-        let stats = manifest(&root, Some(&out), 1, Some(p)).unwrap();
+        let stats = manifest(&root, Some(&out), 1, Lang::default(), Some(p)).unwrap();
         assert!(!stats.written);
         assert_eq!(stats.unchecked, 1);
         assert_eq!(stats.errors, 0);
         assert!(!out.exists());
     }
 
-    /// Один и тот же текст видят CLI и экран «Целостность»: счётчики, пути и вердикт.
+    /// The CLI and the "Integrity" screen see the same text: counters, paths and the verdict.
     #[test]
     fn the_check_report_writes_the_counters_the_paths_and_the_verdict() {
         let r = Report {
@@ -1343,7 +1355,7 @@ mod tests {
         assert!(text.contains("размер отличается:\n  size.jpg"), "{text}");
         assert!(text.contains("вердикт: найдены расхождения"), "{text}");
 
-        // Без «показать все» список обрезается и говорит об этом.
+        // Without "show all" the list is cut and says so.
         let mut many = r;
         many.only_a = (0..25).map(|n| format!("p{n}.jpg")).collect();
         let text = verify_report(Path::new("/a"), Path::new("/b"), &many, false);
@@ -1351,8 +1363,8 @@ mod tests {
         assert!(!text.contains("p24.jpg"), "{text}");
     }
 
-    /// Путь слепка в отчёте появляется только тогда, когда файл действительно записан:
-    /// отменённый или неудачный проход не должен выглядеть как успех.
+    /// The manifest path appears in the report only when the file was really written:
+    /// a stopped or failed pass must not look like a success.
     #[test]
     fn the_manifest_report_does_not_pass_a_cancel_for_a_write() {
         let stats = ManifestStats {

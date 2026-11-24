@@ -1485,6 +1485,17 @@ const PAIRS: &[(&str, &str)] = &[
     ("the face write thread died", "поток записи лиц упал"),
     ("faces {}: {}", "лица {}: {}"),
 
+    ("walking both folders", "обход двух каталогов"),
+    ("the comparison is done", "сверка завершена"),
+    ("sha256 over the matching sizes", "sha256 по совпавшим размерам"),
+    ("walking the folder", "обход каталога"),
+    ("sha256 of every file", "sha256 всех файлов"),
+    ("the manifest is ready", "слепок готов"),
+    ("sha256 against the manifest", "sha256 по слепку"),
+    ("the manifest check is done", "проверка слепка завершена"),
+
+    ("exporting the album", "выгрузка альбома"),
+
 ];
 
 #[cfg(test)]

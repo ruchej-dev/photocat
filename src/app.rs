@@ -2301,8 +2301,9 @@ impl App {
         let progress = Arc::new(Progress::default());
         let worker = progress.clone();
         let (tx, rx) = mpsc::channel();
+        let lang = self.settings.lang;
         std::thread::spawn(move || {
-            let report = organize::apply_export(&plan, Some(&worker));
+            let report = organize::apply_export(&plan, lang, Some(&worker));
             let _ = tx.send(report);
         });
         self.export_progress = Some(progress);
@@ -2449,20 +2450,20 @@ impl App {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let res = match plan {
-                IntegrityPlan::Verify(a, b) => verify::verify(&a, &b, jobs, Some(worker)).map(
+                IntegrityPlan::Verify(a, b) => verify::verify(&a, &b, jobs, lang, Some(worker)).map(
                     |mut report| {
                         report.lang = lang;
                         IntegrityOutcome::Verify { a, b, report }
                     },
                 ),
                 IntegrityPlan::Manifest(root, out) => {
-                    verify::manifest(&root, Some(&out), jobs, Some(worker)).map(|mut stats| {
+                    verify::manifest(&root, Some(&out), jobs, lang, Some(worker)).map(|mut stats| {
                         stats.lang = lang;
                         IntegrityOutcome::Manifest { root, out, stats }
                     })
                 }
                 IntegrityPlan::Check(root, file) => {
-                    verify::check_manifest(&root, &file, jobs, Some(worker)).map(|mut report| {
+                    verify::check_manifest(&root, &file, jobs, lang, Some(worker)).map(|mut report| {
                         report.lang = lang;
                         IntegrityOutcome::Check { root, file, report }
                     })
@@ -13385,7 +13386,7 @@ mod tests {
         app.settings.roots = vec![archive.to_string_lossy().to_string()];
         app.export_out = archive.join("sub").to_string_lossy().to_string();
         let err = app.export_build().unwrap_err().to_string();
-        assert!(err.contains("внутри каталога архива"), "{err}");
+        assert!(err.contains("inside the archive folder"), "{err}");
     }
 
     /// Экран «Целостность» существует без терминала: поля, три действия, подсказка.

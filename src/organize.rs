@@ -1,6 +1,6 @@
-//! Раскладка архива по датам: план → подтверждение → применение (hardlink/copy/symlink).
-//! Оригиналы не удаляются и не переименовываются: витрина — новые файлы/ссылки рядом, а не поверх
-//! архива. Имена в витрине собираются из шаблона (по умолчанию — оригинальные).
+//! Arranging the archive by dates: plan → confirmation → apply (hardlink/copy/symlink).
+//! The originals are neither deleted nor renamed: the showcase is new files or links next to
+//! the archive, not over it. The names in the showcase come from a template (original by default).
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
@@ -18,8 +18,8 @@ pub enum LinkMode {
     Symlink,
 }
 
-/// Глубина витрины. `Event` — день плюс место по GPS (ячейка ~1 км): без обратного геокодинга
-/// (сеть запрещена) место называется координатами, а снимки без GPS остаются в каталоге дня.
+/// The depth of the showcase. `Event` is a day plus a place by GPS (a ~1 km cell): there is no
+/// reverse geocoding (the network is forbidden), so the place is named by its coordinates and photos without GPS stay in the day folder.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layout {
     Day,
@@ -49,21 +49,21 @@ impl Layout {
     }
 }
 
-/// Подстановки шаблона имени. `{ext}` пишется без точки; если его нет в шаблоне, расширение
-/// исходного файла добавляется само.
+/// The placeholders of the name template. `{ext}` is written without a dot; if the template has
+/// no extension, the one of the source file is added.
 pub const PLACEHOLDERS: [&str; 6] = ["{date}", "{time}", "{camera}", "{tag}", "{orig}", "{ext}"];
 
-/// Шаблон по умолчанию для `--rename`: то же, что раньше давал флаг переименования.
+/// The default template for `--rename`: the same the rename flag used to give.
 pub const RENAME_TEMPLATE: &str = "{date}_{time}_{orig}";
 
 pub struct Options {
     pub out: PathBuf,
     pub layout: Layout,
-    /// Шаблон имени без расширения; `None` — оригинальное имя.
+    /// The name template without an extension; `None` means the original name.
     pub name: Option<String>,
-    /// Не включать файлы, помеченные лишними в дублях.
+    /// Leave out the files marked spare in the duplicates.
     pub exclude_dup: bool,
-    /// Уверенный тег для `{tag}`: видимые теги и пороги из настроек.
+    /// The confident tag for `{tag}`: the visible tags and the thresholds from the settings.
     pub tags: HashMap<i64, Vec<(String, f32)>>,
     pub tag_show: f32,
     pub tag_margin: f32,
@@ -90,15 +90,15 @@ pub struct PlanItem {
 
 pub struct Plan {
     pub items: Vec<PlanItem>,
-    /// Снимков без даты — в витрину не попадают.
+    /// Photos without a date do not reach the showcase.
     pub no_date: usize,
-    /// Помечены лишними и исключены по `--exclude-dup`.
+    /// Marked spare and left out by `--exclude-dup`.
     pub excluded: usize,
-    /// Сколько каталогов витрины получится (дни, месяцы или события).
+    /// How many showcase folders will come out (days, months or events).
     pub dirs: usize,
 }
 
-/// Проверка шаблона: неизвестная подстановка — ошибка сразу, а не в середине раскладки.
+/// Checking the template: an unknown placeholder is an error at once, not in the middle of a pass.
 pub fn validate_template(tpl: &str) -> Result<()> {
     validate_tokens(tpl, &PLACEHOLDERS)
 }
@@ -108,12 +108,12 @@ fn validate_tokens(tpl: &str, allowed: &[&str]) -> Result<()> {
     while let Some(start) = rest.find('{') {
         let after = &rest[start..];
         let Some(end) = after.find('}') else {
-            anyhow::bail!("в шаблоне имени не закрыта скобка: {after}");
+            anyhow::bail!("an unclosed brace in the name template: {after}");
         };
         let token = &after[..=end];
         if !allowed.contains(&token) {
             anyhow::bail!(
-                "неизвестная подстановка {token}; допустимы: {}",
+                "an unknown placeholder {token}; allowed: {}",
                 allowed.join(" ")
             );
         }
@@ -167,8 +167,8 @@ pub fn build_plan(rows: &[FileRow], opts: &Options) -> Plan {
             dst: dir.join(&name),
         });
     }
-    // Сначала порядок по будущим путям (при равенстве — по источнику), потом нумерация коллизий:
-    // так `-2` гарантированно идёт после базового имени.
+    // The order is by future paths first (ties by source), then the collisions are numbered:
+    // so `-2` reliably follows the base name.
     items.sort_by(|a, b| a.dst.cmp(&b.dst).then_with(|| a.src.cmp(&b.src)));
     for it in &mut items {
         let key = it.dst.to_string_lossy().to_string();
@@ -201,8 +201,8 @@ fn layout_dir(opts: &Options, r: &FileRow, y: &str, m: &str, d: &str) -> PathBuf
     }
 }
 
-/// Ячейка GPS ~1 км (два знака после запятой): соседние кадры одной прогулки попадают вместе,
-/// кадры из разных мест — в разные каталоги. Без обратного геокодинга имя — координаты.
+/// A GPS cell of ~1 km (two decimals): neighbouring frames of one walk land together, frames
+/// from different places land apart. Without reverse geocoding the name is the coordinates.
 pub fn gps_cell(lat: f64, lon: f64) -> String {
     let lat = lat.clamp(-90.0, 90.0);
     let lon = lon.clamp(-180.0, 180.0);
@@ -254,8 +254,8 @@ fn template_name(
     }
 }
 
-/// Уверенный верхний тег — та же формула, что `embed::confident_tag_with`.
-/// Продублирована нарочно: `organize` не зависит от модели и её модуля (правило слоёв).
+/// The confident top tag — the same formula as `embed::confident_tag_with`.
+/// Duplicated on purpose: `organize` does not depend on the model or its module (the layer rule).
 fn confident_tag(scores: &[(String, f32)], show: f32, margin: f32) -> Option<(&str, f32)> {
     let (tag, top) = scores.first()?;
     if *top < show {
@@ -269,14 +269,14 @@ fn confident_tag(scores: &[(String, f32)], show: f32, margin: f32) -> Option<(&s
     Some((tag.as_str(), *top))
 }
 
-/// Одна подстановка: только безопасные для любой ФС символы, не длиннее 40 знаков.
+/// One substitution: only characters safe for any file system, 40 characters at most.
 fn component(s: &str) -> String {
     tidy(s).chars().take(40).collect::<String>()
         .trim_end_matches(['_', '-', '.'])
         .to_string()
 }
 
-/// Пробелы → `_`, запрещённые символы выброшены, повторы и хвосты разделителей убраны.
+/// Spaces → `_`, forbidden characters dropped, repeated and trailing separators removed.
 fn tidy(s: &str) -> String {
     let mut out = String::new();
     let mut sep = false;
@@ -298,7 +298,7 @@ fn tidy(s: &str) -> String {
     out.trim_end_matches(['_', '-', '.']).to_string()
 }
 
-/// `file.jpg` + 2 → `file-2.jpg`; файл без расширения не получает точку на конце.
+/// `file.jpg` + 2 → `file-2.jpg`; a file without an extension gets no trailing dot.
 fn numbered(dst: &Path, n: u32) -> PathBuf {
     let ext = dst
         .extension()
@@ -316,8 +316,8 @@ fn numbered(dst: &Path, n: u32) -> PathBuf {
     dst.with_file_name(name)
 }
 
-/// Символическая ссылка на файл. На Windows нужен режим разработчика или права администратора;
-/// без них ошибка попадает в счётчик `fail`, а не роняет применение плана.
+/// A symbolic link to a file. Windows needs developer mode or administrator rights; without
+/// them the error lands in the `fail` counter and does not take the whole plan down.
 #[cfg(unix)]
 fn symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(src, dst)
@@ -364,21 +364,21 @@ pub fn apply(plan: &[PlanItem], mode: LinkMode) -> Result<(usize, usize)> {
     Ok((ok, fail))
 }
 
-// ---------------------------------------------------------------- M20: выгрузка альбома
+// ---------------------------------------------------------------- M20: the album export
 
-/// Шаблон имени файла при выгрузке: позиция в альбоме и оригинальное имя.
+/// The file name template of an export: the position in the album and the original name.
 pub const EXPORT_TEMPLATE: &str = "{n}_{orig}";
 
-/// Подстановки выгрузки. `{n}` — позиция в альбоме, `{hash8}` — первые 8 знаков sha256.
+/// The export placeholders. `{n}` is the position in the album, `{hash8}` the first 8 sha256 signs.
 pub const EXPORT_PLACEHOLDERS: [&str; 8] = [
     "{n}", "{date}", "{time}", "{camera}", "{tag}", "{orig}", "{ext}", "{hash8}",
 ];
 
-/// Предел длины одного компонента пути и полного пути на диске (запас до 260 в Windows).
+/// The length limit of one path component and of the whole path on disk (a margin up to 260 on Windows).
 pub const MAX_NAME: usize = 120;
 pub const MAX_PATH: usize = 240;
 
-/// Альбом, готовый к выгрузке: узел дерева и его файлы в порядке альбома.
+/// An album ready for export: a tree node and its files in album order.
 #[derive(Clone, Debug)]
 pub struct ExportAlbum {
     pub id: i64,
@@ -387,7 +387,7 @@ pub struct ExportAlbum {
     pub files: Vec<FileRow>,
 }
 
-/// Данные из БД (`db::album_export_data`) в вид, который понимает `plan_album`.
+/// Data from the DB (`db::album_export_data`) turned into what `plan_album` understands.
 pub fn export_albums(data: Vec<(db::AlbumNode, Vec<FileRow>)>) -> Vec<ExportAlbum> {
     data.into_iter()
         .map(|(node, files)| ExportAlbum {
@@ -401,9 +401,9 @@ pub fn export_albums(data: Vec<(db::AlbumNode, Vec<FileRow>)>) -> Vec<ExportAlbu
 
 #[derive(Clone, Debug)]
 pub struct ExportOptions {
-    /// Каталог, внутри которого создаётся корневой каталог альбома.
+    /// The folder inside which the root folder of the album is created.
     pub out: PathBuf,
-    /// Шаблон имени файла; по умолчанию `{n}_{orig}`.
+    /// The file name template; `{n}_{orig}` by default.
     pub name: String,
     pub tags: HashMap<i64, Vec<(String, f32)>>,
     pub tag_show: f32,
@@ -425,7 +425,7 @@ impl ExportOptions {
 #[derive(Clone, Debug)]
 pub struct ExportDir {
     pub album_id: i64,
-    /// Путь относительно `out`; включает имя корневого каталога альбома.
+    /// The path relative to `out`; includes the name of the album root folder.
     pub rel: PathBuf,
     pub depth: usize,
     pub files: usize,
@@ -440,20 +440,20 @@ pub struct ExportItem {
     pub size: i64,
 }
 
-/// План выгрузки: дерево каталогов и копии файлов. На диск ничего не пишется.
+/// The export plan: a folder tree and file copies. Nothing is written to disk.
 #[derive(Clone, Debug, Default)]
 pub struct ExportPlan {
     pub root_id: i64,
     pub out: PathBuf,
-    /// Имя корневого каталога альбома (относительно `out`).
+    /// The name of the album root folder (relative to `out`).
     pub root: PathBuf,
     pub dirs: Vec<ExportDir>,
     pub items: Vec<ExportItem>,
-    /// Файлы в корзине приложения: остаются в альбоме, но на диск не выгружаются.
+    /// Files in the app trash: they stay in the album but are not exported to disk.
     pub trashed: usize,
-    /// Файлы, чей полный путь длиннее `MAX_PATH`: пропущены с причиной.
+    /// Files whose full path is longer than `MAX_PATH`: skipped with a reason.
     pub too_long: usize,
-    /// Имена, которым коллизия добавила `-2` уже на этапе плана.
+    /// Names that got a `-2` collision already at the plan stage.
     pub renamed: usize,
     pub bytes: i64,
 }
@@ -463,7 +463,7 @@ impl ExportPlan {
         self.items.len()
     }
 
-    /// Строка сводки для GUI и CLI; числа с единицами — через `db::human_in`.
+    /// The summary line for the GUI and the CLI; numbers with units go through `db::human_in`.
     pub fn summary(&self, lang: Lang) -> String {
         let mut s = i18n::fill(
             lang,
@@ -491,8 +491,8 @@ impl ExportPlan {
         s
     }
 
-    /// План-дерево: каталоги с отступами и имена файлов. `limit` строк —
-    /// для окна; CLI печатает всё.
+    /// The plan tree: folders with indents and file names. `limit` lines for the window;
+    /// the CLI prints everything.
     pub fn outline(&self, limit: usize) -> String {
         let mut by_album: HashMap<i64, Vec<&ExportItem>> = HashMap::new();
         for item in &self.items {
@@ -533,24 +533,24 @@ impl ExportPlan {
     }
 }
 
-/// Отчёт выгрузки. Ни один файл в цели не перезаписан и не удалён.
+/// The export report. Not a single file in the target was overwritten or deleted.
 #[derive(Clone, Debug, Default)]
 pub struct ExportReport {
     pub copied: usize,
-    /// Уже выгруженные файлы, в том числе под старым номером (`stale`).
+    /// Files exported already, including under an old number (`stale`).
     pub skipped: usize,
-    /// Сколько пропущенных лежит в цели под другим именем: порядок устарел.
+    /// How many skipped files lie in the target under another name: the order is stale.
     pub stale: usize,
-    /// Скопировано под именем с `-2` из-за занятого имени.
+    /// Copied under a `-2` name because the name was taken.
     pub renamed: usize,
     pub failed: usize,
     pub bytes: u64,
     pub dirs_created: usize,
     pub cancelled: bool,
-    /// Что именно создано — для отчёта и теста «отмена в середине».
+    /// What exactly was created — for the report and the "cancel in the middle" test.
     pub created: Vec<PathBuf>,
     pub errors: Vec<String>,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -578,21 +578,21 @@ impl fmt::Display for ExportReport {
     }
 }
 
-/// Проверка шаблона выгрузки: `{n}` и `{hash8}` здесь есть, а в витрине их нет.
+/// Checking the export template: `{n}` and `{hash8}` exist here, but not in the showcase.
 pub fn validate_export_template(tpl: &str) -> Result<()> {
     validate_tokens(tpl, &EXPORT_PLACEHOLDERS)
 }
 
-/// `--out` должен существовать, быть каталогом и не лежать внутри каталога архива.
+/// `--out` must exist, be a folder and not lie inside the archive folder.
 pub fn check_out_dir(out: &Path, roots: &[String]) -> Result<()> {
     if !out.exists() {
         anyhow::bail!(
-            "каталог назначения не существует: {} — создайте его сами",
+            "the target folder does not exist: {} — create it yourself",
             out.display()
         );
     }
     if !out.is_dir() {
-        anyhow::bail!("каталог назначения — не каталог: {}", out.display());
+        anyhow::bail!("the target is not a folder: {}", out.display());
     }
     let canon = out.canonicalize().unwrap_or_else(|_| out.to_path_buf());
     for root in roots {
@@ -600,7 +600,7 @@ pub fn check_out_dir(out: &Path, roots: &[String]) -> Result<()> {
             && (canon == root_canon || canon.starts_with(&root_canon))
         {
             anyhow::bail!(
-                "выгрузка внутри каталога архива запрещена: {} — выберите каталог вне {}",
+                "an export inside the archive folder is forbidden: {} — choose a folder outside {}",
                 out.display(),
                 root
             );
@@ -609,17 +609,17 @@ pub fn check_out_dir(out: &Path, roots: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// План выгрузки: дерево каталогов альбома и копии файлов. Ничего не создаёт.
+/// The export plan: the folder tree of the album and file copies. Creates nothing.
 pub fn plan_album(albums: &[ExportAlbum], opts: &ExportOptions) -> Result<ExportPlan> {
     let Some(root) = albums.first() else {
-        anyhow::bail!("альбом пуст — выгружать нечего");
+        anyhow::bail!("the album is empty — there is nothing to export");
     };
     let root_name = dir_component(&root.name, root.id);
     let root_rel = PathBuf::from(&root_name);
     let root_path = opts.out.join(&root_rel);
     if root_path.exists() && !root_path.is_dir() {
         anyhow::bail!(
-            "в {} уже лежит файл «{root_name}», а нужен каталог",
+            "{} already holds a file “{root_name}” where a folder is needed",
             opts.out.display()
         );
     }
@@ -631,9 +631,9 @@ pub fn plan_album(albums: &[ExportAlbum], opts: &ExportOptions) -> Result<Export
     };
     let mut dir_rel: HashMap<i64, PathBuf> = HashMap::new();
     dir_rel.insert(root.id, root_rel.clone());
-    // Имена среди соседей: сравнение без учёта регистра везде, а не только на
-    // Windows/macOS. Альбомы в БД уже не различаются регистром, поэтому
-    // строже — значит предсказуемее.
+    // Names among siblings: compared case-insensitively everywhere, not only on Windows
+    // and macOS. Albums in the DB already ignore case, so being stricter means being
+    // more predictable.
     let mut used: HashMap<i64, HashSet<String>> = HashMap::new();
     used.entry(root.id)
         .or_default()
@@ -707,24 +707,25 @@ pub fn plan_album(albums: &[ExportAlbum], opts: &ExportOptions) -> Result<Export
     Ok(plan)
 }
 
-/// Выгрузка плана на диск: только копии, ничего не перезаписывается.
-/// Существующий файл с тем же sha256 — пропуск (прогон идемпотентен);
-/// с другим содержимым — новое имя `-2`; файл с тем же содержимым под старым
-/// номером — «порядок в цели устарел».
-pub fn apply_export(plan: &ExportPlan, progress: Option<&Progress>) -> ExportReport {
-    apply_export_in(plan, progress, &db::cache_dir().join("exports"))
+/// Writing the plan to disk: copies only, nothing is overwritten.
+/// An existing file with the same sha256 is a skip (the pass is idempotent); with other
+/// content it gets a new `-2` name; a file with the same content under an old number
+/// means "the order in the target is stale".
+pub fn apply_export(plan: &ExportPlan, lang: Lang, progress: Option<&Progress>) -> ExportReport {
+    apply_export_in(plan, lang, progress, &db::cache_dir().join("exports"))
 }
 
-/// То же, но с явным каталогом кэша: тесты не пишут в кэш владельца.
+/// The same with an explicit cache folder: the tests do not write into the owner's cache.
 fn apply_export_in(
     plan: &ExportPlan,
+    lang: Lang,
     progress: Option<&Progress>,
     cache_dir: &Path,
 ) -> ExportReport {
     let mut report = ExportReport::default();
     if let Some(p) = progress {
         p.set_total(plan.items.len());
-        p.set_msg("выгрузка альбома");
+        p.set_msg(i18n::t(lang, "exporting the album"));
     }
     let cache_key = format!("{}-{:08x}", plan.root_id, path_hash(&plan.out));
     let mut cache = load_export_cache(cache_dir, &cache_key);
@@ -732,7 +733,7 @@ fn apply_export_in(
     let mut created: HashSet<PathBuf> = HashSet::new();
     let mut entries: HashMap<PathBuf, Vec<(String, u64)>> = HashMap::new();
 
-    // Структура важнее содержимого: пустой альбом тоже даёт пустой каталог.
+    // The structure matters more than the content: an empty album gives an empty folder too.
     for dir in &plan.dirs {
         let path = plan.out.join(&dir.rel);
         if path.is_dir() {
@@ -742,7 +743,7 @@ fn apply_export_in(
             Ok(()) => report.dirs_created += 1,
             Err(e) => note_export_error(
                 &mut report,
-                format!("каталог {}: {e}", path.display()),
+                format!("folder {}: {e}", path.display()),
             ),
         }
     }
@@ -757,14 +758,14 @@ fn apply_export_in(
             let Ok(meta) = std::fs::metadata(&item.src) else {
                 note_export_error(
                     &mut report,
-                    format!("нет файла: {}", item.src.display()),
+                    format!("no such file: {}", item.src.display()),
                 );
                 break 'item;
             };
             if !meta.is_file() {
                 note_export_error(
                     &mut report,
-                    format!("не обычный файл: {}", item.src.display()),
+                    format!("not a regular file: {}", item.src.display()),
                 );
                 break 'item;
             }
@@ -812,7 +813,7 @@ fn apply_export_in(
                     }
                     Err(e) => note_export_error(
                         &mut report,
-                        format!("копия {}: {e}", dst.display()),
+                        format!("copy {}: {e}", dst.display()),
                     ),
                 },
                 ExportOutcome::Fail(msg) => note_export_error(&mut report, msg),
@@ -826,7 +827,7 @@ fn apply_export_in(
         }
     }
 
-    // Кэш «что уже выгружено» — в кэше приложения, не в `--out`: цель остаётся чистой.
+    // The "already exported" cache lives in the app cache, not in `--out`: the target stays clean.
     cache.retain(|rel, _| plan.out.join(rel).is_file());
     save_export_cache(cache_dir, &cache_key, &cache);
     if let Some(p) = progress {
@@ -835,7 +836,7 @@ fn apply_export_in(
     report
 }
 
-/// Решение по одному файлу: что делать с уже существующим именем в цели.
+/// The decision on one file: what to do with a name that already exists in the target.
 enum ExportOutcome {
     Skip,
     Stale,
@@ -866,13 +867,13 @@ fn decide_export(
             Some(_) => {}
             None => {
                 return ExportOutcome::Fail(format!(
-                    "не прочитать содержимое цели: {}",
+                    "cannot read the content of the target: {}",
                     planned.display()
                 ));
             }
         }
     }
-    // Тот же снимок лежит в каталоге под другим номером: порядок в цели устарел.
+    // The same photo lies in the folder under another number: the order in the target is stale.
     if find_same_content(item, &name, planned, list, out, cache, hashes, created) {
         return ExportOutcome::Stale;
     }
@@ -888,8 +889,8 @@ fn decide_export(
     }
 }
 
-/// Есть ли в этом каталоге тот же sha256 под другим именем (и это не файл,
-/// созданный в этом же прогоне: две одинаковые копии в альбоме — две строки).
+/// Whether this folder holds the same sha256 under another name (and it is not a file
+/// created in this very pass: two identical copies in an album are two rows).
 #[allow(clippy::too_many_arguments)]
 fn find_same_content(
     item: &ExportItem,
@@ -917,12 +918,12 @@ fn find_same_content(
     false
 }
 
-/// Кэш выгрузки: относительный путь → (размер, mtime мс, sha256).
+/// The export cache: relative path → (size, mtime ms, sha256).
 type ExportCache = HashMap<String, (u64, u64, String)>;
 
-/// sha256 файла в цели: сначала кэш выгрузки (если совпали размер и mtime),
-/// иначе честное чтение. Подмена содержимого с сохранением mtime — та же цена,
-/// что у индексации (AGENTS §8).
+/// The sha256 of a file in the target: the export cache first (if size and mtime match),
+/// otherwise an honest read. A content swap that keeps the mtime costs the same as in
+/// indexing (AGENTS §8).
 fn target_sha(
     path: &Path,
     size: u64,
@@ -972,7 +973,7 @@ fn read_entries(dir: &Path) -> Vec<(String, u64)> {
         .collect()
 }
 
-/// Первое свободное `name-2.ext`, `name-3.ext`, … в этом каталоге.
+/// The first free `name-2.ext`, `name-3.ext`, … in this folder.
 fn free_numbered(planned: &Path, list: &[(String, u64)]) -> PathBuf {
     let name = planned
         .file_name()
@@ -999,7 +1000,7 @@ fn note_export_error(report: &mut ExportReport, msg: String) {
     }
 }
 
-/// `stem` и `ext` без точки; расширение — последняя точка, как у `Path`.
+/// `stem` and `ext` without a dot; the extension is the last dot, as in `Path`.
 fn split_name(name: &str) -> (String, String) {
     let path = Path::new(name);
     let stem = path
@@ -1013,7 +1014,7 @@ fn split_name(name: &str) -> (String, String) {
     (stem, ext)
 }
 
-/// Ширина номера позиции: 2 знака до 99, 3 до 999, дальше по числу знаков.
+/// The width of the position number: 2 digits up to 99, 3 up to 999, then by the digit count.
 fn number_width(count: usize) -> usize {
     if count <= 99 {
         2
@@ -1024,8 +1025,8 @@ fn number_width(count: usize) -> usize {
     }
 }
 
-/// Имя файла по шаблону выгрузки. Пустое имя заменяется на `{hash8}`
-/// (а без хеша — на `file`), длина компонента — не больше `MAX_NAME`.
+/// A file name by the export template. An empty name is replaced with `{hash8}` (and without
+/// a hash with `file`); the component is no longer than `MAX_NAME`.
 fn export_name(tpl: &str, r: &FileRow, opts: &ExportOptions, n: usize, width: usize) -> String {
     let src = Path::new(&r.path);
     let ext = src
@@ -1072,7 +1073,7 @@ fn export_name(tpl: &str, r: &FileRow, opts: &ExportOptions, n: usize, width: us
     format!("{}{suffix}", base.trim_end_matches(['_', '-', '.']))
 }
 
-/// Дата и время из `taken_at` для подстановок: `20240517` и `144243`.
+/// The date and time from `taken_at` for the substitutions: `20240517` and `144243`.
 fn taken_parts(taken: Option<&str>) -> (String, String) {
     let Some(taken) = taken else {
         return (String::new(), String::new());
@@ -1087,7 +1088,7 @@ fn taken_parts(taken: Option<&str>) -> (String, String) {
     (date, time)
 }
 
-/// Имя каталога альбома: безопасные символы, ≤ `MAX_NAME`, пустое — `album-<id>`.
+/// The folder name of an album: safe characters, ≤ `MAX_NAME`, empty means `album-<id>`.
 fn dir_component(name: &str, id: i64) -> String {
     let clean = safe_component(name, MAX_NAME);
     if clean.is_empty() {
@@ -1107,9 +1108,9 @@ fn safe_component(s: &str, max: usize) -> String {
     }
 }
 
-/// Как `tidy`, но запрещённый символ становится разделителем, а не исчезает:
-/// «Дача/2024» и «Дача:2024» дают одно имя `Дача_2024`, и коллизия видна, а не
-/// превращается в другое имя без следа.
+/// Like `tidy`, but a forbidden character becomes a separator instead of disappearing:
+/// "Dacha/2024" and "Dacha:2024" give one name `Dacha_2024`, and the collision is visible
+/// instead of silently turning into another name.
 fn tidy_sep(s: &str) -> String {
     let mut out = String::new();
     let mut sep = false;
@@ -1132,7 +1133,7 @@ fn tidy_sep(s: &str) -> String {
     out.trim_end_matches(['_', '-', '.']).to_string()
 }
 
-/// Имена устройств Windows нельзя использовать как имя файла или каталога.
+/// Windows device names cannot be used as a file or folder name.
 fn is_windows_reserved(name: &str) -> bool {
     let upper = name
         .split('.')
@@ -1146,13 +1147,13 @@ fn is_windows_reserved(name: &str) -> bool {
             && upper.as_bytes()[3].is_ascii_digit())
 }
 
-/// Ключ сравнения имён: без учёта регистра на всех ОС.
+/// The comparison key of names: case-insensitive on every OS.
 fn name_key(s: &str) -> String {
     s.to_lowercase()
 }
 
-/// Сравнение имени с записью в цели: на Windows и macOS файловая система
-/// не различает регистр, на Linux — различает.
+/// Comparing a name with an entry in the target: on Windows and macOS the file system
+/// ignores case, on Linux it does not.
 fn same_name(a: &str, b: &str) -> bool {
     #[cfg(any(windows, target_os = "macos"))]
     {
@@ -1164,7 +1165,7 @@ fn same_name(a: &str, b: &str) -> bool {
     }
 }
 
-/// Кэш привязан к альбому и каталогу цели: другой `--out` — другой кэш.
+/// The cache is bound to the album and the target folder: another `--out` means another cache.
 fn export_cache_path(cache_dir: &Path, key: &str) -> PathBuf {
     cache_dir.join(format!("{key}.txt"))
 }
@@ -1186,7 +1187,7 @@ fn load_export_cache(cache_dir: &Path, key: &str) -> ExportCache {
         let (Some(sha), Some(size), Some(mtime), Some(rel)) =
             (it.next(), it.next(), it.next(), it.next())
         else {
-            // Старый формат (sha, size, rel) не доверяем: файл перечитается один раз.
+            // The old format (sha, size, rel) is not trusted: the file is read once more.
             continue;
         };
         if sha.len() != 64 {
@@ -1199,8 +1200,8 @@ fn load_export_cache(cache_dir: &Path, key: &str) -> ExportCache {
     out
 }
 
-/// Кэш ускоряет повтор: известный sha256 не читается с диска, если размер совпал.
-/// Ошибка записи кэша не валит выгрузку — цель уже создана.
+/// The cache speeds a repeat up: a known sha256 is not read from disk if the size matches.
+/// A cache write error does not fail the export — the target is created already.
 fn save_export_cache(cache_dir: &Path, key: &str, cache: &ExportCache) {
     let path = export_cache_path(cache_dir, key);
     if let Some(dir) = path.parent()
@@ -1216,8 +1217,8 @@ fn save_export_cache(cache_dir: &Path, key: &str, cache: &ExportCache) {
     let _ = std::fs::write(&path, lines.join("\n"));
 }
 
-/// CLI: `photocat export --album N --out DIR [--name ШАБЛОН] [--apply]`.
-/// Без `--apply` — только план-дерево; на диске не создаётся ничего.
+/// CLI: `photocat export --album N --out DIR [--name TEMPLATE] [--apply]`.
+/// Without `--apply` — the plan tree only; nothing is created on disk.
 pub fn export_cli(args: &[String]) -> Result<()> {
     let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
     let conn = db::open(&db_path)?;
@@ -1327,7 +1328,7 @@ pub fn export_cli(args: &[String]) -> Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
     });
-    let mut report = apply_export(&plan, Some(&progress));
+    let mut report = apply_export(&plan, Lang::default(), Some(&progress));
     report.lang = lang;
     println!("{report}");
     for line in &report.errors {
@@ -1410,8 +1411,8 @@ pub fn cli(args: &[String]) -> Result<()> {
     opts.tag_margin = settings.tag_margin;
     let plan = build_plan(&rows, &opts);
 
-    // Считаем по верхнему каталогу витрины (год или «без даты»), а не по глубине пути:
-    // у событий внутри дня есть ещё каталог места.
+    // Counted by the top folder of the showcase (a year or "no date"), not by the path depth:
+    // events inside a day have one more folder for the place.
     let mut by_top: BTreeMap<String, usize> = BTreeMap::new();
     for it in &plan.items {
         let top = it
@@ -1665,7 +1666,7 @@ mod tests {
         assert_eq!(numbered(&dst, 3), PathBuf::from("/out/file-3.jpg"));
     }
 
-    // ------------------------------------------------------------ M20: выгрузка
+    // ------------------------------------------------------------ M20: the export
 
     fn tmp_dir(tag: &str) -> PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1785,7 +1786,7 @@ mod tests {
         assert!(validate_export_template("{n}_{date}_{time}_{camera}_{tag}_{orig}_{ext}").is_ok());
         assert!(validate_export_template("{hash8}").is_ok());
         assert!(validate_export_template("{foo}").is_err());
-        // Шаблон витрины `{n}` не знает, и наоборот.
+        // The showcase template does not know `{n}`, and the other way round.
         assert!(validate_template("{n}_{orig}").is_err());
         assert!(validate_export_template("{date}_{orig}").is_ok());
     }
@@ -1812,7 +1813,7 @@ mod tests {
         assert_eq!(plan.files(), 1);
         assert_eq!(plan.trashed, 1);
 
-        // 240 символов пути: 120 у корня + 120 у файла — уже за пределом.
+        // 240 characters of path: 120 for the root and 120 for the file — beyond the limit.
         let long_out = PathBuf::from(format!("/{}", "o".repeat(150)));
         let albums = [album(
             1,
@@ -1838,7 +1839,7 @@ mod tests {
         r.sha256 = sha;
         let albums = [album(1, 0, "На печать", vec![r])];
         let plan = plan_album(&albums, &ExportOptions::new(&out)).unwrap();
-        let first = apply_export_in(&plan, None, &dir.join("cache"));
+        let first = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
         assert_eq!(first.copied, 1);
         assert_eq!(first.failed, 0, "{:?}", first.errors);
         let dst = out.join("На_печать/01_src.jpg");
@@ -1854,7 +1855,7 @@ mod tests {
                 "выгрузка — копия, а не hardlink"
             );
         }
-        let second = apply_export_in(&plan, None, &dir.join("cache"));
+        let second = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
         assert_eq!(second.copied, 0);
         assert_eq!(second.skipped, 1);
         assert_eq!(second.failed, 0);
@@ -1874,7 +1875,7 @@ mod tests {
         r.sha256 = derive::sha256_file(&src).unwrap();
         let albums = [album(1, 0, "На печать", vec![r])];
         let plan = plan_album(&albums, &ExportOptions::new(&out)).unwrap();
-        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        let report = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
         assert_eq!(report.copied, 1);
         assert_eq!(report.renamed, 1);
         assert_eq!(std::fs::read(&taken).unwrap(), b"someone else");
@@ -1904,14 +1905,14 @@ mod tests {
             &ExportOptions::new(&out),
         )
         .unwrap();
-        assert_eq!(apply_export_in(&first, None, &dir.join("cache")).copied, 2);
-        // Меняем порядок: имена с номерами другие, но содержимое уже лежит в цели.
+        assert_eq!(apply_export_in(&first, Lang::default(), None, &dir.join("cache")).copied, 2);
+        // The order changes: the numbered names differ, but the content is in the target already.
         let second = plan_album(
             &[album(1, 0, "Порядок", vec![rb, ra])],
             &ExportOptions::new(&out),
         )
         .unwrap();
-        let report = apply_export_in(&second, None, &dir.join("cache"));
+        let report = apply_export_in(&second, Lang::default(), None, &dir.join("cache"));
         assert_eq!(report.copied, 0);
         assert_eq!(report.stale, 2);
         assert_eq!(report.renamed, 0);
@@ -1926,7 +1927,7 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
         let planets = [album(1, 0, "Пустой", Vec::new())];
         let plan = plan_album(&planets, &ExportOptions::new(&out)).unwrap();
-        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        let report = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
         assert_eq!(report.copied, 0);
         assert!(out.join("Пустой").is_dir());
         assert_eq!(std::fs::read_dir(out.join("Пустой")).unwrap().count(), 0);
@@ -1945,10 +1946,10 @@ mod tests {
         let gone = export_row(2, dir.join("gone.jpg").to_string_lossy().as_ref(), None);
         let albums = [album(1, 0, "Смесь", vec![good, gone])];
         let plan = plan_album(&albums, &ExportOptions::new(&out)).unwrap();
-        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        let report = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
         assert_eq!(report.copied, 1);
         assert_eq!(report.failed, 1);
-        assert!(report.errors.iter().any(|e| e.contains("нет файла")));
+        assert!(report.errors.iter().any(|e| e.contains("no such file")));
     }
 
     #[test]
@@ -1964,13 +1965,13 @@ mod tests {
         let plan = plan_album(&[album(1, 0, "Стоп", vec![r])], &ExportOptions::new(&out)).unwrap();
         let progress = Progress::default();
         progress.cancel();
-        let report = apply_export_in(&plan, Some(&progress), &dir.join("cache"));
+        let report = apply_export_in(&plan, Lang::default(), Some(&progress), &dir.join("cache"));
         assert!(report.cancelled);
         assert_eq!(report.created.len(), 0);
         assert!(!out.join("Стоп/01_a.jpg").exists());
 
-        // Обычный прогон перечисляет созданные файлы (для отчёта и теста).
-        let report = apply_export_in(&plan, None, &dir.join("cache"));
+        // A normal pass lists the created files (for the report and the test).
+        let report = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
         assert_eq!(report.created, vec![out.join("Стоп/01_a.jpg")]);
     }
 
