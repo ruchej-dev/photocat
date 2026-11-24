@@ -15,7 +15,6 @@ use std::path::Path;
 const PENDING: &[&str] = &[
     "app.rs",
     "embed.rs",
-    "main.rs",
     "player.rs",
 ];
 

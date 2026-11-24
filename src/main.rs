@@ -1,23 +1,23 @@
-//! photocat — каталогизатор медиаархива: индексация, дубли, раскладка по датам, ML-теги.
+//! photocat — a media archive cataloguer: indexing, duplicates, arranging by dates, ML tags.
 //!
-//! Подкоманды:
-//!   photocat index <каталог> [--jobs N] [--db PATH]
+//! Subcommands:
+//!   photocat index <folder> [--jobs N] [--db PATH]
 //!   photocat stats
 //!   photocat dupes [--max-dist 6] [--csv FILE] [--plan FILE]
-//!   photocat organize --out <каталог> [--by day|month|event] [--name ШАБЛОН]
+//!   photocat organize --out <folder> [--by day|month|event] [--name TEMPLATE]
 //!                     [--exclude-dup] [--apply] [--copy|--symlink] [--rename]
 //!   photocat verify <a> <b> [--jobs N] [--all]  |  verify --manifest FILE <dir>
-//!   photocat manifest [каталог] [--out FILE] [--jobs N]
+//!   photocat manifest [folder] [--out FILE] [--jobs N]
 //!   photocat embed [--jobs N] [--batch N] [--refresh] [--retag]
-//!   photocat tags [--list] [--add МЕТКА] [--prompt ТЕКСТ] [--export FILE] [--import FILE]
+//!   photocat tags [--list] [--add LABEL] [--prompt TEXT] [--export FILE] [--import FILE]
 //!   photocat ocr [--jobs N] [--all]
-//!   photocat search <запрос> [--top N] [--text]
+//!   photocat search <query> [--top N] [--text]
 //!   photocat clusters [--k N] [--out FILE]
-//!   photocat eval --folder DIR --out DIR [--sample N]   разметка тегов на выборке
-//!   photocat eval --labels FILE                         метрики по готовой разметке
+//!   photocat eval --folder DIR --out DIR [--sample N]   tag labelling on a sample
+//!   photocat eval --labels FILE                         metrics over an existing labelling
 //!   photocat albums list|new|rename|move|add|remove|delete|show
-//!   photocat export --album N --out DIR [--name ШАБЛОН] [--apply]
-//!   photocat            (без аргументов — GUI)
+//!   photocat export --album N --out DIR [--name TEMPLATE] [--apply]
+//!   photocat            (no arguments — the GUI)
 
 mod app;
 mod db;
@@ -46,8 +46,8 @@ fn usage(lang: Lang) {
     println!("{}", i18n::t(lang, i18n::USAGE.0));
 }
 
-/// Язык отчёта: `settings.lang` из БД (M21.6). Первый запуск определяет язык из
-/// локали, как и GUI, — чтобы `photocat stats` и окно говорили на одном языке.
+/// The language of the report: `settings.lang` from the DB (M21.6). The first launch takes
+/// the language from the locale, like the GUI does, so `photocat stats` and the window agree.
 fn language(args: &[String]) -> Result<Lang> {
     let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
     let conn = db::open(&db_path)?;
@@ -364,7 +364,7 @@ fn main() -> Result<()> {
                     .unwrap_or(file);
                 let id: i64 = conn
                     .query_row("SELECT id FROM files WHERE path=?1", [&path], |r| r.get(0))
-                    .map_err(|_| anyhow::anyhow!("файл не в индексе: {path}"))?;
+                    .map_err(|_| anyhow::anyhow!("the file is not in the index: {path}"))?;
                 let stats = ocr::run_files(&db_path, &[id], Some(progress))?;
                 println!("{stats}");
                 return Ok(());
@@ -388,7 +388,7 @@ fn main() -> Result<()> {
             };
             let top = flag_num(&args, "--top", 30);
             if has_flag(&args, "--text") {
-                // Поиск по распознанному тексту — без модели и без сети.
+                // Search over recognized text — no model and no network.
                 let conn = db::open(&db_path)?;
                 let t0 = std::time::Instant::now();
                 let hits = db::search_ocr(&conn, &query, top)?;
@@ -560,7 +560,7 @@ fn main() -> Result<()> {
         "settings" => {
             let db_path = db::resolve_db(flag_str(&args, "--db").map(PathBuf::from).as_deref())?;
             let conn = db::open(&db_path)?;
-            // Первый запуск: язык интерфейса берётся из системы (M21, ADR 0040).
+            // The first launch: the interface language comes from the system (M21, ADR 0040).
             db::ensure_lang(&conn)?;
             let mut settings = db::load_settings(&conn);
             let mut lang = settings.lang;
@@ -588,13 +588,13 @@ fn main() -> Result<()> {
                 settings.ocr_lang = code;
                 changed = true;
             }
-            // Язык интерфейса (M21, ADR 0040): только коды из списка, иначе — ошибка,
-            // чтобы опечатка не превращалась молча в английский.
+            // The interface language (M21, ADR 0040): only the listed codes, otherwise an error,
+            // so a typo does not silently turn into English.
             if let Some(code) = flag_str(&args, "--lang") {
                 match code.trim().to_ascii_lowercase().as_str() {
                     "en" | "ru" => {
                         settings.lang = Lang::parse(&code);
-                        // Смена языка действует сразу: отчёт печатается уже на новом.
+                        // The change applies at once: the report is printed in the new language already.
                         lang = settings.lang;
                         changed = true;
                     }
@@ -632,7 +632,7 @@ fn main() -> Result<()> {
                 };
                 let mut probe = settings.tools.clone();
                 *probe.get_mut(tool) = path.trim().to_string();
-                // Путь проверяется до сохранения: ошибка — сообщением, а не падением.
+                // The path is checked before saving: an error becomes a message, not a crash.
                 match probe.version(tool) {
                     Ok(v) => {
                         println!(
@@ -883,7 +883,7 @@ fn main() -> Result<()> {
                     std::process::exit(2);
                 }
             };
-            // По умолчанию — в кэш, а не в репозиторий: в labels.csv пути семейного архива.
+            // Into the cache by default, not the repository: labels.csv holds family archive paths.
             let out = flag_str(&args, "--out")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| db::cache_dir().join("eval"));
@@ -1146,10 +1146,10 @@ fn main() -> Result<()> {
     }
 }
 
-/// `photocat albums …` — альбомы как данные: дерево, порядок и строки в БД.
-/// Ни одна команда не открывает файл по пути и не пишет на диск: PATH — ключ
-/// `files.path`, а не файловая операция. Коды: 0 — сделано, 1 — ошибка данных,
-/// 2 — неверные аргументы или отказ без подтверждения.
+/// `photocat albums …` — albums as data: the tree, the order and the rows in the DB.
+/// No command opens a file by path or writes to disk: PATH is a `files.path` key, not a
+/// file operation. Exit codes: 0 — done, 1 — a data error, 2 — wrong arguments or a refusal
+/// without a confirmation.
 fn albums_cli(args: &[String]) -> Result<()> {
     let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
     let conn = db::open(&db_path)?;
@@ -1333,7 +1333,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
             let node = tree
                 .iter()
                 .find(|n| n.id == id)
-                .with_context(|| format!("альбома {id} нет"))?;
+                .with_context(|| format!("there is no album {id}"))?;
             let mut subtree = vec![node.clone()];
             let mut seen = vec![id];
             loop {
@@ -1384,7 +1384,7 @@ fn albums_cli(args: &[String]) -> Result<()> {
             let node = tree
                 .iter()
                 .find(|n| n.id == id)
-                .with_context(|| format!("альбома {id} нет"))?;
+                .with_context(|| format!("there is no album {id}"))?;
             let note = if node.note.trim().is_empty() {
                 String::new()
             } else {
@@ -1455,7 +1455,7 @@ fn album_id_arg(args: &[String], lang: Lang) -> i64 {
     }
 }
 
-/// Позиционные пути команды: всё, что не флаг и не значение известного флага.
+/// The positional paths of a command: everything that is not a flag or a known flag value.
 fn positional_paths(args: &[String], flags: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     let mut it = args.iter().skip(1);
@@ -1472,8 +1472,8 @@ fn positional_paths(args: &[String], flags: &[&str]) -> Vec<String> {
     out
 }
 
-/// Путь → id файла в индексе. Файл не открывается; если точного пути нет,
-/// пробуем канонический вид (симлинк, `.`/`..`), но не содержимое.
+/// A path → the file id in the index. The file is not opened; if there is no exact path,
+/// the canonical form is tried (a symlink, `.`/`..`), but never the content.
 fn file_ids_for_paths(conn: &rusqlite::Connection, paths: &[String]) -> Result<Vec<i64>> {
     let mut ids = Vec::new();
     let mut missing = Vec::new();
@@ -1498,13 +1498,13 @@ fn file_ids_for_paths(conn: &rusqlite::Connection, paths: &[String]) -> Result<V
         }
     }
     if !missing.is_empty() {
-        anyhow::bail!("нет в индексе: {}", missing.join(", "));
+        anyhow::bail!("not in the index: {}", missing.join(", "));
     }
     Ok(ids)
 }
 
-/// Словарь тегов: показать, добавить, включить/выключить, убрать, импорт/экспорт JSON.
-/// После правок веса тегов пересчитывает `embed --retag` (без повторного CLIP по фото).
+/// The tag dictionary: show, add, enable or disable, remove, JSON import and export.
+/// After the edits `embed --retag` recomputes the tag weights (without running CLIP over the photos again).
 fn tags_cli(args: &[String]) -> Result<()> {
     let db_path = db::resolve_db(flag_str(args, "--db").map(PathBuf::from).as_deref())?;
     let settings = {
@@ -1623,7 +1623,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
         let d = defs
             .iter_mut()
             .find(|d| d.id == want || d.label == want)
-            .with_context(|| format!("нет тега «{want}»"))?;
+            .with_context(|| format!("there is no tag “{want}”"))?;
         d.enabled = enable;
         db::save_tag_def(&conn, d)?;
         println!(
@@ -1646,7 +1646,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
         let d = defs
             .iter()
             .find(|d| d.id == want || d.label == want)
-            .with_context(|| format!("нет тега «{want}»"))?;
+            .with_context(|| format!("there is no tag “{want}”"))?;
         db::delete_tag_def(&conn, entry.id, &d.id)?;
         println!(
             "{}",
@@ -1661,7 +1661,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
 
     if let Some(path) = flag_str(args, "--export") {
         std::fs::write(&path, embed::tag_defs_to_json(&defs))
-            .with_context(|| format!("не записать {path}"))?;
+            .with_context(|| format!("cannot write {path}"))?;
         println!(
             "{}",
             i18n::fill(
@@ -1675,7 +1675,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
 
     if let Some(path) = flag_str(args, "--import") {
         let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("не прочитать {path}"))?;
+            .with_context(|| format!("cannot read {path}"))?;
         let defs = embed::tag_defs_from_json(entry.id, &text)?;
         embed::import_defs(&db_path, entry.id, &defs)?;
         println!(
@@ -1705,7 +1705,7 @@ fn tags_cli(args: &[String]) -> Result<()> {
     list()
 }
 
-/// Короткая подпись версии: «ffmpeg version 6.1.1» вместо строки с копирайтом.
+/// A short version label: "ffmpeg version 6.1.1" instead of the line with the copyright.
 fn short_version(line: &str) -> String {
     line.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
 }
@@ -1737,9 +1737,9 @@ pub fn has_flag(args: &[String], name: &str) -> bool {
 mod cli_i18n_tests {
     use super::*;
 
-    /// M21.6: отчёты CLI говорят на языке из `settings.lang`. Каждый отчёт — пара
-    /// строк: английская и русская из одного и того же поля `lang`, чтобы было видно,
-    /// что язык не глобальный и оба варианта живы.
+    /// M21.6: the CLI reports speak the language of `settings.lang`. Every report is a pair
+    /// of lines, English and Russian, from the same `lang` field, so it is visible that the
+    /// language is not global and both variants are alive.
     #[test]
     fn english_translates_the_command_reports() {
         // index
@@ -1862,8 +1862,8 @@ mod cli_i18n_tests {
         assert_eq!(t.source(tools::Tool::Curl, Lang::Ru), "из PATH");
     }
 
-    /// M21.6: дубли отдают не готовую русскую фразу, а признак и части совета —
-    /// один и тот же набор печатается на двух языках.
+    /// M21.6: the duplicates give a feature and advice parts instead of a ready Russian phrase —
+    /// the same set is printed in both languages.
     #[test]
     fn english_translates_the_duplicate_advice() {
         assert_eq!(dupes::Reason::Exact.label(Lang::En), "exact copy");
@@ -1892,8 +1892,8 @@ mod cli_i18n_tests {
         assert_eq!(same.label(Lang::Ru), "точные копии — разницы нет");
     }
 
-    /// M21.6: текст сверки, проверки по слепку и итог записи слепка — тот же
-    /// источник слов, что и у CLI, и он переводится по полю `lang`.
+    /// M21.6: the comparison text, the manifest check and the manifest result are the same
+    /// source of words as in the CLI, and they follow the `lang` field.
     #[test]
     fn english_translates_the_verification_reports() {
         let mut report = verify::Report {
@@ -1976,8 +1976,8 @@ mod cli_i18n_tests {
         );
     }
 
-    /// M21.6: `--help` — часть CLI и переводится вместе с ним; английский текст
-    /// не содержит кириллицы, а русский остаётся русским.
+    /// M21.6: `--help` is part of the CLI and is translated with it; the English text holds no
+    /// Cyrillic, and the Russian one stays Russian.
     #[test]
     fn the_cli_help_is_translated() {
         let en = i18n::t(Lang::En, i18n::USAGE.0);
