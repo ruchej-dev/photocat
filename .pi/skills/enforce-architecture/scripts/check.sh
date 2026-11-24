@@ -76,9 +76,17 @@ fi
 
 # ---------------------------------------------------------------- 4. network
 echo "4. the network only for models"
-bad=$(grep -nE '^(reqwest|hyper|ureq|curl|isahc|attohttpc)\s*=' Cargo.toml 2>/dev/null || true)
+# One HTTP client, the built-in one (ADR 0047), and only in the downloader: a second client or a
+# request anywhere else means some code the owner never consented to talks to the internet.
+bad=$(grep -nE '^(reqwest|hyper|curl|isahc|attohttpc)\s*=' Cargo.toml 2>/dev/null || true)
 if [[ -n $bad ]]; then
-  err "an HTTP client in Cargo.toml: the network only through a curl process (ADR 0016): $bad"
+  err "a second HTTP client in Cargo.toml: the weights are fetched by ureq in src/embed.rs (ADR 0047): $bad"
+else
+  pass
+fi
+bad=$(grep -nE '^ureq\s*=' Cargo.toml >/dev/null 2>&1 || echo "ureq is not in Cargo.toml")
+if [[ $bad == "ureq is not in Cargo.toml" ]]; then
+  err "the downloader needs an HTTP client (ADR 0047)"
 else
   pass
 fi
@@ -90,16 +98,16 @@ if [[ -n $bad ]]; then
 else
   pass
 fi
-# curl is allowed only to the weight downloader; the launch itself lives in tools.rs.
-bad=$(grep -nE 'command\(Tool::Curl\)' src/*.rs 2>/dev/null | grep -v -e '^src/embed.rs:' -e '^src/tools.rs:' || true)
+# The HTTP client lives in the downloader only.
+bad=$(grep -nE '\bureq::|\bureq\b' src/*.rs 2>/dev/null | grep -v '^src/embed.rs:' || true)
 if [[ -n $bad ]]; then
-  err "curl is started outside src/embed.rs (ADR 0016):"
+  err "ureq is used outside src/embed.rs (ADR 0047):"
   echo "$bad" | sed 's/^/      /'
 else
   pass
 fi
-# Upload flags are forbidden in the downloader: only GET requests for weights leave the machine.
-bad=$(grep -nE '\s(-F|--data|-T|--upload-file)\s' src/embed.rs 2>/dev/null || true)
+# Only GET: a weight file is read, nothing about the owner is sent.
+bad=$(grep -nE '\.(post|put|delete|patch)\s*\(' src/embed.rs 2>/dev/null || true)
 if [[ -n $bad ]]; then
   err "the downloader can send data (ADR 0015):"
   echo "$bad" | sed 's/^/      /'

@@ -138,8 +138,9 @@ save half but would need another dependency and lose precision on a small corpus
 
 **Network.** The app downloads only model weights — by the owner's explicit consent (ADR 0015),
 nothing else. The binary is the only path to the weights (`models download`, the Settings button) and
-there is no shell script for it (M24.1: a cross-platform application is one binary); the sha256 is
-pinned in `src/embed.rs` and checked on download. On the first build `ort-sys` downloads ONNX Runtime itself
+there is no shell script for it (M24.1: a cross-platform application is one binary); the download is
+made in-process by `ureq`/`rustls` (ADR 0047); the sha256 is pinned in `src/embed.rs` and checked on
+download. On the first build `ort-sys` downloads ONNX Runtime itself
 (cache `~/.cache/ort.pyke.io`); that is a build step, not runtime. The model needs AVX2 (int8
 quantisation), otherwise the fp32 variant is required.
 **Forbids:** auto-download without consent, sending previews, paths and query texts outside, storing
@@ -164,8 +165,8 @@ OS-specific API without a fallback. Cache: `XDG_CACHE_HOME` → `LOCALAPPDATA` (
 External processes: `ffmpeg`/`ffprobe` are looked up in `PATH` (`Command` adds `.exe` on Windows
 itself), the console window is suppressed via `CREATE_NO_WINDOW`.
 
-**Boundary:** no shell script ships with the application: preparing a model is the binary's job, and
-a machine without `curl` copies the weights into the models folder by hand. Non-UTF-8 file names
+**Boundary:** no shell script ships with the application: preparing a model is the binary's job, over
+HTTPS from inside the process (ADR 0047). Non-UTF-8 file names
 (possible on Linux) are stored in the DB via
 `to_string_lossy` — a known limitation, not an M4 goal.
 **Forbids:** `unsafe` workarounds, `#[cfg]` branches without a second implementation, a hardcoded
@@ -185,14 +186,14 @@ the mirrors, then compatible catalogue variants within the limit, and reports wh
 **Forbids:** a background download without a human action, any POST/PUT, sending user data, models
 without a sha256.
 
-## 0016. The weight downloader is the `curl` process, not an HTTP client in the dependencies
+## 0016. ~~The weight downloader is the `curl` process~~ — superseded by ADR 0047
 
-Like `ffmpeg` for video (ADR 0010): `curl` is present on Linux/macOS and in Windows 10+, knows TLS,
-redirects, retries and resumption. An own HTTP dependency (`ureq`/`reqwest`) means TLS, root
-certificates and network code in the project for one operation.
-**Consequence:** without `curl` in `PATH` a download from the app is unavailable (the manual script
-needs `curl` too), the rest of the functionality works. The boundary check watches that `curl` is
-called only in `src/embed.rs` and without sending flags (`-F`, `--data`, `-T`).
+The downloader was a `curl` process, like `ffmpeg` for video (ADR 0010): present on Linux/macOS and
+in Windows 10+, it knows TLS, redirects and retries, and no TLS code entered the project. The owner
+reversed this on 2026-11-24 — a cross-platform application is one binary — so the weights are
+downloaded in-process with `ureq`/`rustls`. The module boundary this ADR introduced is kept: the
+downloader is the only network code, it lives in `src/embed.rs` and does nothing but `GET` a
+catalogue file. See ADR 0047.
 **Forbids:** a second way to download and network calls outside the model catalogue.
 
 ## 0017. Hidden tags in the DB, not in a file and not in the model
@@ -224,15 +225,15 @@ downloading anything for OCR without consent per ADR 0015.
 
 ## 0019. External programs: PATH, soft degradation and `doctor`
 
-The app does not pull ffmpeg, tesseract and curl into itself: a C/C++ build and dozens of megabytes in
-the distribution (ADR 0010, 0016, 0018). Instead — one contract for all external programs:
+The app does not pull ffmpeg and tesseract into itself: a C/C++ build and dozens of megabytes in the
+distribution (ADR 0010, 0018). Weights stopped being an external program: the downloader is the
+binary's own HTTPS client (ADR 0047). For the programs that remain — one contract:
 
 | Program | Why | Without it |
 |---|---|---|
 | `ffmpeg` | a video cover frame, dHash, previews | a video enters the index without a preview and dHash, the error is counted in `errors`; photos do not suffer |
 | `ffprobe` | video duration and resolution | a video without a duration `▶ M:SS`, the rest is indexed |
 | `tesseract` | text from documents and screenshots | OCR is off: the button is disabled, `ocr` says what to install; search, duplicates and CLIP work |
-| `curl` | downloading model weights (consent only) | the weights have to be copied into the models folder by hand; local functions work |
 
 **Rules.**
 1. A program is started through `std::process::Command` (`.exe` is added by itself on Windows) by an
@@ -242,11 +243,12 @@ the distribution (ADR 0010, 0016, 0018). Instead — one contract for all extern
    kind of work is disabled, the rest works. An error in one file is a counter, not a stop of the run.
 3. The console window on Windows is suppressed (`CREATE_NO_WINDOW`); data is passed to the program
    through stdin/stdout (OCR), and there are no temporary files next to the archive.
-4. Where to look is shown by `photocat doctor`: the versions of ffmpeg/ffprobe/tesseract/curl, the
+4. Where to look is shown by `photocat doctor`: the versions of ffmpeg/ffprobe/tesseract, the
    tesseract languages against `ocr_lang`, the presence of the model and the DB size. One screen
    instead of guesses.
-5. The launching of all four programs lives in `src/tools.rs`; `ffmpeg`/`ffprobe`/`tesseract` are
-   called by `src/derive.rs`, `curl` only by `src/embed.rs`. The boundary check guards this.
+5. The launching of all three programs lives in `src/tools.rs` and they are called by
+   `src/derive.rs`; the downloader needs no program at all (ADR 0047). The boundary check guards
+   this.
 **Forbids:** bundling binaries in the repository, calling `sh`/`cmd`, the network for OCR, downloading
 OS packages from the app. The fallback contract is `PATH`; explicit paths are ADR 0020.
 
@@ -255,8 +257,8 @@ OS packages from the app. The fallback contract is `PATH`; explicit paths are AD
 On Arch the tesseract packages are called `tesseract-data-eng`/`-rus`, while on Windows and macOS
 ffmpeg and tesseract are often not in `PATH` at all. Forcing the owner to fix the environment or
 rebuild the app because of one path is wrong. Hence `settings.tool_ffmpeg`, `tool_ffprobe`,
-`tool_tesseract`, `tool_curl`: empty — the name is looked up in `PATH` (the former behaviour of ADR
-0019), non-empty — the given file is started.
+`tool_tesseract`: empty — the name is looked up in `PATH` (the former behaviour of ADR
+0019), non-empty — the given file is started. `curl` had such a key too until ADR 0047.
 
 **Rules.**
 1. A path is checked before saving by starting the program with its version flag; an error is shown
@@ -1212,3 +1214,41 @@ Russian. Behaviour is unchanged: the inverted table reproduces the same two lang
 prompts in `embed.rs`); a Russian word in a screen or a report built by `format!` instead of `t()`
 or `fill()`; a translated string in the code; growing `PENDING`; translating the owner's own
 names, album titles or tags.
+
+## 0047. The binary downloads the weights itself: `ureq` with `rustls`, not a `curl` process
+
+**Decision (the owner, 2026-11-24).** "The program must be able to download data itself." A
+cross-platform application is one file, so the weight downloader stops shelling out to `curl`
+(ADR 0016) and becomes part of the binary: `ureq` 3.5 with `rustls` and the bundled WebPKI roots.
+
+**Why this reverses ADR 0016.** 0016 chose a process over a dependency to keep TLS, root
+certificates and network code out of the project. That reasoning holds for `ffmpeg` and
+`tesseract`, which are large C programs doing real work (ADR 0010, 0019), and it does not hold for a
+single GET: the consequence was a machine without `curl` that cannot fetch a 217 MiB model at all,
+and a shell script as the manual fallback — which needed the same `curl` and existed only for Unix.
+For a family archive on a machine the owner did not prepare, that is the wrong trade.
+
+**What it costs.** `ureq` (MIT OR Apache-2.0) with `rustls` (Apache-2.0 OR ISC OR MIT),
+`ring` (Apache-2.0 AND ISC), `rustls-webpki`/`untrusted` (ISC), `subtle` (BSD-3-Clause) and
+`webpki-roots` (CDLA-Permissive-2.0, certificate data only) — every one of them permissive and
+compatible with Apache-2.0, recorded here per AGENTS §1. The binary grew by 2.4 MB (85.1 → 87.6 MB).
+`ureq` was already in the build graph as a build dependency of `ort-sys` (it fetches ONNX Runtime);
+the rest of the list is new to the lock file but downloads nothing else at build time beyond the
+normal registry fetch.
+
+**What we would do without it.** Nothing else in the app needs TLS. Without this dependency the only
+alternatives are the external `curl` (rejected: not one binary, not on every machine) or a vendored
+download protocol (impossible: HTTPS is not hand-rollable safely). If `ureq` ever becomes
+unmaintained, the replacement is `reqwest` (blocking, `rustls`) behind the same two functions.
+
+**Boundary.** The client exists for one thing: `GET` of a catalogue file into the models folder.
+`agent.get(...)` only — no POST/PUT/body, no headers carrying user data (`src/embed.rs`). The mirror
+(hf-mirror) and three retries stay, the sha256 check stays, consent is still required. The boundary
+check (`check.sh` §4) now enforces: no second HTTP client in `Cargo.toml`, `ureq` only in
+`src/embed.rs`, no verbs other than `get` there.
+
+**Consequences.** `curl` disappears from the external programs: `Tool::Curl`, `settings.tool_curl`,
+`--curl`, the Settings field, the `doctor` line and the "without it" hint are gone. A machine with no
+network still works, as before — the download is the only thing that fails, and it says so.
+**Forbids:** an HTTP client other than the downloader's, a request carrying owner data, a background
+download without a human action.

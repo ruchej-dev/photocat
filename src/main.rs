@@ -625,7 +625,6 @@ fn main() -> Result<()> {
                 ("--ffmpeg", tools::Tool::Ffmpeg),
                 ("--ffprobe", tools::Tool::Ffprobe),
                 ("--tesseract", tools::Tool::Tesseract),
-                ("--curl", tools::Tool::Curl),
             ] {
                 let Some(path) = flag_str(&args, flag) else {
                     continue;
@@ -1852,14 +1851,17 @@ mod cli_i18n_tests {
         assert_eq!(organize::Layout::Day.title(Lang::Ru), "по дням");
 
         // tools: the same words `doctor` prints and Settings shows
-        assert_eq!(tools::Tool::Curl.purpose(Lang::En), "downloading model weights on consent");
         assert_eq!(
-            tools::Tool::Curl.purpose(Lang::Ru),
-            "скачивание весов модели по согласию"
+            tools::Tool::Tesseract.purpose(Lang::En),
+            "OCR: text from documents and screenshots"
+        );
+        assert_eq!(
+            tools::Tool::Tesseract.purpose(Lang::Ru),
+            "OCR: текст с документов и скриншотов"
         );
         let t = tools::Tools::default();
-        assert_eq!(t.source(tools::Tool::Curl, Lang::En), "from PATH");
-        assert_eq!(t.source(tools::Tool::Curl, Lang::Ru), "из PATH");
+        assert_eq!(t.source(tools::Tool::Tesseract, Lang::En), "from PATH");
+        assert_eq!(t.source(tools::Tool::Tesseract, Lang::Ru), "из PATH");
     }
 
     /// M21.6: the duplicates give a feature and advice parts instead of a ready Russian phrase —

@@ -47,8 +47,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 2. `egui`/`eframe` встречается только в `src/app.rs`.
 3. В `src/` нет `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` — оригиналы
    архива неприкосновенны (ADR 0005).
-4. Сеть только за весами моделей: в `Cargo.toml` нет HTTP-клиентов, `curl` запускается лишь в
-   `src/embed.rs` и без флагов отправки данных — ADR 0015, 0016.
+4. Сеть только за весами моделей: один HTTP-клиент (`ureq`, ADR 0047), и только в
+   `src/embed.rs`, только GET — ни второго клиента, ни уходящих данных (ADR 0015).
 5. Каждая зависимость упомянута в `docs/DECISIONS.ru.md` (предупреждение, не ошибка).
 6. Код говорит по-английски (AGENTS.ru.md §6): в `src/` нет кириллических идентификаторов и
    проходит `cargo test --test source_language` — в переведённых модулях нет русских

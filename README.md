@@ -139,7 +139,7 @@ systemctl --user enable --now photocat-verify.timer
 | People: SCRFD + ArcFace, groups, manual names, "not him" for false merges | ✅ |
 | OCR of documents/screenshots (tesseract), text search with highlights | ✅ |
 | Video previews via ffmpeg, dHash and duration, video in duplicates and CLIP | ✅ |
-| Settings: model, thresholds, paths to ffmpeg/ffprobe/tesseract/curl with probing; `doctor` | ✅ |
+| Settings: model, thresholds, paths to ffmpeg/ffprobe/tesseract with probing; `doctor` | ✅ |
 | "Best frame of a series": advice by sharpness/resolution/size | ✅ |
 | Comparing two archive copies (`verify`, size → sha256) and a `sha256sum` manifest (`manifest`) | ✅ |
 | Check reminder by interval (`settings`, GUI banner) with no auto-start | ✅ |
@@ -173,5 +173,6 @@ and [NOTICE](NOTICE) for the attribution notice. The copyright holder is
 Alexander Grigoryevich Vinogradov.
 
 Third-party models, crates and programs keep their own licenses: the CLIP and face weights are
-downloaded by the owner and are not distributed with the source code; `ffmpeg`, `ffprobe`,
-`tesseract` and `curl` are external programs the app only calls.
+downloaded by the owner and are not distributed with the source code; `ffmpeg`, `ffprobe` and
+`tesseract` are external programs the app only calls, and the weights are fetched by the binary itself
+(`ureq` + `rustls`, ADR 0047).

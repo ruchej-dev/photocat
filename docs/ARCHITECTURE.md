@@ -563,6 +563,7 @@ not with a different labelled set.
 | 2026-11-24 | the same DB, 356 recognized texts | repeated `ocr` and `search --text` ("сбербанк", "счет-фактура", "2023") | 0.09 s, 356 skipped by sha256; 1 ms per text query, the expected files first |
 | 2026-11-24 | the same DB with CLIP and OCR | DB size | 16.0 MB (vectors 4.4 MiB, 31 206 tags, OCR 176 KiB + FTS5): +3.3 MB over the 12.7 MB of 2026-11-22, and the cause is `idx_tag_source` (M12) plus b-tree slack, not the text |
 | 2026-11-24 | a copy of the bench DB | `gui` under `timeout 6`, `dupes`, `ocr --dry-run`, `models list` under `lang=en` and `lang=ru` | the window opens on the new DB and lives to the timeout (code 124, no output); every report prints the same numbers and the same order in both languages, only the labels and the units differ |
+| 2026-11-24 | network, `clip-vit-b32-en`, a temp DB and models folder | `models download --id clip-vit-b32-en --yes` with the in-process client (`ureq` + `rustls`, ADR 0047) | 22.7 s for 148.6 MiB in 3 files, the sha256 of all three matched; the same download through `curl` on 2026-11-22 took 18.8 s, so the difference is the network; the release binary grew 85.1 → 87.6 MB |
 | 2026-11-24 | a clean install: `XDG_CACHE_HOME=$(mktemp -d)`, no DB, no models, no settings (M24.1/M24.2 smoke) | `gui` under `timeout 6`, then `stats`, `models list`, `doctor`, `ocr --dry-run`, `settings` on the same cache | the window opens and lives to the timeout (code 124, no output) and writes `<cache>/photocat/photocat.db` (176 KiB with the seeded 14-tag dictionary) plus `thumbs/`; `lang=ru` is detected from the locale and stored; `stats` says 0 files, `models list` says "not downloaded" for all four and "over the limit" for SigLIP 2, `ocr --dry-run` finds 0 of 0 candidates, `doctor` lists the programs, no pass starts by itself. The smoke found a defect: the GUI read the default English and stored no language, while the CLI detected the locale — fixed by `app::first_lang` |
 
 Rule: numbers without a corpus and a date do not enter the table.
@@ -582,18 +583,17 @@ not take all cores and the window does not stutter.
 The app is one Rust binary; everything that needs a C stack runs as a process (ADR 0019). The path
 to each program is a setting (ADR 0020): an empty field means a `PATH` lookup, a non-empty one means
 starting that file. The lookup, the launch and the Windows console suppression live in
-`src/tools.rs`: `derive` and `embed` ask for `Tool::Ffmpeg`/`Tool::Tesseract`/`Tool::Curl`, not for a
-name as a string.
+`src/tools.rs`: `derive` asks for `Tool::Ffmpeg`/`Tool::Tesseract`, not for a name as a string. The
+weight downloader needs no program: it is an HTTPS client inside the binary (ADR 0047).
 
 | Program | Module it works for | Setting | Without it |
 |---|---|---|---|
 | `ffmpeg` | `derive::analyze_video` | `tool_ffmpeg` | a video in the index without a preview and dHash, an error in the counter |
 | `ffprobe` | `derive::video_probe` | `tool_ffprobe` | a video without duration and resolution |
 | `tesseract` | `derive::ocr_image` | `tool_tesseract` | OCR is off (the button is greyed out, `ocr` suggests a path) |
-| `curl` | `embed::download_model` | `tool_curl` | model weights have to be put in place by hand |
 
 **Checking a path.** On save the program is started with its version flag (`-version` for
-ffmpeg/ffprobe, `--version` for tesseract/curl). The GUI writes the outcome or the error to the
+ffmpeg/ffprobe, `--version` for tesseract). The GUI writes the outcome or the error to the
 status line and does not save a non-working path; `settings --tesseract PATH` in the CLI exits with
 code 2 on an error and writes nothing to the DB. There is nothing to check for an empty path — the
 program is looked up in `PATH` at work time.
@@ -607,10 +607,11 @@ state, not a crash: only its own kind of work is disabled.
 
 The target is Linux (ADR 0014), but the code has no dead ends: the cache is found through
 `XDG_CACHE_HOME` / `LOCALAPPDATA` / `HOME`, symlinks use `#[cfg(unix)]` and `#[cfg(windows)]`, and
-`ffmpeg`/`ffprobe`/`curl`/`tesseract` come from the settings or `PATH` (`tools::Tools`) and are
-started without a console window on Windows. A known limitation: non-UTF-8 names (allowed on Linux)
-are lost when the path is written to SQLite via `to_string_lossy`; video, model download and OCR need
-the respective programs in `PATH` (without tesseract only OCR is lost — everything else works).
+`ffmpeg`/`ffprobe`/`tesseract` come from the settings or `PATH` (`tools::Tools`) and are started
+without a console window on Windows. A known limitation: non-UTF-8 names (allowed on Linux) are lost
+when the path is written to SQLite via `to_string_lossy`; video and OCR need the respective programs
+in `PATH` (without tesseract only OCR is lost — everything else works, the weight download included,
+because it is the binary's own HTTPS client, ADR 0047).
 What exactly is present on the machine is printed by `photocat doctor`; packages are installed with
 the OS package manager (Arch: `tesseract` + `tesseract-data-rus` + `tesseract-data-eng`,
 Windows/macOS — their own ffmpeg and tesseract builds).

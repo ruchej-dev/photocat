@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone) → next:M22.3 (the left panel: years and tag chips), then M24.2 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047) → next:M22.3 (the left panel: years and tag chips), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -906,10 +906,10 @@ is changed under the same id, `--refresh` is needed.
 9. ~~The default name template~~ Decided: **`{n}_{orig}`**; the width of the number by the number of
    files.
 10. ~~One shot twice in one album~~ Decided: **once** (in different albums — allowed).
-11. **Downloading the weights without `curl`.** Today the binary shells out to `curl` (ADR 0016); a
-    machine without it has to copy the files by hand. An in-process HTTPS client (`ureq`/`rustls` and
-    the like, ~1 MiB with the TLS roots, a new dependency and an ADR) would make "one binary" strict.
-    The owner's call; the clean-install pass (M24.2) covers the `curl`-less path either way.
+11. ~~Downloading the weights without `curl`~~ Decided by the owner (2026-11-24): **the program
+    downloads the data itself**. `ureq` + `rustls` inside the binary, `curl` removed altogether —
+    ADR 0047, M24.2. The clean-install pass (M24.3) checks the download on a machine with nothing
+    installed.
 
 All decisions on M17–M20 are taken and closed; the M20 measurements are in § M20 and
 `docs/ARCHITECTURE.md`.
@@ -2150,6 +2150,39 @@ locale, so a fresh install would show two languages at once and never remember t
 locale and is written once, and the owner's later choice still wins — the numbers of the run are in
 `docs/ARCHITECTURE.md` § Measurements.
 
-**Not done, deliberately.** The rest of M24.2 — a folder indexed with no model at all, the consent
-download of 217.5 MiB, and the run with `ffmpeg`/`tesseract`/`curl` cleared out; replacing `curl` — an
-open question, not a decision.
+**Not done, deliberately.** The rest of the clean-install pass — M24.3: a folder indexed with no model
+at all, the consent download of 217.5 MiB, and the run with `ffmpeg`/`tesseract` cleared out.
+
+## M24.2 — the binary downloads the weights itself (2026-11-24) ✅
+
+The owner's answer to the open question of M24.1: "the program must be able to download data itself".
+`curl` is gone — not called, not configured, not listed — and the downloader is now `ureq` 3.5 with
+`rustls` and the bundled WebPKI roots, inside `src/embed.rs` (ADR 0047). One GET of a catalogue file
+into the models folder: no second client, no request body, no header carrying anything about the
+owner. The mirror (hf-mirror) and the three attempts stay, the sha256 check stays, the consent tick
+stays.
+
+**What was removed.** `Tool::Curl`, `settings.tool_curl`, the `--curl` flag of `settings`, the field
+in "Settings → External programs", the `doctor` line and the "without it" hint; the "the weights have
+to be copied by hand — a download needs curl" message; the `curl` row of the ADR 0019 table. The GUI
+now draws one line per `tools::ALL`, and the array of states became `Vec` so removing a tool cannot
+index out of bounds again (a test caught exactly that).
+
+**How it behaves.** `http_get` streams the body to the file in 64 KiB chunks (a 400 MiB SigLIP 2 must
+not sit in memory), prints a line every 16 MiB ("Model: text.onnx — 48.0 MiB of 61.5 MiB"), refuses a
+body that ended earlier than `Content-Length` promised, retries three times with a short pause, and
+falls back to the mirror. Timeouts: 20 s to connect, 30 minutes for the whole transfer.
+
+**Measured (a temp DB, a temp models folder, real network).** `models download --id clip-vit-b32-en
+--yes` — 148.6 MiB in 22.7 s, three files, sha256 matched (the check would have failed otherwise);
+the same download through `curl` on 2026-11-22 was 18.8 s, so the difference is the network, not the
+client. The binary grew 85.1 → 87.6 MB (`rustls` + `ring` + roots). `check.sh` §4 was rewritten for
+the new rule and finds no violation; a second HTTP client, `ureq` outside `src/embed.rs` or a
+`.post()` in the downloader is an error.
+
+**Checks.** `cargo test` — 239 passed, 7 ignored; `cargo clippy --all-targets` clean;
+`rust-analyzer diagnostics` 0 errors; `check.sh` 55 checks, 0 violations.
+
+**Not done, deliberately.** Byte-level progress in the GUI progress bar (the row shows the message and
+a tick per file); a "Stop" for a download in flight (the request cannot be cancelled mid-body yet —
+the same limitation as before); the clean-install pass itself — M24.3.

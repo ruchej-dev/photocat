@@ -115,7 +115,7 @@ impl std::fmt::Display for DownloadReport {
     }
 }
 
-/// Downloading the face weights the same way as CLIP: consent only, curl, sha256.
+/// Downloading the face weights the same way as CLIP: consent only, the built-in HTTP client, sha256.
 pub fn download_model(
     settings: &db::Settings,
     consent: bool,

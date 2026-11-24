@@ -1100,7 +1100,7 @@ a third language; gettext/fluent; changing the language mechanism decided in ADR
 
 ---
 
-## M24 — a clean install and one binary 🔄 (M24.1 done)
+## M24 — a clean install and one binary 🔄 (M24.1–M24.2 done)
 
 **Goal.** A person who has never had photocat: no DB, no previews, no models, no settings. Everything
 the app needs appears on its own or is asked for with a button, and the weights come only from the
@@ -1121,28 +1121,30 @@ file.
 4. The model: the consent tick plus "Download model" fetches 217.5 MiB with the sha256 matched, then
    "Compute tags" works; with the network down the message says what failed and the rest keeps
    working.
-5. Absent system programs: with no `ffmpeg`, `tesseract` and `curl` (the fields cleared and the names
-   out of `PATH`) the app still starts and indexes photos, and each block says what is lost — one
-   honest line, no crash, no dialog loop.
+5. Absent system programs: with no `ffmpeg` and `tesseract` (the fields cleared and the names out of
+   `PATH`) the app still starts and indexes photos, downloads a model and runs OCR's disabled state,
+   and each block says what is lost — one honest line, no crash, no dialog loop.
 6. One binary: `cargo build --release` gives `target/release/photocat`, `doctor` lists the external
    programs as optional, and copying that file to another machine of the same OS is enough (the DB
-   and the models travel in the cache).
+   and the models travel in the cache). The weights are fetched by the binary itself, with no
+   external program at all. ✅ (M24.2)
 7. The pass is recorded in `plan/STATUS.md` with numbers: what a clean start costs in bytes and
    seconds, and what the first index of a 120-file folder takes.
 
 **Steps.** M24.1 — the shell script is gone, the messages name the binary (done 2026-11-24; the
 smoke of a clean start also caught the GUI not storing the first-launch language — fixed in
-`app::first_lang`). M24.2 — the clean-install pass itself: an empty cache, no models, no external
-programs, then a model download with consent.
+`app::first_lang`). M24.2 — the downloader is the binary's own HTTPS client, `ureq` + `rustls`, and
+`curl` is gone (done 2026-11-24: 148.6 MiB in 22.7 s with the sha256 matched; ADR 0047). M24.3 — the
+clean-install pass itself: an empty cache, no models, no external programs, then a model download
+with consent.
 
 **Not doing.** Bundling the weights into the binary (218–393 MiB, and they change independently of
 the code); bundling `ffmpeg`/`tesseract` (ADR 0023); a portable single-file package (AppImage and
 alike) — the target stays a release binary plus the cache.
 
-**Open question for the owner.** Dropping the external `curl` in favour of an in-process HTTPS client
-(a new dependency, ~1 MiB with TLS roots, an ADR) would make the download work on a machine with
-nothing installed — the strict reading of "one binary". Today `curl` is the only external program the
-network path needs.
+**Decided (the owner, 2026-11-24).** The external `curl` is gone in favour of an in-process HTTPS
+client (ADR 0047): the program must be able to download data itself, and "one binary" is strict. The
+dependency is `ureq` + `rustls`, the binary grew by 2.4 MB.
 
 **Files.** `src/embed.rs`, `src/tools.rs`, `src/app.rs`, `README.md`, `docs/DECISIONS.md`,
 `plan/STATUS.md`.

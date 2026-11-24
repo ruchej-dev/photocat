@@ -590,7 +590,6 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "tool_ffmpeg" => s.tools.ffmpeg = v,
             "tool_ffprobe" => s.tools.ffprobe = v,
             "tool_tesseract" => s.tools.tesseract = v,
-            "tool_curl" => s.tools.curl = v,
             "face_threshold" => s.face_threshold = v.parse().unwrap_or(s.face_threshold),
             "tile_size" => s.tile_size = v.parse().unwrap_or(s.tile_size),
             "grid_layout" => s.grid_layout = GridLayout::parse(&v),
@@ -2775,7 +2774,6 @@ mod tests {
         assert_eq!(back.ocr_lang, "rus");
         assert_eq!(back.tools.ffmpeg, "/opt/ffmpeg");
         assert_eq!(back.tools.tesseract, "/opt/tesseract");
-        assert_eq!(back.tools.curl, "");
     }
 
     #[test]

@@ -1594,7 +1594,8 @@ struct App {
     /// The editable paths to the programs: applied by a button after a test launch.
     tools_input: tools::Tools,
     /// The verified state of the programs (a version or an error) — they are not started on every frame.
-    tool_states: [String; 4],
+    /// One line per program of `tools::ALL`: the version, the file found, the source.
+    tool_states: Vec<String>,
     /// The "Settings" dialog: whether it is open and which section is shown.
     settings_open: bool,
     settings_tab: SettingsTab,
@@ -1774,7 +1775,7 @@ impl App {
             ocr_rx: None,
             tesseract: None,
             tools_input: tools::Tools::default(),
-            tool_states: std::array::from_fn(|_| String::new()),
+            tool_states: vec![String::new(); tools::ALL.len()],
             settings_open: false,
             settings_tab: SettingsTab::Interface,
             details_open: true,
@@ -4674,7 +4675,7 @@ impl App {
                     .desired_width(380.0),
             );
             ui.label(
-                egui::RichText::new(&self.tool_states[i])
+                egui::RichText::new(self.tool_states.get(i).map(String::as_str).unwrap_or(""))
                     .size(11.0)
                     .color(dim(ui)),
             );
@@ -7004,8 +7005,7 @@ impl App {
     /// One pass over the programs: the version, the file found, the source. Run on reload and on save.
     fn refresh_tool_states(&mut self) {
         let lang = self.settings.lang;
-        self.tool_states = std::array::from_fn(|i| {
-            let tool = tools::ALL[i];
+        self.tool_states = tools::ALL.iter().map(|&tool| {
             let where_ = match self.settings.tools.locate(tool) {
                 Some(p) => format!(
                     "{} ({})",
@@ -7030,7 +7030,7 @@ impl App {
                     tool.purpose(lang)
                 ),
             }
-        });
+        }).collect();
     }
 
     /// The path to a program is saved only after a successful version launch.

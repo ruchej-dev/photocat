@@ -28,7 +28,8 @@ owner, do not "slightly" break it.
   sha256 and stored on disk; the offline mode keeps working.
 - **Cross-platform.** The target environment is Linux (Arch + Wayland), but the code does not lean
   on the OS: the cache (`db::cache_dir`), symlinks, external processes (`ffmpeg`, `ffprobe`,
-  `curl`, `tesseract`) and paths have fallbacks; home paths are never hardcoded in code or UI.
+  `tesseract`) and paths have fallbacks; home paths are never hardcoded in code or UI. The model
+  weights are downloaded by the binary itself, over HTTPS (ADR 0047).
   Platform branches come only in pairs `#[cfg(unix)]` / `#[cfg(windows)]`, never "good enough for
   now".
 - **Expensive work goes to the background.** Decoding, hashing, inference, clustering: never on the
@@ -64,7 +65,7 @@ source of truth (see `plan/I18N.md` for the order).
 |---|---|---|---|
 | `src/i18n.rs` | L0 | UI and CLI language: `Lang`, `t(lang, text)`, `fill(lang, template, values)`, `count(lang, n, noun)`, the en→ru table | DB, UI, decoding |
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (date/GPS/camera), previews, date from the name | DB, UI, indexer |
-| `src/tools.rs` | L0 | paths to `ffmpeg`/`ffprobe`/`tesseract`/`curl`, `PATH` lookup, version probing | DB, UI, decoding |
+| `src/tools.rs` | L0 | paths to `ffmpeg`/`ffprobe`/`tesseract`, `PATH` lookup, version probing | DB, UI, decoding |
 | `src/db.rs` | L1 | SQLite schema, inserts/queries, albums (tree and order), `Progress`, `human()` | egui, image decoding |
 | `src/storage.rs` | L1 | used space, cache and index cleanup | archive, egui |
 | `src/index.rs` | L2 | `walkdir` traversal, rayon parallelism, writer thread | egui |
@@ -109,8 +110,8 @@ The one-dependency rule: **a module depends only on lower layers**. Checked by
   to 400). A model's tag weight is calibrated into the CLIP scale, so one threshold means the same
   thing on every model. Downloading is consent-only and sha256-checked, and the binary is the only
   way to get weights: `models download --id ID --yes` or the "Download model" button. There is no
-  shell script for it — the repository ships none, and a cross-platform application is one binary
-  (M24.1). Without `curl` the weights have to be copied into the models folder by hand.
+  shell script and no external program for it — the downloader is an HTTPS client inside the binary
+  (`ureq` + `rustls`, ADR 0047), so a machine with nothing installed can still fetch a model.
 - Cache for 2230 files: DB 1.3 MB, previews 29 MB; after CLIP + OCR + faces the DB is ~22 MB (CLIP
   vectors 4.4 MiB, faces 2498 × 2 KiB), face crops ~11 MB. An order-of-magnitude jump is a
   regression.

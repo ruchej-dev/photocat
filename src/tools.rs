@@ -1,4 +1,4 @@
-//! External programs (`ffmpeg`, `ffprobe`, `tesseract`, `curl`): where the path comes from and how it is checked.
+//! External programs (`ffmpeg`, `ffprobe`, `tesseract`): where the path comes from and how it is checked.
 //!
 //! An empty field in the settings means the program is looked up in `PATH`; a non-empty one is run at that path.
 //! A missing program is a state, not a crash: only its kind of work is switched off (ADR 0019, 0020).
@@ -14,11 +14,10 @@ pub enum Tool {
     Ffmpeg,
     Ffprobe,
     Tesseract,
-    Curl,
 }
 
 /// Every program in the order the interface and `doctor` show it.
-pub const ALL: [Tool; 4] = [Tool::Ffmpeg, Tool::Ffprobe, Tool::Tesseract, Tool::Curl];
+pub const ALL: [Tool; 3] = [Tool::Ffmpeg, Tool::Ffprobe, Tool::Tesseract];
 
 impl Tool {
     pub fn name(self) -> &'static str {
@@ -26,7 +25,6 @@ impl Tool {
             Tool::Ffmpeg => "ffmpeg",
             Tool::Ffprobe => "ffprobe",
             Tool::Tesseract => "tesseract",
-            Tool::Curl => "curl",
         }
     }
 
@@ -34,7 +32,7 @@ impl Tool {
     pub fn version_args(self) -> &'static [&'static str] {
         match self {
             Tool::Ffmpeg | Tool::Ffprobe => &["-version"],
-            Tool::Tesseract | Tool::Curl => &["--version"],
+            Tool::Tesseract => &["--version"],
         }
     }
 
@@ -44,7 +42,6 @@ impl Tool {
             Tool::Ffmpeg => "tool_ffmpeg",
             Tool::Ffprobe => "tool_ffprobe",
             Tool::Tesseract => "tool_tesseract",
-            Tool::Curl => "tool_curl",
         }
     }
 
@@ -56,7 +53,6 @@ impl Tool {
                 Tool::Ffmpeg => "video: cover frame, dHash, previews",
                 Tool::Ffprobe => "video: duration and resolution",
                 Tool::Tesseract => "OCR: text from documents and screenshots",
-                Tool::Curl => "downloading model weights on consent",
             },
         )
     }
@@ -71,9 +67,6 @@ impl Tool {
                 }
                 Tool::Ffprobe => "videos without duration or resolution",
                 Tool::Tesseract => "OCR is off: the button is disabled, text search stays empty",
-                Tool::Curl => {
-                    "the weights have to be copied into the models folder by hand — a download needs curl"
-                }
             },
         )
     }
@@ -139,7 +132,6 @@ pub struct Tools {
     pub ffmpeg: String,
     pub ffprobe: String,
     pub tesseract: String,
-    pub curl: String,
 }
 
 impl Tools {
@@ -148,7 +140,6 @@ impl Tools {
             Tool::Ffmpeg => &self.ffmpeg,
             Tool::Ffprobe => &self.ffprobe,
             Tool::Tesseract => &self.tesseract,
-            Tool::Curl => &self.curl,
         }
     }
 
@@ -157,7 +148,6 @@ impl Tools {
             Tool::Ffmpeg => &mut self.ffmpeg,
             Tool::Ffprobe => &mut self.ffprobe,
             Tool::Tesseract => &mut self.tesseract,
-            Tool::Curl => &mut self.curl,
         }
     }
 
@@ -293,11 +283,11 @@ mod tests {
     #[test]
     fn missing_path_is_an_error_not_a_panic() {
         let mut t = Tools::default();
-        *t.get_mut(Tool::Curl) = "/nonexistent/photocat-curl".into();
-        let err = t.version(Tool::Curl).unwrap_err().to_string();
-        assert!(err.contains("curl"), "{err}");
-        assert!(err.contains("photocat-curl"), "{err}");
-        assert!(t.locate(Tool::Curl).is_none());
+        *t.get_mut(Tool::Tesseract) = "/nonexistent/photocat-tesseract".into();
+        let err = t.version(Tool::Tesseract).unwrap_err().to_string();
+        assert!(err.contains("tesseract"), "{err}");
+        assert!(err.contains("photocat-tesseract"), "{err}");
+        assert!(t.locate(Tool::Tesseract).is_none());
     }
 
     #[test]
@@ -305,7 +295,6 @@ mod tests {
         assert_eq!(Tool::Ffmpeg.version_args(), &["-version"]);
         assert_eq!(Tool::Ffprobe.version_args(), &["-version"]);
         assert_eq!(Tool::Tesseract.version_args(), &["--version"]);
-        assert_eq!(Tool::Curl.version_args(), &["--version"]);
     }
 
     #[test]

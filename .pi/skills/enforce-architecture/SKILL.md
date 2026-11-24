@@ -48,8 +48,8 @@ What is checked:
 2. `egui`/`eframe` appears only in `src/app.rs`.
 3. There is no `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` in `src/` —
    archive originals are untouchable (ADR 0005).
-4. The network is only for model weights: `Cargo.toml` has no HTTP clients, `curl` runs only in
-   `src/embed.rs` and without data-upload flags — ADR 0015, 0016.
+4. The network is only for model weights: one HTTP client (`ureq`, ADR 0047), used only in
+   `src/embed.rs`, GET requests only — no second client and no data leaving the machine (ADR 0015).
 5. Every dependency is mentioned in `docs/DECISIONS.md` (a warning, not an error).
 6. The code speaks English (AGENTS.md §6): no Cyrillic identifier in `src/`, and
    `cargo test --test source_language` passes — the converted modules hold no Russian comment or

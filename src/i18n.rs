@@ -321,7 +321,7 @@ subcommands:
   models [list|check|download --id ID --yes]
                                             the model catalogue, checking and downloading weights
   settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L] [--lang en|ru]
-           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH] [--curl PATH]
+           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH]
                                             show or change the settings
   doctor                                   what the machine has: programs, OCR languages, model
   gui                                       the graphical interface (default)
@@ -365,7 +365,7 @@ default: GUI"#,
   models [list|check|download --id ID --yes]
                                             каталог моделей, проверка и загрузка весов
   settings [--models-dir DIR] [--model ID] [--max-model-mb N] [--ocr-lang L] [--lang en|ru]
-           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH] [--curl PATH]
+           [--face-threshold X] [--ffmpeg PATH] [--ffprobe PATH] [--tesseract PATH]
                                             показать или изменить настройки
   doctor                                   что есть на машине: программы, языки OCR, модель
   gui                                       графический интерфейс (по умолчанию)
@@ -1152,10 +1152,6 @@ const PAIRS: &[(&str, &str)] = &[
     (
         "OCR is off: the button is disabled, text search stays empty",
         "OCR выключен: кнопка погашена, поиск по тексту пуст",
-    ),
-    (
-        "the weights have to be copied into the models folder by hand — a download needs curl",
-        "веса придётся положить в папку моделей вручную — для загрузки нужен curl",
     ),
 
     // --- the full screen, the player, the folder chooser, the cache (M21.5) -----
