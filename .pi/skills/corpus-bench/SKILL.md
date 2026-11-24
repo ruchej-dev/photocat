@@ -55,19 +55,19 @@ du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 
 ## Expected values (a baseline, not a dogma)
 
-| Metric | Baseline (2026-11-22) | Alarm if |
+| Metric | Baseline (2026-11-24) | Alarm if |
 |---|---|---|
-| Indexing 2230 files, `--jobs 16` (incl. video via ffmpeg) | 84.7 s | > 130 s |
+| Indexing 2230 files, `--jobs 16` (incl. video via ffmpeg) | 68 s (84.7 s on 2026-11-22; the machine sets the difference) | > 130 s |
 | Throughput | ~34 files/s, ~80 images/s | < 15 files/s |
 | Indexing errors | 1 (the known broken JPEG `P_20200724_154351.jpg`) | > 1 |
 | DB | 1.3 MB | > 12 MB |
-| Previews | 33 MB (29 MB photos + 4 MB video covers) | > 100 MB |
-| `dupes --max-dist 6` | 103 groups / 238 files / 214.1 MiB | groups < 80 or > 150 |
+| Previews | 28 MB (24 MB photos + 4 MB video covers) | > 100 MB |
+| `dupes --max-dist 6` | 101 groups / 234 files / 210.3 MiB — since M22.2 the dHash is computed on the EXIF-oriented frame (ADR 0045) and two pairs of portrait shots fell out of the 103 of 2026-11-22 | groups < 80 or > 150 |
 | Clustering 2229 files, k=30 | 1.0 s | > 5 s |
 | Files without a dHash | 1 (the broken JPEG; videos now have a dHash) | > 1 (means video or decoding broke) |
 | Videos with a cover, a dHash and a duration | 258/258, 3:19:46 in total | < 250 |
 | Files without a date | 0 | > 5% |
-| `embed` 2229 files (photos + videos), `--jobs 8 --batch 8` | 77.3 s (34.7 ms/file) | > 200 s |
+| `embed` 2229 files (photos + videos), `--jobs 8 --batch 8` | 126 s (57 ms/file) with two frames per shot; 161 s while the machine carried an unrelated build | > 250 s |
 | `embed` 2340 files, SigLIP 2 base 224 multilingual, `--jobs 8` | 398.8 s (0.170 s/file), one frame; CLIP on the same run 147 s — the machine, not the model, sets the absolute numbers, the ratio is 2.7× | > 600 s |
 | `embed` 2340 files, SigLIP base 224 English | 404.5 s (0.173 s/file), one frame | > 600 s |
 | `embed --retag`, 2340 files, the vectors already in the DB | 2–4 s (SigLIP 1 2.1 s, SigLIP 2 3.5 s) — no photo is read | > 15 s |
@@ -76,14 +76,14 @@ du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 | The CLIP en model (3 files) | 148.6 MiB | > 5 s for a check/network |
 | The SigLIP base 224 English model (3 files) | 203.5 MiB | the files do not match by sha256 |
 | The SigLIP 2 base 224 multilingual model (3 files) | 393.3 MiB, download 83 s (vision 90.2 MiB, text 270.3 MiB — a 256k-token vocabulary, tokenizer 32.8 MiB) | the files do not match by sha256; at the default 250 MiB limit the download is refused on purpose |
-| DB with CLIP (2229 files) | 12 MB, vectors 4.35 MiB, 15 603 tags | > 40 MB per corpus |
+| DB with CLIP (2229 files) | 16 MB, vectors 4.4 MiB, 31 206 tags (14 per file) | > 40 MB per corpus |
 | A repeated `embed` | 0.03 s, everything skipped by sha256+model | > 5 s |
 | Search over 2229 vectors (the model already loaded) | 11 ms | > 200 ms |
-| OCR candidates (`ocr --dry-run`), 1972 shots | 435 | > 700 or < 150 |
-| `ocr --jobs 8` over 435 candidates (tesseract 5.5.4) | 106.2 s, 434/435, 66 444 characters | > 200 s |
-| A repeated `ocr` | 0.0 s, 434 skipped by sha256 | > 5 s |
-| Text search (`search --text`), 434 texts | 2–3 ms | > 50 ms |
-| DB with CLIP and OCR | 12.7 MB (+276 KiB for text) | > 40 MB |
+| OCR candidates (`ocr --dry-run`), 1972 shots | 357 (203 without a camera + 154 with a confident `document`/`screenshot` tag); 203 before M23.6, when the dictionary was looked up by the empty `settings.model_id` | > 700 or < 150 |
+| `ocr --jobs 8` over 357 candidates (tesseract 5.5.4) | 70.3 s, 356/357, 66 584 characters in 138 files | > 200 s |
+| A repeated `ocr` | 0.09 s, 356 skipped by sha256 | > 5 s |
+| Text search (`search --text`), 356 texts | 1 ms | > 50 ms |
+| DB with CLIP and OCR | 16 MB (vectors 4.4 MiB, OCR 0.3 MB) | > 40 MB |
 | `verify` of two corpus copies, `--jobs 8` | 19.9 s, 2230/2230 matched | > 120 s |
 | `manifest` of the corpus, `--jobs 8` | 10.1 s, 2230 rows, 193 KiB | > 60 s |
 | `verify --manifest` over the corpus | 11.4 s, 2230/2230 | > 60 s |

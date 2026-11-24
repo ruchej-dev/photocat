@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions) → next:M23.6 (the corpus pass), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught) → next:M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -35,7 +35,18 @@ in `#[ignore = "…"]` fails; the arguments a test compares are not messages and
 Measured: `cargo test` 236 + 3 guard tests passed (the same 236 as M23.4 — only messages changed),
 `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors; one
 injected Russian message and one injected Russian `expect` text were both caught.
-Next: M23.6 — the corpus pass and the numbers in `docs/ARCHITECTURE.md`.
+M23.6 ran the pass the acceptance rule asks for; the numbers are in `docs/ARCHITECTURE.md`
+§ Measurements: indexing 67.7 s, 101 duplicate groups / 234 files / 210.3 MiB, `embed` 160.6 s
+(126.1 s on a quiet machine), 31 206 tags, `ocr` 357 candidates into 356 files with 66 584
+characters in 138, and every report printing the same numbers under both languages. Two findings:
+(1) the duplicate count fell from 103 to 101 because of M22.2's oriented dHash — `51d6d78`, the code
+from before M22.2, still gives exactly 103/238/214.1 MiB on a fresh index, and the two lost pairs are
+portrait shots of one field taken 4 s apart, where the 9×8 gradient grid lands on near-flat bands;
+(2) a real regression the pass caught — the OCR candidate heuristic had lost its content branch,
+because the tag dictionary was looked up by `settings.model_id`, empty until the owner picks a model.
+`db::text_tag_labels` now reads the labels of the `document`/`screenshot` ids from every dictionary,
+so 357 candidates are proposed again instead of 203
+(`a_confident_document_tag_counts_without_a_saved_model_choice` fails on the old code).
 
 Since M17 the owner chooses how he looks at the archive: "By months" (as in PhotoPrism) or "Flat",
 and the order — date ↓ (default) / date ↑ / name / size. Both settings live in `settings`
@@ -2052,3 +2063,48 @@ become a later task, albums keep the nested tree, the selection stays in the chi
 task (M22.3–M22.11); the sticky month heading is M22.4; bundled fonts, cropped 4:3 previews, a
 floating selection bar, favourites, ratings, share/delete and the mock-up's non-existent EXIF, GPU,
 tray and update functions are refused (§5 of the spec, with the recommendation to the owner).
+
+## M23.6 — the corpus pass after the English conversion (2026-11-24) ✅
+
+The point of the pass is not a pretty table: the conversion touched every module, so the archive has
+to be walked again and every number compared with the baseline of 2026-11-22. A release build, a
+`/tmp` DB, the real 2230 files from `Фотографии с телефона`, the archive read only.
+
+**Numbers (all in `docs/ARCHITECTURE.md` § Measurements).** `index --jobs 16` 67.7 s, 1 error (the
+known broken JPEG), DB 1.4 MB, 2229 previews 28.1 MiB; a repeated index 0.029 s. `stats` 2230 files,
+21.2 GiB, 258 videos, 3:19:46, 1 without a dHash, 0 without a date. `dupes --max-dist 6` 0.023–0.026 s,
+101 groups / 234 files / 210.3 MiB. `organize` dry runs 0.021–0.023 s, 573 / 76 / 576 folders. `embed`
+CLIP multilingual 160.6 s (an unrelated build held the machine at load 9–14; the same operation took
+126.1 s the day before), vectors 4.4 MiB, 31 206 tags; `search` 10–11 ms, `clusters` 0.9 s. `ocr` 357
+candidates, 70.3 s, 356/357, 66 584 characters in 138 files; `search --text` 1 ms. DB with CLIP and OCR
+16.0 MB. GUI: `timeout 6` opens on the new DB and lives to the timeout. Both languages print the same
+numbers in the same order — only the labels and the units differ (`КиБ`/`KiB`).
+
+**Finding 1 — the duplicates are 101, not 103.** The cause is not the translation but M22.2 (ADR 0045):
+the dHash is now computed on the EXIF-oriented frame, and two pairs of portrait shots of one field
+taken 4 s apart fall out at `max-dist 6` — their oriented 9×8 gradient grid samples near-flat bands and
+the pairs drift by 14 and 7 bits instead of 5 and 3 on the sideways frame. Proven by index: the code
+from before M22.2 (`51d6d78`) on a fresh index gives exactly 103 / 238 / 214.1 MiB with the same 2230
+files. Nothing else moved. This is a recall loss for portrait bursts and is now in AGENTS § 8, the
+baseline of the `corpus-bench` skill and the measurements table; fixing the 9×8 grid for portrait
+frames is not part of M23.6.
+
+**Finding 2 — a real regression, fixed.** `ocr --dry-run` proposed 203 candidates instead of 357: the
+content branch of `wants_text` (a confident `document`/`screenshot` tag) never fired. M23.3 made the
+default tag labels English, so the old hard-coded check `Some("документ" | "скриншот")` had to become
+a dictionary lookup — and that lookup asked for `settings.model_id`, which stays empty until the owner
+picks a model, so it returned nothing on every default DB. `db::text_tag_labels` now reads the labels
+of the `document` and `screenshot` ids from every dictionary (`enabled` only), so a renamed tag in a
+second model still counts and the OCR module needs neither the model nor its catalogue. The cost is
+unchanged: the pass reads the labels, not the photos.
+
+**Checks.** `cargo test` — 238 passed, 7 ignored (new: `text_tag_labels_come_from_every_dictionary` and
+`a_confident_document_tag_counts_without_a_saved_model_choice`, the second fails on the old code);
+`cargo test --test source_language` — 3 passed; `cargo clippy --all-targets` — clean; `check.sh` — 55
+checks, 0 violations; `rust-analyzer diagnostics` — 0 errors; the OCR tests now carry the English
+default labels as data. No file of the archive was touched: the index wrote to the cache and the DB.
+
+**Not done, deliberately.** The dHash grid on portrait frames (a candidate for a later task, the
+numbers are in the measurements table); the OCR text of the 154 newly proposed shots was computed here
+but not yet reviewed by the owner — the card shows it as soon as the pass runs on his DB; the `--all`
+path, the faces pass and the model downloads were not re-measured because M23 did not touch them.

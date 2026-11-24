@@ -1051,7 +1051,7 @@ mock-up's EXIF/GPU/tray/update functions, a network call, a file operation.
 
 ---
 
-## M23 — English is the language of the code 🔄 (M23.1–M23.5 done)
+## M23 — English is the language of the code ✅ (M23.1–M23.6 done)
 
 **Goal.** The repository is English in the code as well as in the documents: identifiers, comments,
 logs, errors and the source text of the interface. Russian survives only as a translation
@@ -1071,6 +1071,12 @@ logs, errors and the source text of the interface. Russian survives only as a tr
    `expect` text or `#[ignore]` reason in `src/`, and `scripts/*.sh` print English. The guard fails
    on a Russian message while what a test compares stays data (a Russian label, an album name, OCR
    text). ✅ (M23.5)
+7. The archive is walked again after the conversion: a fresh index of the 2230-file corpus, `stats`,
+   `dupes`, `organize`, `embed`, `ocr`, the GUI smoke test and every report in both languages give
+   the numbers of 2026-11-22 (§ Measurements); a number that moved is explained or fixed. ✅ (M23.6:
+   101 duplicate groups instead of 103 — the oriented dHash of M22.2, not the translation; and a real
+   regression fixed: the OCR candidate heuristic had lost its content branch and proposed 203
+   candidates instead of 357)
 
 **Steps.** M23.1 — identifiers, the inverted table, the guard, the documents (done). M23.2 — L0/L1:
 `i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs` (done: no Cyrillic left, the size units
@@ -1082,7 +1088,10 @@ table, the 40 hand-written `match lang` blocks replaced by one English source an
 M23.5 — `main.rs`, the test messages and `scripts/` (done: 205 Russian message strings in ten
 modules and the nine messages of `scripts/fetch-model.sh` became English; the guard checks message
 positions, the data — album names, queries, expected Russian UI text — stays). M23.6 — the corpus
-pass and the numbers in `docs/ARCHITECTURE.md`.
+pass and the numbers in `docs/ARCHITECTURE.md` (done: 67.7 s indexing, 101 duplicate groups / 234
+files / 210.3 MiB, 357 OCR candidates → 356 files and 66 584 characters in 138, both languages
+printing the same numbers; `db::text_tag_labels` restored the tag branch of the OCR heuristic —
+M23.3 made the labels English and the lookup asked an empty `settings.model_id`).
 
 **Not doing.** Translating the owner's own data (album and face names, user tags, `labels.csv`);
 a third language; gettext/fluent; changing the language mechanism decided in ADR 0040.

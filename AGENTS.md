@@ -214,8 +214,9 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
    source_language` and `rust-analyzer diagnostics .` before anything else: a Russian identifier, a
    Russian comment in a converted module or a stale `PENDING` entry stops the task there.
 2. **Corpus**: the real 2230 files from `~/Documents/nasty/mail_media/Фотографии с телефона` (see
-   `corpus-bench`). Expected: indexing ~85 s (photos + video covers via ffmpeg), 103 duplicate
-   groups, 238 files, 214 MiB; `embed` over photos and videos ~77 s, 2229 files.
+   `corpus-bench`). Expected: indexing ~68 s (photos + video covers via ffmpeg), 101 duplicate
+   groups, 234 files, 210 MiB; `embed` over photos and videos ~130 s (two frames per photo), 2229
+   files; `ocr` 357 candidates, 138 with text.
 3. **GUI**: compilation + a short run (`timeout 6 ./target/release/photocat gui`). Opening a window
    on the owner's screen without a warning — only for a smoke test and no longer than a few seconds;
    the owner does the real review.
@@ -227,7 +228,10 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
 - Videos are indexed with a cover frame, dHash, duration and resolution via `ffmpeg`/`ffprobe`
   (M4). Without a dHash one broken JPEG remains; videos do not take part in CLIP search yet.
 - The similarity threshold of 6/64 produces false positives (different photos in one group) — dHash
-  alone must not drive automatic deletions.
+  alone must not drive automatic deletions. Since M22.2 the hash is computed on the EXIF-oriented
+  frame, so 2 of the 103 corpus groups of 2026-11-22 are gone (101 now): two pairs of portrait shots
+  of one field taken 4 s apart, where the 9×8 gradient grid samples near-flat bands and the pair
+  drifts by 14 and 7 bits instead of 5 and 3 on the sideways frame.
 - HEIC/AVIF: `image` does not read HEIC.
 - `hardlink` does not work across filesystems (`/tmp` is tmpfs): build the showcase on the same disk
   or use `--copy`/`--symlink`.
@@ -243,8 +247,10 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   617 groups. The detector occasionally finds a "face" on a screen or a statue and mixes up relatives
   — a false merge is split with the "not him" button, a name pins a group. The face model is
   182.4 MiB. OCR needs `tesseract` in `PATH` and the `rus`/`eng` language packs; without it
-  everything else works and the "Recognize text" button is disabled. Out of 435 corpus candidates,
-  text was found on 146 — photos without text keep an empty string and are not recomputed.
+  everything else works and the "Recognize text" button is disabled. Out of 357 corpus candidates,
+  text was found in 138 (before M23.6 only 203 were proposed: the tag branch of the heuristic was
+  dead while the owner had never picked a model, because the dictionary was looked up by the empty
+  `settings.model_id`); photos without text keep an empty string and are not recomputed.
 - `plan/M3-clusters.md` is a local report with archive paths, it is not committed.
 - The app trash is not physical: "Empty trash" moves files to the OS trash via `trash`; cache cleanup
   removes only `<cache>/photocat/*`. Both actions require confirmation.
