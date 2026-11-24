@@ -1,7 +1,7 @@
-//! CLIP-эмбеддинги: локальная ONNX-модель, векторы в БД, теги, косинусный поиск, k-means.
+//! CLIP embeddings: a local ONNX model, vectors in the DB, tags, cosine search, k-means.
 //!
-//! Модели лежат файлами в папке из настроек (по умолчанию `~/.cache/photocat/models/`) и
-//! проверяются по sha256. Сеть — только за весами из каталога, по согласию владельца (ADR 0015).
+//! The models live as files in the folder from the settings (`~/.cache/photocat/models/` by
+//! default) and are checked by sha256. The network is used only for weights from the catalogue, with the owner's consent (ADR 0015).
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
@@ -16,15 +16,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tokenizers::Tokenizer;
 
-/// Пороги по умолчанию (их же хранят настройки; калибровано на корпусе).
+/// The default thresholds (the settings keep the same ones; calibrated on the corpus).
 #[allow(dead_code)]
 pub const TAG_SHOW: f32 = 0.22;
-/// Насколько первый тег должен отрываться от второго, чтобы ему можно было верить.
+/// How far the first tag must lead the second for it to be trusted.
 #[allow(dead_code)]
 pub const TAG_MARGIN: f32 = 0.01;
 
-/// Дефолтный тег: подпись и общие шаблоны промптов на двух языках.
-/// Метки и промпты живут в БД (`tag_defs`): дефолт только засевает пустой словарь.
+/// A default tag: a label and general prompt templates in two languages.
+/// The labels and prompts live in the DB (`tag_defs`): the default only seeds an empty dictionary.
 pub struct TagDefault {
     pub id: &'static str,
     pub label: &'static str,
@@ -32,12 +32,12 @@ pub struct TagDefault {
     pub prompts_en: &'static [&'static str],
 }
 
-/// Версия дефолтного набора: пишется в `settings.tag_defs_version`.
-/// Обновление дефолта не перезатирает правки владельца — только фиксирует, что засеяно.
+/// The version of the default set: written to `settings.tag_defs_version`.
+/// Updating the default does not overwrite the owner's edits — it only records what was seeded.
 pub const DEFAULT_TAG_VERSION: i64 = 2;
 
-/// 14 общих подсказок по 2–3 шаблона. Никаких слов из конкретного архива: набор обязан
-/// работать на любом каталоге (M15.4/M15.5, plan/M15-tags.md §4).
+/// 14 general hints, 2–3 templates each. No words from a particular archive: the set must
+/// work on any folder (M15.4/M15.5, plan/M15-tags.md §4).
 pub const DEFAULT_TAGS: [TagDefault; 14] = [
     TagDefault {
         id: "beach",
@@ -125,14 +125,14 @@ pub const DEFAULT_TAGS: [TagDefault; 14] = [
     },
 ];
 
-/// Как текстовая башня отдаёт вектор: через проекцию 768→512 или сразу `text_embeds`.
+/// How the text tower gives a vector: through the 768→512 projection or `text_embeds` directly.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextKind {
-    /// Multilingual DistilBERT + Dense 768→512 (русский поиск).
+    /// Multilingual DistilBERT + Dense 768→512 (Russian search).
     Projected,
-    /// CLIP text tower, выход `text_embeds`, без проекции (английский).
+    /// The CLIP text tower, `text_embeds` output, no projection (English).
     Direct,
-    /// SigLIP text tower: только `input_ids`, выход `pooler_output` 768.
+    /// The SigLIP text tower: `input_ids` only, `pooler_output` of 768.
     Pooler,
 }
 
@@ -144,45 +144,45 @@ pub struct ModelFile {
 }
 
 pub struct ModelEntry {
-    /// Ключ эмбеддингов в БД.
+    /// The key of the embeddings in the DB.
     pub id: &'static str,
-    /// Имя подкаталога в папке моделей (исторически `clip-vit-b32`, не меняем).
+    /// The subfolder name in the models folder (historically `clip-vit-b32`, not changed).
     pub dir: &'static str,
     pub title: &'static str,
     pub note: &'static str,
-    /// Лицензия весов — чтобы владелец видел её до скачивания.
+    /// The licence of the weights — so the owner sees it before downloading.
     pub license: &'static str,
     pub kind: TextKind,
-    /// Размерность эмбеддинга этой модели (512, 768, …), а не глобальная константа.
+    /// The embedding dimension of this model (512, 768, …), not a global constant.
     pub dim: usize,
-    /// Сторона квадрата на входе зрительной башни.
+    /// The side of the square at the input of the vision tower.
     pub image_side: u32,
-    /// Максимум токенов текста (у SigLIP — 64).
+    /// The maximum number of text tokens (64 for SigLIP).
     pub max_tokens: usize,
-    /// Токен добивки; пусто — 0. У SigLIP это `</s>` (id 1): pooler берёт последний
-    /// токен, поэтому короткий текст паддится тем же EOS, а не нулём.
+    /// The padding token; empty means 0. For SigLIP it is `</s>` (id 1): the pooler takes the
+    /// last token, so short text is padded with the same EOS, not with a zero.
     pub pad_token: &'static str,
-    /// С какой стороны добивать текст до `max_tokens`. Справа — CLIP и SigLIP 1;
-    /// слева — SigLIP 2: его токенизатор сам добивает справа `<pad>`, а пулер читает
-    /// последний токен, и последним обязан остаться EOS. Справа все тексты
-    /// склеиваются в один вектор (dog/cat 0.976), и картинки перестают различаться.
+    /// On which side to pad the text to `max_tokens`. On the right — CLIP and SigLIP 1; on the
+    /// left — SigLIP 2: its tokenizer pads with `<pad>` on the right itself, while the pooler
+    /// reads the last token, and EOS must remain the last one. On the right all texts
+    /// collapse into one vector (dog/cat 0.976), and the pictures stop being distinguishable.
     pub pad_left: bool,
-    /// Нормализация кадра: у CLIP и SigLIP разные mean/std и фильтр.
+    /// Frame normalization: CLIP and SigLIP have different mean/std and filter.
     pub norm: derive::ImageNorm,
-    /// Сколько кадров видит модель на снимок: CLIP — центр-кроп и весь кадр,
-    /// SigLIP — один кадр, растянутый в квадрат (как в его processor).
+    /// How many frames the model sees per photo: CLIP — a centre crop and the whole frame,
+    /// SigLIP — one frame stretched into a square (as in its processor).
     pub frames: usize,
-    /// Имя выхода зрительной башни в ONNX.
+    /// The name of the vision tower output in ONNX.
     pub vision_output: &'static str,
-    /// Калибровка веса тега: косинус → шкала уверенности CLIP.
-    /// Шкала косинуса у семейств разная (CLIP ViT-B/32 — 0.24–0.32, SigLIP 2 —
-    /// 0.07–0.10), а `tag_show` и `tag_margin` в настройках одни на все модели.
-    /// `score = cos * scale + shift`; `(1.0, 0.0)` — тождественное (CLIP).
-    /// Коэффициенты — свойство модели, а не папки: сняты на двух наборах (M15.6).
+    /// Tag weight calibration: cosine → the CLIP confidence scale.
+    /// The cosine scale differs between families (CLIP ViT-B/32 — 0.24–0.32, SigLIP 2 —
+    /// 0.07–0.10), while `tag_show` and `tag_margin` in the settings are the same for all models.
+    /// `score = cos * scale + shift`; `(1.0, 0.0)` is the identity (CLIP).
+    /// The coefficients are a property of the model, not of the folder: taken on two sets (M15.6).
     pub score_calib: (f32, f32),
-    /// Версия калибровки веса тега. Меняется вместе с `score_calib`: веса в `tags`
-    /// помечены ею в `source`, поэтому старые строки не смешиваются с новыми —
-    /// `embed --retag` пересчитывает их за секунды.
+    /// The version of the tag weight calibration. It changes together with `score_calib`: the
+    /// weights in `tags` are marked with it in `source`, so old rows do not mix with new ones —
+    /// `embed --retag` recomputes them in seconds.
     pub score_version: u8,
     pub files: &'static [ModelFile],
 }
@@ -191,11 +191,11 @@ impl ModelEntry {
     pub fn bytes(&self) -> u64 {
         self.files.iter().map(|f| f.bytes).sum()
     }
-    /// Влезает ли модель в лимит настроек (МиБ).
+    /// Whether the model fits the limit from the settings (MiB).
     pub fn fits(&self, max_mb: u64) -> bool {
         self.bytes() <= max_mb.saturating_mul(1024 * 1024)
     }
-    /// Вес тега в шкале уверенности CLIP (см. `score_calib`).
+    /// The tag weight on the CLIP confidence scale (see `score_calib`).
     pub fn score(&self, cos: f32) -> f32 {
         let (scale, shift) = self.score_calib;
         if !scale.is_finite() || scale <= 0.0 || !shift.is_finite() {
@@ -203,7 +203,7 @@ impl ModelEntry {
         }
         cos * scale + shift
     }
-    /// Имя выхода текстовой башни в ONNX; у Projected это ещё не эмбеддинг.
+    /// The name of the text tower output in ONNX; for Projected it is not an embedding yet.
     pub fn text_output(&self) -> &'static str {
         match self.kind {
             TextKind::Projected => "last_hidden_state",
@@ -356,8 +356,8 @@ static CATALOG: [ModelEntry; 4] = [
         norm: derive::SIGLIP_NORM,
         frames: 1,
         vision_output: "pooler_output",
-        // Косинус SigLIP ниже шкалы CLIP; коэффициенты — из M15.6 (два набора,
-        // 2340 файлов): медианы веса и отрыва совпадают с CLIP.
+        // The SigLIP cosine is below the CLIP scale; the coefficients come from M15.6 (two sets,
+        // 2340 files): the medians of the weight and of the margin match CLIP.
         score_calib: (0.55, 0.23),
         score_version: 2,
         files: &SIGLIP_FILES,
@@ -387,7 +387,7 @@ pub fn catalog() -> &'static [ModelEntry] {
     &CATALOG
 }
 
-/// Модель по id; пустой id — первая из каталога.
+/// A model by id; an empty id means the first in the catalogue.
 pub fn entry(id: &str) -> Option<&'static ModelEntry> {
     if id.is_empty() {
         CATALOG.first()
@@ -396,7 +396,7 @@ pub fn entry(id: &str) -> Option<&'static ModelEntry> {
     }
 }
 
-/// Активная модель из настроек; если id устарел — первая совместимая.
+/// The active model from the settings; if the id is stale — the first compatible one.
 pub fn active_entry(settings: &db::Settings) -> &'static ModelEntry {
     entry(&settings.model_id).unwrap_or(&CATALOG[0])
 }
@@ -409,7 +409,7 @@ pub fn tag_source(e: &ModelEntry) -> String {
     }
 }
 
-/// Дефолтный словарь модели: подписи русские, промпты — на языке её текстовой башни.
+/// The default dictionary of a model: labels are translated, prompts are in the language of its text tower.
 pub fn default_defs(model: &str, kind: TextKind) -> Vec<db::TagDef> {
     DEFAULT_TAGS
         .iter()
@@ -432,10 +432,10 @@ pub fn default_defs(model: &str, kind: TextKind) -> Vec<db::TagDef> {
         .collect()
 }
 
-/// Словарь модели из БД; пустой засевается дефолтом один раз.
-/// Правки владельца не перезатираются: дефолт добавляется в пустую таблицу и
-/// обновляется с новой версией только если словарь с момента засева не правили
-/// (отпечаток `tag_defs_sig` совпадает).
+/// The model dictionary from the DB; an empty one is seeded with the default once.
+/// The owner's edits are not overwritten: the default is added to an empty table and
+/// updated with a new version only if the dictionary has not been edited since the seed
+/// (the `tag_defs_sig` fingerprint matches).
 pub fn ensure_tag_defs(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDef>> {
     let conn = db::open(db_path)?;
     let defs = db::load_tag_defs(&conn, e.id)?;
@@ -457,8 +457,8 @@ pub fn ensure_tag_defs(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDef>
     Ok(defs)
 }
 
-/// Отпечаток словаря: им отличаем «стандартный набор, никто не правил» от правок.
-/// Не криптография, а детектор изменений: FNV-1a по отсортированным строкам.
+/// The dictionary fingerprint: it tells "the standard set, nobody edited it" from edits.
+/// Not cryptography but a change detector: FNV-1a over the sorted strings.
 fn defs_signature(defs: &[db::TagDef]) -> String {
     let mut rows: Vec<String> = defs
         .iter()
@@ -480,7 +480,7 @@ fn write_defs_meta(db_path: &Path, version: i64, defs: &[db::TagDef]) -> Result<
     Ok(())
 }
 
-/// Вернуть стандартный словарь модели (явное действие владельца).
+/// Return the standard dictionary of the model (an explicit action of the owner).
 pub fn reset_to_defaults(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDef>> {
     let conn = db::open(db_path)?;
     let defs = default_defs(e.id, e.kind);
@@ -489,14 +489,14 @@ pub fn reset_to_defaults(db_path: &Path, e: &ModelEntry) -> Result<Vec<db::TagDe
     Ok(defs)
 }
 
-/// Заменить словарь импортом: это правка владельца, автообновление дефолта её не трогает.
+/// Replace the dictionary with an import: this is the owner's edit, the default update leaves it alone.
 pub fn import_defs(db_path: &Path, model: &str, defs: &[db::TagDef]) -> Result<()> {
     let conn = db::open(db_path)?;
     db::replace_tag_defs(&conn, model, defs)?;
     write_defs_meta(db_path, 0, defs)
 }
 
-/// Словарь в JSON — для обмена между машинами и резервной копии. Без путей архива.
+/// The dictionary in JSON — for moving between machines and for a backup. No archive paths.
 pub fn tag_defs_to_json(defs: &[db::TagDef]) -> String {
     let arr: Vec<serde_json::Value> = defs
         .iter()
@@ -514,12 +514,12 @@ pub fn tag_defs_to_json(defs: &[db::TagDef]) -> String {
     serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into())
 }
 
-/// Разобрать словарь из JSON. Неизвестные поля игнорируются, модель берётся из аргумента.
+/// Parse a dictionary from JSON. Unknown fields are ignored, the model comes from the argument.
 pub fn tag_defs_from_json(model: &str, text: &str) -> Result<Vec<db::TagDef>> {
-    let value: serde_json::Value = serde_json::from_str(text).context("разбор JSON словаря")?;
+    let value: serde_json::Value = serde_json::from_str(text).context("parsing the dictionary JSON")?;
     let arr = value
         .as_array()
-        .context("ожидался массив тегов: [{id,label,prompts}]" )?;
+        .context("expected an array of tags: [{id,label,prompts}]")?;
     let mut defs: Vec<db::TagDef> = Vec::with_capacity(arr.len());
     let mut used: HashSet<String> = HashSet::new();
     for (i, v) in arr.iter().enumerate() {
@@ -528,7 +528,7 @@ pub fn tag_defs_from_json(model: &str, text: &str) -> Result<Vec<db::TagDef>> {
             .and_then(|x| x.as_str())
             .map(str::trim)
             .filter(|l| !l.is_empty())
-            .with_context(|| format!("тег #{i}: нет label"))?;
+            .with_context(|| format!("tag #{i}: no label"))?;
         let base = v
             .get("id")
             .and_then(|x| x.as_str())
@@ -543,7 +543,7 @@ pub fn tag_defs_from_json(model: &str, text: &str) -> Result<Vec<db::TagDef>> {
             n += 1;
         }
         if defs.iter().any(|d: &db::TagDef| d.label == label) {
-            bail!("метка «{label}» встречается в файле дважды");
+            bail!("the label “{label}” occurs twice in the file");
         }
         let prompts: Vec<String> = v
             .get("prompts")
@@ -577,9 +577,9 @@ pub fn tag_defs_from_json(model: &str, text: &str) -> Result<Vec<db::TagDef>> {
     Ok(defs)
 }
 
-/// Ключ для тега, добавленного без явного id: латиница/цифры, остальное — дефис.
-/// Кириллическая метка даёт `tag`, поэтому `tag_defs_from_json` разводит повторы
-/// (`tag-2`), а GUI при создании своего тега ставит `custom-N`.
+/// A key for a tag added without an explicit id: Latin letters and digits, the rest becomes a dash.
+/// A Cyrillic label gives `tag`, so `tag_defs_from_json` separates the repeats (`tag-2`),
+/// and the GUI puts `custom-N` when creating its own tag.
 pub fn slug(label: &str) -> String {
     let mut out = String::new();
     for c in label.chars() {
@@ -605,7 +605,7 @@ fn file_paths(dir: &Path, e: &ModelEntry) -> Vec<PathBuf> {
     e.files.iter().map(|f| dir.join(f.name)).collect()
 }
 
-/// Файлы модели на месте (без проверки sha256 — она при загрузке).
+/// The model files are in place (without a sha256 check — that happens on download).
 pub fn model_present_in(models_dir: &Path, e: &ModelEntry) -> bool {
     let dir = model_dir(models_dir, e);
     file_paths(&dir, e).iter().all(|p| p.is_file())
@@ -615,23 +615,23 @@ pub fn model_present(settings: &db::Settings) -> bool {
     model_present_in(&settings.models_dir, active_entry(settings))
 }
 
-/// Проверить наличие и sha256 всех файлов модели.
+/// Check the presence and the sha256 of every model file.
 pub fn check_model_in(models_dir: &Path, e: &ModelEntry) -> Result<()> {
     let dir = model_dir(models_dir, e);
     for f in e.files {
         let path = dir.join(f.name);
         if !path.is_file() {
             bail!(
-                "нет файлов модели «{}»: {}\nскачайте в «Настройках» или: bash scripts/fetch-model.sh",
+                "no files of the model “{}”: {}\ndownload in the Settings or run: bash scripts/fetch-model.sh",
                 e.title,
                 path.display()
             );
         }
         let got = derive::sha256_file(&path)
-            .with_context(|| format!("не прочитать {}", path.display()))?;
+            .with_context(|| format!("cannot read {}", path.display()))?;
         if got != f.sha256 {
             bail!(
-                "файл модели повреждён ({}): {} \nsha256 {got}, ожидался {}\nскачайте заново в «Настройках»",
+                "a model file is damaged ({}): {} \nsha256 {got}, expected {}\ndownload it again in the Settings",
                 f.name,
                 path.display(),
                 f.sha256
@@ -641,7 +641,7 @@ pub fn check_model_in(models_dir: &Path, e: &ModelEntry) -> Result<()> {
     Ok(())
 }
 
-/// Размер файлов модели в байтах (для интерфейса и отчётов).
+/// The size of the model files in bytes (for the interface and the reports).
 pub fn model_bytes_in(models_dir: &Path, e: &ModelEntry) -> i64 {
     let dir = model_dir(models_dir, e);
     file_paths(&dir, e)
@@ -655,9 +655,9 @@ pub fn check_model(settings: &db::Settings) -> Result<()> {
     check_model_in(&settings.models_dir, active_entry(settings))
 }
 
-/// Разложить строки токенов в один батч: добить до `max_len` с нужной стороны.
-/// Хвост из падов, который токенизатор поставил сам, снимается: у SigLIP 2 он
-/// справа, а пулер читает последний токен — последним обязан остаться EOS.
+/// Lay the token rows into one batch: pad to `max_len` on the needed side.
+/// The tail of pads the tokenizer put there itself is removed: for SigLIP 2 it is on the
+/// right, while the pooler reads the last token — EOS must remain the last one.
 fn pad_rows(rows: &[Vec<i64>], max_len: usize, pad: i64, pad_left: bool) -> (Vec<i64>, Vec<i64>) {
     let batch = rows.len();
     let mut ids = vec![pad; batch * max_len];
@@ -682,7 +682,7 @@ pub struct Model {
     text: Session,
     tokenizer: Tokenizer,
     dense: Vec<f32>,
-    /// Метка → векторы её промптов (по одному на шаблон); только включённые теги.
+    /// Label → the vectors of its prompts (one per template); enabled tags only.
     tag_vectors: Vec<(String, Vec<f32>)>,
     pub entry: &'static ModelEntry,
 }
@@ -704,16 +704,16 @@ impl Model {
             .commit_from_file(f("text.onnx"))
             .map_err(oe)?;
         let tokenizer = Tokenizer::from_file(f("tokenizer.json"))
-            .map_err(|e| anyhow::anyhow!("не загрузить токенизатор: {e}"))?;
-        // Размерность — свойство модели, а не глобальная константа. Где ONNX-метаданные
-        // фиксированы, сверяем их сразу при загрузке; где динамические — на первом прогоне.
-        if let Some(dim) = output_dim(&vision, entry.vision_output, "зрительная")? {
-            ensure_dim("зрительная", dim, entry.dim)?;
+            .map_err(|e| anyhow::anyhow!("cannot load the tokenizer: {e}"))?;
+        // The dimension is a property of the model, not a global constant. Where the ONNX metadata
+        // is fixed, it is checked at load; where dynamic — on the first pass.
+        if let Some(dim) = output_dim(&vision, entry.vision_output, "vision")? {
+            ensure_dim("vision", dim, entry.dim)?;
         }
         if entry.kind != TextKind::Projected
-            && let Some(dim) = output_dim(&text, entry.text_output(), "текстовая")?
+            && let Some(dim) = output_dim(&text, entry.text_output(), "text")?
         {
-            ensure_dim("текстовая", dim, entry.dim)?;
+            ensure_dim("text", dim, entry.dim)?;
         }
         let dense = if entry.kind == TextKind::Projected {
             read_dense(&f("text_dense.safetensors"), entry.dim)?
@@ -733,10 +733,10 @@ impl Model {
         Ok(me)
     }
 
-    /// Подготовить векторы промптов из словаря: 2–3 шаблона на метку.
-    /// Вес тега — лучший из его шаблонов, а не среднее: описание предмета может
-    /// совпасть только с одной формулировкой, и среднее такую догадку размывает.
-    /// Векторы фото не пересчитываются — правка словаря стоит один прогон текстовой башни.
+    /// Prepare the prompt vectors from the dictionary: 2–3 templates per label.
+    /// A tag weight is the best of its templates, not the average: a description of an object may
+    /// match only one wording, and the average blurs such a guess.
+    /// The photo vectors are not recomputed — editing the dictionary costs one text tower pass.
     pub fn set_tag_defs(&mut self, defs: &[db::TagDef]) -> Result<()> {
         let mut out: Vec<(String, Vec<f32>)> = Vec::new();
         for d in defs.iter().filter(|d| d.enabled) {
@@ -765,7 +765,7 @@ impl Model {
             let enc = self
                 .tokenizer
                 .encode(*t, true)
-                .map_err(|e| anyhow::anyhow!("токенизация «{t}»: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("tokenizing “{t}”: {e}"))?;
             let mut ids: Vec<i64> = enc.get_ids().iter().map(|&v| v as i64).collect();
             ids.truncate(self.entry.max_tokens);
             if ids.is_empty() {
@@ -774,8 +774,8 @@ impl Model {
             max_len = max_len.max(ids.len());
             rows.push(ids);
         }
-        // SigLIP обучался на фиксированных 64 токенах с pad=EOS: короткий текст
-        // без добивки до 64 даёт пулеру не тот последний токен.
+        // SigLIP was trained on fixed 64 tokens with pad=EOS: short text without padding to 64
+        // gives the pooler the wrong last token.
         let max_len = if self.entry.kind == TextKind::Pooler {
             self.entry.max_tokens
         } else {
@@ -793,7 +793,7 @@ impl Model {
         Ok((ids, mask, rows.len(), max_len))
     }
 
-    /// Текстовые эмбеддинги (для запроса и промптов). Векторы нормализованы.
+    /// Text embeddings (for a query and for prompts). The vectors are normalized.
     pub fn encode_texts(&mut self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -809,14 +809,14 @@ impl Model {
                 .try_extract_tensor::<f32>()
                 .map_err(oe)?;
             let dim = *shape.last().unwrap_or(&0) as usize;
-            ensure_dim("текстовая", dim, self.entry.dim)?;
+            ensure_dim("text", dim, self.entry.dim)?;
             for row in data.chunks(dim) {
                 let mut v = row.to_vec();
                 normalize(&mut v);
                 out.push(v);
             }
             if out.len() != batch {
-                bail!("текстовая модель вернула {} векторов на {batch} запросов", out.len());
+                bail!("the text model returned {} vectors for {batch} requests", out.len());
             }
             return Ok(out);
         }
@@ -829,8 +829,8 @@ impl Model {
         let want_hidden = self.dense.len() / self.entry.dim;
         if hidden == 0 || hidden != want_hidden {
             bail!(
-                "текстовая модель вернула {hidden} признаков, ожидалось {want_hidden}; \
-                 проекция не совпадает с вектором {}",
+                "the text model returned {hidden} features, {want_hidden} expected; \
+                 the projection does not match the vector of {}",
                 self.entry.dim
             );
         }
@@ -863,10 +863,10 @@ impl Model {
         Ok(out)
     }
 
-    /// Эмбеддинги изображений по путям к превью 320 px. Векторы нормализованы.
+    /// Image embeddings by paths to 320 px previews. The vectors are normalized.
     ///
-    /// На каждый снимок модель видит два кадра — центр-кроп и весь кадр с полями;
-    /// векторы усредняются и снова нормализуются. Один вектор на снимок в БД.
+    /// Per photo the model sees two frames — a centre crop and the whole frame with margins;
+    /// the vectors are averaged and normalized again. One vector per photo in the DB.
     pub fn embed_thumbs(&mut self, thumbs: &[PathBuf]) -> Result<Vec<Vec<f32>>> {
         if thumbs.is_empty() {
             return Ok(Vec::new());
@@ -891,13 +891,13 @@ impl Model {
             values.chunks(self.entry.dim).map(<[f32]>::to_vec).collect()
         };
         if out.len() != thumbs.len() {
-            bail!("зрительная модель вернула {} векторов на {} картинок", out.len(), thumbs.len());
+            bail!("the vision model returned {} vectors for {} images", out.len(), thumbs.len());
         }
         Ok(out)
     }
 
-    /// Прогнать зрительную модель по готовым CHW-входам; векторы нормализованы.
-    /// `n` — число кадров, для которых подготовлены данные (не снимков).
+    /// Run the vision model over ready CHW inputs; the vectors are normalized.
+    /// `n` is the number of frames the data was prepared for (not photos).
     fn run_vision(&mut self, data: Vec<f32>, n: usize) -> Result<Vec<f32>> {
         let side = self.entry.image_side;
         let outputs = self.vision.run(ort::inputs![
@@ -909,10 +909,10 @@ impl Model {
         let name = self.entry.vision_output;
         let (shape, values) = outputs[name].try_extract_tensor::<f32>().map_err(oe)?;
         let dim = *shape.last().unwrap_or(&0) as usize;
-        ensure_dim("зрительная", dim, self.entry.dim)?;
+        ensure_dim("vision", dim, self.entry.dim)?;
         let count = values.len() / dim;
         if count != n {
-            bail!("зрительная модель вернула {count} векторов на {n} кадров");
+            bail!("the vision model returned {count} vectors for {n} frames");
         }
         let mut out = values.to_vec();
         for chunk in out.chunks_mut(dim) {
@@ -921,8 +921,8 @@ impl Model {
         Ok(out)
     }
 
-    /// Теги для одного вектора: все включённые теги словаря с весом по убыванию.
-    /// У метки несколько шаблонов — берётся её лучший вес.
+    /// Tags for one vector: every enabled tag of the dictionary, weight descending.
+    /// A label has several templates — its best weight is taken.
     pub fn tag_scores(&self, image: &[f32]) -> Vec<(String, f32)> {
         let mut best: Vec<(String, f32)> = Vec::new();
         for (label, v) in &self.tag_vectors {
@@ -936,7 +936,7 @@ impl Model {
         best
     }
 
-    /// Сколько включённых тегов сейчас в словаре.
+    /// How many enabled tags are in the dictionary now.
     pub fn tag_count(&self) -> usize {
         let mut labels: Vec<&str> = self.tag_vectors.iter().map(|(l, _)| l.as_str()).collect();
         labels.sort_unstable();
@@ -945,21 +945,21 @@ impl Model {
     }
 }
 
-/// Фильтр по тегу: подходит любой вес выше порога, а не только самый верхний.
-/// Так 14 подсказок не «съедают» друг друга: фото с детьми видно и в «дети», и в «одежда».
+/// A filter by tag: any weight above the threshold fits, not only the top one.
+/// So 14 hints do not "eat" each other: a photo with children shows up in both "children" and "clothes".
 pub fn tag_above(scores: &[(String, f32)], want: &str, show: f32) -> bool {
     scores
         .iter()
         .any(|(tag, score)| tag == want && *score >= show)
 }
 
-/// Самый сильный вес среди тегов одного файла; `None`, если тегов нет.
+/// The strongest weight among the tags of one file; `None` if there are no tags.
 pub fn max_score(scores: &[(String, f32)]) -> Option<f32> {
     scores.iter().map(|(_, s)| *s).reduce(f32::max)
 }
 
-/// Распределение весов каждого тега по каталогу, по убыванию — для процентильного порога.
-/// Считается один раз при загрузке тегов, а не на каждый кадр интерфейса.
+/// The distribution of the weight of each tag over the folder, descending — for the percentile threshold.
+/// Computed once when the tags are loaded, not on every interface frame.
 pub fn tag_distributions(
     tags: &HashMap<i64, Vec<(String, f32)>>,
 ) -> HashMap<String, Vec<f32>> {
@@ -975,16 +975,16 @@ pub fn tag_distributions(
     out
 }
 
-/// Распределение лучшего веса каждого файла, по убыванию — процентиль «все теги».
+/// The distribution of the best weight of every file, descending — the "all tags" percentile.
 pub fn top_score_distribution(tags: &HashMap<i64, Vec<(String, f32)>>) -> Vec<f32> {
     let mut v: Vec<f32> = tags.values().filter_map(|t| max_score(t)).collect();
     v.sort_by(|a, b| b.total_cmp(a));
     v
 }
 
-/// Порог-процентиль по убывающему списку: 0% — все, 100% — только самый сильный.
-/// Возвращает вес, при котором проходит не меньше `count` снимков, где `count` —
-/// верхние `100 − pct` процентов (на 100% всегда хотя бы один). Пусто — `None`.
+/// A percentile threshold over a descending list: 0% — all, 100% — only the strongest.
+/// Returns the weight at which at least `count` photos pass, where `count` is the top
+/// `100 − pct` percent (at 100% always at least one). Empty — `None`.
 pub fn percentile_threshold(sorted_desc: &[f32], pct: i32) -> Option<f32> {
     let n = sorted_desc.len();
     if n == 0 {
@@ -999,8 +999,8 @@ pub fn percentile_threshold(sorted_desc: &[f32], pct: i32) -> Option<f32> {
     Some(sorted_desc[count - 1])
 }
 
-/// Усреднить векторы кадров одного снимка (по два на снимок) и нормализовать.
-/// Без нормализации среднее двух единичных векторов короче единицы, и косинус с промптами врёт.
+/// Average the frame vectors of one photo (two per photo) and normalize.
+/// Without normalization the mean of two unit vectors is shorter than one, and the cosine with prompts lies.
 fn average_pairs(values: &[f32], images: usize, dim: usize) -> Vec<Vec<f32>> {
     let mut out = Vec::with_capacity(images);
     for i in 0..images {
@@ -1020,7 +1020,7 @@ fn average_pairs(values: &[f32], images: usize, dim: usize) -> Vec<Vec<f32>> {
     out
 }
 
-/// Уверенный тег с настраиваемыми порогами.
+/// A confident tag with configurable thresholds.
 pub fn confident_tag_with(
     scores: &[(String, f32)],
     show: f32,
@@ -1038,27 +1038,27 @@ pub fn confident_tag_with(
     Some((tag.as_str(), *top))
 }
 
-/// Пороги по умолчанию.
+/// The default thresholds.
 #[allow(dead_code)]
 pub fn confident_tag(scores: &[(String, f32)]) -> Option<(&str, f32)> {
     confident_tag_with(scores, TAG_SHOW, TAG_MARGIN)
 }
 
-/// Проверка размерности с текстом, где видно и полученное, и ожидаемое число.
+/// A dimension check with text that shows both the obtained and the expected number.
 fn ensure_dim(what: &str, got: usize, want: usize) -> Result<()> {
     if got == want {
         return Ok(());
     }
     bail!(
-        "{what} модель вернула {got} признаков, а в каталоге у неё {want}; \
-         модель и векторы не смешиваются — выберите ту же модель или пересчитайте теги"
+        "the {what} model returned {got} features while the catalogue says {want}; \
+         a model and its vectors do not mix — pick the same model or recompute the tags"
     )
 }
 
-/// Последняя размерность выхода ONNX, если она зафиксирована в метаданных.
+/// The last dimension of the ONNX output, if it is fixed in the metadata.
 fn output_dim(session: &Session, name: &str, what: &str) -> Result<Option<usize>> {
     let Some(outlet) = session.outputs().iter().find(|o| o.name() == name) else {
-        bail!("в {what} модели нет выхода «{name}»; каталог моделей не совпадает с файлами");
+        bail!("the {what} model has no output “{name}”; the catalogue does not match the files");
     };
     if let ort::value::ValueType::Tensor { shape, .. } = outlet.dtype()
         && let Some(&last) = shape.last()
@@ -1073,7 +1073,7 @@ fn oe<R>(e: ort::Error<R>) -> anyhow::Error {
     anyhow::anyhow!("ONNX Runtime: {e}")
 }
 
-/// Одно ONNX-окружение на процесс: ORT не разрешает создать второе, а CLIP и лица живут рядом.
+/// One ONNX environment per process: ORT does not allow a second one, and CLIP and faces live side by side.
 static ORT_ENV: OnceLock<Environment> = OnceLock::new();
 
 pub(crate) fn shared_environment() -> Result<Environment> {
@@ -1086,21 +1086,21 @@ pub(crate) fn shared_environment() -> Result<Environment> {
 }
 
 fn read_dense(path: &Path, dim: usize) -> Result<Vec<f32>> {
-    let bytes = std::fs::read(path).with_context(|| format!("не прочитать {}", path.display()))?;
+    let bytes = std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
     if bytes.len() < 8 {
-        bail!("плотный слой повреждён: {}", path.display());
+        bail!("the dense layer is damaged: {}", path.display());
     }
     let header_len = u64::from_le_bytes(bytes[..8].try_into().unwrap()) as usize;
     let header: serde_json::Value = serde_json::from_slice(&bytes[8..8 + header_len])
-        .context("не разобрать safetensors-заголовок")?;
+        .context("cannot parse the safetensors header")?;
     let info = header
         .get("linear.weight")
-        .context("в safetensors нет linear.weight")?;
+        .context("the safetensors hold no linear.weight")?;
     let start = info["data_offsets"][0].as_u64().unwrap_or(0) as usize + 8 + header_len;
     let end = info["data_offsets"][1].as_u64().unwrap_or(0) as usize + 8 + header_len;
     let raw = bytes
         .get(start..end)
-        .context("safetensors короче заявленного")?;
+        .context("the safetensors are shorter than declared")?;
     let w: Vec<f32> = raw
         .as_chunks::<4>()
         .0
@@ -1108,7 +1108,7 @@ fn read_dense(path: &Path, dim: usize) -> Result<Vec<f32>> {
         .map(|b| f32::from_le_bytes(*b))
         .collect();
     if dim == 0 || !w.len().is_multiple_of(dim) {
-        bail!("проекция текста {} чисел не делится на размерность {dim}", w.len());
+        bail!("the text projection of {} numbers does not divide by the dimension {dim}", w.len());
     }
     Ok(w)
 }
@@ -1139,7 +1139,7 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Векторы из БД, отсортированные по косинусу с запросом.
+/// Vectors from the DB, sorted by the cosine with the query.
 pub fn search(
     db_path: &Path,
     model: &mut Model,
@@ -1149,7 +1149,7 @@ pub fn search(
     let mut q = model
         .encode_texts(&[query])?
         .pop()
-        .context("пустой текстовый эмбеддинг")?;
+        .context("an empty text embedding")?;
     normalize(&mut q);
     let conn = db::open(db_path)?;
     let vectors = db::load_embeddings(&conn, model.entry.id)?;
@@ -1170,9 +1170,9 @@ pub struct EmbedStats {
     pub errors: usize,
     pub seconds: f64,
     pub model_bytes: i64,
-    /// Прогон прерван владельцем: остальные файлы остались на следующий раз.
+    /// The pass was stopped by the owner: the remaining files are left for next time.
     pub cancelled: bool,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -1204,9 +1204,9 @@ impl std::fmt::Display for EmbedStats {
     }
 }
 
-/// Посчитать эмбеддинги и теги для изображений, у которых их ещё нет (ключ — sha256).
-/// `refresh` сбрасывает векторы активной модели: нужен после смены препроцессинга,
-/// иначе ключ sha256 честно скажет «уже посчитано».
+/// Compute embeddings and tags for the images that have none yet (the key is sha256).
+/// `refresh` drops the vectors of the active model: needed after a change of preprocessing,
+/// otherwise the sha256 key honestly says "computed already".
 pub fn embed_missing(
     db_path: &Path,
     threads: usize,
@@ -1221,7 +1221,11 @@ pub fn embed_missing(
     if refresh {
         let n = db::clear_embeddings(&conn, entry.id)?;
         if let Some(p) = &progress {
-            p.set_msg(format!("CLIP: сброшено {n} старых векторов — считаю заново"));
+            p.set_msg(i18n::fill(
+                settings.lang,
+                "CLIP: dropped {} old vectors — computing them anew",
+                &[n.to_string()],
+            ));
         }
     }
     let rows = db::load_all(&conn)?;
@@ -1239,7 +1243,7 @@ pub fn embed_missing(
     }
     if todo.is_empty() {
         if let Some(p) = &progress {
-            p.set_msg("CLIP: всё уже посчитано");
+            p.set_msg(i18n::t(settings.lang, "CLIP: everything is computed already"));
             p.finish();
         }
         return Ok(EmbedStats {
@@ -1255,18 +1259,22 @@ pub fn embed_missing(
         });
     }
     let mut model = Model::load(&settings, threads)?;
-    // Словарь тегов — из БД: правки владельца и дефолт засеяны до прогона.
+    // The tag dictionary comes from the DB: the owner's edits and the default are seeded before the pass.
     let defs = ensure_tag_defs(db_path, entry)?;
     model.set_tag_defs(&defs)?;
     if let Some(p) = &progress {
-        p.set_msg(format!("CLIP: эмбеддинги, тегов в словаре {}…", model.tag_count()));
+        p.set_msg(i18n::fill(
+            settings.lang,
+            "CLIP: embeddings, {} tags in the dictionary…",
+            &[model.tag_count().to_string()],
+        ));
     }
     let thumbs_dir = db::cache_dir().join("thumbs");
     let mut computed = 0usize;
     let mut errors = 0usize;
     let batch = batch.clamp(1, 64);
     for part in todo.chunks(batch) {
-        // «Стоп»: посчитанные пакеты уже в БД, остальные остаются на следующий запуск.
+        // "Stop": the computed batches are in the DB already, the rest is left for the next run.
         if progress.as_ref().is_some_and(|p| p.cancelled()) {
             break;
         }
@@ -1280,16 +1288,27 @@ pub fn embed_missing(
         let vectors = match model.embed_thumbs(&paths) {
             Ok(v) => v,
             Err(e) => {
-                // пакет может упасть из-за одного битого превью — откатываемся на поштучно
+                // a batch may fail because of one broken preview — fall back to one by one
                 if let Some(p) = &progress {
-                    p.set_msg(format!("CLIP: пакет не прошёл ({e}), по одному"));
+                    p.set_msg(i18n::fill(
+                settings.lang,
+                "CLIP: the batch failed ({}), one by one",
+                &[e.to_string()],
+            ));
                 }
                 let mut single = Vec::with_capacity(paths.len());
                 for (r, path) in valid.iter().zip(&paths) {
                     match model.embed_thumbs(std::slice::from_ref(path)) {
                         Ok(v) => single.push(Some(v.into_iter().next().unwrap_or_default())),
                         Err(err) => {
-                            eprintln!("\nCLIP: не декодировать {}: {err}", path.display());
+                            eprintln!(
+                "\n{}",
+                i18n::fill(
+                    settings.lang,
+                    "CLIP: cannot decode {}: {}",
+                    &[path.display().to_string(), err.to_string()],
+                )
+            );
                             let _ = r;
                             single.push(None);
                         }
@@ -1321,7 +1340,7 @@ pub fn embed_missing(
         tx.commit()?;
     }
     if let Some(p) = &progress {
-        p.set_msg("CLIP: готово");
+        p.set_msg(i18n::t(settings.lang, "CLIP: done"));
         p.finish();
     }
     Ok(EmbedStats {
@@ -1337,13 +1356,13 @@ pub fn embed_missing(
     })
 }
 
-/// Пересчитать теги по уже сохранённым векторам: новые подписи без повторного CLIP по фото.
+/// Recompute the tags from the stored vectors: new labels without running CLIP over the photos again.
 pub struct RetagStats {
     pub model: &'static str,
     pub total: usize,
     pub tagged: usize,
     pub seconds: f64,
-    /// Язык отчёта (M21.6): ставит вызывающий до печати; английский по умолчанию.
+    /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
 }
 
@@ -1363,7 +1382,7 @@ impl std::fmt::Display for RetagStats {
     }
 }
 
-/// Одна кнопка «Посчитать теги»: сначала эмбеддинги для новых файлов, затем подписи по всем.
+/// One "Compute tags" button: embeddings for the new files first, then labels over all of them.
 pub fn embed_and_retag(
     db_path: &Path,
     threads: usize,
@@ -1375,7 +1394,7 @@ pub fn embed_and_retag(
     Ok((embed, tags))
 }
 
-/// Пересчитать только теги: читает готовые эмбеддинги и промпты модели, без декодирования фото.
+/// Recompute tags only: reads the ready embeddings and the model prompts, without decoding photos.
 pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) -> Result<RetagStats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
@@ -1384,7 +1403,7 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
     let rows = db::load_embeddings(&conn, entry.id)?;
     if let Some(p) = &progress {
         p.set_total(rows.len());
-        p.set_msg("CLIP: пересчёт тегов без фото…");
+        p.set_msg(i18n::t(settings.lang, "CLIP: recomputing the tags without the photos…"));
     }
     let mut model = Model::load(&settings, threads)?;
     let defs = ensure_tag_defs(db_path, entry)?;
@@ -1400,7 +1419,7 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
     }
     tx.commit()?;
     if let Some(p) = &progress {
-        p.set_msg("CLIP: теги пересчитаны");
+        p.set_msg(i18n::t(settings.lang, "CLIP: the tags are recomputed"));
         p.finish();
     }
     Ok(RetagStats {
@@ -1412,7 +1431,7 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
     })
 }
 
-/// Детерминированный k-means++ над нормализованными векторами.
+/// A deterministic k-means++ over normalized vectors.
 pub fn kmeans(xs: &[Vec<f32>], k: usize, iters: usize, seed: u64) -> Vec<usize> {
     let n = xs.len();
     if n == 0 {
@@ -1486,7 +1505,7 @@ pub fn kmeans(xs: &[Vec<f32>], k: usize, iters: usize, seed: u64) -> Vec<usize> 
         }
         for c in 0..k {
             if counts[c] == 0 {
-                // пустой кластер забирает самую дальнюю точку
+                // an empty cluster takes the farthest point
                 let far = labels
                     .iter()
                     .enumerate()
@@ -1516,7 +1535,7 @@ pub struct ClusterStats {
     pub seconds: f64,
 }
 
-/// Собрать кластеры и записать отчёт «кластер → 12 примеров».
+/// Build the clusters and write the report "cluster → 12 examples".
 pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterStats> {
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
@@ -1526,7 +1545,7 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
     let by_id: HashMap<i64, &FileRow> = rows.iter().map(|r| (r.id, r)).collect();
     let vectors = db::load_embeddings(&conn, entry.id)?;
     if vectors.len() < 2 {
-        bail!("нет эмбеддингов: сначала запустите `photocat embed`");
+        bail!("no embeddings: run `photocat embed` first");
     }
     let xs: Vec<Vec<f32>> = vectors.iter().map(|(_, v)| v.clone()).collect();
     let labels = kmeans(&xs, k, 30, 0x5eed_2026);
@@ -1538,7 +1557,7 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
     buckets.sort_by_key(|b| std::cmp::Reverse(b.len()));
 
     let lang = settings.lang;
-    let mut md = String::from(i18n::t(lang, "# CLIP clusters (M3)\n\n"));
+    let mut md = String::from(i18n::t(settings.lang, "# CLIP clusters (M3)\n\n"));
     md.push_str(&format!(
         "{}\n\n",
         i18n::fill(
@@ -1574,7 +1593,7 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
         if b.len() > 12 {
             md.push_str(&format!(
                 "- {}\n",
-                i18n::fill(lang, "… and {} more", &[(b.len() - 12).to_string()])
+                i18n::fill(settings.lang, "… and {} more", &[(b.len() - 12).to_string()])
             ));
         }
     }
@@ -1590,13 +1609,13 @@ pub fn write_clusters(db_path: &Path, out: &Path, k: usize) -> Result<ClusterSta
     })
 }
 
-/// Итог загрузки: какая модель в итоге скачана и какие варианты не подошли.
+/// The result of a download: which model ended up downloaded and which options did not fit.
 pub struct DownloadReport {
     pub model: &'static str,
     pub bytes: u64,
     pub files: usize,
     pub fallbacks: Vec<String>,
-    /// Язык отчёта (M21.6): английский по умолчанию.
+    /// The language of the report (M21.6): English by default.
     pub lang: Lang,
 }
 
@@ -1622,8 +1641,8 @@ impl std::fmt::Display for DownloadReport {
     }
 }
 
-/// Скачать модель с согласия владельца. Сначала выбранная, затем — совместимые варианты
-/// из каталога в пределах лимита размера (ADR 0015).
+/// Download a model with the owner's consent. The chosen one first, then the compatible
+/// options from the catalogue within the size limit (ADR 0015).
 pub fn download_model(
     settings: &db::Settings,
     requested: &str,
@@ -1631,7 +1650,10 @@ pub fn download_model(
     progress: Option<Arc<Progress>>,
 ) -> Result<DownloadReport> {
     if !consent {
-        bail!("скачивание модели требует явного согласия владельца");
+        bail!(
+            "{}",
+            i18n::t(settings.lang, "downloading a model needs the owner's explicit consent")
+        );
     }
     let max_bytes = settings.max_model_mb.saturating_mul(1024 * 1024);
     let mut candidates: Vec<&'static ModelEntry> = Vec::new();
@@ -1649,7 +1671,7 @@ pub fn download_model(
     for e in candidates {
         if max_bytes > 0 && e.bytes() > max_bytes {
             failed.push(format!(
-                "{} — {} больше лимита {} МиБ",
+                "{}: {} is bigger than the limit of {} MiB",
                 e.title,
                 db::human(e.bytes() as i64),
                 settings.max_model_mb
@@ -1669,7 +1691,7 @@ pub fn download_model(
             Err(err) => failed.push(format!("{} — {err}", e.title)),
         }
     }
-    bail!("не удалось скачать модель: {}", failed.join("; "))
+    bail!("cannot download the model: {}", failed.join("; "))
 }
 
 fn download_entry(
@@ -1681,8 +1703,8 @@ fn download_entry(
     download_files(settings, &dir, e.title, e.files, progress)
 }
 
-/// Скачать произвольный набор файлов модели (CLIP или лица) с проверкой sha256.
-/// Общий путь нужен, чтобы загрузчик был один и `curl` запускался только здесь (ADR 0016).
+/// Download an arbitrary set of model files (CLIP or faces) with a sha256 check.
+/// A shared path so that there is one downloader and `curl` runs only here (ADR 0016).
 pub(crate) fn download_files(
     settings: &db::Settings,
     dir: &Path,
@@ -1691,11 +1713,11 @@ pub(crate) fn download_files(
     progress: Option<Arc<Progress>>,
 ) -> Result<usize> {
     std::fs::create_dir_all(dir)
-        .with_context(|| format!("не создать {}", dir.display()))?;
+        .with_context(|| format!("cannot create {}", dir.display()))?;
     if let Some(p) = &progress {
         p.reset();
         p.set_total(model_files.len());
-        p.set_msg(format!("модель {title}: подготовка"));
+        p.set_msg(i18n::fill(settings.lang, "model {}: preparing", &[title.to_string()]));
     }
     let mut files = 0usize;
     for f in model_files {
@@ -1708,14 +1730,18 @@ pub(crate) fn download_files(
             files += 1;
         } else {
             if let Some(p) = &progress {
-                p.set_msg(format!("модель {title}: {}", f.name));
+                p.set_msg(i18n::fill(
+                    settings.lang,
+                    "model {}: {}",
+                    &[title.to_string(), f.name.to_string()],
+                ));
             }
             fetch_with_fallback(&settings.tools, settings.lang, f.url, &path)?;
             let got = derive::sha256_file(&path)
-                .with_context(|| format!("не прочитать {}", path.display()))?;
+                .with_context(|| format!("cannot read {}", path.display()))?;
             if got != f.sha256 {
                 bail!(
-                    "sha256 {} не совпал: {got}, ожидался {}",
+                    "the sha256 of {} does not match: got {got}, expected {}",
                     f.name,
                     f.sha256
                 );
@@ -1727,13 +1753,13 @@ pub(crate) fn download_files(
         }
     }
     if let Some(p) = &progress {
-        p.set_msg("модель скачана");
+        p.set_msg(i18n::t(settings.lang, "the model is downloaded"));
         p.finish();
     }
     Ok(files)
 }
 
-/// Основной адрес и зеркало: если HuggingFace недоступен, пробуем hf-mirror.
+/// The main address and the mirror: if HuggingFace is unreachable, try hf-mirror.
 fn fetch_with_fallback(tools: &tools::Tools, lang: Lang, url: &str, dst: &Path) -> Result<()> {
     let mirror = url.replace("https://huggingface.co/", "https://hf-mirror.com/");
     let mut last = String::new();
@@ -1767,7 +1793,7 @@ fn curl_get(tools: &tools::Tools, lang: Lang, url: &str, dst: &Path) -> Result<(
     .arg(url);
     let out = cmd.output().with_context(|| {
         format!(
-            "не запустить curl ({}: {}): скачивание моделей требует curl",
+            "cannot run curl ({}: {}): downloading models needs curl",
             tools.source(Tool::Curl, lang),
             tools.program(Tool::Curl)
         )
@@ -1785,7 +1811,7 @@ fn curl_get(tools: &tools::Tools, lang: Lang, url: &str, dst: &Path) -> Result<(
 mod tests {
     use super::*;
 
-    /// Дефолт: русские подписи, промпты на языке модели; ни одного слова из конкретного архива.
+    /// The default: English labels, prompts in the language of the model; not a word from a particular archive.
     #[test]
     fn the_default_dictionary_is_shared_and_speaks_the_model_language() {
         let ru = default_defs("m", TextKind::Projected);
@@ -1804,12 +1830,12 @@ mod tests {
                 assert!(!d.prompts.iter().any(|p| p.contains(bad)), "в дефолте «{bad}»");
             }
         }
-        // Порядок сохраняется, id — стабильные ключи.
+        // The order is kept, the id is a stable key.
         assert_eq!(ru[7].id, "furniture");
         assert_eq!(ru[7].position, 7);
     }
 
-    /// Словарь переживает экспорт/импорт без потерь; теги без id получают уникальные ключи.
+    /// The dictionary survives export and import losslessly; tags without an id get unique keys.
     #[test]
     fn the_dictionary_survives_a_json_roundtrip() {
         let defs = default_defs("m", TextKind::Projected);
@@ -1823,7 +1849,7 @@ mod tests {
         edited[2].min_percentile = 40;
         let back = tag_defs_from_json("m", &tag_defs_to_json(&[edited[2].clone()])).unwrap();
         assert_eq!(back[0], edited[2]);
-        // Без id: ключи из метки, совпадающие ключи разводятся, а не затирают друг друга.
+        // Without an id: keys come from the label, colliding keys are separated, not overwritten.
         let back = tag_defs_from_json(
             "m",
             r#"[{"label":"Шкаф","prompts":["фотография шкафа"]},{"label":"Комод","prompts":[]}]"#,
@@ -1834,7 +1860,7 @@ mod tests {
         assert!(back.iter().all(|d| d.model == "m"));
     }
 
-    /// Дефолт засевается один раз: правка владельца не перезатирается повторным запуском.
+    /// The default is seeded once: the owner's edits are not overwritten by a repeated run.
     #[test]
     fn the_dictionary_is_seeded_once_and_keeps_the_edits() {
         let path = std::env::temp_dir().join(format!(
@@ -1857,7 +1883,7 @@ mod tests {
         assert_eq!(again.len(), DEFAULT_TAGS.len());
     }
 
-    /// Дефолт обновляется только в нетронутом словаре: правки владельца и импорт не трогаются.
+    /// The default is updated only in an untouched dictionary: the owner's edits and an import are left alone.
     #[test]
     fn a_default_update_keeps_the_edits_and_the_import() {
         let path = std::env::temp_dir().join(format!(
@@ -1871,24 +1897,24 @@ mod tests {
         let e = &catalog()[0];
         let defs = ensure_tag_defs(&path, e).unwrap();
         let conn = db::open(&path).unwrap();
-        // Старый засев: отпечаток совпадает с содержимым, версия ниже — набор догоняется.
+        // An old seed: the fingerprint matches the content, the version is lower — the set is caught up.
         db::set_setting(&conn, "tag_defs_version", "1").unwrap();
         db::set_setting(&conn, "tag_defs_sig", &defs_signature(&defs)).unwrap();
         assert_eq!(ensure_tag_defs(&path, e).unwrap(), defs);
-        // Правка владельца: метка другая, отпечаток остался от засева — не трогаем.
+        // The owner's edit: the label differs, the fingerprint is left from the seed — do not touch it.
         let mut d = defs[0].clone();
         d.label = "море и берег".into();
         db::save_tag_def(&conn, &d).unwrap();
         db::set_setting(&conn, "tag_defs_version", "1").unwrap();
         let kept = ensure_tag_defs(&path, e).unwrap();
         assert!(kept.iter().any(|x| x.label == "море и берег"));
-        // Импорт помечается как правка (версия 0) и автообновлением не затирается.
+        // An import is marked as an edit (version 0) and is not overwritten by the automatic update.
         let mut custom = defs.clone();
         custom[1].label = "бумага".into();
         import_defs(&path, e.id, &custom).unwrap();
         let after = ensure_tag_defs(&path, e).unwrap();
         assert!(after.iter().any(|x| x.label == "бумага"));
-        // Сброс возвращает стандарт и снова разрешает обновления.
+        // A reset returns the standard and allows updates again.
         let reset = reset_to_defaults(&path, e).unwrap();
         assert_eq!(reset, defs);
         db::set_setting(&conn, "tag_defs_version", "1").unwrap();
@@ -1931,7 +1957,7 @@ mod tests {
         let scores = [0.30, 0.20, 0.10, 0.05];
         assert_eq!(percentile_threshold(&scores, 100), Some(0.30));
         assert_eq!(percentile_threshold(&scores, 0), Some(0.05));
-        // 50% — верхние две записи; 70% — тоже две (ceil(0.3*4) = 2).
+        // 50% — the top two entries; 70% — two as well (ceil(0.3*4) = 2).
         assert_eq!(percentile_threshold(&scores, 50), Some(0.20));
         assert_eq!(percentile_threshold(&scores, 70), Some(0.20));
         assert_eq!(percentile_threshold(&scores, 90), Some(0.30));
@@ -1947,7 +1973,7 @@ mod tests {
         assert_eq!(d["мебель"], vec![0.4, 0.1]);
         assert_eq!(d["дети"], vec![0.3, 0.2]);
         assert_eq!(top_score_distribution(&tags), vec![0.4, 0.3]);
-        // На 100% у каждого тега остаётся хотя бы один снимок.
+        // At 100% every tag keeps at least one photo.
         for v in d.values() {
             assert!(percentile_threshold(v, 100).is_some());
         }
@@ -1955,7 +1981,7 @@ mod tests {
 
     #[test]
     fn two_frames_are_averaged_and_renormalised() {
-        // Два единичных вектора под 90°: среднее должно стать 45°, длина 1.
+        // Two unit vectors at 90°: the mean must become 45°, length 1.
         let values = [1.0f32, 0.0, 0.0, 1.0];
         let out = average_pairs(&values, 1, 2);
         assert_eq!(out.len(), 1);
@@ -1977,7 +2003,7 @@ mod tests {
             ("интерьер".to_string(), 0.25),
         ];
         assert_eq!(confident_tag_with(&clear, 0.22, 0.01).unwrap().0, "мебель");
-        // Ниже порога уверенности — тоже «не уверен», даже с отрывом.
+        // Below the confidence threshold is "not sure" too, even with a margin.
         assert!(confident_tag_with(&clear, 0.35, 0.01).is_none());
     }
 
@@ -2051,8 +2077,8 @@ mod tests {
         );
     }
 
-    /// M12: SigLIP — другая архитектура и 768 признаков. Проверяет реальные веса
-    /// и превью: `PHOTOCAT_SIGLIP_MODELS` (папка моделей) и `PHOTOCAT_SIGLIP_THUMB`.
+    /// M12: SigLIP is another architecture with 768 features. It checks the real weights
+    /// and previews: `PHOTOCAT_SIGLIP_MODELS` (the models folder) and `PHOTOCAT_SIGLIP_THUMB`.
     #[test]
     #[ignore = "нужны веса SigLIP и превью: PHOTOCAT_SIGLIP_MODELS, PHOTOCAT_SIGLIP_THUMB"]
     fn siglip_gives_768_features() {
@@ -2093,8 +2119,8 @@ mod tests {
         );
     }
 
-    /// M12: каталог — данные. id и каталог уникальны, все поля заполнены,
-    /// sha256 настоящие, а размерность не спрятана в глобальной константе.
+    /// M12: the catalogue is data. The id and the folder are unique, every field is filled,
+    /// the sha256 values are real, and the dimension is not hidden in a global constant.
     #[test]
     fn the_model_catalogue_is_described_by_data() {
         let mut ids = HashSet::new();
@@ -2119,17 +2145,17 @@ mod tests {
         }
         assert!(dims.len() >= 2, "нужны модели разной размерности, а не одна: {dims:?}");
         assert!(catalog().iter().any(|e| e.id == "siglip-base-224-en" && e.dim == 768));
-        // Новая модель влезает в лимит по умолчанию и не влезает в прежний 160 МиБ.
+        // A new model fits the default limit and does not fit the previous 160 MiB.
         let sig = entry("siglip-base-224-en").unwrap();
         assert!(sig.fits(250));
         assert!(!sig.fits(160));
-        // M15.6: мультиязычный SigLIP 2 в 250 МиБ не влезает — он честно больше лимита,
-        // и `models download` скажет об этом, пока владелец не поднимет лимит до 400.
+        // M15.6: the multilingual SigLIP 2 does not fit into 250 MiB — it is honestly bigger than the limit,
+        // and `models download` says so until the owner raises the limit to 400.
         let multi = entry("siglip2-base-224-multi").unwrap();
         assert_eq!(multi.dim, 768);
         assert!(!multi.fits(250), "393 МиБ не влезают в 250");
         assert!(multi.fits(400));
-        // Калибровка описана у каждой модели: тождественная — только у CLIP.
+        // The calibration is described for every model: only CLIP has the identity one.
         for e in catalog() {
             let (scale, shift) = e.score_calib;
             assert!(scale.is_finite() && scale > 0.0, "{}: масштаб {scale}", e.id);
@@ -2143,13 +2169,13 @@ mod tests {
                 assert_eq!(e.score_version, 1, "{}: CLIP не менял шкалу", e.id);
             }
         }
-        // Пустой запрос — первая модель; неизвестный id — None, без паники.
+        // An empty query means the first model; an unknown id — None, no panic.
         assert_eq!(entry("").unwrap().id, DEFAULT_MODEL);
         assert!(entry("no-such-model").is_none());
     }
 
-    /// M15.6: каждая модель каталога названа и описана на обоих языках — иначе в английском
-    /// окне строка модели молча остаётся русской (хвост M21.6).
+    /// M15.6: every model in the catalogue is named and described in both languages — otherwise, in an English
+    /// window the model row silently stays Russian (the tail of M21.6).
     #[test]
     fn the_model_catalogue_is_translated() {
         let ru = crate::i18n::Lang::Ru;
@@ -2169,26 +2195,26 @@ mod tests {
         }
     }
 
-    /// M15.6: калибровка приводит шкалу SigLIP к шкале CLIP — вес и отрыв двух моделей
-    /// в одних и тех же порогах значат одно и то же. Числа — медианы двух наборов
-    /// (2340 файлов, `docs/ARCHITECTURE.md` § Measurements).
+    /// M15.6: the calibration brings the SigLIP scale to the CLIP one — the weight and the margin of two
+    /// models mean the same thing under the same thresholds. The numbers are medians of two sets
+    /// (2340 files, `docs/ARCHITECTURE.md` § Measurements).
     #[test]
     fn the_tag_weight_calibration_equalises_the_scales() {
         let clip = entry(DEFAULT_MODEL).unwrap();
         assert_eq!(clip.score(0.086), 0.086, "у CLIP калибровка тождественная");
-        // Медианы top-1: CLIP 0.263, SigLIP 2 0.086, SigLIP 1 0.059.
+        // Medians of top-1: CLIP 0.263, SigLIP 2 0.086, SigLIP 1 0.059.
         for (e, median, margin) in [
             (entry("siglip2-base-224-multi").unwrap(), 0.086_f32, 0.0083_f32),
             (entry("siglip-base-224-en").unwrap(), 0.059, 0.0216),
         ] {
             let s = e.score(median);
             assert!((s - 0.263).abs() < 0.006, "{}: медиана {s}", e.id);
-            // Отрыв 0.01 в настройках — это медианный отрыв CLIP (0.0118).
+            // The margin of 0.01 in the settings is the median margin of CLIP (0.0118).
             let (scale, _) = e.score_calib;
             let m = margin * scale;
             assert!((m - 0.0118).abs() < 0.002, "{}: отрыв {m}", e.id);
         }
-        // Веса тегов разных калибровок не смешиваются: source помечен версией.
+        // Tag weights of different calibrations do not mix: the source is marked with the version.
         assert_eq!(tag_source(clip), "clip:clip-vit-b32-multilingual");
         assert_eq!(
             tag_source(entry("siglip2-base-224-multi").unwrap()),
@@ -2196,13 +2222,13 @@ mod tests {
         );
     }
 
-    /// M15.6: добивка текста. Пулер SigLIP 2 читает последний токен, поэтому EOS
-    /// обязан остаться последним, а пады токенизатора — уйти влево.
+    /// M15.6: text padding. The SigLIP 2 pooler reads the last token, so EOS must
+    /// remain the last one and the tokenizer pads must go to the left.
     #[test]
     fn text_padding_keeps_eos_last() {
         let eos = 1;
         let pad = 0;
-        // Токенизатор SigLIP 2 уже добил строку до 8 справа: [5, 6, eos, pad, pad, ...].
+        // The SigLIP 2 tokenizer has already padded the row to 8 on the right: [5, 6, eos, pad, pad, ...].
         let rows = vec![vec![5, 6, eos, pad, pad, pad, pad, pad], vec![7, eos, pad, pad, pad, pad, pad, pad]];
         let (ids, mask) = pad_rows(&rows, 8, pad, true);
         assert_eq!(&ids[0..8], &[pad, pad, pad, pad, pad, 5, 6, eos]);
@@ -2210,33 +2236,33 @@ mod tests {
         assert_eq!(mask[7], 1);
         assert_eq!(mask[0], 0);
         assert_eq!(ids.iter().filter(|&&v| v == eos).count(), 2, "в каждом ряду ровно один EOS");
-        // Справа (CLIP, SigLIP 1) — как было: строка с начала, пады в хвосте.
+        // On the right (CLIP, SigLIP 1) — as before: the row from the start, pads in the tail.
         let (ids, mask) = pad_rows(&rows, 8, pad, false);
         assert_eq!(&ids[0..8], &[5, 6, eos, pad, pad, pad, pad, pad]);
         assert_eq!(mask[2], 1);
-        // Длинный текст не выходит за max_len.
+        // Long text does not go beyond max_len.
         let (ids, _) = pad_rows(&[vec![9, 9, 9, 9, 9]], 3, pad, false);
         assert_eq!(ids[..], [9, 9, 9]);
     }
 
-    /// M12: размер приходит из модели, а ошибка называет оба числа и подсказывает,
-    /// что векторы разных моделей не смешиваются.
+    /// M12: the size comes from the model, and the error names both numbers and hints
+    /// that vectors of different models do not mix.
     #[test]
     fn a_dimension_error_names_the_numbers() {
-        assert!(ensure_dim("текстовая", 768, 768).is_ok());
-        let e = ensure_dim("текстовая", 512, 768).unwrap_err().to_string();
+        assert!(ensure_dim("text", 768, 768).is_ok());
+        let e = ensure_dim("text", 512, 768).unwrap_err().to_string();
         assert!(e.contains("512") && e.contains("768"), "нет чисел: {e}");
-        assert!(e.contains("не смешиваются"), "нет подсказки: {e}");
+        assert!(e.contains("do not mix"), "no hint: {e}");
     }
 
-    /// M12: скачивание без согласия не начинается, даже если модель в каталоге.
+    /// M12: a download does not start without consent, even if the model is in the catalogue.
     #[test]
     fn a_download_without_consent_is_refused() {
         let settings = db::Settings::default();
         let res = download_model(&settings, "siglip-base-224-en", false, None);
         assert!(res.is_err(), "без согласия скачивания нет");
         let e = res.err().unwrap().to_string();
-        assert!(e.contains("согласия"), "{e}");
+        assert!(e.contains("consent"), "{e}");
     }
 
 }

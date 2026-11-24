@@ -1496,6 +1496,25 @@ const PAIRS: &[(&str, &str)] = &[
 
     ("exporting the album", "выгрузка альбома"),
 
+    ("CLIP: everything is computed already", "CLIP: всё уже посчитано"),
+    ("CLIP: done", "CLIP: готово"),
+    ("CLIP: recomputing the tags without the photos…", "CLIP: пересчёт тегов без фото…"),
+    ("CLIP: the tags are recomputed", "CLIP: теги пересчитаны"),
+    (
+        "downloading a model needs the owner's explicit consent",
+        "скачивание модели требует явного согласия владельца",
+    ),
+    ("the model is downloaded", "модель скачана"),
+    ("CLIP: dropped {} old vectors — computing them anew", "CLIP: сброшено {} старых векторов — считаю заново"),
+    (
+        "CLIP: embeddings, {} tags in the dictionary…",
+        "CLIP: эмбеддинги, тегов в словаре {}…",
+    ),
+    ("CLIP: the batch failed ({}), one by one", "CLIP: пакет не прошёл ({}), по одному"),
+    ("CLIP: cannot decode {}: {}", "CLIP: не декодировать {}: {}"),
+    ("model {}: preparing", "модель {}: подготовка"),
+    ("model {}: {}", "модель {}: {}"),
+
 ];
 
 #[cfg(test)]

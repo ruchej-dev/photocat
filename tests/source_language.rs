@@ -14,7 +14,6 @@ use std::path::Path;
 /// Modules that still carry Russian comments or strings (the refactor works them off one by one).
 const PENDING: &[&str] = &[
     "app.rs",
-    "embed.rs",
 ];
 
 /// Files whose string literals are legitimate Russian *data*: the translation table itself and the
