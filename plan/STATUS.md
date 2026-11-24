@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`) → next:M21.8b (`plan/BACKLOG.md`), then M21.8c (the remaining `plan/*.md`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`) → next:M21.8c (the remaining `plan/*.md`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Where we are
 
@@ -1597,3 +1597,20 @@ M21.8 row from `todo` to done in three steps (`8a` STATUS, `8b` BACKLOG, `8c` th
 `plan/*.md`). No code was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 
 **Next.** M21.8b: `plan/BACKLOG.md`.
+
+## M21.8b — the backlog in English (2026-11-24)
+
+`plan/BACKLOG.md` is English now; the Russian original is `plan/BACKLOG.ru.md`, both files link to
+each other. All **26 task blocks** are there with the same ids, the same acceptance criteria and the
+same measurements (indexing 64.9–69.3 s, 103 duplicate groups, 2498 faces in 630 s, the M20 export
+2045 ms for 500 files, `dupes` 0.023 s after M21.6); the paths, the crate names, the CLI commands and
+the corpus folder stay as data. The M21 block was already English and is kept verbatim in both
+variants; references to the behaviour documents were retargeted from `docs/*.ru.md` to `docs/*.md`.
+Two criteria said "the texts in Russian" (M9, M17) — they now say "the texts in English", because the
+window has been bilingual since M21; the criteria themselves are unchanged.
+
+**Checks.** Both files have 26 `## ` blocks and one `# `. `plan/I18N.md` moved M21.8b to done. No
+code was touched.
+
+**Next.** M21.8c: `plan/SESSION.md`, `plan/M15-tags.md`, `plan/M16-interface.md`,
+`plan/M19-albums.md`.

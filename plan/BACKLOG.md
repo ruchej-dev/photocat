@@ -1,736 +1,850 @@
 # BACKLOG
 
-Одна задача — один блок: цель, критерии приёмки, файлы. Порядок = порядок работы. Взяли
-задачу — перенесли её в `plan/SESSION.md` и поставили `STATE: doing:<ID>` в `plan/STATUS.md`.
+*Русская версия: [BACKLOG.ru.md](BACKLOG.ru.md).*
+
+One task — one block: the goal, the acceptance criteria, the files. The order = the order of work.
+Take a task — move it to `plan/SESSION.md` and put `STATE: doing:<ID>` into `plan/STATUS.md`.
 
 ---
 
-## M1 — индексация, дубли, раскладка, GUI ✅ (готово)
+## M1 — indexing, duplicates, arranging, GUI ✅ (done)
 
-sha256 + dHash + EXIF + превью → SQLite; дубли и серии; план по датам с hardlink; GUI на egui.
-
----
-
-## M2 — интерактив по дублям ✅ (готово)
-
-**Цель.** Из отчёта «вот 103 группы» получить решение: что оставить, что пометить лишним, и почему.
-
-**Критерии приёмки.**
-1. В виде «Дубли» у каждого файла группы есть кнопка «оставить» (по одному на группу), остальные
-   помечаются как лишние; состояние живёт в БД (`files.decision`), переживает перезапуск.
-2. Для каждой группы считается совет: резкость (дисперсия лапласиана по серому), разрешение,
-   размер файла; «оставить» по умолчанию предлагается лучшему, совет подписан словами.
-3. Кнопка «Экспорт плана» пишет CSV: `group,keep_path,drop_path,reason,wasted_bytes` — без удаления
-   файлов. Отдельная кнопка «Скопировать список в буфер».
-4. Счётчик в панели: «в группах N, помечено лишними M, освободится X» — пересчитывается на лету.
-5. `photocat dupes --csv` учится печатать колонку `decision` и `sharpness`.
-6. Замер на корпусе 2230 файлов записан в `docs/ARCHITECTURE.ru.md`.
-
-**Файлы.** `src/derive.rs` (sharpness), `src/dupes.rs` (поле в `Group`), `src/db.rs`
-(`ALTER TABLE files ADD COLUMN decision TEXT`, `sharpness REAL`), `src/app.rs` (вид «Дубли»).
+sha256 + dHash + EXIF + previews → SQLite; duplicates and series; a date plan with hardlinks; a GUI
+on egui.
 
 ---
 
-## M3 — CLIP: смысловые теги и поиск ✅ (готово)
+## M2 — acting on duplicates ✅ (done)
 
-**Цель.** Строка поиска «торт», «море», «документ» работает по содержимому, а не по имени файла.
+**Goal.** Turn the report "here are 103 groups" into a decision: what to keep, what to mark as
+spare, and why.
 
-**Критерии приёмки.**
-1. Эмбеддинги считаются по превью 224 px, модель ONNX (CLIP ViT-B/32 или SigLIP), CPU через `ort`;
-   веса скачиваются один раз в `~/.cache/photocat/models/` с проверкой sha256.
-2. Векторы лежат в БД (`embeddings(file_id, model, vec BLOB)`) как f16/f32; повторная индексация не
-   пересчитывает неизменённые файлы (ключ — sha256).
-3. Поиск: текстовый запрос → косинус → топ-N превью в сетке, время ответа < 200 мс на 20 тыс. фото.
-4. Заготовленный список русских промптов (пляж, документ, скриншот, еда, животные, дети, праздник)
-   даёт теги; теги видны в карточке файла и фильтруют сетку.
-5. Кластеризация эмбеддингов (k-means или HDBSCAN) собирает 20–40 кластеров; отчёт
-   «кластер → 12 примеров» пишется в `plan/M3-clusters.md` для просмотра владельцем.
-6. Замер: сколько секунд на 1000 фото, сколько МБ весов и векторов.
+**Acceptance criteria.**
+1. In the "Duplicates" view every file of a group has a "keep" button (one per group), the rest are
+   marked as spare; the state lives in the DB (`files.decision`) and survives a restart.
+2. For each group an advice is computed: sharpness (the variance of the Laplacian over grey), the
+   resolution, the file size; "keep" is offered to the best one by default, the advice is labelled
+   with words.
+3. The "Export the plan" button writes a CSV: `group,keep_path,drop_path,reason,wasted_bytes` —
+   without deleting files. A separate "Copy the list to the clipboard" button.
+4. A counter in the panel: "in groups N, marked spare M, X will be freed" — recomputed on the fly.
+5. `photocat dupes --csv` learns to print the `decision` and `sharpness` columns.
+6. The measurement on the corpus of 2230 files is written to `docs/ARCHITECTURE.md`.
 
-**Не делать.** Никаких сетевых вызовов: только локальная модель.
-
----
-
-## M4 — превью и дубли видео ✅ (готово)
-
-**Цель.** 258 видео перестают быть слепой зоной.
-
-**Критерии приёмки.**
-1. Кадр-обложка через `ffmpeg -ss <10%> -frames:v 1` (процесс, не библиотека), превью в кэше.
-2. dHash по кадру → видео участвуют в группах дублей; одинаковые перекодировки склеиваются.
-3. Длительность и разрешение из `ffprobe` в БД.
-4. Ошибка ffmpeg не валит индексацию: файл остаётся без превью, счётчик ошибок растёт.
+**Files.** `src/derive.rs` (sharpness), `src/dupes.rs` (a field in `Group`), `src/db.rs`
+(`ALTER TABLE files ADD COLUMN decision TEXT`, `sharpness REAL`), `src/app.rs` (the "Duplicates"
+view).
 
 ---
 
-## M4b — настройки, модели, теги и календарь ✅ (готово)
+## M3 — CLIP: semantic tags and search ✅ (done)
 
-**Цель.** Владелец сам выбирает модель и место, где она лежит; теги можно поправлять; календарь
-показывает месяц, а не сворачивающиеся дни.
+**Goal.** The search line "cake", "sea", "document" works by the contents, not by the file name.
 
-**Критерии приёмки.**
-1. Раздел «Настройки»: каталог моделей, путь, лимит размера, согласие и загрузка, проверка sha256,
-   смена модели; всё сохраняется в БД и переживает перезапуск.
-2. Сеть только за весами и только по согласию; фото, пути и запросы не отправляются (ADR 0015,
-   0016). Есть зеркало и подбор совместимой модели в пределах лимита.
-3. Вторая модель меньше по размеру (`clip-vit-b32-en`, 148.6 МиБ) работает через тот же интерфейс;
-   каталог расширяется данными.
-4. `tag_hidden`: «убрать» у тега скрывает его у фото, «вернуть скрытые теги» возвращает; фильтр и
-   счётчики это учитывают.
-5. Календарь: месяц с навигацией, ячейки дней с миниатюрами и счётчиками, выбранный день — сеткой.
-6. Замеры на корпусе: embed фото+видео, скачивание модели, лимиты; записаны в
-   `docs/ARCHITECTURE.ru.md`.
+**Acceptance criteria.**
+1. Embeddings are computed over a 224 px preview, an ONNX model (CLIP ViT-B/32 or SigLIP), the CPU
+   through `ort`; the weights are downloaded once into `~/.cache/photocat/models/` with a sha256
+   check.
+2. The vectors lie in the DB (`embeddings(file_id, model, vec BLOB)`) as f16/f32; a repeated
+   indexing does not recompute unchanged files (the key is sha256).
+3. The search: a text query → a cosine → the top-N previews in the grid, the response time < 200 ms
+   for 20 thousand photos.
+4. A ready list of prompts (beach, document, screenshot, food, animals, children, holiday)
+   gives tags; the tags are visible in the file card and filter the grid.
+5. Clustering of the embeddings (k-means or HDBSCAN) collects 20–40 clusters; the report
+   "cluster → 12 examples" is written to `plan/M3-clusters.md` for the owner to review.
+6. A measurement: how many seconds per 1000 photos, how many MB of weights and vectors.
 
-**Файлы.** `src/db.rs` (settings, tag_hidden), `src/embed.rs` (каталог, загрузчик, TextKind),
-`src/app.rs` (настройки, календарь, теги), `src/main.rs` (`models`, `settings`).
-
----
-
-## M5 — OCR документов и скриншотов ✅ (готово)
-
-**Цель.** Чеки, справки, скриншоты ищутся по тексту.
-
-**Критерии приёмки.**
-1. `tesseract` (rus+eng) отдельным проходом по файлам, помеченным как документ/скриншот
-   (эвристика: нет EXIF-камеры, разрешение экрана, CLIP-тег из M3).
-2. Текст в БД (`ocr(file_id, text)`), FTS5-поиск, подсветка совпадения в карточке.
-3. Оригиналы не перезаписываются, текст не пишется рядом с файлом.
-
-**Сделано.** `src/ocr.rs` (кандидаты, rayon-проход, запись в БД), `db` (таблица `ocr`, FTS5
-`ocr_fts`, триггеры, `fts_query`/`search_ocr`), `derive::ocr_image` (EXIF-поворот, PNG в stdin),
-CLI `ocr [--jobs N] [--all] [--dry-run] [--file PATH]` и `search --text`, GUI: галочка «по тексту
-на фото», кнопка «Распознать текст» у выбранного снимка и отдельный пакетный проход
-«Распознать документы (N)», фрагмент с подсветкой в карточке. На корпусе: 435 кандидатов из 1972
-снимков, `ocr --jobs 8` — 106.2 с, 434/435 (1 битый JPEG), 66 444 знака у 146 файлов, текст ищется
-за 2–3 мс, БД +276 КиБ. Чек Сбербанка, счёт-фактура и страница книги читаются целиком.
-
-**Файлы.** `src/ocr.rs`, `src/derive.rs`, `src/db.rs`, `src/main.rs`, `src/app.rs`.
+**Not doing.** No network calls: a local model only.
 
 ---
 
-## M5b — отмена и продолжение долгих проходов ✅ (готово)
+## M4 — previews and duplicates of videos ✅ (done)
 
-**Цель.** Во время OCR/CLIP/индексации окно откликается, проход можно остановить и доделать.
+**Goal.** 258 videos stop being a blind spot.
 
-**Критерии приёмки.**
-1. Чтение БД во время прогона не блокируется: `db::open` не делает DDL, пока `SCHEMA_VERSION`
-   совпадает (замер: `stats` во время OCR — 11 мс вместо 5 с и «database is locked»).
-2. Кнопка «Стоп» у индексации, CLIP и OCR; уже начатый файл доводится, результат коммитится.
-3. После остановки кнопка показывает «Продолжить (N)»; повторный запуск пропускает сделанное по
-   `sha256` (у OCR — и файлы с пустым текстом).
-4. `tesseract` запускается с `OMP_THREAD_LIMIT=1`, чтобы воркеры не занимали все ядра.
-5. Один разовый проход по выбранному снимку (M5) не затронут.
-
----
-
-## M5c — пути к внешним программам в настройках ✅ (готово)
-
-**Цель.** На Windows и macOS программы часто не в `PATH`; владелец должен указать путь сам, не
-пересобирая приложение.
-
-**Критерии приёмки.**
-1. В «Настройках» поля для `ffmpeg`, `ffprobe`, `tesseract`, `curl`; пусто — берётся из `PATH`.
-2. `photocat doctor` показывает, откуда взята каждая программа и что сломается без неё.
-3. Путь проверяется при сохранении: запуск версии, ошибка — в статусе, а не в консоли.
-4. Замер не нужен (настройка), но smoke-тест GUI обязателен.
-
-**Файлы.** `src/tools.rs` (новый модуль), `src/db.rs` (настройки), `src/derive.rs`/`src/embed.rs`
-(запуск по пути), `src/app.rs`, `src/main.rs`.
-
-**Сделано.** `tools::Tools` хранит четыре пути (`settings.tool_ffmpeg` и т. д.), пусто — имя из
-`PATH`; поиск, запуск и `CREATE_NO_WINDOW` в одном месте. Сохранение проверяет путь запуском
-`-version`/`--version`: GUI пишет итог в статус, CLI `settings --ffmpeg PATH` отказывает с кодом 2.
-`doctor` показывает версию, найденный файл, источник (настройки/`PATH`), назначение и что сломается
-без программы; `settings` печатает тот же список. Тесты: `tools` (пусто/явный путь/ошибка запуска/
-флаги версии), roundtrip настроек в БД. GUI smoke: окно живёт 6 с, падений нет.
+**Acceptance criteria.**
+1. A cover frame through `ffmpeg -ss <10%> -frames:v 1` (a process, not a library), a preview in the
+   cache.
+2. A dHash over the frame → videos take part in duplicate groups; equal re-encodes are glued.
+3. The duration and the resolution from `ffprobe` in the DB.
+4. An ffmpeg error does not break indexing: the file stays without a preview, the error counter
+   grows.
 
 ---
 
-## M6 — лица ✅ (готово)
+## M4b — settings, models, tags and the calendar ✅ (done)
 
-**Цель.** «Покажи все фото с Лизой».
+**Goal.** The owner chooses the model and the place where it lies himself; tags can be corrected;
+the calendar shows a month, not collapsing days.
 
-**Критерии приёмки.**
-1. Детекция и эмбеддинг лиц (ONNX: SCRFD + ArcFace), кластеризация, подписи кластеров вручную.
-2. Порог схожести настраивается, ложные склейки видны и разъединяются кнопкой.
-3. Никакой отправки лиц наружу; модель локальная.
+**Acceptance criteria.**
+1. The "Settings" section: the model folder, the path, the size limit, consent and download, the
+   sha256 check, the model switch; everything is saved in the DB and survives a restart.
+2. The network only for weights and only with consent; photos, paths and queries are not sent
+   (ADR 0015, 0016). There is a mirror and a pick of a compatible model within the limit.
+3. A second, smaller model (`clip-vit-b32-en`, 148.6 MiB) works through the same interface; the
+   catalogue is extended by data.
+4. `tag_hidden`: "remove" at a tag hides it on the photo, "restore the hidden tags" brings it back;
+   the filter and the counters take it into account.
+5. The calendar: a month with navigation, day cells with thumbnails and counters, the picked day as
+   a grid.
+6. Measurements on the corpus: embed of photos+videos, the model download, the limits; written to
+   `docs/ARCHITECTURE.md`.
 
-**Сделано.** `src/faces.rs`: SCRFD (детекция 640×640, три шага, NMS) + ArcFace (выравнивание по
-5 точкам, 112×112, 512 f32), кропы в `<кэш>/faces/`, таблицы `faces`, `face_clusters`, `face_scans`,
-`settings.face_threshold`. Проход пропускает снимки по `sha256`, останавливается кнопкой «Стоп»;
-кластеры — union-find по косинусу, подписи и ручные разъединения закреплены. GUI: вид «Лица»,
-список групп, кропы, «не он», «Сохранить имя»; CLI `faces [--dry-run|--list|--recluster|download|
-label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--jobs 4`), 2498 лиц на 856 снимках,
-617 групп, пересборка 1.2 с, модель 182.4 МиБ. Ничего не уходит в сеть, кроме весов по согласию.
-
-**Файлы.** `src/faces.rs`, `src/db.rs`, `src/app.rs`, `src/main.rs`, `src/derive.rs`.
-
----
-
-## M7 — витрина: расширить organize ✅ (готово)
-
-**Цель.** Владелец сам выбирает, как выглядит витрина: по дням, по месяцам или по событиям;
-имена собираются из даты/времени/камеры/тега; помеченные лишними в витрину не попадают.
-
-**Критерии приёмки.**
-1. `--by day` (по умолчанию) — `ГГГГ/ГГГГ-ММ-ДД/`; `--by month` — `ГГГГ/ГГГГ-ММ/`;
-   `--by event` — `ГГГГ/ГГГГ-ММ-ДД/` для снимков без GPS и
-   `ГГГГ/ГГГГ-ММ-ДД/<ШШ.ШШN_ДД.ДДE>/` для снимков с координатами (ячейка ~1 км).
-2. `--name "{date}_{time}_{orig}"` — шаблон имени с подстановками `{date}`, `{time}`, `{camera}`,
-   `{tag}`, `{orig}`, `{ext}`; `--rename` — короткая запись `{date}_{time}_{orig}`; без шаблона имя
-   файла остаётся оригинальным.
-3. `--exclude-dup` не включает файлы с `decision='drop'`; счётчик исключённых виден в плане.
-4. Пустая подстановка не оставляет «мусорных» разделителей (`__`, `_` на конце), недопустимые
-   в имени символы заменяются, коллизии в каталоге получают `-2`, `-3`.
-5. Неизвестная подстановка в шаблоне и неизвестное `--by` — отказ с кодом 2 и списком допустимых.
-6. Без `--apply` ничего не создаётся; оригиналы не переименовываются и не удаляются.
-7. Замер на корпусе (dry-run и применение в отдельный каталог) записан в `docs/ARCHITECTURE.ru.md`.
-
-**Сделано.** `src/organize.rs`: `Layout` (`day`/`month`/`event`), `Options`, `gps_cell`,
-шаблон имени (`PLACEHOLDERS`, `tidy`/`component`, длина ≤120, коллизии `-2`), `validate_template`,
-счётчики плана (`no_date`, `excluded`, `dirs`). `--by event` — день + ячейка координат ~1 км;
-без GPS файл остаётся в каталоге дня. `--exclude-dup` опирается на `files.decision`; теги для
-`{tag}` читаются только если шаблон их просит. На корпусе 2230 файлов: dry-run 0.017–0.037 с,
-`--apply` (hardlink) — 2230 ссылок за 0.065 с, 0 ошибок, 0 байт; `--exclude-dup` на копии БД —
-135 исключено. 13 новых тестов, `cargo test` — 64, `check.sh` — 0 нарушений. ADR 0022.
-
-**Файлы.** `src/organize.rs`, `src/main.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
+**Files.** `src/db.rs` (settings, tag_hidden), `src/embed.rs` (the catalogue, the downloader,
+TextKind), `src/app.rs` (settings, the calendar, tags), `src/main.rs` (`models`, `settings`).
 
 ---
 
-## M8 — целостность и бэкап ✅ (готово)
+## M5 — OCR of documents and screenshots ✅ (done)
 
-**Цель.** Заменить ручной `cmp` двух дисков одной командой и получить слепок архива, по которому
-через полгода можно проверить, что ничего не подменилось.
+**Goal.** Receipts, certificates, screenshots are searched by text.
 
-**Критерии приёмки.**
-1. `photocat verify <a> <b>` сравнивает деревья по относительным путям: файлы только в A, только
-   в B, разные размеры, разное содержимое, совпало. При разных размерах sha256 не считается;
-   при одинаковых — считается и сравнивается. Отчёт с числами и примерами путей.
-2. Прогресс виден, `--jobs N` задаёт число потоков; `Ctrl-C` безопасен, потому что команда только
-   читает. Код возврата: 0 — копии совпадают, 1 — расхождения, 2 — ошибка аргументов.
-3. `photocat manifest [DIR] --out FILE` пишет слепок в формате `sha256sum` (относительные пути,
-   экранирование `\\`, `\n`, `\r`), включает все обычные файлы; без `--out` печатает в stdout.
-   При ошибке чтения или отмене файл не пишется: неполный слепок хуже отсутствующего.
-4. `photocat verify --manifest FILE DIR` проверяет слепок: нет файла, лишний файл, изменено
-   содержимое, совпало; те же прогресс и коды возврата.
-5. Ни один файл архива не удаляется, не переименовывается и не меняется; единственный новый файл —
-   слепок по явному `--out`. Симлинки и особые файлы пропускаются со счётчиком.
-6. Замер на корпусе 2230 файлов / 21.2 ГиБ: `verify` двух копий, `manifest` и проверка слепка;
-   числа записаны в `docs/ARCHITECTURE.ru.md`.
-7. Тесты: сравнение по размеру и содержимому, только в A/B, экранирование и разбор слепка,
-   отказ писать слепок при ошибке, отмена.
+**Acceptance criteria.**
+1. `tesseract` (rus+eng) as a separate pass over the files marked as a document/screenshot (the
+   heuristic: no EXIF camera, a screen resolution, a CLIP tag from M3).
+2. The text in the DB (`ocr(file_id, text)`), an FTS5 search, the highlighting of a match in the
+   card.
+3. The originals are not overwritten, the text is not written next to the file.
 
-**Сделано.** `src/verify.rs`: обход двух деревьев по относительным путям, размер → sha256 только
-для файлов одинакового размера, отчёт (`only_a`, `only_b`, `size_diff`, `content_diff`, `same`),
-прогресс и отмена через `db::Progress`, `rayon` по `--jobs`. `manifest` пишет слепок в формате
-`sha256sum` (относительные пути, экранирование обратного слэша, `\n`, `\r`), сам файл слепка
-исключается из обхода; неполный слепок не пишется. `verify --manifest FILE DIR` находит
-отсутствующие, лишние и изменённые файлы. CLI: `verify`, `manifest`; коды 0/1/2. Ни удаления, ни
-переименования, ни записи в каталог архива — только явный `--out`. На корпусе 2230 файлов /
-21.2 ГиБ: `verify` двух копий — 19.9 с (2230/2230), `manifest` — 10.1 с (2230 строк, 193 КиБ),
-`verify --manifest` — 11.4 с; изменённая копия находится за 16.1 с (4 расхождения), проверка по
-слепку — за 8.9 с (изменено 2, нет 1, лишний 1). 10 новых тестов, `cargo test` — 74, `check.sh` —
-33 проверки, 0 нарушений. ADR 0023.
+**Done.** `src/ocr.rs` (candidates, a rayon pass, writing to the DB), `db` (the `ocr` table, FTS5
+`ocr_fts`, the triggers, `fts_query`/`search_ocr`), `derive::ocr_image` (EXIF rotation, PNG into
+stdin), the CLI `ocr [--jobs N] [--all] [--dry-run] [--file PATH]` and `search --text`, the GUI: the
+"by text on the photo" checkbox, the "Recognize text" button for the selected shot and a separate
+batch pass "Recognize documents (N)", an excerpt with highlighting in the card. On the corpus: 435
+candidates of 1972 shots, `ocr --jobs 8` — 106.2 s, 434/435 (1 broken JPEG), 66 444 characters in
+146 files, the text is searched in 2–3 ms, the DB +276 KiB. A Sberbank receipt, an invoice and a book
+page are read in full.
 
-**Файлы.** `src/verify.rs`, `src/main.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
+**Files.** `src/ocr.rs`, `src/derive.rs`, `src/db.rs`, `src/main.rs`, `src/app.rs`.
 
 ---
 
-## M13 — ревизия интерфейса владельца ✅ (готово)
+## M5b — cancelling and resuming long passes ✅ (done)
 
-**Цель.** Закрыть замечания после просмотра архива: полноэкранный просмотр, понятные дубли,
-календарь по годам/месяцам/неделям, закрываемая правая панель, несколько каталогов, корзина,
-место на диске, свои теги и поиск людей вместе.
+**Goal.** During OCR/CLIP/indexing the window responds, a pass can be stopped and finished later.
 
-**Сделано.**
-1. **Полный экран.** Двойной клик по плитке (и кнопка в карточке) открывает модальное окно поверх
-   интерфейса: кадр 1920 px декодируется в фоне, ←/→, слайд-шоу каждые 3 с, масштаб, полный текст
-   OCR рядом, «Смотреть видео» — в окне, «Со звуком в системе» — системный проигрыватель. Закрытие возвращает в тот же вид, фильтр,
-   день и выделение. `App::viewer_modal`, `Viewer`.
-2. **Лица.** Клик по лицу ведёт в день календаря, где лежит снимок (если даты нет — в общие файлы с
-   выделением). На кропе появились «выбрать» и «Назначить имя выбранным»: несколько лиц сразу
-   уезжают в группу с одним именем (`db::group_faces`). Группы можно отметить галочкой и нажать
-   «Фото, где все вместе (N)» — выборка только те снимки, где есть лицо из каждой группы.
-3. **Правая панель** закрывается кнопкой «Скрыть» и возвращается кнопкой «Сведения»; календарь и
-   сетка получают всё место. Ширина ячейки месяца больше не имеет жёсткого минимума 82 px.
-4. **Календарь** получил градации «Год / Месяц / Неделя» с навигацией; клик по месяцу в году
-   переключает в месяц, клик по дню в неделе — в день.
-5. **Дубли и модель.** У «оставить», «Экспорт плана», «Посчитать теги» появились подписи-объяснения
-   прямо в панели: что записывается, что файлы не удаляются, что CSV — отчёт. Клип-тегов стало 14
-   (`мебель`, `интерьер`, `одежда`, `природа`, `город`, `транспорт`, `растения`), появилась кнопка
-   «Посчитать теги» по готовым векторам без повторного CLIP. Свои теги добавляются вручную в
-   карточке (`user_tags`) и участвуют в фильтре.
-6. **Каталоги.** Кнопка «Каталоги (N)» открывает список и встроенный выбор папки (без новой
-   зависимости). Несколько каталогов индексируются одной кнопкой; «Убрать из индекса» удаляет
-   только строки БД, файлы на диске целы.
-7. **Корзина.** «В корзину» пишет `files.trashed_at` и скрывает файл из обычных видов; вид
-   «Корзина» даёт «Вернуть» и «Очистить корзину (N)». Очистка — только после подтверждения и только
-   в системную корзину ОС (`trash`), затем удаляются строки индекса. Безвозвратного удаления в
-   приложении нет.
-8. **Хранилище.** «Посчитать занятое место» показывает БД, превью, кропы лиц, модели и весь кэш.
-   «Очистить превью», «Очистить кропы лиц», «Сбросить индекс» — с подтверждением; `storage.rs`
-   удаляет только внутри `<кэш>/photocat/`, архив не трогает.
-9. **Плитки и прокрутка.** Ползунок «Размер плиток» 100–260 px (по умолчанию 150, хранится в
-   настройках). Текстуры грузятся порциями по 8 за кадр, плавная анимация прокрутки включена:
-   быстрый скролл не декодирует сотни JPEG в UI-потоке.
-
-**Проверено.** `cargo test` — 79 passed, 3 ignored, `cargo clippy --all-targets` — без замечаний,
-`check.sh` — 38 проверок, 0 нарушений. Миграция копии реальной БД (22 МиБ, 2230 файлов) со схемы 2
-на 4: данные целы, появились `trashed_at` и `user_tags`. Smoke GUI на копии БД: окно живёт,
-код 124 по таймауту. Пиксели и жесты (двойной клик, корзина, календарь) смотрит владелец.
-
-**Осталось (осознанно).**
-- При масштабе >100% кадр в полном экране центрируется и обрезается: панорамирования пока нет.
-- Свои теги — ручные; CLIP сам их не создаёт. Предмет вне 14 подсказок ищется смысловым запросом.
-- Отдельных «альбомов» тогда не было: «альбом» означал день календаря. С M19 альбомы — явные
-  наборы файлов в БД (`plan/M19-albums.md`), а день остаётся днём.
-- Видео воспроизводится системным проигрывателем, не внутри окна.
-- Очистка моделей не сделана: весит сотни МиБ и качается только по согласию.
-
-
-
-**M13b — исправления после проверки владельцем.** Полный экран показывает 320 px превью сразу,
-полный кадр 1920 px — из фонового кэша/потока; выбранный файл декодируется заранее. Старое
-видео без обложек пересчитывается инкрементальной индексацией (258/258 обложек за 10.2 с).
-Видео играет в окне: поток RGBA-кадров из `ffmpeg` 720×480, 15 к/с, без звука; звук — системным
-проигрывателем. Календарь считает ширину с шагом 4 px и больше не обрезается. Кнопка тегов одна:
-недостающие эмбеддинги + пересчёт подписей; фильтр берёт любой вес выше порога. Переход из «Лиц»
-сбрасывает старый фильтр. Каталог после добавления индексируется сам; поле сверху заполняется.
-Повторная индексация пропускает неизменённые файлы (путь+размер+mtime): на корпусе 1971 фото
-пропущено, 259 обработано за 10.2 с, повтор — 0.024 с.
-
-**Файлы.** `src/app.rs`, `src/db.rs`, `src/embed.rs`, `src/faces.rs`, `src/index.rs`,
-`src/tools.rs`, `src/recycle.rs`, `src/storage.rs`, `Cargo.toml`, `check.sh`, `docs/UI.ru.md`,
-`docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md` (0025, 0026, 0027).
+**Acceptance criteria.**
+1. Reading the DB during a run is not blocked: `db::open` does no DDL while `SCHEMA_VERSION` matches
+   (the measurement: `stats` during OCR — 11 ms instead of 5 s and "database is locked").
+2. A "Stop" button for indexing, CLIP and OCR; a file already started is finished, the result is
+   committed.
+3. After a stop the button shows "Resume (N)"; a repeated run skips what was done by `sha256` (for
+   OCR — also the files with empty text).
+4. `tesseract` is started with `OMP_THREAD_LIMIT=1`, so that the workers do not take all the cores.
+5. The one-off pass over the selected shot (M5) is not affected.
 
 ---
 
-## M9 — GUI: сверка копий и слепок ✅ (готово 2026-11-23)
+## M5c — paths to external programs in the settings ✅ (done)
 
-**Цель.** Владелец проверяет бэкап и делает слепок без терминала: выбрать два каталога, увидеть
-расхождения списком и остановить долгую проверку, не закрывая окно.
+**Goal.** On Windows and macOS the programs are often not in `PATH`; the owner has to give the path
+himself, without rebuilding the app.
 
-**Критерии приёмки.**
-1. Новый вид `View::Integrity` и пункт «Целостность» в левой панели; экран по скиллу `add-view`,
-   тексты по-русски.
-2. Поля: каталог A, каталог B, файл слепка; галочка «показать все пути»; кнопки «Сверить копии»,
-   «Записать слепок», «Проверить по слепку». Пути вводятся текстом, без новой зависимости для
-   системного диалога.
-3. Операции идут в фоновом потоке через `db::Progress` и `mpsc`; видно «N из M», есть «Стоп»;
-   окно откликается. Результат — счётчики и список путей, как в CLI, плюс «Скопировать отчёт».
-4. Слепок пишется только по кнопке и явному пути; если файл уже есть — подтверждение перезаписи.
-   Во время сверки и проверки в архив не пишется ничего.
-5. GUI и CLI используют одни функции `verify`; отчёт и коды те же, логика не дублируется в
-   `app.rs`.
-6. `docs/UI.ru.md` описывает экран, состояния, пустые значения и поведение «Стоп»; smoke-запуск GUI
-   без падений; `cargo test`, `clippy`, `check.sh` — зелёные.
+**Acceptance criteria.**
+1. Fields in "Settings" for `ffmpeg`, `ffprobe`, `tesseract`, `curl`; empty — taken from `PATH`.
+2. `photocat doctor` shows where each program came from and what breaks without it.
+3. The path is checked on saving: a version run, the error — in the status, not in the console.
+4. A measurement is not needed (it is a setting), but a GUI smoke test is mandatory.
 
-**Файлы.** `src/app.rs`, `src/verify.rs` (публичные отчёты), `docs/UI.ru.md`.
+**Files.** `src/tools.rs` (a new module), `src/db.rs` (settings), `src/derive.rs`/`src/embed.rs`
+(running by a path), `src/app.rs`, `src/main.rs`.
 
-**Сделано.** Вид `View::Integrity` с пунктом «Целостность»; поля A/B/слепок, галочка
-«Показать все пути», кнопки «Сверить копии», «Записать слепок»/«Перезаписать слепок»,
-«Проверить по слепку»; фоновый поток `mpsc` + `db::Progress`, прогресс и «Стоп» в верхней панели;
-вердикт словами, общий отчёт `verify_report`/`check_report`/`manifest_report` и «Скопировать
-отчёт». Перезапись слепка — только вторым нажатием. В архив не пишется ничего. Проверки и
-хвосты — в `plan/STATUS.md` § M9.
+**Done.** `tools::Tools` keeps four paths (`settings.tool_ffmpeg` and so on), empty — the name from
+`PATH`; the lookup, the run and `CREATE_NO_WINDOW` are in one place. Saving checks the path by
+running `-version`/`--version`: the GUI writes the result into the status, the CLI
+`settings --ffmpeg PATH` refuses with code 2. `doctor` shows the version, the file found, the source
+(the settings/`PATH`), the purpose and what breaks without the program; `settings` prints the same
+list. Tests: `tools` (empty/an explicit path/a start error/the version flags), the settings roundtrip
+in the DB. A GUI smoke: the window lives 6 s, no crashes.
 
 ---
 
-## M10 — напоминание о проверке целостности ✅ (сделано 2026-11-23)
+## M6 — faces ✅ (done)
 
-**Цель.** Бэкап проверяется не «когда вспомнил», а по сроку: приложение напоминает, но само
-тяжёлый проход не запускает.
+**Goal.** "Show me all photos with Lisa".
 
-**Критерии приёмки.**
-1. В `settings` хранятся `verify_manifest`, `verify_interval_days` (0 — выключено),
-   `verify_last_at`, `verify_last_ok`, `verify_last_report`; значения переживают перезапуск.
-2. При запуске GUI, если слепок задан и срок вышел, показывается баннер «Пора проверить архив»
-   с кнопками «Проверить» и «Напомнить позже». Автоматического запуска нет: проверка начинается
-   только по нажатию.
-3. Проверка идёт фоном с прогрессом и «Стоп», пишет итог в настройки и отчёт в
-   `<кэш>/photocat/verify-last.txt`; в каталог архива не пишется ничего.
-4. Для Cron/systemd остаётся CLI-путь: `photocat verify --manifest FILE DIR` с кодами 0/1;
-   в README есть готовый пример таймера. Приложение не ставит системных таймеров само.
-5. Тесты: расчёт «пора/не пора» (нет слепка, интервал 0, ровно срок, просрочено, часы назад),
-   баннер не запускает проход; ошибка проверки не стирает прошлый успешный отчёт.
-6. Без сети; всё локально.
+**Acceptance criteria.**
+1. Detection and embedding of faces (ONNX: SCRFD + ArcFace), clustering, naming clusters by hand.
+2. The similarity threshold is configurable, false glues are visible and are split with a button.
+3. No sending of faces outside; the model is local.
 
-**Сделано.** `db::Settings` получил `verify_root`, `verify_manifest`, `verify_interval_days`
-(30 по умолчанию, 0 — выключено), `verify_last_at` (RFC3339 UTC), `verify_last_ok`,
-`verify_last_report`; `db::verify_due(&settings, now)` — единственный расчёт «пора/не пора»
-(нет слепка, выключено, ровно срок, просрочено, рано, часы назад). В верхней панели — баннер
-«Пора проверить архив» с «Проверить» и «Напомнить позже»; сам проход не запускается, «Проверить»
-открывает «Целостность» и стартует ту же фоновую проверку. На экране «Целостность» — интервал,
-дата и итог прошлого прохода, путь `verify-last.txt` и «Скопировать прошлый отчёт». Успешный
-слепок и проверка пишут дату, «ок» и полный отчёт в `settings` и `<кэш>/photocat/verify-last.txt`;
-ошибка и отмена прошлый отчёт не стирают. CLI не менялся, README получил пример systemd-таймера.
-Проверки и цифры — в `plan/STATUS.md` § M10.
+**Done.** `src/faces.rs`: SCRFD (a 640×640 detection, three steps, NMS) + ArcFace (alignment by
+5 points, 112×112, 512 f32), the crops in `<cache>/faces/`, the tables `faces`, `face_clusters`,
+`face_scans`, `settings.face_threshold`. The pass skips shots by `sha256`, stops with the "Stop"
+button; the clusters are a union-find by cosine, the names and the manual splits are pinned. GUI: the
+"Faces" view, the group list, the crops, "not him", "Save the name"; the CLI
+`faces [--dry-run|--list|--recluster|download|label|split]`. On the corpus: 1971/1972 shots in 630.2
+s (`--jobs 4`), 2498 faces on 856 shots, 617 groups, a rebuild in 1.2 s, the model 182.4 MiB.
+Nothing goes to the network except the weights, with consent.
 
-**Файлы.** `src/db.rs` (настройки), `src/app.rs`, `src/verify.rs`, `README.md`, `docs/ARCHITECTURE.ru.md`.
+**Files.** `src/faces.rs`, `src/db.rs`, `src/app.rs`, `src/main.rs`, `src/derive.rs`.
 
 ---
 
-## M11 — быстрый поиск похожих больше 20 тыс. фото ✅ (сделано 2026-11-23)
+## M7 — the showcase: extend organize ✅ (done)
 
-**Цель.** Текущее попарное сравнение dHash — O(n²): на 2230 файлах это 0.03 с, на 20 тыс. уже
-сотни миллионов сравнений. Индекс по 64-битному Хэммингу должен сохранить результат и убрать
-квадрат.
+**Goal.** The owner chooses how the showcase looks: by days, by months or by events; the names are
+built from the date/time/camera/tag; the files marked as spare do not get into the showcase.
 
-**Критерии приёмки.**
-1. `dupes::find_groups` даёт **тот же** набор групп, что и текущий перебор, на корпусе и на
-   синтетических наборах при `max_dist` 0–10. Точные копии по sha256 склеиваются как раньше.
-2. Выше порога (20 000 хешей) строится индекс, ниже — прежний перебор. Порог — именованная
-   константа с комментарием, а не магическое число в цикле.
-3. Расстояние — Хэмминг по `u64`; индекс строится один раз, union-find и совет по группе не
-   меняются. Новых зависимостей нет.
-4. Замер в release: корпус 2230 файлов — не хуже 0.03 с; синтетика 20 тыс. и 50 тыс. хешей —
-   время и память записаны в `docs/ARCHITECTURE.ru.md`; 50 тыс. при `--max-dist 6` укладывается
-   в 5 с.
-5. Тест «индекс и перебор совпадают» на случайных наборах (включая пустой, один элемент,
-   все одинаковые, все далёкие); пустой dHash не участвует.
+**Acceptance criteria.**
+1. `--by day` (default) — `YYYY/YYYY-MM-DD/`; `--by month` — `YYYY/YYYY-MM/`;
+   `--by event` — `YYYY/YYYY-MM-DD/` for shots without a GPS and
+   `YYYY/YYYY-MM-DD/<LL.LLN_LL.LLE>/` for shots with coordinates (a cell of ~1 km).
+2. `--name "{date}_{time}_{orig}"` — a name template with the substitutions `{date}`, `{time}`,
+   `{camera}`, `{tag}`, `{orig}`, `{ext}`; `--rename` — the short form `{date}_{time}_{orig}`;
+   without a template the file name stays the original one.
+3. `--exclude-dup` leaves out the files with `decision='drop'`; the counter of the excluded ones is
+   visible in the plan.
+4. An empty substitution leaves no "garbage" separators (`__`, a trailing `_`), the symbols not
+   allowed in a name are replaced, collisions in a folder get `-2`, `-3`.
+5. An unknown substitution in the template and an unknown `--by` — a refusal with code 2 and the
+   list of the allowed ones.
+6. Without `--apply` nothing is created; the originals are not renamed and not deleted.
+7. The measurement on the corpus (a dry run and an application into a separate folder) is written to
+   `docs/ARCHITECTURE.md`.
 
-**Поправка при выполнении.** Голый BK-tree замерен и отвергнут: на 64-битных хешах при радиусе
-6 почти все точки лежат на расстоянии ~32, неравенство треугольника не отсекает ничего —
-20 тыс. за 2.58 с, 50 тыс. за 17.2 с (хуже цели в 5 с). Вместо него — восьмиблочный индекс
-(8 кусков по 8 бит): при расстоянии меньше 8 хотя бы один кусок совпадает целиком (принцип
-ящиков), кандидаты проверяются полным Хэммингом. Подробности и цифры — ADR 0038,
-`docs/ARCHITECTURE.ru.md` § «Дубли: индекс по блокам».
+**Done.** `src/organize.rs`: `Layout` (`day`/`month`/`event`), `Options`, `gps_cell`, the name
+template (`PLACEHOLDERS`, `tidy`/`component`, the length ≤120, the `-2` collisions),
+`validate_template`, the plan counters (`no_date`, `excluded`, `dirs`). `--by event` — the day + a
+coordinate cell of ~1 km; without a GPS the file stays in the day folder. `--exclude-dup` relies on
+`files.decision`; the tags for `{tag}` are read only if the template asks for them. On the corpus of
+2230 files: a dry run 0.017–0.037 s,
+`--apply` (hardlink) — 2230 links in 0.065 s, 0 errors, 0 bytes; `--exclude-dup` on a copy of the DB
+— 135 excluded. 13 new tests, `cargo test` — 64, `check.sh` — 0 violations. ADR 0022.
 
-**Сделано.** В `src/dupes.rs` — `INDEX_MIN = 20_000`, `INDEX_BLOCKS = 8`, `INDEX_MAX_RADIUS = 7`,
-`union_similar_indexed` (бакеты по 8-битным кускам, метка вместо HashSet для дедупликации
-кандидатов) и прежний `union_similar_pairwise`. `find_groups_with(..., index_from)` даёт тестам
-оба пути на одних данных; публичный `find_groups` выбирает по порогу. Для радиуса 8–64 остаётся
-перебор: у восьми блоков нет гарантии, а такие пороги и так дают почти всё в одной группе.
-
-**Файлы.** `src/dupes.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
-
----
-
-## M12 — расширяемый каталог моделей CLIP ✅ (сделано 2026-11-23)
-
-**Цель.** Добавлять модели данными, а не правкой кода: владелец выбирает модель по размеру и
-языку, векторы разных моделей не смешиваются.
-
-**Критерии приёмки.**
-1. Размерность эмбеддинга — свойство `ModelEntry` (сейчас `DIM = 512` зашит в `embed.rs`);
-   загрузка проверяет, что зрительная и текстовая башни дали одну размерность; поиск, кластеры и
-   сохранение в БД берут `dim` из модели/строки, а не из глобальной константы.
-2. В каталоге минимум одна новая модель с закреплёнными URL, `sha256`, размером, лицензией и
-   подсказкой; id и каталог уникальны, запись данных не требует правки логики. Модели с разной
-   размерностью допустимы, но сравниваются только внутри своей модели.
-3. `models list`, `models check`, `settings`, `doctor` и «Настройки» GUI показывают новые модели,
-   их размер, статус «на месте/не скачана» и лимит `max_model_mb`; загрузка — только по согласию,
-   с проверкой sha256 и зеркалом.
-4. Переключение модели не стирает старые векторы и теги и не смешивает их: поиск и теги идут
-   только по активной модели; теги других моделей видны только после переключения обратно.
-5. Тесты: уникальность id/dir, `fits` по лимиту, выбор совместимой модели при недоступной,
-   ошибка размерности с понятным текстом, отказ скачивания без согласия, пустые подсказки.
-6. Замер на чистом каталоге: скачивание новой модели (размер, время, sha256), `embed` на корпусе,
-   поиск и `clusters`; числа в `docs/ARCHITECTURE.ru.md`.
-
-**Не делать.** Пользовательские теги, автоматический поиск моделей в сети без согласия,
-телеметрию.
-
-**Сделано.** `DIM` убран; `ModelEntry` хранит `dim`, `image_side`, `max_tokens`, `pad_token`,
-`norm` (mean/std/фильтр), `frames` и имена выходов ONNX. Добавлена `siglip-base-224-en`:
-Xenova SigLIP base patch16-224, 768 признаков, Apache-2.0, 203.5 МиБ, sha256 закреплён.
-`TextKind::Pooler` читает `pooler_output`, текст паддится до 64 токенов `</s>`, кадр растягивается
-в квадрат с mean/std 0.5. Схема 7: `tags` с ключом `(file_id,tag,source)`, миграция сохраняет
-данные, триггер смены sha256 снимает теги всех моделей. GUI и `models list` показывают признаки,
-лицензию и статус; поиск/теги/кластеры читают только активную модель. Замеры — в
-`docs/ARCHITECTURE.ru.md` § «Каталог моделей», решение — ADR 0039.
-
-**Файлы.** `src/embed.rs`, `src/derive.rs`, `src/db.rs`, `src/app.rs`, `src/main.rs`,
-`docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
-
-
-## M13c — гладкое листание и слайд-шоу ✅
-
-**Цель.** Убрать «мыло → резко» при листании и сделать слайд-шоу инструментом, а не кнопкой.
-
-**Сделано.** Один фоновый декодер с очередью (текущий, следующий, предыдущий, +1), кэш 4
-RGBA-кадра; при листании следующий обычно уже готов. Пока кадра нет — на экране предыдущий резкий,
-320 px миниатюра не растягивается. JPEG на Linux через TurboJPEG DCT-масштаб: 108 Мп — 0.52 с
-вместо 1.33 с. Слайд-шоу: интервал 3/5/10 с, пробел, по кругу, ждёт готовый кадр; ←/→ сбрасывают
-таймер. Видео открывается ffplay: видео и звук в отдельном окне.
-
-**Проверено.** `cargo test` — 79 passed, 3 ignored, `clippy` — чисто, `check.sh` — 38/0; замер
-TurboJPEG на 108 Мп файле.
-
-## M14 — встроенный плеер видео ✅
-
-**Цель.** Видео играет в окне приложения, одинаково на всех ОС, без внешних программ.
-
-**Сделано.** `src/player.rs` на чистом Rust: `rff-format-mp4/mkv` + `rff-codec-h264`/`hevc`/`aac`
-(+`rusty_h264`/`rusty_h265`), звук `cpal`. Поток декода и поток показа, очередь 3 кадра, часы
-(звук-мастер), seek по индексу сэмплов, поворот и матрица цвета из контейнера, RGBA в текстуру.
-GUI: «Смотреть видео», «Пауза»/«Играть», «Стоп видео», полоса с перемоткой, громкость.
-`ffplay` — только фолбэк. ADR 0030/0031, замеры — в `docs/ARCHITECTURE.ru.md` §Замеры.
-
-**Критерий приёмки.** Видео корпуса играет в окне со звуком; 1080p держит реальное время; seek и
-пауза работают; `play --decode-only` даёт числа без экрана; тесты, clippy и границы зелёные.
-
-**Не делать.** 4K, аппаратное декодирование, встроенный плеер как зависимость от `ffmpeg`/`mpv`.
-
-## M14c — полноэкранное листание и панель воспроизведения ✅
-
-**Цель.** Листание в полном экране показывает следующий файл, даже если это видео; у плеера
-кнопки-иконки, у видео в кадре — большая кнопка ▶.
-
-**Сделано.** `App::viewer_step` — единственная точка смены файла: сначала `stop_video`, потом
-`Viewer::idx`. Прошлый снимок больше не перекрывает видео (`stale` только для снимков), кадр
-плеера привязан к `video_id`. Панель: ⏮ ▶/⏸ ⏭ (32 px, `paint_icon`), время, перемотка, звук,
-«Стоп видео»; у снимка ▶ — слайд-шоу. Большая ▶ 76×76 по центру кадра видео и клик по кадру.
-Пробел у видео — пауза, у снимка — слайд-шоу. Конец видео открывает следующий файл.
-
-**Критерий приёмки.** ←/→ и кнопки меняют файл и в списке с видео; на видео видна большая ▶;
-пауза/продолжение и перемотка работают; после конца видео открывается следующий файл; тесты,
-clippy и границы зелёные.
+**Files.** `src/organize.rs`, `src/main.rs`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`.
 
 ---
 
-## M15 — теги, которые работают на любом каталоге (1–5 сделано 2026-11-23; 6 — после M12)
+## M8 — integrity and backup ✅ (done)
 
-**Цель.** Теги должны работать с первого запуска на любом архиве, без подгонки промптов под
-`Фотографии с телефона`; 100 % шкалы всегда что-то оставляет; владелец может добавить свои
-метки и промпты. Подробный разбор, диагностика `8.jpg`, порядок задач и открытые вопросы —
-`plan/M15-tags.md`.
+**Goal.** Replace a manual `cmp` of two disks with one command and get a manifest of the archive
+against which, half a year later, one can check that nothing was swapped.
 
-**Порядок и критерии приёмки.**
+**Acceptance criteria.**
+1. `photocat verify <a> <b>` compares the trees by relative paths: files only in A, only in B,
+   different sizes, different contents, matched. With different sizes sha256 is not computed; with
+   equal ones — it is computed and compared. A report with numbers and example paths.
+2. The progress is visible, `--jobs N` sets the number of threads; `Ctrl-C` is safe because the
+   command only reads. The return code: 0 — the copies match, 1 — divergences, 2 — an argument
+   error.
+3. `photocat manifest [DIR] --out FILE` writes a manifest in the `sha256sum` format (relative paths,
+   the escaping of `\\`, `\n`, `\r`), including all regular files; without `--out` it prints to
+   stdout. On a read error or a cancel the file is not written: an incomplete manifest is worse than
+   a missing one.
+4. `photocat verify --manifest FILE DIR` checks the manifest: a missing file, an extra file, changed
+   contents, matched; the same progress and return codes.
+5. No archive file is deleted, renamed or changed; the only new file is the manifest written by an
+   explicit `--out`. Symlinks and special files are skipped with a counter.
+6. The measurement on the corpus of 2230 files / 21.2 GiB: `verify` of two copies, `manifest` and a
+   manifest check; the numbers are written to `docs/ARCHITECTURE.md`.
+7. Tests: a comparison by size and contents, only in A/B, the escaping and parsing of the manifest,
+   a refusal to write a manifest on an error, a cancel.
 
-1. ✅ **Кроп.** Центр-кроп + весь кадр с полями, усреднение векторов, `embed --refresh`.
-   Сделано: 176.6 с на 2229 файлов (2.3×), «мебель» ≥0.22 у 717 → 1029, уверенных тегов 1284 →
-   1285, у 98.4% старых уверенных top-1 тот же. `8.jpg`: «документ» уходит из лидеров, но первым
-   становится «интерьер», а не «мебель» — критерий перенесён в п. 3 и п. 5, без подгонки промптов.
-2. ✅ **Процентиль по тегу.** `tag_show_pct` 0–100 по каждому тегу; на 100% ровно 1 снимок
-   у любого тега, на 0% — все, на 70% — 669 (пороги 0.229–0.248). Уверенность (`tag_show` 0.22
-   + отрыв) осталась отдельной для карточки, OCR и `{tag}` в витрине; старая база мигрирует
-   (уверенность 0.22, фильтр 70%), маленький каталог берёт сырой порог.
-3. ✅ **«Не уверен».** При отрыве меньше 0.01 карточка пишет «тег: не уверен», показывает топ-3
-   с весом и процентилем, без подсветки «документа»; остальные — под «все теги (N)». `8.jpg`
-   (документ 0.271 / интерьер 0.270) показывает «не уверен».
-4. ✅ **Словарь.** `tag_defs` в БД на модель: метка, промпты, включён, порядок, минимальный
-   процентиль. Дефолт общий, засевается один раз, правки не перезатираются. «Шкаф» добавляется,
-   теги пересчитываются по сохранённым векторам (2229 файлов за 1.0–1.2 с), фильтр его видит;
-   импорт/экспорт JSON; тесты roundtrip. ADR 0036.
-5. ✅ **Промпты.** 2–3 общих шаблона на метку, вес тега — лучший из шаблонов (среднее
-   размывает); «шкаф-купе» в дефолте нет; «Чертёж/схема» — не общая, только через словарь.
-   Замер до/после на двух каталогах: ложный «документ/скриншот» на фото 16.3% → 13.6%,
-   документы с текстом 123/145 без потерь. plan/STATUS.md § M15.5.
-6. **Модель.** SigLIP 2 multilingual / CLIP ViT-L/14 — только после M12 (динамическая
-   размерность), с ONNX, sha256, лимитом, калибровкой и замером CPU. Старые модели и векторы
-   не смешивать.
-7. **Проверка на двух независимых каталогах**, а не на одном; числа с датой, каталогом и
-   моделью — в `docs/ARCHITECTURE.ru.md` § Замеры.
+**Done.** `src/verify.rs`: a walk of two trees by relative paths, size → sha256 only for the files
+of equal size, the report (`only_a`, `only_b`, `size_diff`, `content_diff`, `same`), progress and a
+cancel through `db::Progress`, `rayon` over `--jobs`. `manifest` writes a manifest in the `sha256sum`
+format (relative paths, the escaping of a backslash, `\n`, `\r`), the manifest file itself is
+excluded from the walk; an incomplete manifest is not written. `verify --manifest FILE DIR` finds the
+missing, the extra and the changed files. The CLI: `verify`, `manifest`; the codes 0/1/2. Neither
+deletion, nor renaming, nor writing into the archive folder — only an explicit `--out`. On the corpus
+of 2230 files / 21.2 GiB: `verify` of two copies — 19.9 s (2230/2230), `manifest` — 10.1 s (2230
+rows, 193 KiB), `verify --manifest` — 11.4 s; a changed copy is found in 16.1 s (4 divergences), a
+manifest check — in 8.9 s (changed 2, missing 1, extra 1). 10 new tests, `cargo test` — 74,
+`check.sh` — 33 checks, 0 violations. ADR 0023.
 
-**Не делать.** Хардкод промптов/порогов под текущий архив; автоподгонка под один каталог;
-сеть за промптами; удаление/переименование файлов; обещание детектора объектов.
-
-**Файлы.** `src/derive.rs`, `src/embed.rs`, `src/db.rs`, `src/app.rs`, `src/ocr.rs`,
-`src/organize.rs`, `plan/M15-tags.md`, `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`,
-`docs/DECISIONS.ru.md`.
+**Files.** `src/verify.rs`, `src/main.rs`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`.
 
 ---
 
-## M16 — интерфейс по образцу PhotoPrism (сделано 2026-11-23)
+## M13 — a revision of the owner's interface ✅ (done)
 
-**Цель.** Оболочка, которую владелец знает по PhotoPrism: боковая навигация группами со
-счётчиками, поиск главным элементом верхней панели, панель содержимого с разме- ром плиток и
-чипами фильтра, сетка группами по месяцам, инспектор с именем файла и строками «подпись —
-значение». Подробный разбор, варианты и выбор — `plan/M16-interface.md`, решение — ADR 0033.
+**Goal.** Close the remarks after a review of the archive: a full screen view, understandable
+duplicates, a calendar by years/months/weeks, a closable right panel, several folders, a trash, the
+disk usage, own tags and a search for people together.
 
-**Критерии приёмки.**
-1. Левая панель: группы «БИБЛИОТЕКА» и «ИНСТРУМЕНТЫ», у пунктов реальные числа справа; при
-   840 px навигация и фильтр видны без прокрутки.
-2. Верхняя панель — две строки управления, «Индексировать» — единственная акцентная кнопка;
-   прогресс не сдвигает сетку больше чем на свою строку.
-3. Сетка: месяцы по убыванию с заголовком «май 2024 · N файлов · объём», внутри — свежие сверху;
-   шаг 2 px; наведение даёт обводку и курсор; 4 колонки при 1240 px.
-4. Над сеткой: чипы активных фильтров с «×», «найдено N из M», ползунок «Плитки».
-5. Инспектор: имя файла 14 px, путь 11 px, метаданные строками «подпись — значение», действия до
-   метаданных.
-6. Секции панелей и карточки без `Frame::group`; один стиль на весь GUI.
-7. `cargo clippy --all-targets` чисто, `enforce-architecture` без нарушений, `cargo test` зелёный,
-   `timeout 6 photocat gui --db <копия реальной БД>` не падает.
-8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `docs/DECISIONS.ru.md` 0033,
+**Done.**
+1. **The full screen.** A double click on a tile (and a button in the card) opens a modal window over
+   the interface: a 1920 px frame is decoded in the background, ←/→, a slideshow every 3 s, zoom, the
+   full OCR text next to it, "Watch the video" — in a window, "With system sound" — the system
+   player. Closing returns to the same view, filter, day and selection. `App::viewer_modal`,
+   `Viewer`.
+2. **Faces.** A click on a face leads to the calendar day that holds the shot (if there is no date —
+   to all files with a selection). The crop got "pick" and "Name the picked people": several faces
+   go into a group with one name at once (`db::group_faces`). Groups can be ticked and "Photo where
+   everyone is together (N)" pressed — a selection of only those shots that have a face from each
+   group.
+3. **The right panel** closes with the "Hide" button and comes back with the "Details" button; the
+   calendar and the grid get all the room. The width of a month cell no longer has a hard minimum of
+   82 px.
+4. **The calendar** got the scales "Year / Month / Week" with navigation; a click on a month in a
+   year switches to the month, a click on a day in a week — to the day.
+5. **Duplicates and the model.** "Keep", "Export the plan", "Compute tags" got explanation labels
+   right in the panel: what is written, that the files are not deleted, that the CSV is a report.
+   There are 14 CLIP tags now (`furniture`, `interior`, `clothes`, `nature`, `city`, `transport`,
+   `plants`), a "Compute tags" button appeared that works over the ready vectors without a repeated
+   CLIP. Own tags are added by hand in the card (`user_tags`) and take part in the filter.
+6. **Folders.** The "Folders (N)" button opens the list and the built-in folder picker (without a new
+   dependency). Several folders are indexed with one button; "Remove from the index" deletes only DB
+   rows, the files on disk are intact.
+7. **Trash.** "To trash" writes `files.trashed_at` and hides the file from the normal views; the
+   "Trash" view offers "Restore" and "Empty the trash (N)". The emptying happens only after a
+   confirmation and only into the OS trash (`trash`), then the index rows are deleted. There is no
+   permanent deletion in the app.
+8. **Storage.** "Compute the used space" shows the DB, the previews, the face crops, the models and
+   the whole cache. "Clear the previews", "Clear the face crops", "Reset the index" — with a
+   confirmation; `storage.rs` deletes only inside `<cache>/photocat/`, it does not touch the archive.
+9. **Tiles and scrolling.** The "Tile size" slider 100–260 px (150 by default, kept in the settings).
+   Textures load in portions of 8 per frame, the smooth scrolling animation is on: a fast scroll does
+   not decode hundreds of JPEGs on the UI thread.
+
+**Checked.** `cargo test` — 79 passed, 3 ignored, `cargo clippy --all-targets` — no remarks,
+`check.sh` — 38 checks, 0 violations. Migration of a copy of the real DB (22 MiB, 2230 files) from
+schema 2 to 4: the data is intact, `trashed_at` and `user_tags` appeared. A GUI smoke on a copy of
+the DB: the window is alive, code 124 on the timeout. The owner reviews the pixels and the gestures
+(a double click, the trash, the calendar).
+
+**Left (deliberately).**
+- Above 100% zoom the frame in the full screen is centred and cropped: there is no panning yet.
+- Own tags are manual; CLIP does not create them. A thing outside the 14 hints is found by a
+  semantic query.
+- There were no separate "albums" then: an "album" meant a calendar day. Since M19 albums are
+  explicit sets of files in the DB (`plan/M19-albums.md`), and a day stays a day.
+- Video is played by the system player, not inside the window.
+- Clearing the models is not done: they weigh hundreds of MiB and are downloaded only with consent.
+
+**M13b — fixes after the owner's review.** The full screen shows the 320 px preview at once, the full
+1920 px frame — from the background cache/stream; the selected file is decoded in advance. Old videos
+without covers are recomputed by the incremental indexing (258/258 covers in 10.2 s). Video plays in
+the window: a stream of RGBA frames from `ffmpeg` 720×480, 15 fps, without sound; the sound — by the
+system player. The calendar counts the width with a 4 px step and is no longer cut. There is one tag
+button: the missing embeddings + a recompute of the labels; the filter takes any weight above the
+threshold. The transition from "Faces" resets the old filter. A folder is indexed by itself after
+being added; the field on top is filled. A repeated indexing skips unchanged files
+(path+size+mtime): on the corpus 1971 photos were skipped, 259 processed in 10.2 s, a repeat —
+0.024 s.
+
+**Files.** `src/app.rs`, `src/db.rs`, `src/embed.rs`, `src/faces.rs`, `src/index.rs`,
+`src/tools.rs`, `src/recycle.rs`, `src/storage.rs`, `Cargo.toml`, `check.sh`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`, `docs/DECISIONS.md` (0025, 0026, 0027).
+
+---
+
+## M9 — GUI: comparing copies and the manifest ✅ (done 2026-11-23)
+
+**Goal.** The owner checks the backup and makes a manifest without a terminal: pick two folders, see
+the divergences as a list and stop a long check without closing the window.
+
+**Acceptance criteria.**
+1. A new `View::Integrity` and the item "Integrity" in the left panel; the screen per the `add-view`
+   skill, the texts in English.
+2. The fields: folder A, folder B, the manifest file; the "show all paths" checkbox; the buttons
+   "Compare the copies", "Write the manifest", "Check against the manifest". The paths are entered as
+   text, without a new dependency for a system dialog.
+3. The operations run in a background thread through `db::Progress` and `mpsc`; "N of M" is visible,
+   there is a "Stop"; the window responds. The result — the counters and the list of paths, as in the
+   CLI, plus "Copy the report".
+4. The manifest is written only by a button and an explicit path; if the file already exists — an
+   overwrite confirmation. During a comparison and a check nothing is written into the archive.
+5. The GUI and the CLI use the same `verify` functions; the report and the codes are the same, the
+   logic is not duplicated in `app.rs`.
+6. `docs/UI.md` describes the screen, the states, the empty values and the behaviour of "Stop"; a GUI
+   smoke run without crashes; `cargo test`, `clippy`, `check.sh` — green.
+
+**Files.** `src/app.rs`, `src/verify.rs` (public reports), `docs/UI.md`.
+
+**Done.** The `View::Integrity` view with the "Integrity" item; the fields A/B/the manifest, the
+"Show all paths" checkbox, the buttons "Compare the copies", "Write the manifest"/"Overwrite the
+manifest",
+"Check against the manifest"; a background `mpsc` thread + `db::Progress`, the progress and "Stop" in
+the top bar;
+the verdict in words, the common report `verify_report`/`check_report`/`manifest_report` and "Copy
+the
+report". Overwriting the manifest — only by a second click. Nothing is written into the archive. The
+checks and
+the tails are in `plan/STATUS.md` § M9.
+
+---
+
+## M10 — the reminder to check the integrity ✅ (done 2026-11-23)
+
+**Goal.** The backup is checked not "when I remembered" but by a due date: the app reminds, but does
+not start the heavy pass by itself.
+
+**Acceptance criteria.**
+1. `settings` holds `verify_manifest`, `verify_interval_days` (0 — off),
+   `verify_last_at`, `verify_last_ok`, `verify_last_report`; the values survive a restart.
+2. When the GUI starts, if a manifest is set and the date is due, the banner "Time to check the
+   archive" is shown with the buttons "Check" and "Remind later". There is no automatic start: the
+   check begins only on a click.
+3. The check runs in the background with progress and a "Stop", writes the result into the settings
+   and the report into `<cache>/photocat/verify-last.txt`; nothing is written into the archive folder.
+4. For cron/systemd the CLI path remains: `photocat verify --manifest FILE DIR` with the codes 0/1;
+   the README has a ready timer example. The app does not set system timers itself.
+5. Tests: the calculation of "due/not due" (no manifest, an interval of 0, exactly due, overdue, the
+   clock went back), the banner does not start a pass; a check error does not erase the former
+   successful report.
+6. Without the network; everything locally.
+
+**Done.** `db::Settings` got `verify_root`, `verify_manifest`, `verify_interval_days`
+(30 by default, 0 — off), `verify_last_at` (RFC3339 UTC), `verify_last_ok`,
+`verify_last_report`; `db::verify_due(&settings, now)` — the single calculation of "due/not due"
+(no manifest, off, exactly due, overdue, early, the clock went back). In the top bar — the banner
+"Time to check the archive" with "Check" and "Remind later"; the pass does not start by itself,
+"Check" opens "Integrity" and starts the same background check. On the "Integrity" screen — the
+interval, the date and the result of the last pass, the path of `verify-last.txt` and "Copy the last
+report". A successful manifest and check write the date, "ok" and the full report into `settings` and
+`<cache>/photocat/verify-last.txt`;
+an error and a cancel do not erase the former report. The CLI did not change, the README got a
+systemd timer example.
+The checks and the numbers are in `plan/STATUS.md` § M10.
+
+**Files.** `src/db.rs` (settings), `src/app.rs`, `src/verify.rs`, `README.md`,
+`docs/ARCHITECTURE.md`.
+
+---
+
+## M11 — fast search of similar shots above 20 thousand photos ✅ (done 2026-11-23)
+
+**Goal.** The current pairwise comparison of dHash is O(n²): on 2230 files that is 0.03 s, on 20
+thousand already
+hundreds of millions of comparisons. An index over the 64-bit Hamming distance must keep the result
+and remove the
+square.
+
+**Acceptance criteria.**
+1. `dupes::find_groups` gives **the same** set of groups as the current scan, on the corpus and on
+   synthetic sets at `max_dist` 0–10. Exact copies by sha256 are glued as before.
+2. Above the threshold (20 000 hashes) an index is built, below — the former scan. The threshold is
+   a named
+   constant with a comment, not a magic number in a loop.
+3. The distance is the Hamming over `u64`; the index is built once, the union-find and the group
+   advice do not change. There are no new dependencies.
+4. A measurement in release: the corpus of 2230 files — no worse than 0.03 s; synthetic 20 thousand
+   and 50 thousand hashes —
+   the time and the memory written to `docs/ARCHITECTURE.md`; 50 thousand at `--max-dist 6` fits
+   into 5 s.
+5. A test "the index and the scan agree" on random sets (including empty, one element,
+   all identical, all far apart); an empty dHash does not take part.
+
+**A correction during the work.** A bare BK-tree was measured and rejected: on 64-bit hashes at a
+radius of
+6 almost all points lie at a distance of ~32, the triangle inequality cuts nothing off —
+20 thousand in 2.58 s, 50 thousand in 17.2 s (worse than the goal of 5 s). Instead — an eight-block
+index
+(8 pieces of 8 bits): at a distance below 8 at least one piece matches entirely (the pigeonhole
+principle), the candidates are checked by the full Hamming. The details and the numbers — ADR 0038,
+`docs/ARCHITECTURE.md` § "Duplicates: the block index".
+
+**Done.** In `src/dupes.rs` — `INDEX_MIN = 20_000`, `INDEX_BLOCKS = 8`, `INDEX_MAX_RADIUS = 7`,
+`union_similar_indexed` (buckets by 8-bit pieces, a marker instead of a HashSet for deduplicating
+the candidates) and the former `union_similar_pairwise`. `find_groups_with(..., index_from)` gives
+the tests
+both paths on the same data; the public `find_groups` picks by the threshold. For a radius of 8–64
+the
+scan remains: the eight blocks have no guarantee, and such thresholds anyway put almost everything
+in one group.
+
+**Files.** `src/dupes.rs`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`.
+
+---
+
+## M12 — an extensible catalogue of CLIP models ✅ (done 2026-11-23)
+
+**Goal.** Add models by data, not by editing the code: the owner picks a model by size and
+language, the vectors of different models are not mixed.
+
+**Acceptance criteria.**
+1. The embedding dimension is a property of `ModelEntry` (now `DIM = 512` is hardcoded in
+   `embed.rs`);
+   the load checks that the vision and the text towers gave one dimension; the search, the clusters
+   and
+   the saving into the DB take `dim` from the model/the row, not from a global constant.
+2. The catalogue has at least one new model with pinned URLs, `sha256`, a size, a licence and a
+   hint; the ids and the folders are unique, adding data does not require editing the logic. Models
+   with different
+   dimensions are allowed, but are compared only inside their own model.
+3. `models list`, `models check`, `settings`, `doctor` and the GUI "Settings" show the new models,
+   their size, the status "in place/not downloaded" and the `max_model_mb` limit; a download — only
+   with consent,
+   with a sha256 check and a mirror.
+4. Switching the model does not erase the old vectors and tags and does not mix them: the search and
+   the tags go
+   only by the active model; the tags of other models are visible only after switching back.
+5. Tests: the uniqueness of id/dir, `fits` by the limit, the pick of a compatible model when one is
+   unavailable,
+   a dimension error with a clear text, a download refusal without consent, empty hints.
+6. A measurement on a clean folder: downloading the new model (the size, the time, sha256), `embed`
+   on the corpus,
+   the search and `clusters`; the numbers in `docs/ARCHITECTURE.md`.
+
+**Not doing.** User tags, an automatic search for models on the network without consent,
+telemetry.
+
+**Done.** `DIM` is gone; `ModelEntry` keeps `dim`, `image_side`, `max_tokens`, `pad_token`,
+`norm` (mean/std/a filter), `frames` and the ONNX output names. `siglip-base-224-en` was added:
+Xenova SigLIP base patch16-224, 768 features, Apache-2.0, 203.5 MiB, the sha256 pinned.
+`TextKind::Pooler` reads `pooler_output`, the text is padded to 64 tokens with `</s>`, the frame is
+stretched
+into a square with mean/std 0.5. Schema 7: `tags` with the key `(file_id,tag,source)`, the migration
+preserves
+the data, the sha256-change trigger removes the tags of all models. The GUI and `models list` show
+the features,
+the licence and the status; the search/tags/clusters read only the active model. The measurements —
+in
+`docs/ARCHITECTURE.md` § "The model catalogue", the decision — ADR 0039.
+
+**Files.** `src/embed.rs`, `src/derive.rs`, `src/db.rs`, `src/app.rs`, `src/main.rs`,
+`docs/ARCHITECTURE.md`, `docs/DECISIONS.md`.
+
+
+## M13c — smooth flipping and the slideshow ✅
+
+**Goal.** Remove the "blur → sharp" while flipping and make the slideshow a tool, not a button.
+
+**Done.** One background decoder with a queue (the current, the next, the previous, +1), a cache of
+4
+RGBA frames; when flipping, the next one is usually ready. While there is no frame — the previous
+sharp one is on the screen,
+the 320 px thumbnail is not stretched. JPEG on Linux through the TurboJPEG DCT scale: 108 MP —
+0.52 s
+instead of 1.33 s. The slideshow: an interval of 3/5/10 s, space, in a loop, waits for a ready
+frame; ←/→ reset
+the timer. Video opens ffplay: video and sound in a separate window.
+
+**Checked.** `cargo test` — 79 passed, 3 ignored, `clippy` — clean, `check.sh` — 38/0; the measurement
+of TurboJPEG on a 108 MP file.
+
+## M14 — the built-in video player ✅
+
+**Goal.** Video plays in the app window, the same on all OSes, without external programs.
+
+**Done.** `src/player.rs` in pure Rust: `rff-format-mp4/mkv` + `rff-codec-h264`/`hevc`/`aac`
+(+`rusty_h264`/`rusty_h265`), the sound `cpal`. A decode thread and a presentation thread, a queue of
+3 frames, the clock (the sound is the master), seeking by the sample index, rotation and the colour
+matrix from the container, RGBA into a texture.
+GUI: "Watch the video", "Pause"/"Play", "Stop the video", a bar with seeking, the volume.
+`ffplay` — a fallback only. ADR 0030/0031, the measurements — in `docs/ARCHITECTURE.md`
+§Measurements.
+
+**Acceptance criterion.** The video of the corpus plays in the window with sound; 1080p holds real
+time; seeking and pause work; `play --decode-only` gives numbers without a screen; the tests, clippy
+and the layers are green.
+
+**Not doing.** 4K, hardware decoding, the built-in player as a dependency on `ffmpeg`/`mpv`.
+
+## M14c — full screen flipping and the playback panel ✅
+
+**Goal.** Flipping in the full screen shows the next file, even if it is a video; the player has
+icon buttons, a video has a big ▶ button in the frame.
+
+**Done.** `App::viewer_step` — the single point of a file change: first `stop_video`, then
+`Viewer::idx`. The former shot no longer covers a video (`stale` only for shots), the player frame
+is tied to `video_id`. The panel: ⏮ ▶/⏸ ⏭ (32 px, `paint_icon`), the time, seeking, the sound,
+"Stop the video"; for a shot ▶ — the slideshow. A big ▶ 76×76 in the centre of the video frame and a
+click on the frame. Space on a video — pause, on a shot — the slideshow. The end of a video opens the
+next file.
+
+**Acceptance criterion.** ←/→ and the buttons change the file even in a list with videos; a big ▶ is
+visible on a video; pause/resume and seeking work; after the end of a video the next file opens; the
+tests, clippy and the layers are green.
+
+---
+
+## M15 — tags that work on any archive (1–5 done 2026-11-23; 6 — after M12)
+
+**Goal.** The tags should work from the first launch on any archive, without tuning the prompts to
+`Фотографии с телефона`; 100% of the scale always leaves something; the owner can add his own labels
+and prompts. The detailed analysis, the `8.jpg` diagnostics, the order of tasks and the open
+questions — `plan/M15-tags.md`.
+
+**The order and the acceptance criteria.**
+
+1. ✅ **The crop.** A centre crop + the whole frame with margins, averaging of the vectors,
+   `embed --refresh`.
+   Done: 176.6 s for 2229 files (2.3×), "furniture" ≥0.22 for 717 → 1029, confident tags 1284 →
+   1285, in 98.4% of the old confident ones top-1 is the same. `8.jpg`: "document" leaves the leaders,
+   but the first
+   becomes "interior", not "furniture" — the criterion was moved to item 3 and item 5, without tuning
+   the prompts.
+2. ✅ **A percentile per tag.** `tag_show_pct` 0–100 per tag; at 100% exactly 1 shot
+   for any tag, at 0% — all, at 70% — 669 (the thresholds 0.229–0.248). The confidence (`tag_show`
+   0.22
+   + a lead) stayed separate for the card, OCR and `{tag}` in the showcase; an old DB migrates
+   (confidence 0.22, the filter 70%), a small folder takes the raw threshold.
+3. ✅ **"Not sure".** With a lead below 0.01 the card writes "tag: not sure", shows the top-3
+   with the weight and the percentile, without highlighting "document"; the rest — under "all tags
+   (N)". `8.jpg`
+   (document 0.271 / interior 0.270) shows "not sure".
+4. ✅ **The dictionary.** `tag_defs` in the DB per model: the label, the prompts, enabled, the order,
+   the minimum
+   percentile. The default is common, seeded once, edits are not overwritten. "Wardrobe" is added,
+   the tags are recomputed over the stored vectors (2229 files in 1.0–1.2 s), the filter sees it;
+   JSON import/export; the roundtrip tests. ADR 0036.
+5. ✅ **The prompts.** 2–3 common templates per label, the tag weight — the best of the templates
+   (the average
+   blurs); there is no "wardrobe with shelves" in the default; "Drawing/scheme" — not a common one,
+   only through the dictionary.
+   A measurement before/after on two folders: a false "document/screenshot" on a photo 16.3% →
+   13.6%,
+   documents with text 123/145 without losses. plan/STATUS.md § M15.5.
+6. **The model.** SigLIP 2 multilingual / CLIP ViT-L/14 — only after M12 (a dynamic
+   dimension), with ONNX, sha256, a limit, calibration and a CPU measurement. Do not mix the old
+   models and vectors.
+7. **A check on two independent folders**, not on one; the numbers with the date, the folder and
+   the model — in `docs/ARCHITECTURE.md` § Measurements.
+
+**Not doing.** Hardcoding prompts/thresholds for the current archive; auto-tuning for one folder;
+the network for prompts; deleting/renaming files; promising an object detector.
+
+**Files.** `src/derive.rs`, `src/embed.rs`, `src/db.rs`, `src/app.rs`, `src/ocr.rs`,
+`src/organize.rs`, `plan/M15-tags.md`, `docs/UI.md`, `docs/ARCHITECTURE.md`,
+`docs/DECISIONS.md`.
+
+---
+
+## M16 — the interface after the PhotoPrism model (done 2026-11-23)
+
+**Goal.** The shell the owner knows from PhotoPrism: side navigation in groups with
+counters, search as the main element of the top bar, a content panel with the tile size and
+filter chips, the grid grouped by months, an inspector with the file name and "label —
+value" rows. The detailed analysis, the options and the choice — `plan/M16-interface.md`, the
+decision — ADR 0033.
+
+**Acceptance criteria.**
+1. The left panel: the groups "LIBRARY" and "TOOLS", the items with real numbers on the right; at
+   840 px the navigation and the filter are visible without scrolling.
+2. The top bar — two control rows, "Index" — the only accent button;
+   the progress does not shift the grid by more than its own row.
+3. The grid: months in descending order with the header "May 2024 · N files · size", inside — the
+   newest on top;
+   a step of 2 px; hovering gives an outline and a cursor; 4 columns at 1240 px.
+4. Above the grid: chips of the active filters with "×", "found N of M", the "Tiles" slider.
+5. The inspector: the file name 14 px, the path 11 px, the metadata as "label — value" rows, the
+   actions before
+   the metadata.
+6. Panel sections and cards without `Frame::group`; one style for the whole GUI.
+7. `cargo clippy --all-targets` clean, `enforce-architecture` without violations, `cargo test` green,
+   `timeout 6 photocat gui --db <a copy of the real DB>` does not crash.
+8. The documents are updated by the same change: `docs/UI.md`, `docs/DECISIONS.md` 0033,
    `.pi/skills/ui-design/references/verstka.md`, `plan/STATUS.md`.
 
-**Файлы.** `src/app.rs`, `docs/UI.ru.md`, `docs/DECISIONS.ru.md`, `plan/M16-interface.md`,
+**Files.** `src/app.rs`, `docs/UI.md`, `docs/DECISIONS.md`, `plan/M16-interface.md`,
 `plan/STATUS.md`, `plan/BACKLOG.md`, `.pi/skills/ui-design/references/verstka.md`.
 
-**Не делать.** Светлую тему, иконки без подписей, избранное, карту; менять
-схему БД, индексацию, дубли, CLIP, OCR, лица, плеер и корзину.
+**Not doing.** A light theme, icons without labels, favourites, a map; changing
+the DB schema, indexing, duplicates, CLIP, OCR, faces, the player and the trash.
 
 ---
 
-## M17 — представление сетки и сортировка по дате ✅ (сделано 2026-11-23)
+## M17 — the grid layout and sorting by date ✅ (done 2026-11-23)
 
-**Цель.** Владелец сам выбирает, как смотрит на архив: как сейчас — группами по месяцам — или
-плоской сеткой без группировки, как было до M16; и в каком порядке идут файлы.
+**Goal.** The owner chooses how he looks at the archive: as now — groups by months — or
+a flat grid without grouping, as it was before M16; and in what order the files go.
 
-**Критерии приёмки.**
-1. В заголовке вида рядом с «Плитки N» два переключателя: «По месяцам / Подряд» и «Сортировка»
-   с вариантами «Дата: новые сверху» (по умолчанию), «Дата: старые сверху», «Имя», «Размер:
-   крупные сверху». Слова по-русски, иконки без подписи нет. Пятый вариант — «Порядок альбома» —
-   появился с альбомами (M19) и работает только внутри альбома.
-2. «Подряд» — одна непрерывная сетка без заголовков месяцев; «По месяцам» — прежние заголовки
-   «май 2024 · файлов N · объём», внутри месяца — по выбранной сортировке.
-3. «Без даты» — последняя группа в обоих режимах, в том числе при «старые сверху». Порядок
-   тотальный и устойчивый: ключ `(taken_at, id)`, одинаковые даты не переставляются между кадрами.
-4. Смысловой поиск задаёт порядок сам: пока есть `semantic_hits`, переключатель сортировки погашен
-   с подсказкой «порядок задаёт поиск», чип «по релевантности» с «×» снимает поиск.
-5. Представление и сортировка переживают перезапуск: `settings.grid_layout` (`months|flat`),
-   `settings.grid_sort` (`date_desc|date_asc|name|size_desc`); неизвестное значение — значение по
-   умолчанию, без падения. `SCHEMA_VERSION` не поднимается: `settings` — ключ/значение.
-6. Порядок считает одна функция (`App::ordered`); сетка, листание в полном экране и выделение
-   (M18) берут её же. Второго места сортировки нет; механика «исходные индексы строк» из ADR 0033
-   сохраняется.
-7. Тесты без окна: плоско — по дате; «старые сверху» переворачивает месяцы и плоский список;
-   «Без даты» в конце в обе стороны; имя и размер сортируются; при поиске порядок = релевантность;
-   roundtrip настроек.
-8. `docs/UI.ru.md` (переключатели, правило одного порядка, недоступность при поиске), строка в
-   `.pi/skills/add-view/SKILL.md` о том, что настройки вида (`tile_size`, представление,
-   сортировка) живут в `settings`, а данные вида — в `App`; `plan/STATUS.md`.
+**Acceptance criteria.**
+1. In the view header, next to "Tiles N", two switches: "By months / Flat" and "Sort"
+   with the options "Date: newest first" (default), "Date: oldest first", "Name", "Size:
+   largest first". The words in English, there is no icon without a label. The fifth option —
+   "Album order" —
+   appeared with albums (M19) and works only inside an album.
+2. "Flat" — one continuous grid without month headers; "By months" — the former headers
+   "May 2024 · N files · size", inside a month — by the chosen sort order.
+3. "No date" — the last group in both modes, including with "oldest first". The order is
+   total and stable: the key `(taken_at, id)`, equal dates do not swap between frames.
+4. A semantic search sets the order itself: while there are `semantic_hits`, the sort switch is muted
+   with the hint "the search sets the order", the chip "by relevance" with "×" drops the search.
+5. The layout and the sort order survive a restart: `settings.grid_layout` (`months|flat`),
+   `settings.grid_sort` (`date_desc|date_asc|name|size_desc`); an unknown value — the
+   default value, without a crash. `SCHEMA_VERSION` is not bumped: `settings` is key/value.
+6. The order is computed by one function (`App::ordered`); the grid, the flipping in the full screen
+   and the selection
+   (M18) take the same one. There is no second sorting place; the mechanics "source row indices" of
+   ADR 0033
+   is kept.
+7. Tests without a window: flat — by date; "oldest first" reverses the months and the flat list;
+   "No date" at the end in both directions; the name and the size are sorted; during a search the
+   order = relevance;
+   the settings roundtrip.
+8. `docs/UI.md` (the switches, the single-order rule, unavailability during a search), a line in
+   `.pi/skills/add-view/SKILL.md` about the fact that the view settings (`tile_size`, the layout,
+   the sort order) live in `settings`, and the view data — in `App`; `plan/STATUS.md`.
 
-**Файлы.** `src/app.rs`, `src/db.rs`, `docs/UI.ru.md`, `.pi/skills/add-view/SKILL.md`, `plan/`.
+**Files.** `src/app.rs`, `src/db.rs`, `docs/UI.md`, `.pi/skills/add-view/SKILL.md`, `plan/`.
 
-**Не делать.** Второй рендерер сетки, sticky-заголовок месяца (отдельная задача), сортировку по
-GPS/тегам/камере, запись порядка в БД.
-
----
-
-## M18 — мультивыбор плиток ✅ (сделано 2026-11-23)
-
-**Цель.** Действия над несколькими файлами сразу: без этого альбом (M19) и любое действие над
-группой остаются работой по одному файлу.
-
-**Критерии приёмки.**
-1. Клик — один файл (как сейчас); Ctrl+клик добавляет/убирает; Shift+клик — диапазон по текущему
-   порядку (M17); клик по пустому месту снимает выделение.
-2. В строке чипов: «выбрано N · X МиБ» (через `db::human()`), кнопки «Выбрать все (M)» и «Снять
-   выделение». Esc снимает, Ctrl+A выбирает найденное.
-3. Инспектор показывает последний выбранный файл и строку «в выделении N»; выделенные плитки имеют
-   обводку и галочку — видно без наведения.
-4. Смена вида, фильтра, запроса или сортировки сбрасывает выделение и пишет в статус почему
-   («выделение снято: изменился фильтр»), чтобы действие не задело невидимые файлы.
-5. Выделение — поле `App` (`BTreeSet<i64>` + якорь), в настройки не пишется, после перезапуска
-   пустое.
-6. Тесты без окна (headless egui): Ctrl+клик добавляет, Shift+клик даёт диапазон, Esc и смена
-   фильтра сбрасывают, «выбрать все» берёт только видимое.
-7. `docs/UI.ru.md` §Взаимодействие — правила выделения; `plan/STATUS.md`.
-
-**Файлы.** `src/app.rs`, `docs/UI.ru.md`, `plan/STATUS.md`.
-
-**Не делать.** Резиновую рамку мышью, выделение в дублях/лицах/корзине (отдельно), drag&drop.
-
-
+**Not doing.** A second grid renderer, a sticky month header (a separate task), sorting by
+GPS/tags/camera, writing the order into the DB.
 
 ---
 
-## M19 — альбомы: дерево с порядком, только данные в БД ✅ (сделано 2026-11-23)
+## M18 — multiple selection of tiles ✅ (done 2026-11-23)
 
-**Цель.** Владелец собирает дерево альбомов с порядком файлов — «Дача 2024 → Май, Июнь», «Лиза →
-1 год» — чтобы из него получился готовый физический каталог. Пока это только строки в базе: ни
-один файл на диске не создаётся, не меняется и не перемещается.
+**Goal.** Actions over several files at once: without this an album (M19) and any action over a
+group stay work on one file at a time.
 
-**Критерии приёмки.**
-1. Вид «Альбомы» в группе «БИБЛИОТЕКА» (число альбомов справа): дерево с отступами и свёртыванием,
-   у узла «N файлов · M подальбомов · объём»; «+ Новый альбом», «+ Подальбом», «Переименовать»,
-   «Переместить в…» (свои потомки недоступны), «Выше / Ниже», «Удалить альбом». Внутри — строка
-   подальбомов и сетка файлов (`draw_cell`), действия «Добавить выбранные» (M18), «Убрать из
-   альбома», «Выше / Ниже» для файла, «Выгрузить на диск…» (M20).
-2. Схема: `albums(id,parent_id,position,name,name_key,note,created_at,updated_at)` и
-   `album_files(album_id,file_id,position,added_at)`; `parent_id = 0` — корень; имя уникально
-   **среди соседей** без учёта регистра (`parent_id, name_key`), а не глобально; `SCHEMA_VERSION`
-   4 → 5 только через `CREATE TABLE IF NOT EXISTS`; миграция на копии реальной БД (2230 файлов) без
-   потери строк.
-3. Порядок — часть данных: `position` плотный 0..n−1 у файлов и у подальбомов, `db` перенумеровывает
-   после вставки/перемещения/удаления; внутри альбома сортировка по умолчанию «Порядок альбома»
-   (новый вариант в списке M17, доступен только внутри альбома).
-4. Только данные: создание, переименование, перемещение, наполнение, удаление — `INSERT/UPDATE/DELETE`
-   в `db.rs`; `delete_album` рекурсивно чистит поддерево (подтверждение показывает состав), удаление
-   строк `files` (сброс индекса, «убрать каталог») чистит `album_files`, потому что
-   `PRAGMA foreign_keys` в `open` не включён; тесты на все пути.
-5. Цикл запрещён: `move_album` отказывает, если новый родитель — сам альбом или его потомок;
-   идемпотентное добавление (повторный `add` не плодит строки и возвращает «уже было N»); один файл
-   может быть в нескольких альбомах и в разных ветвях дерева, но **не дважды в одном альбоме**
-   (ключ `PRIMARY KEY(album_id, file_id)`, решено владельцем); `albums_of_file` для инспектора.
-6. Файл в корзине приложения остаётся строкой альбома, но скрыт в сетке; счётчик «в корзине N»;
-   файла нет в индексе — строка удалена, «висячих» ссылок нет.
-7. CLI без графики: `albums list [--tree]|new|rename|move|add|remove|delete|show`; пути трактуются
-   как ключ `files.path`, файлы не открываются; коды 0/1/2.
-8. Тесты: дерево из 3 уровней, порядок и перенумерация, уникальность среди соседей (в разных
-   ветвях одинаковые имена разрешены), отказ на цикл, рекурсивное удаление не трогает файлы на
-   диске, идемпотентность, пустое/длинное/повторяющееся имя, миграция 4→5, повторное открытие БД
-   ничего не пишет.
-9. Замер: `albums add` 500 файлов (время), дерево 3 уровней на корпусе, размер БД до/после;
-   `docs/ARCHITECTURE.ru.md` §Замеры.
-10. Документы: `docs/UI.ru.md` (вид, вложенность, порядок), `docs/ARCHITECTURE.ru.md` §Схема,
-    ADR 0034 «Альбомы в БД: дерево и порядок, отдельно от каталогов на диске», `plan/M19-albums.md`,
+**Acceptance criteria.**
+1. A click — one file (as now); Ctrl+click adds/removes; Shift+click — a range by the current
+   order (M17); a click on empty space drops the selection.
+2. In the chips row: "picked N · X MiB" (through `db::human()`), the buttons "Pick all (M)" and "Drop
+   the selection". Esc drops, Ctrl+A picks what was found.
+3. The inspector shows the last picked file and the line "N picked"; picked tiles have
+   an outline and a tick — visible without hovering.
+4. A change of the view, the filter, the query or the sort order drops the selection and writes into
+   the status why
+   ("selection dropped: the filter changed"), so that an action does not touch invisible files.
+5. The selection is an `App` field (`BTreeSet<i64>` + an anchor), it is not written to the settings,
+   after a restart
+   it is empty.
+6. Tests without a window (headless egui): Ctrl+click adds, Shift+click gives a range, Esc and a
+   change of
+   the filter drop it, "pick all" takes only what is visible.
+7. `docs/UI.md` §Interaction — the rules of the selection; `plan/STATUS.md`.
+
+**Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**Not doing.** A rubber-band rectangle with the mouse, a selection in duplicates/faces/the trash
+(separately), drag&drop.
+
+
+
+---
+
+## M19 — albums: a tree with an order, data in the DB only ✅ (done 2026-11-23)
+
+**Goal.** The owner builds a tree of albums with a file order — "Dacha 2024 → May, June", "Lisa →
+1 year" — so that a ready physical folder comes out of it. For now these are only rows in the
+database: no
+file on disk is created, changed or moved.
+
+**Acceptance criteria.**
+1. The "Albums" view in the "LIBRARY" group (the number of albums on the right): a tree with indents
+   and collapsing,
+   a node with "N files · M subalbums · size"; "+ New album", "+ Subalbum", "Rename",
+   "Move to…" (its own descendants are unavailable), "Up / Down", "Delete the album". Inside — a row
+   of subalbums and a grid of files (`draw_cell`), the actions "Add picked" (M18), "Remove from
+   the album", "Up / Down" for a file, "Export to disk…" (M20).
+2. The schema: `albums(id,parent_id,position,name,name_key,note,created_at,updated_at)` and
+   `album_files(album_id,file_id,position,added_at)`; `parent_id = 0` — the root; the name is unique
+   **among siblings** case-insensitively (`parent_id, name_key`), not globally; `SCHEMA_VERSION`
+   4 → 5 only through `CREATE TABLE IF NOT EXISTS`; a migration on a copy of the real DB (2230 files)
+   without
+   losing rows.
+3. The order is part of the data: `position` is dense 0..n−1 for files and for subalbums, `db`
+   renumbers
+   after an insert/a move/a delete; inside an album the sort order by default is "Album order"
+   (a new option in the M17 list, available only inside an album).
+4. Data only: creating, renaming, moving, filling, deleting — `INSERT/UPDATE/DELETE`
+   in `db.rs`; `delete_album` recursively cleans the subtree (the confirmation shows the contents),
+   deleting
+   `files` rows (an index reset, "remove a folder") cleans `album_files`, because
+   `PRAGMA foreign_keys` is not enabled in `open`; tests for all the paths.
+5. A cycle is forbidden: `move_album` refuses if the new parent is the album itself or its descendant;
+   an idempotent addition (a repeated `add` does not multiply rows and returns "N were already
+   there"); one file
+   can be in several albums and in different branches of the tree, but **not twice in one album**
+   (the key `PRIMARY KEY(album_id, file_id)`, decided by the owner); `albums_of_file` for the
+   inspector.
+6. A file in the app trash stays an album row, but is hidden in the grid; the counter "in the trash
+   N";
+   the file is not in the index — the row is deleted, there are no dangling references.
+7. A CLI without graphics: `albums list [--tree]|new|rename|move|add|remove|delete|show`; the paths
+   are treated
+   as the `files.path` key, the files are not opened; the codes 0/1/2.
+8. Tests: a tree of 3 levels, the order and the renumbering, uniqueness among siblings (in different
+   branches equal names are allowed), a refusal on a cycle, recursive deletion does not touch the
+   files on
+   the disk, idempotency, an empty/long/repeated name, the 4→5 migration, a repeated opening of the
+   DB
+   writes nothing.
+9. A measurement: `albums add` of 500 files (the time), a tree of 3 levels on the corpus, the DB size
+   before/after;
+   `docs/ARCHITECTURE.md` §Measurements.
+10. Documents: `docs/UI.md` (the view, the nesting, the order), `docs/ARCHITECTURE.md` §Schema,
+    ADR 0034 "Albums in the DB: a tree and an order, separate from the folders on disk",
+    `plan/M19-albums.md`,
     `plan/STATUS.md`.
 
-**Файлы.** `src/db.rs`, `src/app.rs`, `src/main.rs`, `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`,
-`docs/DECISIONS.ru.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
+**Files.** `src/db.rs`, `src/app.rs`, `src/main.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`,
+`docs/DECISIONS.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
 
-**Не делать.** Файлы на диске, копии, «умные» альбомы по фильтру, обложку руками, синхронизацию с
-папками; называть альбом «каталогом» — «Каталоги (N)» уже про папки архива.
+**Not doing.** Files on disk, copies, "smart" albums by a filter, a handmade cover, syncing with
+folders; calling an album a "folder" — "Folders (N)" is already about the archive folders.
 
 ---
 
-## M20 — выгрузка альбома физическим каталогом ✅ (сделано 2026-11-23)
+## M20 — exporting an album as a physical folder ✅ (done 2026-11-23)
 
-**Цель.** Сформированный альбом превращается в настоящий каталог с упорядоченными файлами: копии
-(не ссылки), структура повторяет дерево альбомов, порядок виден по номерам в именах, одинаковые
-`IMG_0001.jpg` не затирают друг друга.
+**Goal.** A built album turns into a real folder with ordered files: copies
+(not links), the structure repeats the album tree, the order is visible by the numbers in the names,
+equal
+`IMG_0001.jpg` do not overwrite each other.
 
-**Критерии приёмки.**
-1. `photocat export --album N --out DIR [--name TEMPLATE] [--apply]`; без `--apply` — только
-   план-дерево, на диске не создаётся ничего, даже каталог.
-2. Структура на диске — один в один дерево альбомов: `--out/<альбом>/<подальбом>/…`, у каждого
-   каталога свои файлы; пустой альбом даёт пустой каталог; каталоги подальбомов **без номеров**:
-   на диске они идут по алфавиту (файловая система не знает `position`), порядок дерева остаётся в
-   приложении.
-3. **Копии, не ссылки**: inode и размер отличаются от оригинала, содержимое совпадает по `sha256`;
-   `--mode` у `export` нет — ссылки остаются у `organize` (витрина), это другой инструмент.
-4. Порядок: имя по умолчанию `{n}_{orig}`, `{n}` — `position` в своём альбоме, ширина по числу
-   файлов (2 знака до 99, 3 до 999); `{date} {time} {camera} {tag} {orig} {ext} {hash8}` доступны
-   в шаблоне.
-5. Совпадения: одинаковые имена в альбоме разводит номер позиции; занятое другим содержимым имя
-   получает `-2`, не перезапись; тот же `sha256` — пропуск («уже выгружен», прогон идемпотентен);
-   после чистки ФС имена подальбомов сравниваются без учёта регистра на Windows/macOS, второму —
-   `-2`; длина компонента ≤ 120, полный путь ≤ 240 — иначе пропуск с причиной. Один снимок дважды
-   в одном каталоге невозможен: в альбоме он одна строка (`PRIMARY KEY(album_id, file_id)`).
-6. Ни один существующий файл не перезаписан, не удалён и не переименован; `--out` не существует,
-   `--apply` без `--out`, `--out` внутри любого `settings.roots` — отказ с кодом 2.
-7. Отчёт: скопировано / пропущено / ошибок / байт записи / «порядок в цели устарел N»; ошибка
-   одного файла не валит проход. Переупорядочивание не переносит уже выгруженные файлы (нельзя
-   переименовывать в цели) — план и отчёт говорят об этом прямо, лечится ручной перевыгрузкой.
-8. GUI: «Выгрузить на диск…» — каталог и шаблон; сначала план-дерево, затем «Выгрузить N файлов»;
-   прогресс и «Стоп» в верхней панели.
-9. Тесты: пять видов коллизий, идемпотентность, копия (не ссылка), пустой альбом, глубина 3,
-   отказ `--out` в корне, отмена в середине (созданные перечислены), отсутствующий исходник,
-   длинный путь.
-10. Замер на корпусе: дерево из 3 уровней, 500 файлов — время и объём копии; повтор — время и 0
-    новых; 2230 файлов — время и объём; `docs/ARCHITECTURE.ru.md` §Замеры.
-11. ADR 0035 «Выгрузка альбома: структура альбома, копии файлов, ничего не перезаписывается»,
-    `docs/UI.ru.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
+**Acceptance criteria.**
+1. `photocat export --album N --out DIR [--name TEMPLATE] [--apply]`; without `--apply` — only
+   a plan tree, nothing is created on the disk, not even a folder.
+2. The structure on disk is one to one with the album tree: `--out/<album>/<subalbum>/…`, each
+   folder has its own files; an empty album gives an empty folder; the folders of subalbums
+   **without numbers**:
+   on disk they go alphabetically (the file system does not know `position`), the tree order stays
+   in the
+   app.
+3. **Copies, not links**: the inode and the size differ from the original, the contents match by
+   `sha256`;
+   there is no `--mode` in `export` — links stay with `organize` (the showcase), it is another
+   tool.
+4. The order: the name by default `{n}_{orig}`, `{n}` — the `position` in its own album, the width by
+   the number of
+   files (2 digits up to 99, 3 up to 999); `{date} {time} {camera} {tag} {orig} {ext} {hash8}` are
+   available
+   in the template.
+5. Collisions: equal names in an album are separated by the position number; a name taken by other
+   contents
+   gets `-2`, not an overwrite; the same `sha256` — a skip ("already exported", a run is idempotent);
+   after a cleanup of the FS the subalbum names are compared case-insensitively on Windows/macOS, the
+   second one gets
+   `-2`; the length of a component ≤ 120, the full path ≤ 240 — otherwise a skip with a reason. One
+   shot twice
+   in one folder is impossible: in an album it is one row (`PRIMARY KEY(album_id, file_id)`).
+6. No existing file is overwritten, deleted or renamed; `--out` does not exist,
+   `--apply` without `--out`, `--out` inside any `settings.roots` — a refusal with code 2.
+7. The report: copied / skipped / errors / bytes written / "the order in the target is stale N"; an
+   error
+   of one file does not break the pass. Reordering does not move the already exported files (one
+   cannot
+   rename in the target) — the plan and the report say so directly, it is cured by a manual re-export.
+8. GUI: "Export to disk…" — the folder and the template; first a plan tree, then "Export N files";
+   the progress and "Stop" in the top bar.
+9. Tests: five kinds of collisions, idempotency, a copy (not a link), an empty album, a depth of 3,
+   a refusal of an `--out` in the root, a cancel in the middle (the created ones are listed), a
+   missing source,
+   a long path.
+10. A measurement on the corpus: a tree of 3 levels, 500 files — the time and the volume of the
+    copy; a repeat — the time and 0
+    new; 2230 files — the time and the volume; `docs/ARCHITECTURE.md` §Measurements.
+11. ADR 0035 "The album export: the album structure, file copies, nothing is overwritten",
+    `docs/UI.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
 
-**Файлы.** `src/organize.rs` (`plan_album`, `apply_copy`), `src/db.rs` (чтение дерева), `src/main.rs`,
+**Files.** `src/organize.rs` (`plan_album`, `apply_copy`), `src/db.rs` (reading the tree),
+`src/main.rs`,
 `src/app.rs`, `docs/`, `plan/`.
 
-**Не делать.** Ссылки и `--mode` в `export`, служебные файлы в `--out`, «синхронизацию» и удаление
-лишнего в цели, выгрузку по расписанию или при старте, индексацию `--out` без спроса.
+**Not doing.** Links and `--mode` in `export`, service files in `--out`, a "sync" and deleting
+the extra in the target, an export by a schedule or at start, indexing `--out` without asking.
 
-**Сделано.** `organize::plan_album` строит дерево `--out/<альбом>/<подальбом>/…` с именами
-`{n}_{orig}`; `organize::apply_export` копирует файлы (`std::fs::copy`, не ссылки), сверяет
-существующее по размеру и `sha256`, занятое имя уводит в `-2`, уже выгруженное пропускает, а файл
-под старым номером считает «порядок в цели устарел». Кэш выгрузки — в `<кэш>/photocat/exports/`,
-в `--out` служебных файлов нет. `export` в CLI (коды 0/1/2) и диалог «Выгрузить на диск…» в GUI с
-планом-деревом, прогрессом и «Стоп». Структура: `db::album_subtree`/`album_export_data`;
-`organize` получил `derive` (только `sha256_file`). На корпусе: 500 файлов / 2.4 ГиБ — 2045 мс и
-повтор 20 мс с 0 новых; 2230 файлов / 21.2 ГиБ — 110 мс и повтор 45 мс; 16 новых тестов,
-`cargo test` — 155 (151 прошло, 4 `#[ignore]`), `clippy` и `check.sh` — чисто. ADR 0035.
+**Done.** `organize::plan_album` builds the tree `--out/<album>/<subalbum>/…` with the names
+`{n}_{orig}`; `organize::apply_export` copies the files (`std::fs::copy`, not links), compares
+the existing ones by size and `sha256`, moves a taken name to `-2`, skips what was already exported,
+and a file
+under an old number counts as "the order in the target is stale". The export cache — in
+`<cache>/photocat/exports/`,
+there are no service files in `--out`. `export` in the CLI (the codes 0/1/2) and the dialog "Export
+to disk…" in the GUI with
+a plan tree, progress and "Stop". The structure: `db::album_subtree`/`album_export_data`;
+`organize` got `derive` (only `sha256_file`). On the corpus: 500 files / 2.4 GiB — 2045 ms and
+a repeat 20 ms with 0 new; 2230 files / 21.2 GiB — 110 ms and a repeat 45 ms; 16 new tests,
+`cargo test` — 155 (151 passed, 4 `#[ignore]`), `clippy` and `check.sh` — clean. ADR 0035.
 
 ---
 
@@ -811,3 +925,27 @@ Runtime diagnostics from L1/L2 still speak Russian (recorded in `plan/I18N.md` a
 `cargo test` 205 tests (5 new: `fill`, placeholder parity, the source scan that proves every `t`/`fill`
 literal is in `PAIRS`, English CLI reports on both languages, English `--help`); `cargo clippy` clean;
 `check.sh` 52/0; on the corpus copy `dupes` stays 103 groups / 238 files / 214.1 MiB in 0.023 s.
+
+## M21.8b — the backlog in English (2026-11-24)
+
+`plan/BACKLOG.md` is English now; the Russian original is `plan/BACKLOG.ru.md`, both files link to
+each other. All **26 task blocks** are there with the same ids, the same acceptance criteria and the
+same measurements (indexing 64.9–69.3 s, 103 duplicate groups, 2498 faces in 630 s, the M20 export
+2045 ms for 500 files, `dupes` 0.023 s after M21.6); the paths, the crate names, the CLI commands and
+the corpus folder stay as data.
+
+**What changed beyond translation.** The M21 block was already English (the task list is written in
+English since M21) and is kept verbatim in both variants. References to the behaviour documents were
+retargeted from `docs/*.ru.md` to `docs/*.md`; `docs/UI.md` §Interaction and §Debt are named
+in English, while the Russian file keeps the Russian section names. Two acceptance criteria
+were made honest by the translation itself: the M9 and M17 blocks said "the texts in Russian",
+which is no longer true of the window since M21, so they now say "the texts in English"; the
+M3 prompt list is named without a language, because the defaults have been bilingual since
+M15.5. The criteria themselves are unchanged — only the wording follows the interface.
+
+**Checks.** Both files have 26 `## ` blocks and one `# `; the English file has 2 lines with Cyrillic
+left (the `Фотографии с телефона` corpus folder and the `КиБ`/`KiB` pair quoted as evidence). No code
+was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
+
+**Next.** M21.8c: `plan/SESSION.md`, `plan/M15-tags.md`, `plan/M16-interface.md`,
+`plan/M19-albums.md`; `plan/M3-clusters.md` stays uncommitted.

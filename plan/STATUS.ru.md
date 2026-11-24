@@ -1498,3 +1498,20 @@ M21.8 row from `todo` to done in three steps (`8a` STATUS, `8b` BACKLOG, `8c` th
 `plan/*.md`). No code was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 
 **Next.** M21.8b: `plan/BACKLOG.md`.
+
+## M21.8b — the backlog in English (2026-11-24)
+
+`plan/BACKLOG.md` is English now; the Russian original is `plan/BACKLOG.ru.md`, both files link to
+each other. All **26 task blocks** are there with the same ids, the same acceptance criteria and the
+same measurements (indexing 64.9–69.3 s, 103 duplicate groups, 2498 faces in 630 s, the M20 export
+2045 ms for 500 files, `dupes` 0.023 s after M21.6); the paths, the crate names, the CLI commands and
+the corpus folder stay as data. The M21 block was already English and is kept verbatim in both
+variants; references to the behaviour documents were retargeted from `docs/*.ru.md` to `docs/*.md`.
+Two criteria said "the texts in Russian" (M9, M17) — they now say "the texts in English", because the
+window has been bilingual since M21; the criteria themselves are unchanged.
+
+**Checks.** Both files have 26 `## ` blocks and one `# `. `plan/I18N.md` moved M21.8b to done. No
+code was touched.
+
+**Next.** M21.8c: `plan/SESSION.md`, `plan/M15-tags.md`, `plan/M16-interface.md`,
+`plan/M19-albums.md`.
