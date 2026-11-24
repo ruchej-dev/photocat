@@ -111,7 +111,7 @@ PhotoPrism; всё остальное на месте. Компромисс: п�
 7. `cargo clippy --all-targets` чисто, `enforce-architecture` без нарушений, `cargo test` зелёный,
    `timeout 6 photocat gui --db <копия реальной БД>` не падает (с предупреждением владельцу).
 8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `.pi/skills/ui-design/references/verstka.md`,
-   `docs/DECISIONS.ru.md` 0033, `plan/STATUS.md`, `plan/BACKLOG.md`.
+   `docs/DECISIONS.ru.md` 0033, `plan/STATUS.ru.md`, `plan/BACKLOG.ru.md`.
 
 ## 7. Что осталось за границей (честно)
 

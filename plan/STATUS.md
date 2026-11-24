@@ -1628,6 +1628,11 @@ in the CLI snippets are English (`Dacha 2024`), while the corpus folder stays as
 **Not translated.** `plan/M3-clusters.md` — a local report with archive paths; it is in `.gitignore`
 and is data, not documentation.
 
+**Cross-references.** Inside the Russian variants every reference to a plan document that has a
+pair now points at the `*.ru.md` file — in `AGENTS.ru.md`, `docs/*.ru.md`, `README.ru.md` and the
+Russian plan files themselves — so a Russian reader never lands in an English document. The English
+files point at the English one, and `plan/M3-clusters.md` keeps its single name in both.
+
 **Checks.** The heading trees of every pair match (`SESSION` 7/7, `M15-tags` 17/17,
 `M16-interface` 8/8, `M19-albums` 15/15); the English files keep only the link line and the corpus
 path in Cyrillic. `plan/I18N.md` closes the M21.8 row and the "Repository" bullet lists all the plan
