@@ -109,17 +109,6 @@ pub fn wants_text(
     )
 }
 
-/// The labels the dictionary uses for the tags `document` and `screenshot`: the ids are stable,
-/// the labels are the owner's (and follow the language of the defaults).
-fn text_labels(conn: &rusqlite::Connection, model: &str) -> Vec<String> {
-    db::load_tag_defs(conn, model)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|d| d.enabled && (d.id == "document" || d.id == "screenshot"))
-        .map(|d| d.label)
-        .collect()
-}
-
 /// The candidates of the pass: the images of the folder and how many the heuristic picked.
 pub struct Plan {
     pub images: usize,
@@ -149,7 +138,9 @@ fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>
     let rows = db::load_all(conn)?;
     let tags = db::load_visible_tags(conn)?;
     let images = rows.iter().filter(|r| r.kind == "image").count();
-    let text = text_labels(conn, &settings.model_id);
+    // The labels of `document`/`screenshot` from every dictionary: the ids are stable, the words
+    // are the owner's, so the heuristic never hard-codes a label (M23.6).
+    let text = db::text_tag_labels(conn);
     let selected = rows
         .into_iter()
         // `--all` widens the heuristic to every image but leaves videos alone: a cover frame is no document.
@@ -319,7 +310,7 @@ mod tests {
 
     /// The labels of the default dictionary that make OCR look for text.
     fn labels() -> Vec<String> {
-        vec!["документ".to_string(), "скриншот".to_string()]
+        vec!["document".to_string(), "screenshot".to_string()]
     }
 
     fn row(kind: &str, camera: Option<&str>) -> FileRow {
@@ -347,7 +338,7 @@ mod tests {
     }
 
     fn tags(tag: &str, score: f32) -> HashMap<i64, Vec<(String, f32)>> {
-        HashMap::from([(1, vec![(tag.to_string(), score), ("дети".to_string(), score - 0.05)])])
+        HashMap::from([(1, vec![(tag.to_string(), score), ("children".to_string(), score - 0.05)])])
     }
 
     const SHOW: f32 = 0.22;
@@ -362,14 +353,14 @@ mod tests {
     fn camera_photo_needs_confident_document_or_screenshot_tag() {
         let none = HashMap::new();
         assert!(!wants_text(&row("image", Some("Pixel")), &none, SHOW, MARGIN, &labels()));
-        assert!(!wants_text(&row("image", Some("Pixel")), &tags("дети", 0.30), SHOW, MARGIN, &labels()));
-        assert!(wants_text(&row("image", Some("Pixel")), &tags("документ", 0.30), SHOW, MARGIN, &labels()));
-        assert!(wants_text(&row("image", Some("Pixel")), &tags("скриншот", 0.24), SHOW, MARGIN, &labels()));
+        assert!(!wants_text(&row("image", Some("Pixel")), &tags("children", 0.30), SHOW, MARGIN, &labels()));
+        assert!(wants_text(&row("image", Some("Pixel")), &tags("document", 0.30), SHOW, MARGIN, &labels()));
+        assert!(wants_text(&row("image", Some("Pixel")), &tags("screenshot", 0.24), SHOW, MARGIN, &labels()));
         // no confidence: the weight is low or the margin over the second tag is under the threshold
-        assert!(!wants_text(&row("image", Some("Pixel")), &tags("документ", 0.20), SHOW, MARGIN, &labels()));
+        assert!(!wants_text(&row("image", Some("Pixel")), &tags("document", 0.20), SHOW, MARGIN, &labels()));
         let flat = HashMap::from([(1, vec![
-            ("документ".to_string(), 0.30),
-            ("дети".to_string(), 0.295),
+            ("document".to_string(), 0.30),
+            ("children".to_string(), 0.295),
         ])]);
         assert!(!wants_text(&row("image", Some("Pixel")), &flat, SHOW, MARGIN, &labels()));
     }
@@ -400,6 +391,55 @@ mod tests {
         assert!(stats.cancelled);
         assert_eq!(stats.done, 0);
         assert_eq!(stats.errors, 0);
+    }
+
+    #[test]
+    fn a_confident_document_tag_counts_without_a_saved_model_choice() {
+        // M23.6: `settings.model_id` stays empty until the owner picks a model, so the dictionary is
+        // found by its tag ids, not by the setting. Before the fix the tag branch of the heuristic
+        // was silently dead on every default DB and a document shot with a camera dropped out.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "pc-ocr-default-model-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let conn = db::open(&path).unwrap();
+        let def = |id: &str| db::TagDef {
+            model: "clip-vit-b32-multilingual".into(),
+            id: id.into(),
+            label: id.into(),
+            prompts: vec!["a photo".into()],
+            enabled: true,
+            position: 0,
+            min_percentile: 0,
+        };
+        db::save_tag_def(&conn, &def("document")).unwrap();
+        db::save_tag_def(&conn, &def("screenshot")).unwrap();
+        let mut image = row("image", Some("Pixel"));
+        image.path = "/document.jpg".into();
+        db::insert(&conn, &image).unwrap();
+        let id: i64 = conn
+            .query_row("SELECT id FROM files", [], |r| r.get(0))
+            .unwrap();
+        db::replace_tags(
+            &conn,
+            id,
+            "clip:clip-vit-b32-multilingual",
+            &[("document".to_string(), 0.30), ("children".to_string(), 0.10)],
+        )
+        .unwrap();
+        assert!(db::load_settings(&conn).model_id.is_empty());
+        drop(conn);
+
+        let plan = plan(&path, false).unwrap();
+        assert_eq!(plan.images, 1);
+        assert_eq!(
+            plan.candidates, 1,
+            "a confident document tag is a candidate even though no model was ever chosen"
+        );
     }
 
     #[test]

@@ -1583,6 +1583,24 @@ pub fn load_tag_defs(conn: &Connection, model: &str) -> Result<Vec<TagDef>> {
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// The labels every dictionary gives the tags `document` and `screenshot`: the ids are stable, the
+/// labels are the owner's (and follow the language of the defaults). Every model's dictionary is
+/// read on purpose — `settings.model_id` is empty until the owner picks a model, so resolving the
+/// dictionary through the setting silently found nothing and OCR lost its content-based candidates
+/// (M23.6). The labels of these two ids cannot widen the heuristic beyond documents.
+pub fn text_tag_labels(conn: &Connection) -> Vec<String> {
+    let Ok(mut st) = conn.prepare(
+        "SELECT DISTINCT label FROM tag_defs
+         WHERE enabled<>0 AND tag_id IN ('document','screenshot') ORDER BY label",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(rows) = st.query_map([], |r| r.get::<_, String>(0)) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
 /// Store a dictionary tag in place (by `model`+`id`) without touching its neighbours.
 /// The label is unique inside a model: otherwise `tags` would get two rows with one key.
 pub fn save_tag_def(conn: &Connection, d: &TagDef) -> Result<()> {
@@ -3151,6 +3169,31 @@ mod tests {
         };
         assert_eq!(positions, [0, 1]);
         let _ = &mut c;
+    }
+
+    /// The labels that make OCR look for text: every dictionary counts, a disabled tag does not.
+    #[test]
+    fn text_tag_labels_come_from_every_dictionary() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let mk = |model: &str, id: &str, label: &str, pos: i64| TagDef {
+            model: model.into(),
+            id: id.into(),
+            label: label.into(),
+            prompts: vec!["a photo".into()],
+            enabled: true,
+            position: pos,
+            min_percentile: 0,
+        };
+        save_tag_def(&c, &mk("m1", "document", "document", 0)).unwrap();
+        save_tag_def(&c, &mk("m1", "screenshot", "screenshot", 1)).unwrap();
+        save_tag_def(&c, &mk("m1", "beach", "beach", 2)).unwrap();
+        // The owner renamed the tag in a second model and switched one off in the first.
+        save_tag_def(&c, &mk("m2", "document", "papers", 0)).unwrap();
+        let mut off = mk("m1", "screenshot", "screenshot", 1);
+        off.enabled = false;
+        save_tag_def(&c, &off).unwrap();
+        assert_eq!(text_tag_labels(&c), ["document", "papers"]);
     }
 
     /// The tag dictionary: an edit is saved in place, the label is unique, a removal clears one row.
