@@ -876,18 +876,21 @@ All decisions on M17–M20 are taken and closed; the M20 measurements are in § 
 - One photo of 1972 stayed without a preview, CLIP and faces (`P_20200724_154351.jpg` does not
   decode) — it is indexed, but does not take part in the passes; the error is visible in the counter
   (1), the face file is marked as "0 faces", so it is not scanned every time.
-- The English model `clip-vit-b32-en` understands only English queries; the Russian tag labels
-  remain, but the query "cake" is meaningless for it. A multilingual model is 217.5 MiB, there is no
-  compatible multilingual model under 100 MiB in the catalogue yet.
-- Switching the model does not erase the old embeddings and tags: they are tied to `model`, so the DB
-  grows by ~4.4 MiB per model; the tags are shown only for the active model.
+- The English models (`clip-vit-b32-en`, `siglip-base-224-en`) understand only English queries; the
+  Russian tag labels remain, but the query "cake" is meaningless for them. The two multilingual
+  models are 217.5 MiB (CLIP, the default) and 393.3 MiB (SigLIP 2, needs a 400 MiB limit); there is
+  no compatible multilingual model under 100 MiB in the catalogue yet.
+- Switching the model does not erase the old embeddings and tags: they are tied to `model` (and the
+  calibration version to `source`), so the DB grows by ~4.4–6.9 MiB per model; the tags are shown only
+  for the active model. Tags written before the M15.6 calibration of SigLIP are not shown until
+  `embed --retag` — a state, not a mix.
 - The owner needs to reindex the folder: the old DB does not know `duration_s` of videos (258 rows).
 - Non-UTF-8 file names (Linux) are stored in the DB through `to_string_lossy` — see ADR 0014.
 - `plan/M3-clusters.md` — a local report with archive paths, it does not get into git.
 - CLIP tags on vertical/wide frames and renders: the "centre + the whole frame" ensemble removes
   "document" from the leaders, but "furniture" does not become first on `8.jpg` — the baseline of the
-  general prompts is overstated. The card honestly writes "not sure" (M15.3); the next step is the
-  common prompts — M15.5.
+  general prompts is overstated even after the common templates of M15.5. The card honestly writes
+  "not sure" (M15.3); a bigger model did not help either (M15.6: SigLIP 2 is worse on documents).
 - After a schema update old DBs get an empty `sharpness` until a reindex; the duplicates panel warns
   about it.
 - Faces: the threshold 0.45 is a compromise; relatives sometimes have a high cosine, so one group can
