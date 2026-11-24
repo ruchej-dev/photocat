@@ -1,135 +1,143 @@
-# Взаимодействие человека с интерфейсом photocat
+# Human interaction with the photocat interface
 
-Нормативные правила поведения. Цель — интерфейс, который **предсказуем**: человек не изучает
-приложение, а делает то, что уже умеет. Всё, что здесь написано, проверяется глазами и тестом, а
-не «ощущением».
+*Русская версия: [vzaimodeystvie.ru.md](vzaimodeystvie.ru.md).*
 
-## 1. Интуитивность — это три вещи
+The normative behaviour rules. The goal is an interface that is **predictable**: a person does not
+study the application but does what he already knows. Everything written here is checked by eye and
+by a test, not by "feeling".
 
-1. **Одна модель.** Плитка = файл, группа = набор похожих файлов, лицо = человек на снимке.
-   Модель не меняется от экрана к экрану: плитка везде одинакового размера, клик везде выделяет,
-   кнопка «оставить» везде значит одно.
-2. **Узнавание вместо воспоминания.** Пользователь не должен помнить, где лежит функция: она
-   видна на экране словами. Иконки-загадки, скрытые меню, «горячие клавиши, о которых надо знать»
-   — не считаются.
-3. **Ничего не прыгает.** Позиция навигации, кнопки и полей не меняется при смене вида, при
-   загрузке превью и при появлении прогресса. Новый элемент не сдвигает старые.
+## 1. Intuitiveness is three things
 
-Если правило ниже противоречит «красивее», выигрывает правило.
+1. **One model.** A tile = a file, a group = a set of similar files, a face = a person in a snapshot.
+   The model does not change from screen to screen: a tile is the same size everywhere, a click
+   selects everywhere, the "keep" button means one thing everywhere.
+2. **Recognition instead of recall.** The user must not remember where a function lives: it is
+   visible on the screen in words. Puzzle icons, hidden menus and "hotkeys you have to know" do not
+   count.
+3. **Nothing jumps.** The position of navigation, buttons and fields does not change when the view
+   changes, when previews load or when progress appears. A new element does not shift the old ones.
 
-## 2. Клик и наведение
+If a rule below contradicts "prettier", the rule wins.
 
-- Один клик по плитке — выбор. Он виден в том же кадре (обводка 2 px) и в статусе внизу.
-- Один клик по кнопке — действие. Двойных кликов, перетаскиваний и правого клика в основном
-  сценарии нет.
-- Наведение даёт **только** подсказку (крупное превью, полный путь, пояснение). Ни одна функция
-  не доступна только по наведению.
-- Кнопки на плитке («оставить», «не он») видны всегда.
-- Цель клика: второстепенная кнопка — не меньше 20 px по высоте, основная — 28 px; на плитке
-  кнопка не меньше 58×20.
-- Опасных действий нет по определению: нет «удалить», «переместить», «очистить». Поэтому нет и
-  модальных подтверждений. Не добавлять их и для «на всякий случай».
+## 2. Click and hover
 
-## 3. Отклик
+- One click on a tile — selection. It is visible in the same frame (a 2 px outline) and in the status
+  at the bottom.
+- One click on a button — an action. There are no double clicks, drags or right clicks in the main
+  scenario.
+- Hover gives **only** a hint (a large preview, the full path, an explanation). No function is
+  available only on hover.
+- Buttons on a tile ("keep", "not him") are always visible.
+- A click target: a secondary button — at least 20 px high, a primary one — 28 px; on a tile a button
+  is at least 58×20.
+- There are no destructive actions by design: no "delete", "move", "clear". The only confirmations
+  are the two places where the disk state changes — "Empty the trash" (the OS trash) and cleaning the
+  cache/index (see `docs/UI.md` §Interaction). Do not add others "just in case".
 
-| Время | Что обязано быть |
+## 3. Response
+
+| Time | What is mandatory |
 |---|---|
-| до 100 мс | выделение, переключение вида, смена фильтра, ответ поиска по тексту (2–3 мс) |
-| до 1 с | пересчёт групп дублей (0.03 с), пересборка лиц (1.2 с), ответ смыслового поиска (11–50 мс) — без индикатора, но с итогом в статусе |
-| больше 1 с | индексация, CLIP, OCR, лица, скачивание модели — фон, прогресс `done/total`, «Стоп» |
+| up to 100 ms | selection, switching the view, changing the filter, a text search answer (2–3 ms) |
+| up to 1 s | duplicate group recomputation (0.03 s), face group rebuild (1.2 s), a semantic search answer (11–50 ms) — no indicator, but the result in the status |
+| more than 1 s | indexing, CLIP, OCR, faces, model download — background, `done/total` progress, "Stop" |
 
-- Действие никогда не выполняется «молча»: после него меняется статус или счётчик в том же кадре.
-- Тяжёлое не блокирует окно: вычисление в потоке, чтение БД не блокируется транзакцией прогона
-  (см. `SCHEMA_VERSION`).
-- Прогресс не перехватывает фокус, не сбрасывает прокрутку и не закрывает выбранный файл.
+- An action is never performed "silently": afterwards the status or a counter changes in the same
+  frame.
+- Heavy work does not block the window: computation is in a thread, reading the DB is not blocked by
+  the pass transaction (see `SCHEMA_VERSION`).
+- Progress does not steal focus, does not reset scrolling and does not close the selected file.
 
-## 4. Долгая работа: стоп и продолжение
+## 4. Long work: stop and resume
 
-- У каждого долгого прохода есть «Стоп» рядом с прогрессом. Остановка доводит текущий файл и
-  коммитит сделанное.
-- После остановки кнопка запуска показывает остаток: «Продолжить (315)». Повторный запуск
-  пропускает уже сделанное по `sha256`.
-- Перед запуском видно **план**, а не «сколько получится»: «Распознать документы (435)»,
-  «Найти лица (1972)», «ещё без лиц: 0 из 1972».
-- Пакетное и одиночное разделены словами: «Распознать текст» (выбранный снимок) и «Распознать
-  документы (435)» (пакет). Глагол без масштаба запрещён.
-- Нельзя запустить второй такой же проход: повторное нажатие игнорируется, кнопка недоступна.
+- Every long pass has a "Stop" next to the progress. A stop finishes the current file and commits
+  what is done.
+- After a stop the start button shows the remainder: "Resume (315)". A repeated run skips what is
+  already done by `sha256`.
+- Before a start the **plan** is visible, not "whatever happens": "Recognize documents (435)",
+  "Find faces (1972)", "still without faces: 0 of 1972".
+- Batch and single runs are separated by words: "Recognize text" (the selected snapshot) and
+  "Recognize documents (435)" (a batch). A verb without a scale is forbidden.
+- A second identical pass cannot be started: a repeated press is ignored, the button is disabled.
 
-## 5. Ошибки и пустые состояния
+## 5. Errors and empty states
 
-- Ошибка живёт в строке статуса внизу: что случилось + что сделать. Одна строка, без стека.
-- Ошибка не исчезает сама через секунду: держится до следующего действия.
-- Модальных окон с ошибками нет. Исключений не вводить.
-- Пустое состояние — это текст и, если уместно, одна кнопка. Не пустая сетка и не спиннер.
-- Причина недоступности пишется рядом с кнопкой словами: «модель не скачана», «tesseract не
-  запускается — укажите путь в «Настройках»».
-- Частичный успех показывается честно: «распознано 120 из 435», «ошибок 1»; слово «готово» без
-  чисел не используется.
+- An error lives in the status line at the bottom: what happened + what to do. One line, no stack.
+- An error does not disappear by itself after a second: it stays until the next action.
+- There are no modal error windows. Do not introduce exceptions.
+- An empty state is text and, if appropriate, one button. Not an empty grid and not a spinner.
+- The reason for being unavailable is written next to the button in words: "the model is not
+  downloaded", "tesseract does not start — set the path in “Settings”".
+- Partial success is shown honestly: "recognized 120 of 435", "errors 1"; the word "done" without
+  numbers is not used.
 
-## 6. Обратимость и доверие
+## 6. Reversibility and trust
 
-- Любое изменение состояния можно вернуть: скрытые теги — «вернуть скрытые теги (N)», решение по
-  дублю — нажать «оставить» на другой плитке, имя группы — очистить поле и сохранить.
-- Если отменить нельзя — действие не предлагается.
-- Оригиналы файлов не меняются никогда; интерфейс это не обещает словами, он это просто не делает.
-- Порог (дубли, теги, лица) сохраняется после отпускания слайдера, а не на каждый пиксель; рядом
-  сразу виден результат («найдено групп: 103»), иначе слайдер — лотерея.
-- Смена модели, порога или пути объясняет последствие: «после смены модели теги нужно посчитать».
+- Any state change can be undone: hidden tags — "restore the hidden tags (N)", a duplicate decision —
+  press "keep" on another tile, a group name — clear the field and save.
+- If it cannot be undone, the action is not offered.
+- Original files never change; the interface does not promise that in words, it simply does not do
+  it.
+- A threshold (duplicates, tags, faces) is saved after the slider is released, not on every pixel;
+  the result is visible next to it immediately ("groups found: 103"), otherwise the slider is a
+  lottery.
+- A change of the model, threshold or path explains the consequence: "after changing the model the
+  tags must be computed".
 
-## 7. Фокус и клавиатура
+## 7. Focus and keyboard
 
-- Фокус виден всегда: обводка 2 px акцентом. Скрывать фокус запрещено.
-- Tab идёт в визуальном порядке: верхняя панель → левая панель → сетка → правая панель → статус.
-- Enter = основное действие (поиск, открыть); Esc = отменить, сбросить поиск, снять выделение.
-- Стрелки двигают выделение по сетке, Home/End — к началу и концу; прокрутка колесом.
-- Горячие клавиши — только добавка к видимой кнопке, не замена. Ctrl без фанатизма: Ctrl+I
-  индексация, Ctrl+F поиск, F5 обновить.
-- Клавиша Delete **не занята** и не будет занята: удаления в приложении нет.
-- Ввод в поле не должен запускать тяжёлое: поиск по Enter или кнопке, не по каждой букве.
+- Focus is always visible: a 2 px outline in the accent colour. Hiding focus is forbidden.
+- Tab goes in visual order: top bar → left panel → grid → right panel → status.
+- Enter = the main action (search, open); Esc = cancel, reset the search, clear the selection.
+- The arrow keys move the selection across the grid, Home/End to the beginning and the end; the wheel
+  scrolls.
+- Hotkeys are only an addition to a visible button, not a replacement. Ctrl without fanaticism: Ctrl+I
+  indexing, Ctrl+F search, F5 refresh.
+- The Delete key is **not assigned** and will not be assigned: there is no deletion in the
+  application.
+- Typing in a field must not start heavy work: search on Enter or a button, not on every letter.
 
-## 8. Переключение видов и сохранение состояния
+## 8. Switching views and keeping state
 
-- Пять пунктов навигации не меняют место и порядок: «Все файлы», «Дубли и серии», «Календарь»,
-  «Лица», «Настройки».
-- При возврате в вид сохраняется: выделенный файл, фильтр, порог, выбранная группа лиц, месяц
-  календаря, результаты поиска.
-- Переключение режима поиска (смысловой ↔ по тексту) сбрасывает результаты и говорит об этом
-  статусом; строка запроса остаётся, чтобы не набирать заново.
-- Новый вид не открывается с уже запущенным тяжёлым проходом «сам собой»: только по кнопке.
+- The navigation items do not change place or order: "All files", "Albums", "Calendar", "Faces",
+  "Duplicates and series", "Integrity", "Trash".
+- When returning to a view, the following is kept: the selected file, the filter, the threshold, the
+  selected face group, the calendar month, the search results.
+- Switching the search mode (semantic ↔ by text) resets the results and says so in the status; the
+  query line stays so it does not have to be typed again.
+- A new view does not open with an already running heavy pass "by itself": only on a button.
 
-## 9. Язык интерфейса
+## 9. Interface language
 
-- Одно понятие — одно слово. Словарь: **файл** (запись в индексе), **снимок** (фото), **видео**,
-  **плитка**, **группа** (дубли или лица), **лицо**, **тег**, **модель**, **проход** (долгая
-  операция), **индекс** (БД).
-- Кнопка — инфинитив: «Индексировать», «Найти группы», «Сохранить имя».
-- Статус — факт + число + единица: «проиндексировано 2230/2230 файлов (21.2 ГиБ), ошибок 0, за
-  64.9 с».
-- Запрещены: «файл(ов)», «шт.», «Успешно!», восклицательные знаки, «Ой», «Упс», «Пожалуйста,
-  подождите».
-- Технический жаргон объясняется на месте: не «FTS5», а «поиск по тексту на фото»; не «эмбеддинг»,
-  а «теги» / «смысловой поиск».
+- One notion — one word. The vocabulary: **file** (an index entry), **snapshot** (a photo), **video**,
+  **tile**, **group** (duplicates or faces), **face**, **tag**, **model**, **pass** (a long
+  operation), **index** (the DB).
+- A button is an infinitive: "Index", "Find groups", "Save the name".
+- A status is a fact + a number + a unit: "indexed 2230/2230 files (21.2 GiB), errors 0, in 64.9 s".
+- Forbidden: "file(s)", "pcs.", "Success!", exclamation marks, "Oops", "Please wait".
+- Technical jargon is explained on the spot: not "FTS5" but "search by text on a photo"; not
+  "embedding" but "tags" / "semantic search".
 
-## 10. Обратная связь для ML-решений
+## 10. Feedback for ML decisions
 
-- Уверенность показывается числом, а не только цветом: `тег: дети (0.24)`, `0.93` у лица.
-- «Не уверен» — нормальное состояние: все теги с весами, ни один не подсвечен, в фильтр файл не
-  попадает.
-- Ошибку человека исправляют в один клик там, где она видна: «не он» на плитке лица, «убрать» у
-  тега.
-- После исправления сразу видно результат: лицо уехало в новую группу, тег исчез из карточки и
-  фильтра, счётчики пересчитались.
-- Догадка не выдаётся за факт: дата с источником (`exif` / `filename` / `mtime`), тег с весом,
-  лицо с уверенностью детекции.
+- Confidence is shown as a number, not only as colour: `tag: children (0.24)`, `0.93` for a face.
+- "Not sure" is a normal state: all tags with their weights, none highlighted, the file does not get
+  into the filter.
+- A human mistake is corrected in one click where it is visible: "not him" on a face tile, "remove"
+  on a tag.
+- After a correction the result is visible immediately: the face moved to a new group, the tag
+  disappeared from the card and the filter, the counters were recomputed.
+- A guess is not passed off as a fact: a date with its source (`exif` / `filename` / `mtime`), a tag
+  with its weight, a face with the detection confidence.
 
-## 11. Что проверить на живом человеке (5 минут)
+## 11. What to check on a live person (5 minutes)
 
-Дать владельцу пять задач, не подсказывая, и записать время до первого правильного клика:
+Give the owner five tasks without prompting, and record the time to the first correct click:
 
-1. «Проиндексируй вот эту папку» → поле каталога найдено за ≤ 5 с.
-2. «Найди все дубли» → вид «Дубли и серии» и «Найти группы» за ≤ 5 с.
-3. «Покажи снимки за 12 мая 2024» → «Календарь» за ≤ 10 с.
-4. «Найди Лизу» → «Лица» и группа за ≤ 10 с.
-5. «Найди чек из Сбербанка» → поиск и режим «по тексту на фото» за ≤ 10 с.
+1. "Index this folder" → the folder field is found in ≤ 5 s.
+2. "Find all duplicates" → the "Duplicates and series" view and "Find groups" in ≤ 5 s.
+3. "Show the snapshots from 12 May 2024" → "Calendar" in ≤ 10 s.
+4. "Find Lisa" → "Faces" and the group in ≤ 10 s.
+5. "Find the receipt from the bank" → the search and the "by text on the photo" mode in ≤ 10 s.
 
-Провал любой задачи — дефект находимости, а не «пользователь не разобрался».
+A failure of any task is a findability defect, not "the user did not figure it out".

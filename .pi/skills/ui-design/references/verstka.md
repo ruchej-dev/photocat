@@ -1,135 +1,141 @@
-# Вёрстка photocat
+# photocat layout
 
-Нормативные правила раскладки. Числа взяты из `docs/UI.md` и кода `src/app.rs`, а не придуманы:
-менять метрику — значит менять этот файл, `docs/UI.md` и код одним изменением.
+*Русская версия: [verstka.ru.md](verstka.ru.md).*
 
-Дефолты egui 0.37: тело `14 px`, заголовок `18 px`, `item_spacing = 8×3`, скругление 3–4 px.
-Тему не переопределять; собственных цветов, кроме акцента, не вводить.
+The normative layout rules. The numbers are taken from `docs/UI.md` and the code in `src/app.rs`, not
+invented: changing a metric means changing this file, `docs/UI.md` and the code in one change.
 
-## 1. Сетка и ритм
+egui 0.37 defaults: body `14 px`, heading `18 px`, `item_spacing = 8×3`, rounding 3–4 px. Do not
+override the theme; do not introduce colours of our own except the accent.
 
-- Базовая сетка — **4 px**. Разрешённые отступы: `2, 4, 6, 8, 12, 16, 24`. Других чисел в
-  `add_space` быть не может (сегодня в коде встречаются 2, 4, 6, 8, 12 — это и есть шкала).
-- Общий шаг интерфейса — `item_spacing 8×6` (M16); кнопка `10×4`, минимальная цель `32×26`.
-- Между связанными элементами — `4`; между группами — `8`; между секциями — `12`; перед
-  заголовком секции — `8`.
-- **Сетка плиток живёт отдельно:** шаг `2 px` по обеим осям внутри области сетки (M16, как в
-  PhotoPrism). Задаётся только в `View::Grid` и не меняет `item_spacing` других экранов; в
-  остальных местах сетка «дышит» вместе с приложением.
-- **Группы по месяцам.** Заголовок «май 2024» 14 px + «· N файлов · объём» 11 px, от свежих к
-  старым; внутри месяца — свежие сверху; «без даты» — последняя группа.
-- Всё, что стоит в колонке, выровнено по левому краю на `8 px` от края панели. Числа и счётчики —
-  по правому краю своей колонки, а не «где получилось».
-- Один регион — один `ScrollArea`. Вложенная прокрутка запрещена; исключение — список групп лиц
-  (`max_height(250)`, `id_salt`), потому что он живёт внутри панели.
-- Пустое место не должно превышать `24 px` между связанными блоками. Если «воздуха» больше —
-  это потерянная плотность, а не стиль.
+## 1. Grid and rhythm
 
-## 2. Размеры, которые нельзя менять в одиночку
+- The base grid is **4 px**. Allowed spacing: `2, 4, 6, 8, 12, 16, 24`. No other numbers may appear
+  in `add_space` (today the code uses 2, 4, 6, 8, 12 — that is the scale).
+- The common interface step is `item_spacing 8×6` (M16); a button is `10×4`, the minimum target
+  `32×26`.
+- Between related elements — `4`; between groups — `8`; between sections — `12`; before a section
+  heading — `8`.
+- **The tile grid lives separately:** a `2 px` step on both axes inside the grid area (M16, like
+  PhotoPrism). It is set only in `View::Grid` and does not change `item_spacing` of other screens;
+  elsewhere the grid "breathes" with the application.
+- **Month groups.** The heading "May 2024" at 14 px + "· N files · size" at 11 px, from the newest to
+  the oldest; inside a month, the newest on top; "No date" is the last group.
+- Everything in a column is aligned to the left, `8 px` from the panel edge. Numbers and counters —
+  to the right edge of their column, not "wherever it landed".
+- One region — one `ScrollArea`. Nested scrolling is forbidden; the exception is the face group list
+  (`max_height(250)`, `id_salt`), because it lives inside the panel.
+- Empty space between related blocks must not exceed `24 px`. If there is more "air", it is lost
+  density, not style.
 
-| Элемент | Значение | Где |
+## 2. Sizes that cannot be changed alone
+
+| Element | Value | Where |
 |---|---|---|
-| Окно по умолчанию | 1240×840 | `app::run` |
-| Левая панель | 260 px, ширина не тянется | `Panel::left` |
-| Правая панель «Сведения о файле» | 280 px; скрыта при окне уже 1200 px | `Panel::right` |
-| Плитка файла / лица | 150×150 + 26 px подпись | `draw_cell`, `draw_face_cell` |
-| Превью в кэше | 320 px по длинной стороне | `derive` |
-| Тултип | до 400 px (файл) / 300 px (лицо) | `draw_cell` |
-| Лицо в кэше | 112×112 | `faces` |
-| Ячейка календаря | `(ширина − 24)/7` × 96 px | `View::Calendar` |
-| Полоса видео | 16 px, текст 11 px | `draw_cell` |
+| Default window | 1240×840 | `app::run` |
+| Left panel | 260 px, the width does not stretch | `Panel::left` |
+| Right panel "File details" | 280 px; hidden when the window is narrower than 1200 px | `Panel::right` |
+| File / face tile | 150×150 + a 26 px caption | `draw_cell`, `draw_face_cell` |
+| Preview in the cache | 320 px on the long side | `derive` |
+| Tooltip | up to 400 px (file) / 300 px (face) | `draw_cell` |
+| Face in the cache | 112×112 | `faces` |
+| Calendar cell | `(width − 24)/7` × 96 px | `View::Calendar` |
+| Video bar | 16 px, 11 px text | `draw_cell` |
 
-Минимум окна — 1000×700: при нём в сетке обязано оставаться **не меньше 4 колонок**. Если
-метрика плитки вырастет так, что 4 колонки не влезают, — это дефект, а не «просторнее стало».
+The minimum window is 1000×700: at that size the grid must keep **at least 4 columns**. If the tile
+metric grows so much that 4 columns no longer fit — that is a defect, not "it got roomier".
 
-## 3. Типографика
+## 3. Typography
 
-- Разрешённые размеры: **11** (подпись под плиткой, служебное), **12** (текст в кадре, статус
-  плитки), **14** (тело, дефолт egui), **16** (крупная метка решения «лишний»), **18**
-  (заголовок секции/экрана). Промежуточных 13/15/17 не вводить.
-- Не больше **четырёх** размеров на одном экране.
-- Начертаний два: обычное и `RichText::small()`/`weak()` для второстепенного. Курсив, CAPS,
-  разрядка — не использовать (кроме уже существующих меток разделов капсом в левой панели:
-  «БИБЛИОТЕКА», «ГРУППЫ» — это часть текущего языка, новых не добавлять).
-- Длина строки в настройках и карточке — не больше **80 знаков**; поля ввода — не шире 420 px,
-  длинные пути — 520 px.
-- Длинные значения: путь переносится, имя файла в статусе — одна строка с многоточием, полное
-  имя — в тултипе. `sha256` — 16 знаков и `…`.
-- Числа — только через `db::human()`, даты — `ГГГГ-ММ-ДД ЧЧ:ММ`, размеры — `Ш×В`. Свои форматы
-  запрещены.
+- Allowed sizes: **11** (the caption under a tile, service text), **12** (text in the frame, tile
+  status), **14** (body, the egui default), **16** (the large "spare" decision label), **18** (a
+  section/screen heading). Do not introduce intermediate 13/15/17.
+- No more than **four** sizes on one screen.
+- Two weights: normal and `RichText::small()`/`weak()` for secondary text. Do not use italics, CAPS or
+  letter spacing (except the existing CAPS section labels in the left panel: "LIBRARY", "TOOLS" —
+  they are part of the current language; do not add new ones).
+- A line in the settings and the card is no longer than **80 characters**; input fields are no wider
+  than 420 px, long paths — 520 px.
+- Long values: a path wraps, a file name in the status is one line with an ellipsis, the full name is
+  in the tooltip. `sha256` — 16 characters and `…`.
+- Numbers go only through `db::human()`, dates are `YYYY-MM-DD HH:MM`, dimensions are `W×H`. Custom
+  formats are forbidden.
 
-## 4. Цвет и контраст
+## 4. Colour and contrast
 
-- Фон, панели, поля, выделение — из `ui.visuals()`. Свои константы запрещены.
-- Единственный собственный цвет — акцент `rgb(90, 170, 255)`. Он значит ровно три вещи:
-  **выбрано**, **уверенный тег**, **оставить**. Больше ничего акцентом не красить.
-- Акцент — не больше одного элемента на плитку и не больше одной кнопки на экран.
-- Явные серые: `gray(190)` — подпись под плиткой, `gray(150)` — второстепенное, `gray(210)` —
-  слово «лишний», `gray(235)` — текст поверх затемнённого кадра. Темнее `gray(150)` для читаемого
-  текста не опускаться.
-- Затемнение «лишний» — `from_black_alpha(150)`, полоса видео — `from_black_alpha(130)`.
-- Границы: выделение — 2 px внутри, скругление 3–4 px. Теней, градиентов, «стекла» нет.
+- Background, panels, fields, selection come from `ui.visuals()`. Custom constants are forbidden.
+- The only colour of our own is the accent `rgb(90, 170, 255)`. It means exactly three things:
+  **selected**, **confident tag**, **keep**. Nothing else is painted with the accent.
+- The accent — no more than one element per tile and no more than one button per screen.
+- Explicit greys: `gray(190)` — the caption under a tile, `gray(150)` — secondary, `gray(210)` — the
+  word "spare", `gray(235)` — text over a dimmed frame. Do not go darker than `gray(150)` for
+  readable text.
+- The "spare" dimming is `from_black_alpha(150)`, the video bar — `from_black_alpha(130)`.
+- Borders: selection — 2 px inside, rounding 3–4 px. There are no shadows, gradients or "glass".
 
-## 5. Плитка (главный элемент)
+## 5. The tile (the main element)
 
-Порядок слоёв фиксирован и одинаков во всех видах:
+The layer order is fixed and the same in every view:
 
-1. фон плитки (`extreme_bg_color`, скругление 3);
-2. превью, вписанное целиком с сохранением пропорций (`fit_rect`), поля залиты фоном;
-3. у видео — полоса 16 px снизу и «▶ М:СС» слева;
-4. метка решения: «лишний» (затемнение + слово) или «оставить» (обводка + слово);
-5. подпись 26 px: слева дата, справа — вторичное (у лиц — уверенность `0.93`);
-6. выделение — обводка 2 px по всей плитке.
+1. the tile background (`extreme_bg_color`, rounding 3);
+2. the preview, fitted entirely with its proportions kept (`fit_rect`), the margins filled with the
+   background;
+3. for a video — a 16 px bar at the bottom and "▶ M:SS" on the left;
+4. the decision mark: "spare" (dimming + the word) or "keep" (outline + the word);
+5. a 26 px caption: the date on the left, secondary information on the right (for faces, the
+   confidence `0.93`);
+6. the selection — a 2 px outline around the whole tile.
 
-Правила:
+Rules:
 
-- Плитка занимает место **всегда**, даже если превью нет: «нет превью» или «▶ видео · М:СС» —
-  текст в том же прямоугольнике. Прыжков раскладки при догрузке быть не может.
-- Кнопки на плитке («оставить», «не он») видны постоянно, а не по наведению, и не перекрывают
-  дату.
-- Двойной клик не нужен ни для одного действия: один клик = выбор, кнопка = действие.
-- Текст на кадре не мельче 11 px и не поверх светлого без подложки.
+- A tile takes its place **always**, even when there is no preview: "no preview" or "▶ video · M:SS" —
+  text in the same rectangle. No layout jumps while loading.
+- Buttons on a tile ("keep", "not him") are always visible, not shown on hover, and do not cover the
+  date.
+- A double click is not needed for any action: one click = selection, a button = action.
+- Text in the frame is no smaller than 11 px and not over a light background without a backing.
 
-## 6. Панели и формы
+## 6. Panels and forms
 
-- Порядок панелей: верхняя → нижняя (статус) → левая → правая → центральная. Левая и правая
-  резервируют ширину до отрисовки сетки, иначе сетка «съёжит» при первом кадре. Правая панель
-  рисуется, только пока в сетке остаются 4 колонки (окно от 1200 px); иначе карточка живёт в
-  левой панели, а не отдельным экраном.
-- Верхняя панель — максимум **две строки** управления: (1) каталог + «Индексировать» +
-  «Обновить» + справа «Каталоги», «Сведения», «Настройки», (2) поиск с сегментированным режимом.
-  Третья строка — только прогресс фонового прохода.
-- Панель содержимого (над сеткой): название вида 18 px и факты 12 px; справа «Плитки» 11 px и
-  ползунок 120 px; ниже чипы активных фильтров 26 px с «×» и «найдено N из M». Строка чипов
-  остаётся на месте при пустом фильтре — заголовок не прыгает.
-- Секции панелей и карточки — **плоские**: подпись 11 px приглушённым, содержимое, линия.
-  `Frame::group` вокруг блоков не рисуется (M16): рамка в рамке спорит с фото.
-- Левая панель: навигация сверху и не скроллится; всё остальное — в прокрутке. Карточка файла —
-  внизу, отделяется разделителем и заголовком «Файл».
-- Настройки: диалог 760×620 px поверх затемнения, слева список разделов 200 px, справа одна
-  колонка секции (заголовок 16 px) с подписью над полем; внизу «Изменения сохраняются сразу» и
-  «Закрыть». Не больше одного экрана прокрутки на секцию.
-- Форма не растягивается на всю ширину центральной панели: поля ввода — 380–420 px, длинные
-  пути — 520 px, остальное — до 720 px.
+- Panel order: top → bottom (status) → left → right → central. The left and right panels reserve
+  their width before the grid is drawn, otherwise the grid "cringes" on the first frame. The right
+  panel is drawn only while the grid keeps 4 columns (a window of 1200 px or wider); otherwise the
+  card lives in the left panel, not as a separate screen.
+- The top bar has at most **two rows** of controls: (1) the folder + "Index" + "Refresh" + on the
+  right "Folders", "Details", "Settings", (2) the search with the segmented mode. The third row is
+  only the progress of a background pass.
+- The content panel (above the grid): the view title at 18 px and the facts at 12 px; on the right
+  "Tiles" at 11 px and a 120 px slider; below, chips of active filters at 26 px with "×" and "found
+  N of M". The chips row stays in place when the filter is empty — the heading does not jump.
+- Sections of panels and the card are **flat**: an 11 px label in the muted colour, the content, a
+  line. `Frame::group` is not drawn around blocks (M16): a frame inside a frame competes with the
+  photo.
+- Left panel: navigation on top and it does not scroll; everything else is in the scroll area. The
+  file card is at the bottom, separated by a divider and the heading "File".
+- Settings: a dialog 760×620 px over a dimming; on the left a list of sections 200 px wide, on the
+  right a single column of the section (a 16 px heading) with a label above the field; at the bottom
+  "Changes are saved immediately" and "Close". No more than one screen of scrolling per section.
+- A form does not stretch across the whole width of the central panel: input fields 380–420 px, long
+  paths 520 px, the rest up to 720 px.
 
-## 7. Состояния раскладки
+## 7. Layout states
 
-- Пустой вид: одна строка с действием («Введите каталог и нажмите „Индексировать“»), не пустые
-  плитки и не «Loading…».
-- Фильтр ничего не нашёл: «ничего не найдено» + кнопка «Сбросить»; счётчики остаются видимыми.
-- Долгий проход: прогресс `done/total` и «Стоп» в верхней панели; сетка остаётся доступной.
-- Ошибка: строка внизу, текст «что случилось + что сделать». Не модальное окно, не красная
-  плашка поверх сетки.
-- Заблокированная кнопка: рядом написана причина («модель не скачана», «tesseract не
-  запускается»), а не только серый цвет.
+- An empty view: one line with an action ("Enter a folder and press “Index”"), not empty tiles and
+  not "Loading…".
+- The filter found nothing: "nothing found" + a "Reset" button; the counters stay visible.
+- A long pass: `done/total` progress and "Stop" in the top bar; the grid stays available.
+- An error: a line at the bottom, the text "what happened + what to do". Not a modal window, not a
+  red plaque over the grid.
+- A disabled button: the reason is written next to it ("the model is not downloaded", "tesseract
+  does not start"), not just a grey colour.
 
-## 8. Запреты вёрстки
+## 8. Layout prohibitions
 
-- Иконки-эмодзи вместо слов (единственное исключение — «▶»).
-- Иконка без подписи как единственный способ действия.
-- Текст, обрезанный без тултипа.
-- Прокрутка внутри прокрутки.
-- «Карточки» с тенями и большими радиусами как декор.
-- Центрирование длинного текста и «красивые» переносы в данных.
-- Два разных размера подписи под плиткой в одном виде.
-- Пустое место вместо состояния (серая заглушка, скелетон, спиннер на весь экран).
+- Emoji icons instead of words (the only exception is "▶").
+- An icon without a caption as the only way to act.
+- Text truncated without a tooltip.
+- Scrolling inside scrolling.
+- "Cards" with shadows and large radii as decoration.
+- Centring long text and "beautiful" line breaks in data.
+- Two different caption sizes under a tile in one view.
+- Empty space instead of a state (a grey placeholder, a skeleton, a full-screen spinner).

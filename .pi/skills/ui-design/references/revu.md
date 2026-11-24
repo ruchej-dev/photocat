@@ -1,106 +1,111 @@
-# Ревью интерфейса: чеклист
+# Interface review: a checklist
 
-Одна страница, по которой проверяется любой экран, панель или макет до того, как он назван
-готовым. Пункт либо выполняется, либо нет; «в целом норм» не считается.
+*Русская версия: [revu.ru.md](revu.ru.md).*
 
-## 1. Двенадцать проверок (рубрика)
+One page to check any screen, panel or mock-up against before it is called done. A point is either
+met or not; "generally fine" does not count.
 
-| № | Проверка | Как убедиться | Провал |
+## 1. Twelve checks (the rubric)
+
+| # | Check | How to make sure | Failure |
 |---|---|---|---|
-| 1 | Главное действие одно и видно | 5 секунд на экран: что здесь делают? | называется не то или два действия |
-| 2 | Функция находится за секунду | тест из `nayti-za-sekundu.md` §7 | >1 клика для частого |
-| 3 | Состояние видно | идёт проход → прогресс; пусто → текст; ошибка → статус | пустой экран, спиннер, «готово» без чисел |
-| 4 | Отклик моментален | клик меняет кадр ≤100 мс; тяжёлое в фоне | окно замирает |
-| 5 | Ничего не прыгает | загрузка превью, прогресс, смена фильтра | плитки едут, кнопки переезжают |
-| 6 | Одна модель | плитка = файл; клик = выбор; слова те же | «здесь плитка другая» |
-| 7 | Числа с единицами | «зря 214.1 МиБ», «файлов 238» | «214.1», «шт.», «файл(ов)» |
-| 8 | Нет разрушения | поиск слов «удалить/переместить/очистить» | хоть одно слово |
-| 9 | Нет модальных окон и подтверждений | ошибки в статусе; действия обратимы | диалог «Вы уверены?» |
-| 10 | Наведение — только подсказка | выключить мышь: всё действие доступно | кнопка только в тултипе |
-| 11 | Клавиатура не обязательна, но работает | Tab/Enter/Esc, виден фокус | фокус не виден, Tab не ходит |
-| 12 | Метрики не тронуты | 150+26, 260, 320, 1240×840, ≥4 колонки | своя «улучшенная» плитка |
+| 1 | The main action is one and visible | 5 seconds per screen: what is done here? | the wrong thing is named, or there are two actions |
+| 2 | A function is found in a second | the test from `nayti-za-sekundu.md` §7 | >1 click for a frequent action |
+| 3 | The state is visible | a pass runs → progress; empty → text; an error → status | an empty screen, a spinner, "done" without numbers |
+| 4 | The response is immediate | a click changes the frame in ≤100 ms; heavy work in the background | the window freezes |
+| 5 | Nothing jumps | preview loading, progress, a filter change | tiles slide, buttons move |
+| 6 | One model | a tile = a file; a click = selection; the same words | "the tile is different here" |
+| 7 | Numbers have units | "214.1 MiB wasted", "238 files" | "214.1", "pcs.", "file(s)" |
+| 8 | Nothing is destroyed | search for the words "delete/move/clear" | even one word |
+| 9 | No modal windows and confirmations | errors in the status; actions reversible | a "Are you sure?" dialog |
+| 10 | Hover is only a hint | turn the mouse off: every action is still available | a button only in a tooltip |
+| 11 | The keyboard is not mandatory, but works | Tab/Enter/Esc, focus visible | focus is not visible, Tab does not move |
+| 12 | The metrics are untouched | 150+26, 260, 320, 1240×840, ≥4 columns | a "better" tile of one's own |
 
-## 2. Десять эвристик Нильсена → наши формулировки
+## 2. Ten Nielsen heuristics → our wording
 
-1. **Видимость состояния** — прогресс `done/total`, статус-строка, «остановлено: 120 из 435».
-2. **Язык пользователя** — «чек», «справка», «лишний», а не «эмбеддинг», «FTS5», «self-join».
-3. **Свобода** — «Стоп», «Сбросить», «вернуть скрытые теги», снять выделение; ничего не заперто.
-4. **Единство** — одно слово на действие, одна плитка на всех экранах, кнопки на одном месте.
-5. **Предотвращение ошибок** — план до запуска («кандидатов 435»), причина у погашенной кнопки.
-6. **Узнавание, не припоминание** — видимые подписи, тултип только добавляет.
-7. **Гибкость** — мышь и клавиатура; пакетный и одиночный проходы разделены.
-8. **Эстетика и минимализм** — плотность, нет декора; всё, что не несёт информации, убрано.
-9. **Помощь с ошибками** — что случилось + что сделать, внизу, без стека.
-10. **Помощь и документация** — подсказки у порогов и моделей; `doctor` в CLI для среды.
+1. **Visibility of state** — `done/total` progress, a status line, "stopped: 120 of 435".
+2. **The user's language** — "receipt", "certificate", "spare", not "embedding", "FTS5", "self-join".
+3. **Freedom** — "Stop", "Reset", "restore the hidden tags", clear the selection; nothing is locked.
+4. **Consistency** — one word per action, one tile on all screens, buttons in one place.
+5. **Error prevention** — a plan before the start ("435 candidates"), the reason next to a greyed-out
+   button.
+6. **Recognition, not recall** — visible labels, a tooltip only adds.
+7. **Flexibility** — mouse and keyboard; batch and single runs are separated.
+8. **Aesthetics and minimalism** — density, no decoration; everything that carries no information is
+   removed.
+9. **Help with errors** — what happened + what to do, at the bottom, no stack.
+10. **Help and documentation** — hints next to thresholds and models; `doctor` in the CLI for the
+    environment.
 
-## 3. Законы UX в наших числах
+## 3. UX laws in our numbers
 
-- **Фиттс:** главные кнопки — у верхней границы, крупные; второстепенные — 20 px высоты.
-- **Хик:** не больше 5–7 пунктов одного веса в панели. Сейчас видов пять, предел — семь
-  (M9 добавит «Целостность»); на восьмом навигацию надо пересобрать в разделы.
-- **Миллер:** пороги и группы — по 3–7; 617 групп лиц разбиты списком, не «облаком».
-- **Якоб:** ведём себя как Finder/Photos/Lightroom: сетка, дата под кадром, поиск сверху.
-- **Близость:** 4 px внутри группы, 8 между группами, 12 между секциями.
-- **Общая область:** заголовок и содержимое группы связаны рамкой `ui.group`, а не отступом.
-- **Фон и фигура (Von Restorff):** акцент — только выбор/уверенный тег/«оставить»; один акцент на
-  плитку.
-- **Пиковое правило:** конец прохода — честная сводка с числами, а не «Успешно!».
+- **Fitts:** the main buttons are at the top edge and large; secondary ones are 20 px high.
+- **Hick:** no more than 5–7 items of the same weight in a panel. There are seven views now — the
+  limit; an eighth would require rebuilding the navigation into sections.
+- **Miller:** thresholds and groups come in 3–7; the 617 face groups are broken up by a list, not a
+  "cloud".
+- **Jakob:** we behave like Finder/Photos/Lightroom: a grid, a date under the frame, search on top.
+- **Proximity:** 4 px inside a group, 8 between groups, 12 between sections.
+- **Common region:** a group's heading and content are tied by a frame, not by spacing.
+- **Figure and ground (Von Restorff):** the accent — only selection/a confident tag/"keep"; one
+  accent per tile.
+- **Peak rule:** the end of a pass is an honest summary with numbers, not "Success!".
 
-## 4. Что уже нарушено (честный список на 2026-11-23)
+## 4. What is already violated (an honest list as of 2026-11-24)
 
-Проверено по коду и по `plan/STATUS.md`, не по памяти:
+Checked against the code and `plan/STATUS.md`, not from memory:
 
-1. **Клавиатуры нет**: в `app.rs` нет обработки стрелок по сетке, Tab-порядок дефолтный,
-   Ctrl+I/Ctrl+F/F5 не реализованы (в `docs/UI.md` они честно в колонке «Ближайшее»).
-2. **Прогресс появляется мгновенно** и мигает на коротких проходах; правило — показывать после
-   300 мс, если операция ещё идёт.
-3. **Ошибка пути к каталогу** пишется в статус, но поле не подсвечивается: связь «ошибка ↔ поле»
-   только текстовая.
-4. **Заголовок месяца не закрепляется** при прокрутке: `ScrollArea` в egui не даёт sticky-строку
-   без ручной отрисовки. Записано в `docs/UI.md` §Долг, п. 8.
-5. **Мультивыбора плиток нет**: клик выбирает один файл. Пакетные действия не обещаны и записаны
-   в `docs/UI.md` §Долг, п. 9; это отдельная задача, а не скрытая функция.
-6. **Календарь**: выбранный день сбрасывается при листании месяца — осознанно, оговорено в
-   `docs/UI.md` §Долг, п. 4.
+1. **The grid has no keyboard**: `app.rs` does not handle arrows over the grid, the Tab order is the
+   default, Ctrl+I/Ctrl+F/F5 are not implemented (Ctrl+A and the ←/→ keys in the full screen do
+   work; `docs/UI.md` honestly keeps the rest in the "Nearest" column).
+2. **Progress appears instantly** and flickers on short passes; the rule is to show it after 300 ms
+   if the operation is still running.
+3. **A folder path error** is written into the status, but the field is not highlighted: the
+   "error ↔ field" link is text only.
+4. **The month heading does not stick** while scrolling: `ScrollArea` in egui does not provide a
+   sticky row without manual drawing. Recorded in `docs/UI.md` §Debt, item 8.
+5. **The calendar**: the selected day is reset when flipping the month — deliberately, stated in
+   `docs/UI.md` §Debt, item 4.
 
-Правило: пункт из этого списка либо исправляется, либо получает строку-исключение в
-`docs/UI.md` с причиной. Молча жить с нарушением нельзя.
+The rule: an item from this list is either fixed or gets an exception row in `docs/UI.md` with the
+reason. One cannot silently live with a violation.
 
-## 5. Definition of done для UI-изменения
+## 5. Definition of done for a UI change
 
-1. Бриф в пять строк и один вариант выбран по рубрике, а не по вкусу.
-2. `docs/UI.md` обновлён: экран/метрика/текст/состояние.
-3. Правила вёрстки соблюдены: отступы из шкалы, размеры шрифтов из списка, один акцент.
-4. Находимость: новая функция попала в карту размещения и не сломала бюджет левой панели.
-5. Взаимодействие: клик/фокус/статус/ошибка/«Стоп» проверены.
-6. `cargo clippy --all-targets` и `check.sh` чистые.
-7. `timeout 6 ./target/release/photocat gui` — окно открылось, сетка на месте (с предупреждением
-   владельцу).
-8. Одна строка в `plan/STATUS.md`: что появилось и чем проверено.
+1. A five-line brief and one option chosen by the rubric, not by taste.
+2. `docs/UI.md` updated: screen/metric/text/state.
+3. The layout rules are met: spacing from the scale, font sizes from the list, one accent.
+4. Findability: the new function is in the placement map and did not break the left panel budget.
+5. Interaction: click/focus/status/error/"Stop" checked.
+6. `cargo clippy --all-targets` and `check.sh` are clean.
+7. `timeout 6 ./target/release/photocat gui` — the window opened, the grid is in place (with a
+   warning to the owner).
+8. One line in `plan/STATUS.md`: what appeared and how it was checked.
 
-## Откуда взяты правила
+## Where the rules come from
 
-Правила переписаны под egui-десктоп, а не скопированы; источники — для дизайнера, который
-захочет копнуть глубже:
+The rules were rewritten for an egui desktop rather than copied; the sources are for a designer who
+wants to dig deeper:
 
-- 10 эвристик и паттерны состояний: [NN/g — Filters vs. Facets](https://www.nngroup.com/articles/filters-vs-facets/),
+- 10 heuristics and state patterns: [NN/g — Filters vs. Facets](https://www.nngroup.com/articles/filters-vs-facets/),
   [Progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/),
   [Empty states](https://www.nngroup.com/articles/empty-state-interface-design/),
   [Photos as web content](https://www.nngroup.com/articles/photos-as-web-content/).
-- Законы UX в числах: [lawsofux.com](https://lawsofux.com/) (Фиттс, Хик, Миллер, Якоб, близость,
-  общая область, Von Restorff).
-- Доверие к ML, уверенность, исправление ошибок: [Google PAIR Guidebook](https://pair.withgoogle.com/guidebook/),
+- UX laws in numbers: [lawsofux.com](https://lawsofux.com/) (Fitts, Hick, Miller, Jakob, proximity,
+  common region, Von Restorff).
+- Trust in ML, confidence, error correction: [Google PAIR Guidebook](https://pair.withgoogle.com/guidebook/),
   [Microsoft HAX](https://www.microsoft.com/en-us/haxtoolkit/),
   [Apple HIG: Machine Learning](https://developer.apple.com/design/human-interface-guidelines/machine-learning).
-- Плотные данные и master-detail: `data-management-patterns` из
+- Dense data and master-detail: `data-management-patterns` from
   [richhemsley3/claude-design-skills](https://github.com/richhemsley3/claude-design-skills),
   [dashboard-design-skill](https://github.com/abdiraimov-otabek/dashboard-design-skill).
-- Домен: [Apple Photos — дубли](https://support.apple.com/guide/photos/find-and-merge-duplicate-photos-pht9e4a2f3b2/mac),
-  [Google Photos — группы лиц](https://support.google.com/photos/answer/6128838),
+- Domain: [Apple Photos — duplicates](https://support.apple.com/guide/photos/find-and-merge-duplicate-photos-pht9e4a2f3b2/mac),
+  [Google Photos — face groups](https://support.google.com/photos/answer/6128838),
   [digiKam — Light table](https://docs.digikam.org/en/light_table.html),
   [Immich demo](https://demo.immich.app/).
-- Доступность и тёмная тема: [WCAG 2.2 Quick Reference](https://www.w3.org/WAI/WCAG22/quickref/),
+- Accessibility and the dark theme: [WCAG 2.2 Quick Reference](https://www.w3.org/WAI/WCAG22/quickref/),
   [GNOME HIG](https://developer.gnome.org/hig/), [KDE HIG](https://develop.kde.org/hig/).
 
-Не переносились: генераторы лендингов, «anti-slop»-скиллы, палитры и Figma-интеграции — они про
-веб-страницы, а не про плотный десктопный инструмент для одного человека.
+Not carried over: landing-page generators, "anti-slop" skills, palettes and Figma integrations —
+they are about web pages, not about a dense desktop tool for one person.

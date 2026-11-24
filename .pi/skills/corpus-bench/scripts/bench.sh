@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Замер photocat на реальном корпусе. Архив не изменяется: только чтение + временная БД.
+# Measure photocat on the real corpus. The archive does not change: reads only + a temporary DB.
 #   bash bench.sh [--quick]
 set -uo pipefail
 
@@ -18,21 +18,21 @@ corpus=$FULL
 if (( quick )); then
   corpus=$QUICK
   if [[ ! -d $corpus || -z $(ls -A "$corpus" 2>/dev/null) ]]; then
-    # быстрый корпус: 120 жёстких ссылок (места не занимают), только из основного корпуса
-    [[ -d $FULL ]] || { echo "нет основного корпуса: $FULL"; exit 2; }
+    # a quick corpus: 120 hard links (they take no space), from the main corpus only
+    [[ -d $FULL ]] || { echo "the main corpus is missing: $FULL"; exit 2; }
     mkdir -p -- "$corpus"
     n=0
     while IFS= read -r -d '' f; do
       ln -- "$f" "$corpus/$(basename -- "$f")" 2>/dev/null && n=$((n + 1))
       (( n >= 120 )) && break
     done < <(find "$FULL" -maxdepth 1 -type f -name '*.jpg' -print0)
-    echo "создан быстрый корпус: $corpus ($n файлов жёсткими ссылками)"
+    echo "quick corpus created: $corpus ($n files hard-linked)"
   fi
 fi
-[[ -d $corpus ]] || { echo "корпус не найден: $corpus"; exit 2; }
+[[ -d $corpus ]] || { echo "corpus not found: $corpus"; exit 2; }
 
 if [[ ! -x $BIN ]]; then
-  echo "сборка релиза…"
+  echo "building the release…"
   cargo build --release --quiet || exit 2
 fi
 
@@ -41,14 +41,14 @@ rm -f -- "$DB" "$DB-wal" "$DB-shm"
 
 files=$(find "$corpus" -type f | wc -l)
 bytes=$(du -sb --apparent-size "$corpus" | cut -f1)
-echo "корпус: $corpus"
-echo "файлов: $files, объём: $bytes байт"
+echo "corpus: $corpus"
+echo "files: $files, size: $bytes bytes"
 echo
 
 t0=$(date +%s.%N)
 "$BIN" index "$corpus" --jobs 16 --db "$DB" 2>/dev/null | tail -1
 t1=$(date +%s.%N)
-printf 'время индексации: %.1f с\n' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print b-a}')"
+printf 'indexing time: %.1f s\n' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print b-a}')"
 
 echo
 "$BIN" stats --db "$DB"
@@ -57,16 +57,16 @@ echo
 t0=$(date +%s.%N)
 "$BIN" dupes --db "$DB" --max-dist 6 --quiet 2>/dev/null | head -1
 t1=$(date +%s.%N)
-printf 'время кластеризации: %.2f с\n' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print b-a}')"
+printf 'clustering time: %.2f s\n' "$(awk -v a="$t0" -v b="$t1" 'BEGIN{print b-a}')"
 
 echo
-echo "план раскладки по датам:"
+echo "the date arrangement plan:"
 "$BIN" organize --db "$DB" --out "$WORK/plan" 2>/dev/null | head -14
 
 echo
-printf 'БД: %s\n' "$(du -h --apparent-size "$DB" | cut -f1)"
+printf 'DB: %s\n' "$(du -h --apparent-size "$DB" | cut -f1)"
 if [[ -d $HOME/.cache/photocat/thumbs ]]; then
-  printf 'превью в кэше: %s\n' "$(du -sh "$HOME/.cache/photocat/thumbs" | cut -f1)"
+  printf 'previews in the cache: %s\n' "$(du -sh "$HOME/.cache/photocat/thumbs" | cut -f1)"
 fi
 echo
-echo "готово. Записать строку в docs/ARCHITECTURE.md §Замеры (дата, корпус, операция, результат)."
+echo "done. Record a row in docs/ARCHITECTURE.md §Measurements (date, corpus, operation, result)."

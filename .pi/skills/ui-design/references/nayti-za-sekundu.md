@@ -1,112 +1,116 @@
-# Найти за секунду
+# Findable in a second
 
-Правило проекта: **любая нужная функция находится за одну секунду и один клик** из текущего вида.
-Если для функции надо открыть меню, вспомнить сочетание клавиш или почитать подсказку — она
-спрятана.
+*Русская версия: [nayti-za-sekundu.ru.md](nayti-za-sekundu.ru.md).*
 
-## 1. Что значит «за секунду»
+The project rule: **any needed function is found within one second and one click** from the current
+view. If a function requires opening a menu, remembering a key combination or reading a hint, it is
+hidden.
 
-Функция считается найденной, если одновременно верно:
+## 1. What "in a second" means
 
-1. **видна** — присутствует на экране без прокрутки и без наведения;
-2. **названа** — подписана словом, а не иконкой;
-3. **в один клик** — от текущего вида до действия не больше одного нажатия;
-4. **на месте** — там, где её ищут по привычке: глобальное — сверху, навигация — слева сверху,
-   действие вида — первой группой под навигацией;
-5. **не спорит** — рядом нет второй кнопки того же веса с другим смыслом.
+A function counts as found when all of the following are true:
 
-Время до первого правильного клика при тесте — **не больше 1 секунды** для частых функций и
-**не больше 10 секунд** для редких (настройка, модель, программы). Больше — переделывать.
+1. **visible** — it is present on the screen without scrolling and without hovering;
+2. **named** — it is labelled with a word, not an icon;
+3. **one click** — from the current view to the action takes no more than one press;
+4. **in place** — where it is looked for out of habit: global things on top, navigation at the top
+   left, the view action as the first group under the navigation;
+5. **not competing** — there is no second button of the same weight with a different meaning nearby.
 
-## 2. Карта размещения (единственная разрешённая)
+The time to the first correct click in a test is **no more than 1 second** for frequent functions and
+**no more than 10 seconds** for rare ones (settings, model, programs). More — redo it.
 
-| Что | Где | Дистанция |
+## 2. Placement map (the only allowed one)
+
+| What | Where | Distance |
 |---|---|---|
-| Каталог, «Индексировать», «Обновить» | верхняя панель, строка 1 | 0 кликов (видно всегда) |
-| Прогресс и «Стоп» | верхняя панель, рядом с запуском | 1 клик |
-| Поиск (смысловой / по тексту) | верхняя панель, строка 2 | 0 кликов, 1 — «Найти» |
-| Четыре вида | левая панель, сразу под заголовком | 1 клик |
-| Фильтр по пути/дате, «Все / Фото / Видео» | левая панель, секция «Фильтр» | 0–1 клик |
-| Активные фильтры и их сброс | над сеткой, чипы с «×» | 1 клик |
-| Размер плиток | над сеткой, справа от заголовка вида | 0 |
-| Главное действие вида (найти группы / найти лица / распознать документы) | левая панель, первая группа после навигации | 1 клик |
-| Порог вида | там же, перед действием | 0 кликов |
-| Итоги вида (сколько групп, лиц, текстов) | рядом с действием | 0 кликов |
-| Карточка выбранного файла | правая панель | 0 кликов после выбора |
-| Модели, лимиты, пороги тегов, пути к программам | «Настройки» в верхней панели, разделы в диалоге | 1–2 клика — допустимо, это редкое |
-| Экспорт плана, копирование | вид «Дубли», под сводкой | 1 клик |
+| Folder, "Index", "Refresh" | top bar, row 1 | 0 clicks (always visible) |
+| Progress and "Stop" | top bar, next to the start | 1 click |
+| Search (semantic / by text) | top bar, row 2 | 0 clicks, 1 — "Find" |
+| Seven views | left panel, right under the heading | 1 click |
+| Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section | 0–1 click |
+| Active filters and their reset | above the grid, chips with "×" | 1 click |
+| Tile size | above the grid, to the right of the view title | 0 |
+| The main action of the view (find groups / find faces / recognize documents) | left panel, the first group after navigation | 1 click |
+| The view threshold | there too, before the action | 0 clicks |
+| View totals (how many groups, faces, texts) | next to the action | 0 clicks |
+| The card of the selected file | right panel | 0 clicks after selection |
+| Models, limits, tag thresholds, program paths | "Settings" in the top bar, sections in the dialog | 1–2 clicks — acceptable, this is rare |
+| Plan export, copying | the "Duplicates" view, under the summary | 1 click |
 
-Правило одного места: одна и та же функция не дублируется в двух местах. Если очень нужно —
-дублируется **только** через горячую клавишу, не второй кнопкой.
+The one-place rule: the same function is not duplicated in two places. If it is really necessary, it
+is duplicated **only** through a hotkey, not with a second button.
 
-## 3. Бюджет левой панели
+## 3. The left panel budget
 
-Левая панель — 260 px и 840 px высоты. В неё помещается:
+The left panel is 260 px wide and 840 px high. It fits:
 
-- 1 заголовок, 4 вида, 2 строки фильтра — **без прокрутки**;
-- контекст вида — с прокруткой;
-- счётчики и карточка файла — ниже, с прокруткой.
+- 1 heading, 7 views, 2 filter rows — **without scrolling**;
+- the view context — with scrolling;
+- the counters and the file card — below, with scrolling.
 
-Правило: **новая функция не добавляется в левую панель, если она уже прокручивается при пустом
-выделении.** Варианты: перенести в экран вида, в «Настройки» или заменить существующую. Левая
-панель не превращается в свалку.
+The rule: **a new function is not added to the left panel if it already scrolls when nothing is
+selected.** The options: move it into the view screen, into "Settings", or replace an existing one.
+The left panel does not turn into a dump.
 
-Навигация, поиск по пути и переключатель видов не скроллятся никогда: они — карта приложения.
+Navigation, a path search and the view switcher never scroll: they are the map of the application.
 
-## 4. Один экран — одно главное действие
+## 4. One screen — one main action
 
-- «Все файлы» → «Индексировать» (глобальное) и «Найти» (поиск); всё остальное вторично.
-- «Дубли и серии» → «Найти группы».
-- «Календарь» → выбор дня.
-- «Лица» → «Найти лица (N)»; после прохода — «Сохранить имя» у выбранной группы.
-- «Настройки» (диалог) → «Скачать модель» (если не скачана), иначе — ничего: экран справочный.
+- "All files" → "Index" (global) and "Find" (search); everything else is secondary.
+- "Duplicates and series" → "Find groups".
+- "Calendar" → picking a day.
+- "Faces" → "Find faces (N)"; after the pass — "Save the name" for the selected group.
+- "Albums" → "+ New album" / "Add selected"; inside an album — "Export to disk…".
+- "Integrity" → "Compare the copies".
+- "Settings" (a dialog) → "Download model" (if not downloaded), otherwise nothing: the screen is
+  reference material.
 
-Второе действие того же веса на экране запрещено: пользователь не должен выбирать между двумя
-«главными».
+A second action of the same weight on a screen is forbidden: the user must not choose between two
+"main" ones.
 
-## 5. Слова, которые ведут
+## 5. Words that lead
 
-- Кнопка начинается с глагола и называет масштаб: «Найти группы», «Найти лица (1972)»,
-  «Распознать документы (435)», «Распознать текст», «Сохранить имя».
-- Одинаковое действие — одинаковое слово во всех видах. Не «Показать», «Открыть», «Перейти» для
-  одного и того же.
-- Рядом с действием — число, объясняющее цену: сколько кандидатов, сколько снимков без лиц,
-  сколько «лишнего». Человек решает, нажимать ли, до нажатия.
-- Заблокированная кнопка объясняет причину текстом рядом, а не только серым цветом.
+- A button starts with a verb and names its scale: "Find groups", "Find faces (1972)", "Recognize
+  documents (435)", "Recognize text", "Save the name".
+- The same action — the same word in all views. Not "Show", "Open", "Go to" for the same thing.
+- Next to an action — a number explaining the cost: how many candidates, how many snapshots without
+  faces, how much is "spare". A person decides whether to press before pressing.
+- A disabled button explains the reason in text next to it, not only with a grey colour.
 
-## 6. Клавиатура как ускорение, не как вход
+## 6. The keyboard as acceleration, not as an entrance
 
-- Частые действия доступны мышью всегда; клавиши — добавка.
-- Ctrl+I — индексация, Ctrl+F — фокус в поиск, F5 — обновить, Enter — основное действие,
-  Esc — сброс/отмена, стрелки — по сетке, Home/End — края.
-- Ни одно действие не существует **только** на клавиатуре.
-- Delete не назначен: удаления нет.
+- Frequent actions are always available with the mouse; keys are an addition.
+- Ctrl+I — indexing, Ctrl+F — focus the search, F5 — refresh, Enter — the main action, Esc —
+  reset/cancel, arrows — across the grid, Home/End — the edges.
+- No action exists **only** on the keyboard.
+- Delete is not assigned: there is no deletion.
 
-## 7. Проверка находимости (делать до реализации и после)
+## 7. The findability check (do it before and after implementation)
 
-1. **Список задач владельца** — 10 фраз его словами: «найди дубли», «покажи май 2024», «где чеки»,
-   «подпиши Лизу», «сколько освободится», «что за камера», «найди торт», «почему нет превью»,
-   «продолжи распознавание», «сверь копию» (последняя — после M9).
-2. **Бумажный прогон**: на макете/скриншоте показать, куда человек нажмёт первым. Если путь
-   длиннее одного клика для частого — перенести.
-3. **Секундомер** на живом окне: время до первого правильного клика. Норма — из §1.
-4. **Пять секунд на экран**: посмотреть 5 секунд и назвать, что здесь можно сделать. Если
-   названо не то главное действие — иерархия сломана.
-5. **Слепой поиск**: дать название функции и посмотреть, найдёт ли человек её без подсказки
-   (это и есть проверка «интуитивно понятно»).
+1. **A list of the owner's tasks** — 10 phrases in his words: "find duplicates", "show May 2024",
+   "where are the receipts", "label Lisa", "how much will be freed", "what camera is this", "find
+   the cake", "why is there no preview", "resume recognition", "check the copy".
+2. **A paper run**: on a mock-up/screenshot, show where a person will click first. If the path is
+   longer than one click for a frequent action — move it.
+3. **A stopwatch** on a live window: the time to the first correct click. The norm is from §1.
+4. **Five seconds per screen**: look for 5 seconds and name what can be done here. If the named thing
+   is not the main action — the hierarchy is broken.
+5. **A blind search**: give the name of a function and see whether a person finds it without a hint
+   (this is the "intuitive" check).
 
-Результат проверки — одна строка в `plan/STATUS.md`: какие задачи провалились и что перенесено.
+The result of the check is one line in `plan/STATUS.md`: which tasks failed and what was moved.
 
-## 8. Антипаттерны находимости
+## 8. Findability anti-patterns
 
-- Гамбургер, «Ещё», выпадающее меню для основных действий.
-- Иконка без подписи в главной панели.
-- Настройка, без которой не работает основная функция, спрятанная на два экрана.
-- Две строки поиска с неочевидной разницей (смысл ↔ текст) без явного переключателя.
-- Действие только по правому клику или только по наведению.
-- Кнопка «Стоп», которую надо искать во время прохода.
-- Прогресс без процента и без чисел.
-- Новая вкладка на каждый новый вид: больше семи пунктов навигации — уже поиск, восьмой требует
-  разделов («Библиотека», «Инструменты»). Настройка вида — не вкладка.
-- Панель, которая появляется и исчезает от выбора файла: сетка не должна менять ширину.
-- Пустой экран без подсказки, что делать дальше.
+- A hamburger, "More", a drop-down menu for main actions.
+- An icon without a caption in the main panel.
+- A setting without which the main function does not work, hidden two screens away.
+- Two search lines with an unobvious difference (semantic ↔ text) without an explicit switch.
+- An action only on a right click or only on hover.
+- A "Stop" button that has to be looked for during a pass.
+- Progress without a percentage and without numbers.
+- A new tab for every new view: more than seven navigation items is already searching, the eighth
+  requires sections ("Library", "Tools"). A view setting is not a tab.
+- A panel that appears and disappears with the file selection: the grid must not change width.
+- An empty screen without a hint of what to do next.

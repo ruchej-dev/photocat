@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`) → next:M21.9 (`.pi/`), then M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills) → next:M15.6 (a multilingual model and calibration), then M15.7 (a check on two folders). Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Where we are
 
@@ -1639,3 +1639,38 @@ path in Cyrillic. `plan/I18N.md` closes the M21.8 row and the "Repository" bulle
 pairs. No code was touched.
 
 **Next.** M21.9: `.pi/skills/*` and `.pi/prompts/*`.
+
+## M21.9 — the repository skills in English (2026-11-24)
+
+The last Russian layer of the repository is English now. Eight documents: the four
+`.pi/skills/*/SKILL.md` (`add-view`, `corpus-bench`, `enforce-architecture`, `ui-design`) and the
+four normative references of `ui-design` (`verstka`, `vzaimodeystvie`, `nayti-za-sekundu`, `revu`).
+Each has a Russian original next to it as `*.ru.md`, both files link to each other; the Russian
+variants point at `docs/*.ru.md`, `plan/STATUS.ru.md`, `AGENTS.ru.md` and the Russian
+`references/*.ru.md`, the English ones at the English documents. All headings, tables, numbers and
+code references are kept (indexing 84.7 s, 103 duplicate groups / 238 files / 214.1 MiB, 2229
+embeddings in 77.3 s, 435 OCR candidates, the 12 review checks, the 4 px grid and the 150+26 tile).
+
+**The prompt and the scripts.** `.pi/prompts/next-task.md` was already English, so it has no pair;
+only its line about an untranslated document now says "If `plan/I18N.md` marks a document as still
+Russian, the Russian original is the source of truth." The two scripts — `check.sh` and `bench.sh` —
+are code, not documentation: their comments and runtime messages (`ok`, `ERROR`, `WARNING`,
+`RESULT: boundaries are in order (52 checks)`, `indexing time`, `clustering time`) are English now,
+while the checks and thresholds are unchanged. `bash -n` passes on both; `check.sh` — 52/0.
+
+**Made true by the translation (both variants).** The placement map says seven views, not "four";
+the navigation rule lists `All files`, `Albums`, `Calendar`, `Faces`, `Duplicates`, `Integrity`,
+`Trash`; the review's honest list dropped "multi-selection does not exist" (M18 added it) and keeps
+the remaining five items; the interaction rules name the two real confirmations — "Empty the trash"
+(the OS trash) and cleaning the cache/index — instead of "there are no confirmations". The
+references still describe the interface of their last revision; the current behavior document is
+`docs/UI.md`.
+
+**Checks.** Heading trees match in every pair (`verstka` 9/9, `vzaimodeystvie` 12/12,
+`nayti-za-sekundu` 9/9, `revu` 7/7; `ui-design` 8/8, `add-view` 7/7, `corpus-bench` 7/7,
+`enforce-architecture` 12/12). The English markdown keeps Cyrillic only in the link line and in the
+corpus path. No code was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
+`plan/I18N.md` closes the last row and records the skill pairs.
+
+**Next.** M21 is done. The queue returns to M15.6 (a multilingual model and calibration) and M15.7
+(a check on two folders).

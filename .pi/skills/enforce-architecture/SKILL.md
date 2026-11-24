@@ -1,6 +1,6 @@
 ---
 name: enforce-architecture
-description: "Проверить границы слоёв photocat: ядро не знает про egui, модуль зависит только от нижних, ни один код не удаляет и не переименовывает файлы. Использовать при переносе кода, добавлении зависимости, перед коммитом и в конце любой задачи, которая трогает src/ или Cargo.toml."
+description: "Check photocat's layer boundaries: the core does not know about egui, a module depends only on lower layers, and no code deletes or renames files. Use when moving code, adding a dependency, before a commit and at the end of any task that touches `src/` or `Cargo.toml`."
 license: MIT
 compatibility: pi
 metadata:
@@ -8,89 +8,92 @@ metadata:
   workflow: architecture
 ---
 
-# Держать архитектуру photocat
+*Русская версия: [SKILL.ru.md](SKILL.ru.md).*
 
-Карта слоёв — не пожелание: модуль зависит только от нижних, GUI не содержит логики, файлы архива
-неприкосновенны. Этот скилл — процедура проверки границ до того, как задача названа готовой.
+# Keeping photocat's architecture
 
-## Когда применять
+The layer map is not a wish: a module depends only on lower layers, the GUI contains no logic, and
+archive files are untouchable. This skill is the procedure for checking the boundaries before a task
+is called done.
 
-- Добавление, перенос, удаление кода через границу модуля.
-- Новая зависимость в `Cargo.toml`.
-- Ревью изменения или закрытие задачи, которая трогала `src/`.
+## When to apply
 
-## Источник правды
+- Adding, moving or deleting code across a module boundary.
+- A new dependency in `Cargo.toml`.
+- Reviewing a change or closing a task that touched `src/`.
 
-| Документ | Что содержит |
+## Sources of truth
+
+| Document | What it contains |
 |---|---|
-| `AGENTS.md` §1, §3 | Запреты и карта модулей |
-| `docs/ARCHITECTURE.md` | Слои, поток данных, схема БД |
-| `docs/DECISIONS.md` 0008, 0005 | Почему граница есть и почему нельзя удалять файлы |
-| `.pi/skills/enforce-architecture/scripts/check.sh` | Машинная проверка |
+| `AGENTS.md` §1, §3 | The prohibitions and the module map |
+| `docs/ARCHITECTURE.md` | Layers, the data flow, the DB schema |
+| `docs/DECISIONS.md` 0008, 0005 | Why the boundary exists and why files must not be deleted |
+| `.pi/skills/enforce-architecture/scripts/check.sh` | The machine check |
 
-Когда эти четыре расходятся — исправить все одним изменением. Нарушение не «чинится» ослаблением
-правила: либо код, либо предложение владельцу.
+When these four disagree — fix them all in one change. A violation is not "fixed" by weakening the
+rule: either the code, or a proposal to the owner.
 
-## Автоматическая проверка
+## The automatic check
 
 ```bash
-bash .pi/skills/enforce-architecture/scripts/check.sh          # быстро, только grep
+bash .pi/skills/enforce-architecture/scripts/check.sh          # fast, grep only
 bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 ```
 
-Что проверяется:
+What is checked:
 
-1. `use crate::<модуль>` не выходит за карту слоёв (`derive` ↓, `db` ↓,
-   `index`/`dupes`/`organize`/`verify`, `app`/`main` сверху).
-2. `egui`/`eframe` встречается только в `src/app.rs`.
-3. В `src/` нет `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` — оригиналы
-   архива неприкосновенны (ADR 0005).
-4. Сеть только за весами моделей: в `Cargo.toml` нет HTTP-клиентов, `curl` запускается лишь в
-   `src/embed.rs` и без флагов отправки данных — ADR 0015, 0016.
-5. Каждая зависимость упомянута в `docs/DECISIONS.md` (предупреждение, не ошибка).
+1. `use crate::<module>` does not leave the layer map (`derive` ↓, `db` ↓,
+   `index`/`dupes`/`organize`/`verify`, `app`/`main` on top).
+2. `egui`/`eframe` appears only in `src/app.rs`.
+3. There is no `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` in `src/` —
+   archive originals are untouchable (ADR 0005).
+4. The network is only for model weights: `Cargo.toml` has no HTTP clients, `curl` runs only in
+   `src/embed.rs` and without data-upload flags — ADR 0015, 0016.
+5. Every dependency is mentioned in `docs/DECISIONS.md` (a warning, not an error).
 
-## Ручной чек-лист по модулям
+## A manual checklist by module
 
 ### `derive` (L0)
-- Разрешено: `image`, `image_hasher`, `kamadak-exif`, `sha2`, `chrono`, `anyhow`.
-- Запрещено: `rusqlite`, `egui`, `rayon`, `walkdir` — это не дело «прочитать один файл».
-- Проверить: функции принимают `&Path` и возвращают значения, а не пишут в БД.
+- Allowed: `image`, `image_hasher`, `kamadak-exif`, `sha2`, `chrono`, `anyhow`.
+- Forbidden: `rusqlite`, `egui`, `rayon`, `walkdir` — reading one file is not their job.
+- Check: functions take a `&Path` and return values; they do not write to the DB.
 
 ### `db` (L1)
-- Разрешено: `rusqlite`, `anyhow`, `std`.
-- Запрещено: декодирование картинок, `egui`, обход каталога.
-- Проверить: схема меняется только через `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE`, данные не
-  теряются; `human()` — единственный форматер объёмов.
+- Allowed: `rusqlite`, `anyhow`, `std`.
+- Forbidden: image decoding, `egui`, directory traversal.
+- Check: the schema changes only through `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE`, no data is
+  lost; `human()` is the only size formatter.
 
 ### `index` / `dupes` / `organize` / `verify` (L2)
-- Разрешено: L0, L1, `rayon` и `walkdir` в `index` и `verify`.
-- Запрещено: `egui`, `eframe`, чтение настроек GUI.
-- Проверить: `organize` без `--apply` ничего не создаёт; `dupes` не пишет в БД; `verify` и
-  `manifest` только читают архив, `manifest` пишет единственный файл по явному `--out`, и только
-  целиком (неполный слепок не создаётся).
+- Allowed: L0, L1, `rayon` and `walkdir` in `index` and `verify`.
+- Forbidden: `egui`, `eframe`, reading GUI settings.
+- Check: `organize` without `--apply` creates nothing; `dupes` does not write to the DB; `verify`
+  and `manifest` only read the archive, `manifest` writes the single file given by an explicit
+  `--out`, and only in full (an incomplete snapshot is not created).
 
 ### `player` (L2)
-- Разрешено: `rff-format-*`, `rff-codec-*`, `cpal`, `rayon`, `std`.
-- Запрещено: `egui`/`eframe`, `rusqlite`, `crate::db`, запуск внешних программ (`tools`).
-- Проверить: плеер только читает файл, ничего не пишет в архив; UI-строки — в `app.rs`;
-  `play` в `main.rs` — единственный CLI-вход, и он без графики.
+- Allowed: `rff-format-*`, `rff-codec-*`, `cpal`, `rayon`, `std`.
+- Forbidden: `egui`/`eframe`, `rusqlite`, `crate::db`, starting external programs (`tools`).
+- Check: the player only reads a file, writes nothing into the archive; UI strings live in `app.rs`;
+  `play` in `main.rs` is the only CLI entry and it has no graphics.
 
 ### `app` (L3)
-- Разрешено: всё ниже + `eframe`/`egui`.
-- Запрещено: SQL-строки, декодирование полноразмерных изображений в UI-потоке, логика, которую
-  нельзя проверить без экрана.
-- Проверить: логика вынесена в `dupes::`/`db::`; в `app.rs` остались выборки и рисование.
+- Allowed: everything below + `eframe`/`egui`.
+- Forbidden: SQL strings, decoding full-size images on the UI thread, logic that cannot be checked
+  without a screen.
+- Check: logic is moved into `dupes::`/`db::`; `app.rs` keeps fetching and drawing.
 
-## Признаки, что граница уже нарушена
+## Signs that the boundary is already broken
 
-- В `app.rs` появился `conn.execute(` или `SELECT …` строкой.
-- В `dupes.rs` появился `image::open`.
-- В `db.rs` появился `use crate::derive`.
-- `organize` научился удалять «лишнее» вместо отчёта.
-- `verify` или `manifest` пишут в каталог архива без явного `--out` или удаляют файлы.
-- Новая зависимость без строки в `docs/DECISIONS.md`.
+- `conn.execute(` or a `SELECT …` string appeared in `app.rs`.
+- `image::open` appeared in `dupes.rs`.
+- `use crate::derive` appeared in `db.rs`.
+- `organize` learned to delete "the excess" instead of reporting.
+- `verify` or `manifest` write into the archive folder without an explicit `--out` or delete files.
+- A new dependency without a row in `docs/DECISIONS.md`.
 
-## Итог
+## Bottom line
 
-Задача не закрыта, если `check.sh` красный. Отчёт о проверке — одна строка в `plan/STATUS.md`
-(«границы: ок» или что именно осталось).
+A task is not closed if `check.sh` is red. The report of the check is one line in `plan/STATUS.md`
+("boundaries: ok", or exactly what is left).

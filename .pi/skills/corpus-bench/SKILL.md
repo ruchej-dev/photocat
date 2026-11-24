@@ -1,6 +1,6 @@
 ---
 name: corpus-bench
-description: "Измерить photocat на реальном архиве владельца и записать цифры: время индексации, число групп дублей, объём кэша, скорость кластеризации. Использовать перед закрытием задачи, которая трогает индекс, дубли, раскладку или превью, и когда нужны числа для docs/ARCHITECTURE.md."
+description: "Measure photocat on the owner's real archive and record the numbers: indexing time, duplicate group count, cache size, clustering speed. Use before closing a task that touches the index, duplicates, layout or previews, and when numbers are needed for `docs/ARCHITECTURE.md`."
 license: MIT
 compatibility: pi
 metadata:
@@ -8,91 +8,94 @@ metadata:
   workflow: perf
 ---
 
-# Замер на реальном корпусе
+*Русская версия: [SKILL.ru.md](SKILL.ru.md).*
 
-Числа в `docs/ARCHITECTURE.md` — не украшение: это то, на что смотрит следующая сессия, чтобы
-понять, регресс перед ней или нет. Замер всегда делается в release-сборке и всегда на одном и том
-же корпусе.
+# Measuring on the real corpus
 
-## Корпус
+The numbers in `docs/ARCHITECTURE.md` are not decoration: they are what the next session looks at to
+tell whether it faces a regression. A measurement is always taken in a release build and always on
+the same corpus.
 
-Основной: `~/Documents/nasty/mail_media/Фотографии с телефона` — 2230 файлов, 21.2 ГиБ
-(1972 изображения, 258 видео). Он **только читается**: ни одна команда замера не пишет в него.
+## Corpus
 
-Быстрый: 120 изображений жёсткими ссылками в `~/.cache/pctest/imgs` (жёсткие ссылки не занимают
-место; между `/tmp` (tmpfs) и домашним каталогом они не работают — ADR/AGENTS §8).
+The main one: `~/Documents/nasty/mail_media/Фотографии с телефона` — 2230 files, 21.2 GiB
+(1972 images, 258 videos). It is **read only**: not a single measurement command writes into it.
 
-## Команды
+The quick one: 120 images hard-linked into `~/.cache/pctest/imgs` (hard links take no space; they do
+not work between `/tmp` (tmpfs) and the home directory — ADR/AGENTS §8).
+
+## Commands
 
 ```bash
-bash .pi/skills/corpus-bench/scripts/bench.sh            # полный прогон по основному корпусу
-bash .pi/skills/corpus-bench/scripts/bench.sh --quick    # 120 файлов
+bash .pi/skills/corpus-bench/scripts/bench.sh            # a full run over the main corpus
+bash .pi/skills/corpus-bench/scripts/bench.sh --quick    # 120 files
 ```
 
-Скрипт собирает release-сборку при необходимости, индексирует во **временную** БД (кэш владельца не
-трогает), печатает таблицу и код возврата: 0 — все замеры сняты.
+The script builds the release build if needed, indexes into a **temporary** DB (it does not touch
+the owner's cache), prints a table and returns: 0 — all measurements were taken.
 
-## Ручной прогон (когда нужен один замер, а не таблица)
+## A manual run (when one measurement is needed, not a table)
 
 ```bash
 cargo build --release
 D=/tmp/pc-bench.db
-/usr/bin/time -f 'индексация: %e с, %M КБ RSS' \
+/usr/bin/time -f 'indexing: %e s, %M KB RSS' \
   ./target/release/photocat index "$HOME/Documents/nasty/mail_media/Фотографии с телефона" \
     --jobs 16 --db "$D"
 ./target/release/photocat stats --db "$D"
 ./target/release/photocat dupes --db "$D" --max-dist 6 --quiet
 ./target/release/photocat organize --db "$D" --out /tmp/pc-plan | head -12
 ./target/release/photocat embed --db "$D" --jobs 8 --batch 8
-./target/release/photocat search "торт" --db "$D" --top 5
+./target/release/photocat search "cake" --db "$D" --top 5
 ./target/release/photocat clusters --db "$D" --k 30 --out /tmp/M3-clusters.md
 du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 ```
 
-## Ожидаемые значения (базовая линия, не догма)
+## Expected values (a baseline, not a dogma)
 
-| Метрика | База (2026-11-22) | Тревога, если |
+| Metric | Baseline (2026-11-22) | Alarm if |
 |---|---|---|
-| Индексация 2230 файлов, `--jobs 16` (вкл. видео через ffmpeg) | 84.7 с | > 130 с |
-| Пропускная способность | ~34 файла/с, ~80 изобр./с | < 15 файлов/с |
-| Ошибок индексации | 1 (известный битый JPEG `P_20200724_154351.jpg`) | > 1 |
-| БД | 1.3 МБ | > 12 МБ |
-| Превью | 33 МБ (29 МБ фото + 4 МБ обложек видео) | > 100 МБ |
-| `dupes --max-dist 6` | 103 группы / 238 файлов / 214.1 МиБ | групп < 80 или > 150 |
-| Кластеризация 2229 файлов, k=30 | 1.0 с | > 5 с |
-| Файлов без dHash | 1 (битый JPEG; видео теперь с dHash) | > 1 (значит сломали видео или декод) |
-| Видео с обложкой, dHash и длительностью | 258/258, суммарно 3:19:46 | < 250 |
-| Файлов без даты | 0 | > 5% |
-| `embed` 2229 файлов (фото + видео), `--jobs 8 --batch 8` | 77.3 с (34.7 мс/файл) | > 200 с |
-| Модель CLIP multilingual (4 файла) | 217.5 МиБ | файлы не совпали по sha256 |
-| Модель CLIP en (3 файла) | 148.6 МиБ | > 5 с на проверку/сеть |
-| БД с CLIP (2229 файлов) | 12 МБ, векторы 4.35 МиБ, тегов 15 603 | > 40 МБ на корпус |
-| Повторный `embed` | 0.03 с, всё пропущено по sha256+model | > 5 с |
-| Поиск по 2229 векторам (модель уже загружена) | 11 мс | > 200 мс |
-| OCR-кандидаты (`ocr --dry-run`), 1972 снимка | 435 | > 700 или < 150 |
-| `ocr --jobs 8` по 435 кандидатам (tesseract 5.5.4) | 106.2 с, 434/435, 66 444 знака | > 200 с |
-| Повторный `ocr` | 0.0 с, 434 пропущено по sha256 | > 5 с |
-| Поиск по тексту (`search --text`), 434 текста | 2–3 мс | > 50 мс |
-| БД с CLIP и OCR | 12.7 МБ (+276 КиБ на текст) | > 40 МБ |
-| `verify` двух копий корпуса, `--jobs 8` | 19.9 с, 2230/2230 совпало | > 120 с |
-| `manifest` корпуса, `--jobs 8` | 10.1 с, 2230 строк, 193 КиБ | > 60 с |
-| `verify --manifest` по корпусу | 11.4 с, 2230/2230 | > 60 с |
-| `export` 500 файлов / 2.4 ГиБ (дерево 3 уровней), `--apply` | 2.0 с, повтор 20 мс, 0 новых | > 30 с или повтор > 5 с |
-| `export` 2230 файлов / 21.2 ГиБ, `--apply` | 111 мс (ФС отдала `copy_file_range`), повтор 45 мс | > 120 с или повтор > 5 с |
+| Indexing 2230 files, `--jobs 16` (incl. video via ffmpeg) | 84.7 s | > 130 s |
+| Throughput | ~34 files/s, ~80 images/s | < 15 files/s |
+| Indexing errors | 1 (the known broken JPEG `P_20200724_154351.jpg`) | > 1 |
+| DB | 1.3 MB | > 12 MB |
+| Previews | 33 MB (29 MB photos + 4 MB video covers) | > 100 MB |
+| `dupes --max-dist 6` | 103 groups / 238 files / 214.1 MiB | groups < 80 or > 150 |
+| Clustering 2229 files, k=30 | 1.0 s | > 5 s |
+| Files without a dHash | 1 (the broken JPEG; videos now have a dHash) | > 1 (means video or decoding broke) |
+| Videos with a cover, a dHash and a duration | 258/258, 3:19:46 in total | < 250 |
+| Files without a date | 0 | > 5% |
+| `embed` 2229 files (photos + videos), `--jobs 8 --batch 8` | 77.3 s (34.7 ms/file) | > 200 s |
+| The CLIP multilingual model (4 files) | 217.5 MiB | the files do not match by sha256 |
+| The CLIP en model (3 files) | 148.6 MiB | > 5 s for a check/network |
+| DB with CLIP (2229 files) | 12 MB, vectors 4.35 MiB, 15 603 tags | > 40 MB per corpus |
+| A repeated `embed` | 0.03 s, everything skipped by sha256+model | > 5 s |
+| Search over 2229 vectors (the model already loaded) | 11 ms | > 200 ms |
+| OCR candidates (`ocr --dry-run`), 1972 shots | 435 | > 700 or < 150 |
+| `ocr --jobs 8` over 435 candidates (tesseract 5.5.4) | 106.2 s, 434/435, 66 444 characters | > 200 s |
+| A repeated `ocr` | 0.0 s, 434 skipped by sha256 | > 5 s |
+| Text search (`search --text`), 434 texts | 2–3 ms | > 50 ms |
+| DB with CLIP and OCR | 12.7 MB (+276 KiB for text) | > 40 MB |
+| `verify` of two corpus copies, `--jobs 8` | 19.9 s, 2230/2230 matched | > 120 s |
+| `manifest` of the corpus, `--jobs 8` | 10.1 s, 2230 rows, 193 KiB | > 60 s |
+| `verify --manifest` over the corpus | 11.4 s, 2230/2230 | > 60 s |
+| `export` 500 files / 2.4 GiB (a 3-level tree), `--apply` | 2.0 s, repeat 20 ms, 0 new | > 30 s or repeat > 5 s |
+| `export` 2230 files / 21.2 GiB, `--apply` | 111 ms (the FS gave `copy_file_range`), repeat 45 ms | > 120 s or repeat > 5 s |
 
-## Правила
+## Rules
 
-1. **Только release.** Debug-сборка на картинках в 30 раз медленнее и цифру портит (48 с против 1.5 с
-   на 122 файлах).
-2. **Один корпус — одна строка в таблице.** Нельзя «примерно на 2 тысячах».
-3. **Записывать дату и что изменилось.** Строка в `docs/ARCHITECTURE.md` §Замеры: `| дата | корпус |
-   операция | результат |`.
-4. **Не мерить на кэше владельца.** Временная БД в `/tmp`, чтобы не испортить его индекс.
-5. Если замер хуже базы — сначала разобраться, потом писать в план. Регресс без объяснения — дефект.
+1. **Release only.** A debug build is 30 times slower on images and spoils the number (48 s against
+   1.5 s on 122 files).
+2. **One corpus — one row in the table.** "Roughly two thousand" is not allowed.
+3. **Record the date and what changed.** A row in `docs/ARCHITECTURE.md` §Measurements:
+   `| date | corpus | operation | result |`.
+4. **Do not measure on the owner's cache.** A temporary DB in `/tmp`, so his index is not spoiled.
+5. If a measurement is worse than the baseline — figure it out first, then write to the plan. An
+   unexplained regression is a defect.
 
-## После замера
+## After the measurement
 
-- Строка в `docs/ARCHITECTURE.md` §Замеры.
-- Одна фраза в `plan/STATUS.md`: что стало лучше/хуже.
-- Если изменился смысл цифры (например, видео теперь с превью и dHash) — обновить базовую линию в
-  этом скилле тем же коммитом, иначе скилл начнёт врать.
+- A row in `docs/ARCHITECTURE.md` §Measurements.
+- One sentence in `plan/STATUS.md`: what got better/worse.
+- If the meaning of a number changed (for example, videos now have a preview and a dHash) — update
+  the baseline in this skill in the same commit, otherwise the skill starts lying.

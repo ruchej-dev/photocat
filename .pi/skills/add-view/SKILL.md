@@ -1,6 +1,6 @@
 ---
 name: add-view
-description: "Добавить в photocat новый вид или фильтр целиком: вариант View, пункт в левой панели, ветку в центральной панели, переиспользование draw_cell, состояние в App, строка в docs/UI.md и проверка. Использовать, когда появляется вкладка, режим просмотра, фильтр по типу/дате/тегу или новая группировка."
+description: "Add a new view or filter to photocat end to end: a `View` variant, an item in the left panel, a branch in the central panel, reuse of `draw_cell`, state in `App`, a row in `docs/UI.md` and a check. Use when a tab, viewing mode, type/date/tag filter or a new grouping appears."
 license: MIT
 compatibility: pi
 metadata:
@@ -8,42 +8,46 @@ metadata:
   workflow: add-view
 ---
 
-# Добавить вид в photocat
+*Русская версия: [SKILL.ru.md](SKILL.ru.md).*
 
-Вид — это способ посмотреть на тот же индекс: сетка, дубли, таймлайн. Видов будет больше (теги,
-лица, документы), поэтому добавление вида — повторяемая операция, а не творчество в `app.rs`.
+# Add a view to photocat
 
-## Порядок
+A view is a way to look at the same index: the grid, duplicates, the timeline. There will be more
+views (tags, faces, documents), so adding a view is a repeatable operation, not creativity in
+`app.rs`.
 
-1. **Решение.** Записать в `docs/UI.md` §Экраны строку: имя вида, что на нём, главное действие.
-   Если вид меняет структуру на диске или вводит новый фильтр в БД — строка в `docs/DECISIONS.md`.
-2. **Данные.** Ответить: виду нужны новые поля/таблица? Если да — сначала `db.rs` (`ALTER TABLE` в
-   `open`, функция выборки), потом UI. Вид не делает SQL сам.
-3. **Перечисление.** `enum View` в `app.rs` + `selectable_value` в левой панели. Подпись —
-   по-русски, инфинитив или существительное: «Все файлы», «Дубли и серии», «По датам».
-4. **Ветка.** В `CentralPanel` добавить `View::X => { … }`. Плитки рисуются только через
-   `draw_cell` — второй экземпляр плитки запрещён.
-5. **Состояние.** Что вид помнит про показ (порог, выбранная группа, фильтр, выделение), — поле
-   `App` с разумным значением по умолчанию. В `settings` пишутся только настройки показа, которые
-   должны пережить перезапуск: `tile_size`, представление сетки (`grid_layout`) и сортировка
-   (`grid_sort`); ничего другого в файлы настроек не пишем.
-6. **Тяжёлое — в поток.** Классификация/кластеризация в виде идёт фоном, результат приходит через
-   `mpsc`, прогресс — в верхней панели (как `start_index`).
-7. **Документы.** `docs/UI.md` (экран, состояния, метрики), `plan/STATUS.md` (что появилось),
-   при новой колонке в БД — `docs/ARCHITECTURE.md` §Схема.
-8. **Проверка** (см. ниже).
+## Order
 
-## Шаблон вставки
+1. **Decision.** Write a row in `docs/UI.md` §Screens: the view name, what is on it, the main
+   action. If the view changes the structure on disk or introduces a new filter in the DB — a row in
+   `docs/DECISIONS.md`.
+2. **Data.** Answer: does the view need new fields/a table? If yes — `db.rs` first (`ALTER TABLE` in
+   `open`, a fetch function), then the UI. A view does not run SQL itself.
+3. **Enum.** `enum View` in `app.rs` + `selectable_value` in the left panel. The label is in
+   English, an infinitive or a noun: "All files", "Duplicates and series", "By dates".
+4. **Branch.** In `CentralPanel` add `View::X => { … }`. Tiles are drawn only through `draw_cell` —
+   a second copy of the tile is forbidden.
+5. **State.** What the view remembers about the display (threshold, selected group, filter,
+   selection) is an `App` field with a sensible default. Only display settings that must survive a
+   restart go into `settings`: `tile_size`, the grid layout (`grid_layout`) and the sort
+   (`grid_sort`); nothing else is written to the settings file.
+6. **Heavy work goes to a thread.** Classification/clustering in the view runs in the background,
+   the result arrives via `mpsc`, progress is in the top bar (like `start_index`).
+7. **Documents.** `docs/UI.md` (the screen, states, metrics), `plan/STATUS.md` (what appeared), and
+   for a new DB column — `docs/ARCHITECTURE.md` §Schema.
+8. **Check** (see below).
+
+## Insertion template
 
 ```rust
-// View: один вариант перечисления
+// View: one enum variant
 #[derive(Clone, Copy, PartialEq)]
-enum View { Grid, Dupes, Timeline, /* новый */ }
+enum View { Grid, Dupes, Timeline, /* new */ }
 
-// Левая панель
-ui.selectable_value(&mut self.view, View::New, "Новый вид");
+// Left panel
+ui.selectable_value(&mut self.view, View::New, "New view");
 
-// Центральная панель
+// Central panel
 View::New => {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -55,30 +59,30 @@ View::New => {
 }
 ```
 
-## Ловушки, на которых уже спотыкались
+## Traps we have already hit
 
-- **Заимствования.** `self.items` берётся через `std::mem::take`, текстуры кладутся в локальный
-  `Cells`, а после `show` возвращаются назад. Иначе borrow checker не даст менять кэш текстур
-  внутри замыкания.
-- **Ленивая загрузка.** Превью грузится только если `ui.is_rect_visible(rect)`; иначе первый кадр
-  на 20 тыс. фото съест гигабайты.
-- **Счётчики.** Новый вид обязан не ломать нижние счётчики (`файлов`, `объём`, `без даты`).
-- **Пустое состояние.** Писать словами, что делать: «Нажмите „Найти группы“ слева», а не пустоту.
+- **Borrows.** `self.items` is taken with `std::mem::take`, the textures go into a local `Cells`,
+  and after `show` are put back. Otherwise the borrow checker will not let the texture cache change
+  inside the closure.
+- **Lazy loading.** A preview is loaded only if `ui.is_rect_visible(rect)`; otherwise the first
+  frame on 20 thousand photos will eat gigabytes.
+- **Counters.** A new view must not break the bottom counters (`files`, `size`, `no date`).
+- **Empty state.** Say in words what to do: "Press “Find groups” on the left", not emptiness.
 
-## Проверка
+## Check
 
 ```bash
 cargo clippy --all-targets
 bash .pi/skills/enforce-architecture/scripts/check.sh
-timeout 6 ./target/release/photocat gui        # только с предупреждением владельцу
+timeout 6 ./target/release/photocat gui        # only with a warning to the owner
 ```
 
-Логика вида, которую можно проверить без экрана (подсчёты, группировка, фильтр), выносится в
-`dupes.rs`/`db.rs` и проверяется через CLI или отдельную функцию — тогда вид остаётся тонким.
+View logic that can be checked without a screen (counts, grouping, filter) goes into
+`dupes.rs`/`db.rs` and is checked through the CLI or a separate function — then the view stays thin.
 
-## Готово, когда
+## Done when
 
-- вид есть в `docs/UI.md` и в левой панели;
-- плитки рисует `draw_cell`, своей копии нет;
-- `check.sh` зелёный, `clippy` без предупреждений в новом коде;
-- в `plan/STATUS.md` записано, что появилось и что осталось.
+- the view is in `docs/UI.md` and in the left panel;
+- tiles are drawn by `draw_cell`, there is no copy of its own;
+- `check.sh` is green, `clippy` has no warnings in the new code;
+- `plan/STATUS.md` records what appeared and what is left.

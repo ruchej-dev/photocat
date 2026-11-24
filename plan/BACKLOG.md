@@ -848,7 +848,7 @@ a repeat 20 ms with 0 new; 2230 files / 21.2 GiB — 110 ms and a repeat 45 ms; 
 
 ---
 
-## M21 — language of the project and of the interface ◐ (mechanism, GUI screens, CLI reports and the documentation done; `.pi/` left)
+## M21 — language of the project and of the interface ✅ (done)
 
 **Goal.** The repository speaks English (docs, commits) while the Russian documentation stays as the
 second variant; the interface language is chosen in the settings: English is the main language,
@@ -925,6 +925,11 @@ Runtime diagnostics from L1/L2 still speak Russian (recorded in `plan/I18N.md` a
 `cargo test` 205 tests (5 new: `fill`, placeholder parity, the source scan that proves every `t`/`fill`
 literal is in `PAIRS`, English CLI reports on both languages, English `--help`); `cargo clippy` clean;
 `check.sh` 52/0; on the corpus copy `dupes` stays 103 groups / 238 files / 214.1 MiB in 0.023 s.
+M21.7a–c and M21.8a–c: the behavior documents and the plan are English, each with a Russian
+`.ru.md` variant and links both ways (details in `plan/STATUS.md`). M21.9: the eight repository
+skills and references (`.pi/skills/*/SKILL.md`, `.pi/skills/ui-design/references/*.md`) are English
+with Russian `.ru.md` originals; the prompt was already English, the two scripts speak English too;
+`check.sh` — 52/0.
 
 ## M21.8b — the backlog in English (2026-11-24)
 
