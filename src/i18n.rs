@@ -1373,10 +1373,15 @@ const PAIRS: &[(&str, &str)] = &[
     ("запрос «{}»: результатов {} за {} мс", "query “{}”: {} results in {} ms"),
     ("повтор {}: {} мс", "repeat {}: {} ms"),
     ("в среднем: {} мс", "on average: {} ms"),
-    // --- CLI: описания моделей в каталоге (M21.6) ------------------------------
+    // --- названия и описания моделей в каталоге (M21.6, M15.6) ------------------
+    ("CLIP ViT-B/32, мультиязычная", "CLIP ViT-B/32, multilingual"),
+    ("CLIP ViT-B/32, английская", "CLIP ViT-B/32, English"),
+    ("SigLIP base 224, английская", "SigLIP base 224, English"),
+    ("SigLIP 2 base 224, мультиязычная", "SigLIP 2 base 224, multilingual"),
     ("русский поиск и теги, лучшее качество", "Russian search and tags, the best quality"),
     ("меньше по размеру, запросы только по-английски", "smaller, English queries only"),
     ("768 признаков, архитектура SigLIP; запросы по-английски", "768 features, SigLIP architecture; English queries"),
+    ("768 признаков, тексты на 100+ языках; нужен лимит 400 МиБ", "768 features, 100+ languages; needs a 400 MiB limit"),
 ];
 
 #[cfg(test)]

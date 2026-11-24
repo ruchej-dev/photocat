@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills) → next:M15.6 (a multilingual model and calibration), then M15.7 (a check on two folders). Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight) → next:M15.7 (a labelled check on two folders), then the open tail of M15.6 (an fp16 text tower against int8) if the owner wants SigLIP 2 at all. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Where we are
 
@@ -1674,3 +1674,63 @@ corpus path. No code was touched: `cargo test`, `clippy` and `check.sh` are unaf
 
 **Next.** M21 is done. The queue returns to M15.6 (a multilingual model and calibration) and M15.7
 (a check on two folders).
+
+## M15.6 — a multilingual model and the calibration of the tag weight (2026-11-24) ✅
+
+M12 left the tail: "SigLIP understands only English and has a low cosine scale — a confident tag of
+0.22 almost never fires". The task was a fourth model (SigLIP 2 multilingual) plus calibration of the
+thresholds. Done in `src/embed.rs` (catalogue entry, `pad_left`, `score_calib`, `score_version`,
+`tag_source`); `derive.rs`, `db.rs`, `app.rs` and the schema did not change, the originals were not
+touched.
+
+**What appeared.**
+
+- **The fourth model.** `siglip2-base-224-multi`: SigLIP 2 base patch16-224
+  (`onnx-community/siglip2-base-patch16-224-ONNX`, Apache-2.0), 768 features, 393.3 MiB (vision 90.2,
+  text 270.3, tokenizer 32.8 — the text tower carries a 256k-token Gemma vocabulary), three files with
+  pinned URLs and sha256, read through the existing `TextKind::Pooler`. The ONNX graph was checked
+  first: `pixel_values → pooler_output` 768, `input_ids → pooler_output` 768, no attention mask.
+- **The padding rule is data.** The SigLIP 2 tokenizer pads to 64 on the right with `<pad>` itself,
+  and the pooler reads the last token — so every text collapsed into one vector (cosine "a dog"/"a
+  cat" 0.976) and the tags stopped differing at all: 0 confident tags, "документ" on a photo of cats.
+  `pad_left` strips that tail and pads on the left so the EOS stays last; with it the same four test
+  frames (lake, car, desk, portrait) are matched correctly 4/4, whereas the right-padded variant gets
+  0/4.
+- **Calibration.** The threshold must mean the same thing on every model, so the stored tag weight is
+  mapped by the model's own affine map `cos * scale + shift` into the CLIP scale; the coefficients
+  put the median best tag (0.263) and the median lead (0.0118) of CLIP where they are: SigLIP 2
+  `(1.42, 0.14)`, SigLIP 1 `(0.55, 0.23)`, CLIP identity. The percentile filter is untouched by it
+  (a monotone map), and `tags.source` carries `@v2` for a calibrated model, so rows of an older
+  calibration are never mixed in; `embed --retag` rewrites them in 2–4 s without reading a photo.
+- **The old tail is fixed.** `siglip-base-224-en` had 0 % confident tags at 0.22; after the
+  calibration it has 55.6 % — the same as CLIP — at the price of a lower document recall (53.5 %).
+- **SigLIP 2 is opt-in.** The default model stays `clip-vit-b32-multilingual`: SigLIP 2 does not fit
+  the 250 MiB limit (the owner raises it to 400), it is 2.7× slower per file, and it is worse on the
+  document category. `models download` refuses it at 250 MiB naming both numbers; nothing is
+  downloaded without a click.
+
+**Measurements** (`/tmp` DB, release, the phone corpus 2229 files + "день рожденья" 111, 23.3 GiB;
+the full table — `docs/ARCHITECTURE.md` § Measurements):
+
+| Model | `embed` | best tag, median | lead, median | confident | documents with text caught | false "document" without text |
+|---|---|---|---|---|---|---|
+| CLIP ViT-B/32 multilingual | 147 s (0.063 s/file) | 0.263 | 0.0118 | 55.6 % | 85.9 % | 3.3 % |
+| SigLIP 2 base 224 multilingual | 398.8 s (0.170 s/file) | 0.263 | 0.0118 | 55.3 % | 69.0 % | 9.7 % |
+| SigLIP base 224 English | 404.5 s (0.173 s/file) | 0.262 | 0.0119 | 55.6 % | 53.5 % | 1.0 % |
+
+The picture repeats in each folder separately (CLIP 55.4 % / 61.3 % confident, SigLIP 2 54.8 % /
+64.0 %), so the calibration is a property of the model, not of a folder. Ground truth for the document
+category is the OCR text (373 candidates, 142 with text, 68 218 characters, 83.1 s). Where both models
+are confident (815 files) their labels agree in 629 cases (77.2 %). The vectors of four models cost
+18.4 MiB and the DB 62.8 MB.
+
+**Not done, deliberately.** A comparison with CLIP ViT-L/14 (over 500 MiB, over any sane limit); the
+fp16 SigLIP 2 text tower (538.7 MiB) to separate int8 damage from the model itself — it is an open
+question, not a bug; M15.7 (a labelled sample of ≥100 shots on two folders) stays the next task.
+
+**Checks.** `cargo test` — 207 passed, 6 `#[ignore]` (new: the catalogue of four models with unique
+ids/folders, sha256, licence and identity-only-for-CLIP calibration; the calibration puts both SigLIP
+medians onto CLIP's; `tags.source` carries `@v2`; the padding test keeps the EOS last and reproduces
+the right padding for CLIP); `cargo clippy --all-targets` — clean; `check.sh` — 52 checks, 0
+violations; `embed --retag` on the bench DB reproduces the measured numbers; `models list` shows four
+models with sizes, licences and the limit.

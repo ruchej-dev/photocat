@@ -281,8 +281,14 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
   interface works.
 - The model is switched → the old vectors and tags stay in the DB, but search, tags, the filter and
   clusters read only the new one; switching back shows its tags without recomputation. The
-  catalogue shows "768 features · 203.5 MiB · Apache-2.0"; SigLIP answers English queries and has a
-  lower cosine scale — a confident tag at 0.22 almost never fires, the percentile filter works.
+  catalogue shows "768 features · 203.5 MiB · Apache-2.0". The confident-tag threshold keeps its
+  meaning across models: the weight of a tag is brought to the CLIP scale by the model's own
+  calibration (ADR 0041), so 0.22 and the 0.01 lead mean the same thing on CLIP, SigLIP and SigLIP 2.
+  SigLIP models answer English prompts better than Russian ones; Russian semantic search is the
+  strong point of the multilingual CLIP, which stays the default.
+- A model is bigger than the size limit → the row says "over the limit" and "Download model" refuses
+  with both numbers (SigLIP 2 needs 393.3 MiB: the limit has to be raised to 400 MiB); a model that
+  is already on disk is shown as "present" regardless of the limit, because it works.
 - The search mode is switched → the results of the previous query are reset, the status names the
   mode: "semantic search by the content of the snapshots" / "search by the text recognized on the
   snapshots".

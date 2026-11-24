@@ -5,7 +5,7 @@
 > С M21 этот файл пишется по-английски; записи M21 и новее остались на языке, на котором
 > писались. Русская документация — второй вариант (`*.ru.md`). См. `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills) → next:M15.6 (a multilingual model and calibration), then M15.7 (a check on two folders). Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight) → next:M15.7 (a labelled check on two folders), then the open tail of M15.6 (an fp16 text tower against int8) if the owner wants SigLIP 2 at all. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -1573,5 +1573,62 @@ references still describe the interface of their last revision; the current beha
 corpus path. No code was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 `plan/I18N.md` closes the last row and records the skill pairs.
 
-**Next.** M21 is done. The queue returns to M15.6 (a multilingual model and calibration) and M15.7
-(a check on two folders).
+**Next.** M21 and M15.6 are done. The queue — M15.7 (a labelled check on two folders).
+
+## M15.6 — мультиязычная модель и калибровка веса тега (2026-11-24) ✅
+
+M12 оставил хвост: «SigLIP понимает только английский и у него низкая шкала косинуса — уверенный
+тег 0.22 почти не срабатывает». Задача была — четвёртая модель (SigLIP 2 мультиязычная) и калибровка
+порогов. Сделано в `src/embed.rs` (запись каталога, `pad_left`, `score_calib`, `score_version`,
+`tag_source`); `derive.rs`, `db.rs`, `app.rs` и схема не менялись, оригиналы не тронуты.
+
+**Что появилось.**
+
+- **Четвёртая модель.** `siglip2-base-224-multi`: SigLIP 2 base patch16-224
+  (`onnx-community/siglip2-base-patch16-224-ONNX`, Apache-2.0), 768 признаков, 393.3 МиБ (зрительная
+  90.2, текстовая 270.3, токенизатор 32.8 — в текстовой башне словарь Gemma на 256k токенов), три
+  файла с закреплёнными URL и sha256, читается существующим `TextKind::Pooler`. Граф ONNX сначала
+  проверен: `pixel_values → pooler_output` 768, `input_ids → pooler_output` 768, маски внимания нет.
+- **Правило добивки стало данными.** Токенизатор SigLIP 2 сам добивает до 64 справа `<pad>`, а пулер
+  читает последний токен — все тексты склеивались в один вектор (косинус «собака»/«кошка» 0.976), и
+  теги переставали различаться вовсе: 0 уверенных тегов, «документ» на фото кошек. `pad_left`
+  снимает этот хвост и добивает слева, чтобы EOS остался последним; с ним те же четыре контрольных
+  кадра (озеро, автомобиль, стол, портрет) находятся 4/4, а вариант с добивкой справа — 0/4.
+- **Калибровка.** Порог должен значить одно и то же на любой модели, поэтому сохранённый вес тега
+  отображается аффинным отображением самой модели `cos * scale + shift` в шкалу CLIP; коэффициенты
+  ставят медиану лучшего тега (0.263) и медиану отрыва (0.0118) CLIP туда, где они есть: SigLIP 2
+  `(1.42, 0.14)`, SigLIP 1 `(0.55, 0.23)`, CLIP — тождественное. Процентильный фильтр отображение не
+  задевает (монотонное), а `tags.source` у калиброванной модели несёт `@v2`, поэтому строки старой
+  калибровки не смешиваются; `embed --retag` переписывает их за 2–4 с, не читая снимки.
+- **Старый хвост закрыт.** У `siglip-base-224-en` было 0 % уверенных тегов при 0.22; после
+  калибровки — 55.6 %, столько же, сколько у CLIP, ценой более низкого recall по документам (53.5 %).
+- **SigLIP 2 — по выбору.** Модель по умолчанию остаётся `clip-vit-b32-multilingual`: SigLIP 2 не
+  влезает в лимит 250 МиБ (владелец поднимает его до 400), она в 2.7× медленнее на файл и хуже по
+  категории «документ». `models download` отказывает ей при 250 МиБ, называя оба числа; без нажатия
+  ничего не скачивается.
+
+**Замеры** (БД в `/tmp`, release, корпус телефона 2229 файлов + «день рожденья» 111, 23.3 ГиБ;
+полная таблица — `docs/ARCHITECTURE.ru.md` § Замеры):
+
+| Модель | `embed` | лучший тег, медиана | отрыв, медиана | уверенных | документы с текстом найдены | ложный «документ» без текста |
+|---|---|---|---|---|---|---|
+| CLIP ViT-B/32 мультиязычная | 147 с (0.063 с/файл) | 0.263 | 0.0118 | 55.6 % | 85.9 % | 3.3 % |
+| SigLIP 2 base 224 мультиязычная | 398.8 с (0.170 с/файл) | 0.263 | 0.0118 | 55.3 % | 69.0 % | 9.7 % |
+| SigLIP base 224 английская | 404.5 с (0.173 с/файл) | 0.262 | 0.0119 | 55.6 % | 53.5 % | 1.0 % |
+
+Картина повторяется в каждом каталоге отдельно (CLIP 55.4 % / 61.3 % уверенных, SigLIP 2 54.8 % /
+64.0 %), поэтому калибровка — свойство модели, а не каталога. Истина для категории «документ» — текст
+OCR (373 кандидата, 142 с текстом, 68 218 знаков, 83.1 с). Там, где уверены обе модели (815 файлов),
+их метки совпадают в 629 случаях (77.2 %). Векторы четырёх моделей занимают 18.4 МиБ, БД — 62.8 МБ.
+
+**Не делали намеренно.** Сравнения с CLIP ViT-L/14 (свыше 500 МиБ, сверх любого разумного лимита);
+fp16-текстовой башни SigLIP 2 (538.7 МиБ), которая отделила бы потери int8 от свойств модели, — это
+открытый вопрос, а не баг; M15.7 (размеченная выборка ≥100 снимков на двух каталогах) остаётся
+следующей задачей.
+
+**Проверки.** `cargo test` — 207 прошло, 6 `#[ignore]` (новые: каталог четырёх моделей с уникальными
+id/каталогами, sha256, лицензией и калибровкой-тождеством только у CLIP; калибровка ставит обе
+медианы SigLIP на медианы CLIP; `tags.source` несёт `@v2`; тест добивки держит EOS последним и
+воспроизводит правую добивку для CLIP); `cargo clippy --all-targets` — чисто; `check.sh` — 52
+проверки, 0 нарушений; `embed --retag` на стендовой БД воспроизводит замеренные числа; `models list`
+показывает четыре модели с размерами, лицензиями и лимитом.

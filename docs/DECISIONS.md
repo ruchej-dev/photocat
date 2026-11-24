@@ -937,3 +937,60 @@ test parses `ru_RU.UTF-8`, `de:ru`, `C`, `POSIX` and an empty tag; the counter t
 `2 файла`, `11 файлов`, `1 file`; the grid tests assert `May 2024`, `No date`, `Select all (4)`,
 `2 selected · 40 B`; the month test checks both language tables and out-of-range numbers.
 `clippy --all-targets` clean; `check.sh` — 44 checks, 0 violations.
+
+## 0041. The tag weight is calibrated per model: SigLIP 2 in the catalogue, opt-in
+
+M12 added SigLIP with a lower cosine scale and left the tail: "a confident tag of 0.22 almost never
+fires". M15.6 needed a fourth model (SigLIP 2, multilingual) and hit the same wall — with one
+threshold for all models, the meaning of `tag_show`/`tag_margin` depends on the model, and the owner
+sees either "everything is confident" or "nothing is".
+
+**Decision.** The raw cosine stays what is compared (percentiles, search), but the tag weight that
+goes into `tags` is mapped by the model's own affine calibration
+`score = cos * scale + shift` (`ModelEntry::score_calib`, `ModelEntry::score`). The coefficients are
+chosen so that the **median of the best tag** and the **median of its lead over the second** land
+where CLIP's already are — 0.263 and 0.0118 — so the owner's 0.22 / 0.01 keep their meaning when he
+switches the model. The numbers come from 2340 files in two independent directories (the phone corpus
+and "день рожденья"), measured once per model; they are a property of the model, not of a folder:
+SigLIP 2 `(1.42, 0.14)`, SigLIP 1 `(0.55, 0.23)`, both CLIP models `(1.0, 0.0)` — identity, so no
+stored tag changed for them.
+
+`score_version` travels inside `tags.source` (`clip:siglip2-base-224-multi@v2`): rows scored under an
+older calibration are not mixed into the new distribution, and `embed --retag` rewrites them from the
+stored vectors in 2–4 s without reading a single photo. The percentile filter is unaffected by a
+monotone map, so `tag_show_pct` and the per-tag percentiles keep working as before.
+
+**Why an affine map and not "per-model thresholds".** A second set of settings (one slider per model)
+would multiply settings the owner has to understand and would still leave two sliders meaning
+different things across models. One map per model keeps one slider and one meaning; the map is data
+in the catalogue, visible in `models list` and open to a re-measurement.
+
+**Why SigLIP 2 is not the default.** It is a real 768-dimension multilingual model with an Apache-2.0
+licence, but on the owner's archive it loses to the current CLIP on the document category at the same
+confidence level: of the 142 shots with recognized text it confidently calls 69.0% documents (CLIP
+85.9%), and on 1926 photos without text it confidently says "document/screenshot" in 9.7% of cases
+(CLIP 3.3%). Its text tower is 270 MiB because of the 256k-token Gemma vocabulary (393.3 MiB in
+total, over the 250 MiB default limit), and it is 2.7× slower per file (0.170 s against 0.063 s).
+So it is added as an opt-in entry: the owner raises the limit to 400 MiB and clicks download if he
+wants to try it; nothing is downloaded without that click. Its Russian search is weaker than the
+multilingual CLIP text tower (the same label ranks the same photos in only 2 of 3 cases on the
+sample), so the default stays `clip-vit-b32-multilingual`.
+
+**What it forbids.** Comparing raw cosines of two models in the UI or in a report; a threshold that
+silently changes meaning when the model is switched; adding a model to the catalogue without a
+calibration pair and without a measurement on two folders.
+
+**Consequences.** `siglip-base-224-en` becomes usable for the first time (0 → 55.6% confident tags at
+the same threshold) at the price of a lower document recall (53.5%). Rows written by a calibration
+expect the version in `source`; a DB that had SigLIP tags from before M15.6 shows none until
+`embed --retag` — a documented state, not a silent mix. The licence of the new weights is Apache-2.0,
+compatible with the project licence (AGENTS §1); no new dependency appeared — it is data in the
+existing catalogue and the existing `tokenizers` crate reads the Gemma tokenizer.
+
+**Checks (M15.6).** `cargo test` — the catalogue describes four models (unique ids and folders,
+sha256, dimensions, licence, `score_calib` identity only for CLIP, `score_version` 2 for SigLIP),
+the calibration maps both medians of both SigLIP models onto CLIP's within 0.006 / 0.002, the source
+of a calibrated model carries `@v2`, and the padding test keeps the EOS last for left padding and
+reproduces right padding for CLIP. `embed --retag` on the bench DB reproduces the measured numbers;
+`models download` refuses SigLIP 2 at the 250 MiB limit and downloads 393.3 MiB at 400 with a sha256
+match. Full numbers — `docs/ARCHITECTURE.md` § Measurements, `plan/STATUS.md` § M15.6.

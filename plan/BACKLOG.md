@@ -553,7 +553,7 @@ tests, clippy and the layers are green.
 
 ---
 
-## M15 — tags that work on any archive (1–5 done 2026-11-23; 6 — after M12)
+## M15 — tags that work on any archive (1–5 done 2026-11-23, 6 done 2026-11-24; 7 — next)
 
 **Goal.** The tags should work from the first launch on any archive, without tuning the prompts to
 `Фотографии с телефона`; 100% of the scale always leaves something; the owner can add his own labels
@@ -590,11 +590,22 @@ questions — `plan/M15-tags.md`.
    A measurement before/after on two folders: a false "document/screenshot" on a photo 16.3% →
    13.6%,
    documents with text 123/145 without losses. plan/STATUS.md § M15.5.
-6. **The model.** SigLIP 2 multilingual / CLIP ViT-L/14 — only after M12 (a dynamic
-   dimension), with ONNX, sha256, a limit, calibration and a CPU measurement. Do not mix the old
-   models and vectors.
-7. **A check on two independent folders**, not on one; the numbers with the date, the folder and
-   the model — in `docs/ARCHITECTURE.md` § Measurements.
+6. ✅ **The model and the calibration.** SigLIP 2 base 224 multilingual
+   (`onnx-community/siglip2-base-patch16-224-ONNX`, Apache-2.0, 393.3 MiB, 768 features) is the
+   fourth catalogue entry, opt-in: it does not fit the 250 MiB default limit, the owner raises it to
+   400. The tag weight is calibrated per model into the CLIP scale (`score_calib`, ADR 0041), so the
+   confident threshold keeps its meaning on every model; `tags.source` carries the calibration
+   version. The padding rule became data (`pad_left`): without it SigLIP 2's texts collapse into one
+   vector. Measured on two folders: SigLIP 2 55.3 % confident tags (CLIP 55.6 %), documents with text
+   caught 69.0 % (CLIP 85.9 %), false "document" on photos without text 9.7 % (CLIP 3.3 %), 0.170 s
+   per file against 0.063 — so the default stays the multilingual CLIP. `plan/STATUS.md` § M15.6.
+   Open tail: the fp16 text tower (538.7 MiB) was not tried, so it is unknown how much of the loss is
+   int8.
+7. **A check on two independent folders with a labelled sample** (≥100 shots including
+   renders/screenshots): top-1/top-3, how many "furniture" shots at the 100 %/70 % percentile, the
+   embedding time and the DB size — with the date, the folder and the model in
+   `docs/ARCHITECTURE.md` § Measurements. The two folders and the label-free metrics
+   (documents via OCR text) are already in place since M15.6.
 
 **Not doing.** Hardcoding prompts/thresholds for the current archive; auto-tuning for one folder;
 the network for prompts; deleting/renaming files; promising an object detector.

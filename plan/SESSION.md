@@ -8,8 +8,10 @@
 > fast search of similar shots** (a block index instead of a BK-tree; ADR 0038), **M12: the CLIP
 > model catalogue** (SigLIP 768, schema 7; ADR 0039). Before them — **M18: multiple selection of
 > tiles**, **M17: the grid layout and the sort order**, **M16: the interface after the PhotoPrism
-> model** (`plan/M16-interface.md`, ADR 0033). The queue — **M15.6: a multilingual model and
-> calibration**, then **M15.7: a check on two folders**.
+> model** (`plan/M16-interface.md`, ADR 0033). **M15.6 — the multilingual SigLIP 2 model and the
+> calibration of the tag weight** is done as well (ADR 0041). The queue — **M15.7: a labelled check
+> on two folders**; the two folders and the label-free metrics (documents via OCR text) are already
+> in place.
 > The owner cancelled renaming the originals (2026-11-23). The entry point: `plan/STATUS.md`.
 > Below is the historical log of M13–M14c, not the current status.
 

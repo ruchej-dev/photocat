@@ -3353,7 +3353,7 @@ impl App {
             .width(380.0)
             .selected_text(format!(
                 "{} — {} {} · {}",
-                current.title,
+                t(lang, current.title),
                 current.dim,
                 t(lang, "призн."),
                 db::human_in(lang, current.bytes() as i64)
@@ -3365,12 +3365,12 @@ impl App {
                         e.id,
                         format!(
                             "{} — {} {} · {} · {} · {}",
-                            e.title,
+                            t(lang, e.title),
                             e.dim,
                             t(lang, "призн."),
                             db::human_in(lang, e.bytes() as i64),
                             e.license,
-                            e.note
+                            t(lang, e.note)
                         ),
                     );
                 }
@@ -3415,11 +3415,11 @@ impl App {
                     self.status = match lang {
                         i18n::Lang::En => format!(
                             "model {} checked: sha256 matched",
-                            embed::active_entry(&self.settings).title
+                            t(lang, embed::active_entry(&self.settings).title)
                         ),
                         i18n::Lang::Ru => format!(
                             "модель {} проверена: sha256 совпал",
-                            embed::active_entry(&self.settings).title
+                            t(lang, embed::active_entry(&self.settings).title)
                         ),
                     }
                 }
@@ -3500,7 +3500,7 @@ impl App {
             ui.label(
                 egui::RichText::new(format!(
                     "{} — {} {} · {} · {} · {}",
-                    e.title,
+                    t(lang, e.title),
                     e.dim,
                     t(lang, "призн."),
                     db::human_in(lang, e.bytes() as i64),
@@ -5163,7 +5163,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(format!(
                         "{} · {}",
-                        entry.title,
+                        t(lang, entry.title),
                         db::human_in(lang, embed::model_bytes_in(&self.settings.models_dir, entry))
                     ))
                     .size(11.0)

@@ -102,8 +102,12 @@ The one-dependency rule: **a module depends only on lower layers**. Checked by
 - Faces: crops `~/.cache/photocat/faces/<2 chars>/<sha256[..24]>-<N>.jpg`, 112×112; vectors and
   groups are in the DB.
 - Models: by default `<cache>/photocat/models/<id>/`, faces — `<models_dir>/faces/` (182.4 MiB);
-  path, size limit and model choice are in the app settings. Downloading is consent-only and
-  sha256-checked; `scripts/fetch-model.sh` stays the manual fallback for CLIP.
+  path, size limit and model choice are in the app settings. Four entries in the catalogue
+  (`models list`): two CLIP ViT-B/32 (multilingual 217.5 MiB — the default, English 148.6 MiB),
+  SigLIP base 224 English (203.5) and SigLIP 2 base 224 multilingual (393.3 — needs the limit raised
+  to 400). A model's tag weight is calibrated into the CLIP scale, so one threshold means the same
+  thing on every model. Downloading is consent-only and sha256-checked; `scripts/fetch-model.sh`
+  stays the manual fallback for CLIP.
 - Cache for 2230 files: DB 1.3 MB, previews 29 MB; after CLIP + OCR + faces the DB is ~22 MB (CLIP
   vectors 4.4 MiB, faces 2498 × 2 KiB), face crops ~11 MB. An order-of-magnitude jump is a
   regression.
@@ -209,7 +213,10 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   "not sure" is a normal state, not a bug. The model needs AVX2 (int8 quantization), 218 MiB. The
   input is two frames per photo (center crop + the whole frame with margins), vectors averaged; this
   removes "document" from the leaders on vertical renders, but "furniture" on its own is not leading
-  yet.
+  yet. SigLIP 2 base 224 multilingual is in the catalogue but not the default: 393.3 MiB, 0.170 s per
+  file (CLIP 0.063) and on the owner's archive it catches 69.0 % of documents with text at the CLIP
+  confidence level against CLIP's 85.9 %; its Russian search is weaker than the multilingual CLIP
+  text tower (M15.6, ADR 0041).
 - People (M6): SCRFD + ArcFace, threshold 0.45 by default; 2498 faces on 856 corpus photos in 630 s,
   617 groups. The detector occasionally finds a "face" on a screen or a statue and mixes up relatives
   — a false merge is split with the "not him" button, a name pins a group. The face model is

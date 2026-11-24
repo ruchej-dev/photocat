@@ -333,24 +333,40 @@ the ONNX output names. `DIM` is gone from the code: the dimension comes from the
 checked against the ONNX metadata at load time and against the actual output on the first run; a
 mismatch is an error with both numbers, not a silent comparison of vectors of different lengths.
 
-The catalogue holds three models:
+The catalogue holds four models:
 
 | id | architecture | vector | text | frames | size | licence |
 |---|---|---|---|---|---|---|
 | `clip-vit-b32-multilingual` | CLIP ViT-B/32 + DistilBERT+Dense | 512 | Russian/English | 2 (crop+frame) | 217.5 MiB | MIT + Apache-2.0 |
 | `clip-vit-b32-en` | CLIP ViT-B/32 | 512 | English | 2 (crop+frame) | 148.6 MiB | MIT |
 | `siglip-base-224-en` | SigLIP base patch16-224 | 768 | English | 1 (whole frame squared) | 203.5 MiB | Apache-2.0 |
+| `siglip2-base-224-multi` | SigLIP 2 base patch16-224 | 768 | 100+ languages (Gemma tokenizer) | 1 (whole frame squared) | 393.3 MiB | Apache-2.0 |
 
 `TextKind` describes how to read the text tower: `Projected` — hidden states + dense 768→dim,
-`Direct` — CLIP `text_embeds`, `Pooler` — SigLIP `pooler_output`; SigLIP is padded to 64 tokens
-with `</s>` (the pooler takes the last token). SigLIP has its own mean/std 0.5 normalisation and a
-bicubic resize; the frame is neither cropped nor padded but stretched to 224×224, as in its
-processor. Vectors and tags of different models live side by side: `embeddings` keyed by
-`(file_id, model)`, `tags` by `(file_id, tag, source)` (schema 7). Search, tags and clusters read
-only the active model; switching does not wipe the other vectors. SigLIP's cosine scale is lower
-than CLIP's: the default confident-tag threshold of 0.22 means "almost no confident tags", so SigLIP
-tags are shown through the percentile filter or with a lowered threshold; this is not a mixing of
-models.
+`Direct` — CLIP `text_embeds`, `Pooler` — SigLIP `pooler_output`; the pooler reads the **last**
+token, so the padding rules are part of the model record. SigLIP 1 is padded on the right with
+`</s>`; SigLIP 2's tokenizer pads to 64 on the right with `<pad>` itself, so `pad_left` strips that
+tail and pads on the left — the EOS stays last. Without it every text collapses into one vector
+(cosine between "a dog" and "a cat" 0.976) and the image tags stop differing at all. SigLIP has
+its own mean/std 0.5 normalisation and a bicubic resize; the frame is neither cropped nor padded but
+stretched to 224×224, as in its processor. Vectors and tags of different models live side by side:
+`embeddings` keyed by `(file_id, model)`, `tags` by `(file_id, tag, source)` (schema 7). Search, tags
+and clusters read only the active model; switching does not wipe the other vectors.
+
+**The tag weight is calibrated, not compared raw.** The cosine scale is a property of the model:
+CLIP's median best tag is 0.263, SigLIP 2's is 0.086, SigLIP 1's is 0.059 — so one `tag_show` of
+0.22 would mean "every shot is confident" for CLIP and "no shot ever is" for SigLIP (that was the
+M12 tail). `ModelEntry::score_calib` holds an affine map `cos * scale + shift` into the CLIP scale,
+and `Model::tag_scores` stores the mapped value in `tags`. The coefficients are chosen so that both
+medians (the best tag and its lead over the second) land where CLIP's are: SigLIP 2 `(1.42, 0.14)`,
+SigLIP 1 `(0.55, 0.23)`, CLIP `(1.0, 0.0)` — identity. Values are in **cosine**, so the percentiles
+(`tag_show_pct`) are unaffected by the map, and `embed --retag` recomputes the rows from the stored
+vectors in 2–4 s. `score_version` is part of `tags.source` (`clip:<id>@v2`), so rows scored under an
+older calibration are never mixed into the new distribution; ADR 0041.
+
+**SigLIP 2 is opt-in, not the default.** It does not fit the 250 MiB limit (393.3 MiB, of which
+270 MiB is the 256k-token Gemma text tower), it is 2.7× slower than CLIP on the same CPU, and on
+the owner's archive it is **worse** than CLIP on the document category (see § Measurements).
 
 ## Measurements
 
@@ -445,6 +461,17 @@ models.
 | 2026-11-23 | the same 15 tags, "Шкаф" | percentile 70% (`tag_show_pct`) | threshold 0.2454, 669 snapshots pass — the same as the other tags at the same percentile |
 | 2026-11-23 | the phone corpus, 2229 files; 145 with recognized text, 1655 photos with a camera and no text | prompts v1 (1 per label) → v2 (2–3 common templates, the best weight), `embed --retag` on DB copies | confident 1285 (57.6%) → 1242 (55.7%); top-1 the same for 1855 (83.2%); "document" in top-3 804 → 534, "furniture" 392 → 407, "interior" 849 → 905; a false "document/screenshot" on photos with a camera 270/1655 (16.3%) → 225/1655 (13.6%), on snapshots with text 123/145 (84.8%) — no losses |
 | 2026-11-23 | "день рожденья", 110 files (a second independent directory), CLIP ViT-B/32 multilingual | the same: v1 → v2 | confident 66 (60.0%) → 69 (62.7%); top-1 the same for 95 (86.4%); "document" in top-3 38 → 21, "screenshot" 39 → 38; `8.jpg` of the phone corpus: document 0.274 / furniture 0.273 — "not sure" (gap 0.001) |
+| 2026-11-24 | the phone corpus (2229 files) + "день рожденья" (111), one `/tmp` DB, 2341 rows | `index --jobs 16`, release | 68.8 s + 4.1 s, 1 error (the known broken JPEG), 23.3 GiB |
+| 2026-11-24 | the same DB, 374 OCR candidates | `ocr --jobs 8` | 373 recognized, 142 with text, 68 218 characters, 83.1 s, 1 error |
+| 2026-11-24 | the same DB, 2340 `(file, model)` pairs | `embed --jobs 8`, CLIP ViT-B/32 multilingual | 147 s (0.063 s/file, two frames), 32760 tags, vectors 4.6 MiB |
+| 2026-11-24 | the same DB | `embed --jobs 8`, SigLIP 2 base 224 multilingual | 398.8 s (0.170 s/file, one frame), 0 errors, vectors 6.9 MiB — 2.7× CLIP |
+| 2026-11-24 | the same DB | `embed --jobs 8`, SigLIP base 224 English | 404.5 s (0.173 s/file), 0 errors, vectors 6.9 MiB |
+| 2026-11-24 | the same DB, 4 models' vectors and tags | DB size | 62.8 MB (vectors 18.4 MiB, tags 131 040 rows) |
+| 2026-11-24 | the same DB, stored vectors | `embed --retag` | 3.5 s (SigLIP 2) and 2.1 s (SigLIP 1) for 2340 files — the photos are not read |
+| 2026-11-24 | the corpus + "день рожденья", 2340 files, `tag_show` 0.22 / `tag_margin` 0.01 | median best tag / median lead / confident / documents with text caught / false "document" on photos without text | CLIP: 0.263 / 0.0118 / 55.6% / 85.9% / 3.3%; SigLIP 2 calibrated: 0.263 / 0.0118 / 55.3% / 69.0% / 9.7%; SigLIP 1 calibrated: 0.262 / 0.0119 / 55.6% / 53.5% / 1.0% |
+| 2026-11-24 | the same files, both directories separately | the same metrics split by folder | the picture repeats in each folder: CLIP 55.4%/61.3% confident, SigLIP 2 54.8%/64.0% — the calibration does not depend on one folder |
+| 2026-11-24 | 142 shots with recognized text, all three models | agreement of the confident label | CLIP and SigLIP 2 are both confident on 815 files and agree on 629 (77.2%) |
+| 2026-11-24 | weights of SigLIP 2 (`onnx-community/siglip2-base-patch16-224-ONNX`) | download over HTTPS with sha256 | 412 354 647 B = 393.3 MiB in 83 s (vision 90.2 MiB, text 270.3 MiB, tokenizer 32.8 MiB) |
 
 Rule: numbers without a corpus and a date do not enter the table.
 

@@ -162,6 +162,11 @@ pub struct ModelEntry {
     /// Токен добивки; пусто — 0. У SigLIP это `</s>` (id 1): pooler берёт последний
     /// токен, поэтому короткий текст паддится тем же EOS, а не нулём.
     pub pad_token: &'static str,
+    /// С какой стороны добивать текст до `max_tokens`. Справа — CLIP и SigLIP 1;
+    /// слева — SigLIP 2: его токенизатор сам добивает справа `<pad>`, а пулер читает
+    /// последний токен, и последним обязан остаться EOS. Справа все тексты
+    /// склеиваются в один вектор (dog/cat 0.976), и картинки перестают различаться.
+    pub pad_left: bool,
     /// Нормализация кадра: у CLIP и SigLIP разные mean/std и фильтр.
     pub norm: derive::ImageNorm,
     /// Сколько кадров видит модель на снимок: CLIP — центр-кроп и весь кадр,
@@ -169,6 +174,16 @@ pub struct ModelEntry {
     pub frames: usize,
     /// Имя выхода зрительной башни в ONNX.
     pub vision_output: &'static str,
+    /// Калибровка веса тега: косинус → шкала уверенности CLIP.
+    /// Шкала косинуса у семейств разная (CLIP ViT-B/32 — 0.24–0.32, SigLIP 2 —
+    /// 0.07–0.10), а `tag_show` и `tag_margin` в настройках одни на все модели.
+    /// `score = cos * scale + shift`; `(1.0, 0.0)` — тождественное (CLIP).
+    /// Коэффициенты — свойство модели, а не папки: сняты на двух наборах (M15.6).
+    pub score_calib: (f32, f32),
+    /// Версия калибровки веса тега. Меняется вместе с `score_calib`: веса в `tags`
+    /// помечены ею в `source`, поэтому старые строки не смешиваются с новыми —
+    /// `embed --retag` пересчитывает их за секунды.
+    pub score_version: u8,
     pub files: &'static [ModelFile],
 }
 
@@ -179,6 +194,14 @@ impl ModelEntry {
     /// Влезает ли модель в лимит настроек (МиБ).
     pub fn fits(&self, max_mb: u64) -> bool {
         self.bytes() <= max_mb.saturating_mul(1024 * 1024)
+    }
+    /// Вес тега в шкале уверенности CLIP (см. `score_calib`).
+    pub fn score(&self, cos: f32) -> f32 {
+        let (scale, shift) = self.score_calib;
+        if !scale.is_finite() || scale <= 0.0 || !shift.is_finite() {
+            return cos;
+        }
+        cos * scale + shift
     }
     /// Имя выхода текстовой башни в ONNX; у Projected это ещё не эмбеддинг.
     pub fn text_output(&self) -> &'static str {
@@ -258,7 +281,28 @@ const SIGLIP_FILES: [ModelFile; 3] = [
     },
 ];
 
-static CATALOG: [ModelEntry; 3] = [
+const SIGLIP2_FILES: [ModelFile; 3] = [
+    ModelFile {
+        name: "vision.onnx",
+        url: "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/vision_model_quantized.onnx",
+        sha256: "5f2b401c1a4fc095702a5d45348e17ad46c4f87064085365b43c6e8eaa5c0070",
+        bytes: 94_553_333,
+    },
+    ModelFile {
+        name: "text.onnx",
+        url: "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/text_model_quantized.onnx",
+        sha256: "3a0603d3a00c05a80a6ded4743c16aaac7b1e62cdcc7e362e7ce418659b96400",
+        bytes: 283_438_275,
+    },
+    ModelFile {
+        name: "tokenizer.json",
+        url: "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/tokenizer.json",
+        sha256: "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322",
+        bytes: 34_363_039,
+    },
+];
+
+static CATALOG: [ModelEntry; 4] = [
     ModelEntry {
         id: DEFAULT_MODEL,
         dir: "clip-vit-b32",
@@ -270,9 +314,12 @@ static CATALOG: [ModelEntry; 3] = [
         image_side: 224,
         max_tokens: 128,
         pad_token: "",
+        pad_left: false,
         norm: derive::CLIP_NORM,
         frames: 2,
         vision_output: "image_embeds",
+        score_calib: (1.0, 0.0),
+        score_version: 1,
         files: &MULTILINGUAL_FILES,
     },
     ModelEntry {
@@ -286,9 +333,12 @@ static CATALOG: [ModelEntry; 3] = [
         image_side: 224,
         max_tokens: 128,
         pad_token: "",
+        pad_left: false,
         norm: derive::CLIP_NORM,
         frames: 2,
         vision_output: "image_embeds",
+        score_calib: (1.0, 0.0),
+        score_version: 1,
         files: &ENGLISH_FILES,
     },
     ModelEntry {
@@ -302,10 +352,34 @@ static CATALOG: [ModelEntry; 3] = [
         image_side: 224,
         max_tokens: 64,
         pad_token: "</s>",
+        pad_left: false,
         norm: derive::SIGLIP_NORM,
         frames: 1,
         vision_output: "pooler_output",
+        // Косинус SigLIP ниже шкалы CLIP; коэффициенты — из M15.6 (два набора,
+        // 2340 файлов): медианы веса и отрыва совпадают с CLIP.
+        score_calib: (0.55, 0.23),
+        score_version: 2,
         files: &SIGLIP_FILES,
+    },
+    ModelEntry {
+        id: "siglip2-base-224-multi",
+        dir: "siglip2-base-224-multi",
+        title: "SigLIP 2 base 224, мультиязычная",
+        note: "768 признаков, тексты на 100+ языках; нужен лимит 400 МиБ",
+        license: "Apache-2.0",
+        kind: TextKind::Pooler,
+        dim: 768,
+        image_side: 224,
+        max_tokens: 64,
+        pad_token: "<pad>",
+        pad_left: true,
+        norm: derive::SIGLIP_NORM,
+        frames: 1,
+        vision_output: "pooler_output",
+        score_calib: (1.42, 0.14),
+        score_version: 2,
+        files: &SIGLIP2_FILES,
     },
 ];
 
@@ -328,7 +402,11 @@ pub fn active_entry(settings: &db::Settings) -> &'static ModelEntry {
 }
 
 pub fn tag_source(e: &ModelEntry) -> String {
-    format!("clip:{}", e.id)
+    if e.score_version <= 1 {
+        format!("clip:{}", e.id)
+    } else {
+        format!("clip:{}@v{}", e.id, e.score_version)
+    }
 }
 
 /// Дефолтный словарь модели: подписи русские, промпты — на языке её текстовой башни.
@@ -577,6 +655,27 @@ pub fn check_model(settings: &db::Settings) -> Result<()> {
     check_model_in(&settings.models_dir, active_entry(settings))
 }
 
+/// Разложить строки токенов в один батч: добить до `max_len` с нужной стороны.
+/// Хвост из падов, который токенизатор поставил сам, снимается: у SigLIP 2 он
+/// справа, а пулер читает последний токен — последним обязан остаться EOS.
+fn pad_rows(rows: &[Vec<i64>], max_len: usize, pad: i64, pad_left: bool) -> (Vec<i64>, Vec<i64>) {
+    let batch = rows.len();
+    let mut ids = vec![pad; batch * max_len];
+    let mut mask = vec![0i64; batch * max_len];
+    for (b, row) in rows.iter().enumerate() {
+        let mut row = &row[..row.len().min(max_len)];
+        while row.len() > 1 && row.last() == Some(&pad) {
+            row = &row[..row.len() - 1];
+        }
+        let start = if pad_left { max_len - row.len() } else { 0 };
+        for (i, &id) in row.iter().enumerate() {
+            ids[b * max_len + start + i] = id;
+            mask[b * max_len + start + i] = 1;
+        }
+    }
+    (ids, mask)
+}
+
 pub struct Model {
     _env: Environment,
     vision: Session,
@@ -682,7 +781,6 @@ impl Model {
         } else {
             max_len
         };
-        let batch = rows.len();
         let pad = if self.entry.pad_token.is_empty() {
             0
         } else {
@@ -691,15 +789,8 @@ impl Model {
                 .map(|v| v as i64)
                 .unwrap_or(0)
         };
-        let mut ids = vec![pad; batch * max_len];
-        let mut mask = vec![0i64; batch * max_len];
-        for (b, row) in rows.iter().enumerate() {
-            for (i, &id) in row.iter().enumerate() {
-                ids[b * max_len + i] = id;
-                mask[b * max_len + i] = 1;
-            }
-        }
-        Ok((ids, mask, batch, max_len))
+        let (ids, mask) = pad_rows(&rows, max_len, pad, self.entry.pad_left);
+        Ok((ids, mask, rows.len(), max_len))
     }
 
     /// Текстовые эмбеддинги (для запроса и промптов). Векторы нормализованы.
@@ -835,7 +926,7 @@ impl Model {
     pub fn tag_scores(&self, image: &[f32]) -> Vec<(String, f32)> {
         let mut best: Vec<(String, f32)> = Vec::new();
         for (label, v) in &self.tag_vectors {
-            let c = cosine(image, v);
+            let c = self.entry.score(cosine(image, v));
             match best.iter_mut().find(|(l, _)| l == label) {
                 Some((_, s)) => *s = s.max(c),
                 None => best.push((label.clone(), c)),
@@ -2032,9 +2123,100 @@ mod tests {
         let sig = entry("siglip-base-224-en").unwrap();
         assert!(sig.fits(250));
         assert!(!sig.fits(160));
+        // M15.6: мультиязычный SigLIP 2 в 250 МиБ не влезает — он честно больше лимита,
+        // и `models download` скажет об этом, пока владелец не поднимет лимит до 400.
+        let multi = entry("siglip2-base-224-multi").unwrap();
+        assert_eq!(multi.dim, 768);
+        assert!(!multi.fits(250), "393 МиБ не влезают в 250");
+        assert!(multi.fits(400));
+        // Калибровка описана у каждой модели: тождественная — только у CLIP.
+        for e in catalog() {
+            let (scale, shift) = e.score_calib;
+            assert!(scale.is_finite() && scale > 0.0, "{}: масштаб {scale}", e.id);
+            assert!(shift.is_finite());
+            assert!(e.score(0.3).is_finite());
+            assert!(e.score(0.3) > e.score(0.2), "{}: калибровка не растёт", e.id);
+            if e.kind == TextKind::Pooler {
+                assert_ne!(e.score_calib, (1.0, 0.0), "{}: шкала SigLIP не калибрована", e.id);
+                assert_eq!(e.score_version, 2);
+            } else {
+                assert_eq!(e.score_version, 1, "{}: CLIP не менял шкалу", e.id);
+            }
+        }
         // Пустой запрос — первая модель; неизвестный id — None, без паники.
         assert_eq!(entry("").unwrap().id, DEFAULT_MODEL);
         assert!(entry("no-such-model").is_none());
+    }
+
+    /// M15.6: каждая модель каталога названа и описана на обоих языках — иначе в английском
+    /// окне строка модели молча остаётся русской (хвост M21.6).
+    #[test]
+    fn каталог_моделей_переведён() {
+        let en = crate::i18n::Lang::En;
+        for e in catalog() {
+            assert_ne!(
+                crate::i18n::t(en, e.title),
+                e.title,
+                "у модели {} нет перевода названия",
+                e.id
+            );
+            assert_ne!(
+                crate::i18n::t(en, e.note),
+                e.note,
+                "у модели {} нет перевода описания",
+                e.id
+            );
+        }
+    }
+
+    /// M15.6: калибровка приводит шкалу SigLIP к шкале CLIP — вес и отрыв двух моделей
+    /// в одних и тех же порогах значат одно и то же. Числа — медианы двух наборов
+    /// (2340 файлов, `docs/ARCHITECTURE.md` § Measurements).
+    #[test]
+    fn калибровка_веса_тега_уравнивает_шкалы() {
+        let clip = entry(DEFAULT_MODEL).unwrap();
+        assert_eq!(clip.score(0.086), 0.086, "у CLIP калибровка тождественная");
+        // Медианы top-1: CLIP 0.263, SigLIP 2 0.086, SigLIP 1 0.059.
+        for (e, median, margin) in [
+            (entry("siglip2-base-224-multi").unwrap(), 0.086_f32, 0.0083_f32),
+            (entry("siglip-base-224-en").unwrap(), 0.059, 0.0216),
+        ] {
+            let s = e.score(median);
+            assert!((s - 0.263).abs() < 0.006, "{}: медиана {s}", e.id);
+            // Отрыв 0.01 в настройках — это медианный отрыв CLIP (0.0118).
+            let (scale, _) = e.score_calib;
+            let m = margin * scale;
+            assert!((m - 0.0118).abs() < 0.002, "{}: отрыв {m}", e.id);
+        }
+        // Веса тегов разных калибровок не смешиваются: source помечен версией.
+        assert_eq!(tag_source(clip), "clip:clip-vit-b32-multilingual");
+        assert_eq!(
+            tag_source(entry("siglip2-base-224-multi").unwrap()),
+            "clip:siglip2-base-224-multi@v2"
+        );
+    }
+
+    /// M15.6: добивка текста. Пулер SigLIP 2 читает последний токен, поэтому EOS
+    /// обязан остаться последним, а пады токенизатора — уйти влево.
+    #[test]
+    fn добивка_текста_держит_eos_последним() {
+        let eos = 1;
+        let pad = 0;
+        // Токенизатор SigLIP 2 уже добил строку до 8 справа: [5, 6, eos, pad, pad, ...].
+        let rows = vec![vec![5, 6, eos, pad, pad, pad, pad, pad], vec![7, eos, pad, pad, pad, pad, pad, pad]];
+        let (ids, mask) = pad_rows(&rows, 8, pad, true);
+        assert_eq!(&ids[0..8], &[pad, pad, pad, pad, pad, 5, 6, eos]);
+        assert_eq!(&ids[8..16], &[pad, pad, pad, pad, pad, pad, 7, eos]);
+        assert_eq!(mask[7], 1);
+        assert_eq!(mask[0], 0);
+        assert_eq!(ids.iter().filter(|&&v| v == eos).count(), 2, "в каждом ряду ровно один EOS");
+        // Справа (CLIP, SigLIP 1) — как было: строка с начала, пады в хвосте.
+        let (ids, mask) = pad_rows(&rows, 8, pad, false);
+        assert_eq!(&ids[0..8], &[5, 6, eos, pad, pad, pad, pad, pad]);
+        assert_eq!(mask[2], 1);
+        // Длинный текст не выходит за max_len.
+        let (ids, _) = pad_rows(&[vec![9, 9, 9, 9, 9]], 3, pad, false);
+        assert_eq!(ids[..], [9, 9, 9]);
     }
 
     /// M12: размер приходит из модели, а ошибка называет оба числа и подсказывает,

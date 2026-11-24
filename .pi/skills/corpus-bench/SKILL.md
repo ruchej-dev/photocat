@@ -66,8 +66,13 @@ du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 | Videos with a cover, a dHash and a duration | 258/258, 3:19:46 in total | < 250 |
 | Files without a date | 0 | > 5% |
 | `embed` 2229 files (photos + videos), `--jobs 8 --batch 8` | 77.3 s (34.7 ms/file) | > 200 s |
+| `embed` 2340 files, SigLIP 2 base 224 multilingual, `--jobs 8` | 398.8 s (0.170 s/file), one frame; CLIP on the same run 147 s — the machine, not the model, sets the absolute numbers, the ratio is 2.7× | > 600 s |
+| `embed` 2340 files, SigLIP base 224 English | 404.5 s (0.173 s/file), one frame | > 600 s |
+| `embed --retag`, 2340 files, the vectors already in the DB | 2–4 s (SigLIP 1 2.1 s, SigLIP 2 3.5 s) — no photo is read | > 15 s |
 | The CLIP multilingual model (4 files) | 217.5 MiB | the files do not match by sha256 |
 | The CLIP en model (3 files) | 148.6 MiB | > 5 s for a check/network |
+| The SigLIP base 224 English model (3 files) | 203.5 MiB | the files do not match by sha256 |
+| The SigLIP 2 base 224 multilingual model (3 files) | 393.3 MiB, download 83 s (vision 90.2 MiB, text 270.3 MiB — a 256k-token vocabulary, tokenizer 32.8 MiB) | the files do not match by sha256; at the default 250 MiB limit the download is refused on purpose |
 | DB with CLIP (2229 files) | 12 MB, vectors 4.35 MiB, 15 603 tags | > 40 MB per corpus |
 | A repeated `embed` | 0.03 s, everything skipped by sha256+model | > 5 s |
 | Search over 2229 vectors (the model already loaded) | 11 ms | > 200 ms |

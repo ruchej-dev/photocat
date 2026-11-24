@@ -235,14 +235,32 @@ The original criteria:
 - **Acceptance:** the default is the same for any folder; measurements of top-1/top-3
   before/after; docs.
 
-### M15.6 — a better model (related to M12)
+### M15.6 — a better model and the calibration of the weight ✅ (2026-11-24)
 
-- The candidates: SigLIP 2 multilingual (priority), CLIP ViT-L/14 (if the CPU/the space is enough).
-- Needed: ONNX, a tokenizer, `sha256`, the size, the licence, an entry in the model catalogue, `dim`
-  from
-  the model (now `DIM = 512` is hardcoded), calibration of the thresholds/percentiles, a speed
-  measurement on the CPU.
-- **Acceptance:** M12 + a comparison on two folders; the old models and vectors are not mixed.
+**Done.** SigLIP 2 base 224 multilingual is the fourth catalogue entry
+(`onnx-community/siglip2-base-patch16-224-ONNX`, Apache-2.0, 393.3 MiB, 768 features), opt-in: it does
+not fit the 250 MiB limit, the owner raises it to 400. Two things had to become data first:
+
+- **the padding side.** SigLIP 2's tokenizer pads to 64 on the right with `<pad>` itself, and the
+  pooler reads the last token: with right padding every text turned into one vector (cosine "a
+  dog"/"a cat" 0.976) and the tags stopped differing. `pad_left` strips the tokenizer's tail and pads
+  on the left, the EOS stays last; the four test frames are then matched 4/4.
+- **the calibration.** The stored weight is mapped by the model's own affine map
+  `cos * scale + shift` into the CLIP scale, so 0.22 and 0.01 mean the same thing on every model:
+  SigLIP 2 `(1.42, 0.14)`, SigLIP 1 `(0.55, 0.23)`, CLIP identity. `tags.source` carries `@v2`, so an
+  older calibration is never mixed in; `embed --retag` rewrites the rows in 2–4 s.
+
+**Measured on two folders** (2340 files; the phone corpus + "день рожденья"): confident tags 55.6 %
+CLIP / 55.3 % SigLIP 2 / 55.6 % SigLIP 1; documents with text caught 85.9 / 69.0 / 53.5 %; false
+"document" on photos without text 3.3 / 9.7 / 1.0 %; 0.063 / 0.170 / 0.173 s per file. SigLIP 1 went
+from 0 % confident tags to 55.6 % — the M12 tail is closed. SigLIP 2 is **worse** than CLIP on the
+document category and 2.7× slower, so the default stays `clip-vit-b32-multilingual`. Numbers and the
+files — `plan/STATUS.md` § M15.6, ADR 0041.
+
+**Left open.** CLIP ViT-L/14 (over 500 MiB) was not tried; neither was the fp16 SigLIP 2 text tower
+(538.7 MiB), so it is unknown how much of the loss is int8 quantisation. The old models and vectors
+are not mixed: `embeddings` is keyed by `(file_id, model)`, `tags` by `(file_id, tag, source)`, and
+the calibration version is part of the source.
 
 ### M15.7 — a check on two independent folders
 
@@ -284,7 +302,10 @@ The original criteria:
    time.
 3. Which second folder for the check? (an independent one is needed, not `Фотографии с телефона`).
 4. Recompute the existing vectors automatically on an update or by a button?
-5. A bigger model (SigLIP 2 / CLIP-L): how many minutes per corpus and how much space is allowed?
+5. ~~A bigger model (SigLIP 2 / CLIP-L): how many minutes per corpus and how much space is
+   allowed?~~ Answered in M15.6: SigLIP 2 base 224 is 393.3 MiB and 0.170 s per file; it is in the
+   catalogue as an opt-in entry (the limit has to be raised to 400 MiB), the default stays the
+   multilingual CLIP, CLIP ViT-L/14 was not tried.
 6. The current `tag_show = 0.25` — keep it as a percentile or return 0.22/70%?
 
 ## 8. Not doing

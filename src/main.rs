@@ -514,7 +514,7 @@ fn main() -> Result<()> {
                         i18n::fill(
                             lang,
                             "модель в порядке: {}",
-                            &[embed::active_entry(&settings).title.to_string()]
+                            &[i18n::t(lang, embed::active_entry(&settings).title).to_string()]
                         )
                     );
                 }
@@ -856,7 +856,7 @@ fn main() -> Result<()> {
                     lang,
                     "модель CLIP: {} · {} · {}",
                     &[
-                        entry.title.to_string(),
+                        i18n::t(lang, entry.title).to_string(),
                         db::human_in(lang, entry.bytes() as i64),
                         if embed::model_present(&settings) {
                             i18n::t(lang, "на месте").to_string()
