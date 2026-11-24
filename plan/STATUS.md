@@ -2140,5 +2140,16 @@ violations (it fails on a `src/` file that deletes files, and on a missing licen
 applies); `rust-analyzer diagnostics` — 0 errors; a grep for `fetch-model` in the repository finds only
 the dated M23.5 records, which stay as written.
 
-**Not done, deliberately.** The clean install itself — M24.2, with an empty cache, no models and no
-external programs; replacing `curl` — an open question, not a decision.
+**The clean-start smoke (the first step of M24.2).** An empty cache (`XDG_CACHE_HOME=$(mktemp -d)`, no
+DB, no models, no settings) opens the window: `<cache>/photocat/photocat.db` appears (176 KiB with the
+seeded 14-tag dictionary) together with `thumbs/`, `stats` says 0 files, `models list` says "not
+downloaded" for all four, `ocr --dry-run` finds 0 of 0 candidates, no pass starts by itself. The smoke
+found one defect: the GUI read the default English and stored nothing, while the CLI detected the
+locale, so a fresh install would show two languages at once and never remember the first-launch guess.
+`app::first_lang` now calls `db::ensure_lang` before the window opens, so `lang=ru` comes from the
+locale and is written once, and the owner's later choice still wins — the numbers of the run are in
+`docs/ARCHITECTURE.md` § Measurements.
+
+**Not done, deliberately.** The rest of M24.2 — a folder indexed with no model at all, the consent
+download of 217.5 MiB, and the run with `ffmpeg`/`tesseract`/`curl` cleared out; replacing `curl` — an
+open question, not a decision.

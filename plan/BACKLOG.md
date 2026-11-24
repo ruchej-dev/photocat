@@ -1130,9 +1130,10 @@ file.
 7. The pass is recorded in `plan/STATUS.md` with numbers: what a clean start costs in bytes and
    seconds, and what the first index of a 120-file folder takes.
 
-**Steps.** M24.1 — the shell script is gone, the messages name the binary (done 2026-11-24). M24.2 —
-the clean-install pass itself: an empty cache, no models, no external programs, then a model download
-with consent.
+**Steps.** M24.1 — the shell script is gone, the messages name the binary (done 2026-11-24; the
+smoke of a clean start also caught the GUI not storing the first-launch language — fixed in
+`app::first_lang`). M24.2 — the clean-install pass itself: an empty cache, no models, no external
+programs, then a model download with consent.
 
 **Not doing.** Bundling the weights into the binary (218–393 MiB, and they change independently of
 the code); bundling `ffmpeg`/`tesseract` (ADR 0023); a portable single-file package (AppImage and

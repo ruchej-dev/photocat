@@ -1413,9 +1413,22 @@ fn progress_row(ui: &mut egui::Ui, name: &str, p: &Arc<Progress>, running: bool)
     stop
 }
 
+/// The language of a window that is about to open. On the very first launch it comes from the system
+/// locale and is stored once (`db::ensure_lang`), so the window, the CLI reports and the owner's
+/// later choice always agree — before M24.2 the GUI read the default English and stored nothing,
+/// while the CLI detected the locale, so a fresh install showed two languages at once.
+fn first_lang(db_path: &Path) -> i18n::Lang {
+    db::open(db_path)
+        .map(|c| {
+            let _ = db::ensure_lang(&c);
+            db::load_settings(&c).lang
+        })
+        .unwrap_or_default()
+}
+
 pub fn run(explicit: Option<PathBuf>) -> Result<()> {
     let db_path = db::resolve_db(explicit.as_deref())?;
-    let lang = db::open(&db_path).map(|c| db::load_settings(&c).lang).unwrap_or_default();
+    let lang = first_lang(&db_path);
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1240.0, 840.0])
@@ -12607,6 +12620,38 @@ mod tests {
         app.tags.retain(|id, _| *id < 50);
         app.settings.tag_show = 0.22;
         assert!((app.tag_threshold("мебель") - 0.22).abs() < 1e-6);
+    }
+
+    /// M24.2: a fresh install detects the language from the locale and stores it once, so the window
+    /// and the CLI reports agree; the owner's later choice is never overwritten.
+    #[test]
+    fn the_first_launch_detects_and_stores_the_language_once() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-app-first-lang-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let detected = super::first_lang(&path);
+        let stored = db::open(&path)
+            .ok()
+            .and_then(|c| db::get_setting(&c, "lang"));
+        assert_eq!(
+            stored.as_deref(),
+            Some(detected.code()),
+            "the first launch writes the detected language to the DB"
+        );
+        db::open(&path)
+            .map(|c| db::set_setting(&c, "lang", "ru"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            super::first_lang(&path),
+            i18n::Lang::Ru,
+            "the owner's choice is what the next launch shows"
+        );
     }
 
     /// The filter takes the labels from the dictionary but does not hide computed tags that are
