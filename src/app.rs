@@ -1,4 +1,4 @@
-//! GUI на egui: сетка превью, группы дублей, таймлайн, запуск индексации.
+//! A GUI on egui: the preview grid, duplicate groups, the timeline, starting an index pass.
 
 use crate::db::{self, FileRow, Progress};
 use crate::derive;
@@ -44,8 +44,8 @@ enum View {
     Integrity,
 }
 
-/// Что делает экран «Целостность»: сверка двух копий, слепок каталога или проверка
-/// каталога по слепку. Три кнопки — три фоновых прохода одних и тех же функций CLI.
+/// What the "Integrity" screen does: compare two copies, snapshot a folder, or check a
+/// folder against a snapshot. Three buttons — three background passes over the same CLI functions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum IntegrityJob {
     Verify,
@@ -66,7 +66,7 @@ impl IntegrityJob {
     }
 }
 
-/// Готовый результат прохода: хранит и отчёт, и пути, по которым он получен.
+/// The finished result of a pass: it keeps both the report and the paths it was made for.
 enum IntegrityOutcome {
     Verify {
         a: PathBuf,
@@ -94,7 +94,7 @@ impl IntegrityOutcome {
         }
     }
 
-    /// Проход остановлен «Стоп»: часть файлов не проверена, и это не «совпало».
+    /// The pass was stopped by "Stop": some files were not checked, and that is not "matched".
     fn cancelled(&self) -> bool {
         match self {
             IntegrityOutcome::Verify { report, .. } => report.cancelled,
@@ -103,7 +103,7 @@ impl IntegrityOutcome {
         }
     }
 
-    /// Совпало всё или файл записан. Отмена и ошибка чтения — не «успех».
+    /// Everything matched or the file was written. A cancel and a read error are not success.
     fn identical(&self) -> bool {
         match self {
             IntegrityOutcome::Verify { report, .. } => report.identical(),
@@ -112,7 +112,7 @@ impl IntegrityOutcome {
         }
     }
 
-    /// Одна строка вердикта для экрана: словами, без догадок.
+    /// One line of verdict for the screen: in words, without guesses.
     fn verdict(&self, lang: i18n::Lang) -> String {
         match self {
             IntegrityOutcome::Verify { report, .. } => {
@@ -121,52 +121,41 @@ impl IntegrityOutcome {
                 } else if report.identical() {
                     t(lang, "the copies match").into()
                 } else {
-                    match lang {
-                        i18n::Lang::En => format!(
-                            "differences found: only in A {}, only in B {}, size {}, content {}, errors {}",
-                            report.only_a.len(),
-                            report.only_b.len(),
-                            report.size_diff.len(),
-                            report.content_diff.len(),
-                            report.errors()
-                        ),
-                        i18n::Lang::Ru => format!(
-                            "найдены расхождения: только A {}, только B {}, размер {}, содержимое {}, ошибок {}",
-                            report.only_a.len(),
-                            report.only_b.len(),
-                            report.size_diff.len(),
-                            report.content_diff.len(),
-                            report.errors()
-                        ),
-                    }
+                    i18n::fill(
+                        lang,
+                        "differences found: only in A {}, only in B {}, size {}, content {}, errors {}",
+                        &[
+                            report.only_a.len().to_string(),
+                            report.only_b.len().to_string(),
+                            report.size_diff.len().to_string(),
+                            report.content_diff.len().to_string(),
+                            report.errors().to_string(),
+                        ],
+                    )
                 }
             }
             IntegrityOutcome::Manifest { stats, out, .. } => {
                 if stats.written {
-                    match lang {
-                        i18n::Lang::En => format!(
-                            "manifest written: {} ({}) → {}",
-                            i18n::count(
-                                lang,
-                                stats.files,"file"),
+                    i18n::fill(
+                        lang,
+                        "manifest written: {} ({}) → {}",
+                        &[
+                            i18n::count(lang, stats.files, "file"),
                             db::human_in(lang, stats.bytes as i64),
-                            out.display()
-                        ),
-                        i18n::Lang::Ru => format!(
-                            "слепок записан: {} файлов ({}) → {}",
-                            stats.files,
-                            db::human_in(lang, stats.bytes as i64),
-                            out.display()
-                        ),
-                    }
+                            out.display().to_string(),
+                        ],
+                    )
                 } else if stats.cancelled {
                     t(lang, "manifest not written: the pass was stopped").into()
                 } else {
-                    format!(
+                    i18n::fill(
+                        lang,
                         "{}: {} {}",
-                        t(lang, "manifest not written"),
-                        t(lang, "errors"),
-                        stats.errors
+                        &[
+                            t(lang, "manifest not written").to_string(),
+                            t(lang, "errors").to_string(),
+                            stats.errors.to_string(),
+                        ],
                     )
                 }
             }
@@ -176,28 +165,22 @@ impl IntegrityOutcome {
                 } else if report.identical() {
                     t(lang, "the folder matches the manifest").into()
                 } else {
-                    match lang {
-                        i18n::Lang::En => format!(
-                            "the folder differs from the manifest: changed {}, missing in the folder {}, missing in the manifest {}, errors {}",
-                            report.changed.len(),
-                            report.missing.len(),
-                            report.extra.len(),
-                            report.errors()
-                        ),
-                        i18n::Lang::Ru => format!(
-                            "каталог расходится со слепком: изменено {}, нет в каталоге {}, нет в слепке {}, ошибок {}",
-                            report.changed.len(),
-                            report.missing.len(),
-                            report.extra.len(),
-                            report.errors()
-                        ),
-                    }
+                    i18n::fill(
+                        lang,
+                        "the folder differs from the manifest: changed {}, missing in the folder {}, missing in the manifest {}, errors {}",
+                        &[
+                            report.changed.len().to_string(),
+                            report.missing.len().to_string(),
+                            report.extra.len().to_string(),
+                            report.errors().to_string(),
+                        ],
+                    )
                 }
             }
         }
     }
 
-    /// Текст отчёта — те же функции `verify`, что печатает CLI.
+    /// The report text — the same `verify` functions the CLI prints.
     fn report(&self, all: bool) -> String {
         match self {
             IntegrityOutcome::Verify { a, b, report } => verify::verify_report(a, b, report, all),
@@ -211,52 +194,50 @@ impl IntegrityOutcome {
     }
 
     fn status(&self, lang: i18n::Lang) -> String {
+        let verdict = self.verdict(lang);
+        let seconds = format!("{:.1}", self.seconds());
         match self {
-            IntegrityOutcome::Verify { report, .. } => {
-                let verdict = self.verdict(lang);
-                match lang {
-                    i18n::Lang::En => format!(
-                        "{verdict}; A {}, B {}; {:.1} s",
-                        report.files_a, report.files_b, report.seconds
-                    ),
-                    i18n::Lang::Ru => format!(
-                        "{verdict}; A {}, B {}; за {:.1} с",
-                        report.files_a, report.files_b, report.seconds
-                    ),
-                }
+            IntegrityOutcome::Verify { report, .. } => i18n::fill(
+                lang,
+                "{}; A {}, B {}; {} s",
+                &[
+                    verdict,
+                    report.files_a.to_string(),
+                    report.files_b.to_string(),
+                    seconds,
+                ],
+            ),
+            IntegrityOutcome::Manifest { .. } => {
+                i18n::fill(lang, "{}, {} s", &[verdict, seconds])
             }
-            IntegrityOutcome::Manifest { stats, .. } => {
-                let verdict = self.verdict(lang);
-                match lang {
-                    i18n::Lang::En => format!("{verdict}, {:.1} s", stats.seconds),
-                    i18n::Lang::Ru => format!("{verdict}, за {:.1} с", stats.seconds),
-                }
-            }
-            IntegrityOutcome::Check { report, .. } => {
-                let verdict = self.verdict(lang);
-                match lang {
-                    i18n::Lang::En => format!(
-                        "{verdict}; {} same; {:.1} s",
-                        report.same, report.seconds
-                    ),
-                    i18n::Lang::Ru => {
-                        format!("{verdict}; совпало {}; за {:.1} с", report.same, report.seconds)
-                    }
-                }
-            }
+            IntegrityOutcome::Check { report, .. } => i18n::fill(
+                lang,
+                "{}; {} same; {} s",
+                &[verdict, report.same.to_string(), seconds],
+            ),
         }
     }
+
+    /// The duration of the pass, whatever it was.
+    fn seconds(&self) -> f64 {
+        match self {
+            IntegrityOutcome::Verify { report, .. } => report.seconds,
+            IntegrityOutcome::Manifest { stats, .. } => stats.seconds,
+            IntegrityOutcome::Check { report, .. } => report.seconds,
+        }
+    }
+
 }
 
-/// Что именно запускать после проверки полей: каталоги уже разобраны в `PathBuf`.
+/// What exactly to start after the fields are checked: the folders are parsed into `PathBuf`.
 enum IntegrityPlan {
     Verify(PathBuf, PathBuf),
     Manifest(PathBuf, PathBuf),
     Check(PathBuf, PathBuf),
 }
 
-/// Формат в сетке: всё, только снимки, только видео (M16). Одно понятие «фильтр»
-/// живёт в секции «Фильтр» левой панели и повторяется чипом над сеткой.
+/// The format in the grid: everything, photos only, video only (M16). One notion of "filter"
+/// lives in the "Filter" section of the left panel and is repeated by a chip above the grid.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum KindFilter {
     All,
@@ -276,7 +257,7 @@ impl KindFilter {
         )
     }
 
-    /// Подпись чипа над сеткой; `None` — фильтра нет.
+    /// The caption of the chip above the grid; `None` means no filter.
     fn chip(self, lang: i18n::Lang) -> Option<&'static str> {
         match self {
             KindFilter::All => None,
@@ -286,7 +267,7 @@ impl KindFilter {
     }
 }
 
-/// Что именно очищаем в «Хранилище»: кэш превью, кропы лиц или строки индекса.
+/// What is cleaned in "Storage": the preview cache, the face crops or the index rows.
 #[derive(Clone, Copy, PartialEq)]
 enum StorageAction {
     Thumbs,
@@ -294,8 +275,8 @@ enum StorageAction {
     Index,
 }
 
-/// Градация календаря: год, месяц, неделя и день. Двойной клик проваливает
-/// на слой ниже, вкладки слева от заголовка возвращают наверх (docs/UI.md).
+/// The calendar gradation: year, month, week and day. A double click goes one layer down,
+/// the tabs left of the heading go back up (docs/UI.md).
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum CalScale {
     Year,
@@ -305,7 +286,7 @@ enum CalScale {
 }
 
 impl CalScale {
-    /// Слой ниже по двойному клику: год → месяц → неделя → день; ниже дня нет.
+    /// The layer below on a double click: year → month → week → day; there is nothing below a day.
     fn deeper(self) -> Option<CalScale> {
         match self {
             CalScale::Year => Some(CalScale::Month),
@@ -316,24 +297,24 @@ impl CalScale {
     }
 }
 
-/// Текстуры для полного экрана: текущий кадр, миниатюра и предыдущий резкий кадр.
+/// The textures for the full screen: the current frame, the thumbnail and the previous sharp frame.
 struct ViewerTextures<'a> {
     full: Option<&'a (i64, egui::TextureHandle)>,
     preview: Option<&'a egui::TextureHandle>,
     stale: Option<&'a egui::TextureHandle>,
-    /// Кадр встроенного плеера: пока он есть, он важнее статичного снимка.
+    /// A frame of the built-in player: while it exists it matters more than the still photo.
     video: Option<&'a egui::TextureHandle>,
-    /// Видео на паузе: кадр есть, но по центру нужна кнопка ▶.
+    /// Video on pause: the frame is there, but the centre needs a ▶ button.
     paused: bool,
 }
 
-/// Полноэкранный просмотр: один снимок поверх всей сетки, со слайд-шоу и текстом.
+/// The full-screen viewer: one photo over the whole grid, with a slideshow and text.
 struct Viewer {
     ids: Vec<i64>,
     idx: usize,
     zoom: f32,
-    /// Сдвиг увеличенного кадра от центра, в точках экрана. При смене файла и
-    /// при масштабе «вписать» — ноль, кадр по центру (docs/UI.md).
+    /// The offset of the zoomed frame from the centre, in screen points. On a file change and
+    /// at the "fit" scale it is zero, the frame is centred (docs/UI.md).
     pan: egui::Vec2,
     show_text: bool,
     slideshow: bool,
@@ -341,7 +322,7 @@ struct Viewer {
     last_advance: std::time::Instant,
 }
 
-/// Раздел диалога «Настройки»: редкие настройки не отнимают экран у сетки.
+/// A section of the "Settings" dialog: rare settings do not take the screen from the grid.
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsTab {
     Interface,
@@ -380,7 +361,7 @@ impl SettingsTab {
     }
 }
 
-/// Что делает диалог альбома (M19): создание, переименование, перенос или удаление.
+/// What the album dialog does (M19): create, rename, move or delete.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum AlbumDialog {
     New,
@@ -402,8 +383,8 @@ impl AlbumDialog {
     }
 }
 
-/// Действие панели вида «Альбомы»: применяется после кадра, когда отпущены
-/// заимствования текстур (`M19`). Диалоги открываются отдельно.
+/// An action of the "Albums" panel: applied after the frame, when the texture borrows are
+/// released (`M19`). The dialogs open separately.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum AlbumAction {
     Select(i64),
@@ -415,7 +396,7 @@ enum AlbumAction {
     FileDown,
 }
 
-/// Вид клика по плитке (M18): Ctrl — добавить/убрать, Shift — диапазон по порядку сетки.
+/// The kind of a click on a tile (M18): Ctrl adds or removes, Shift takes a range in grid order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PickClick {
     Plain,
@@ -423,8 +404,8 @@ enum PickClick {
     Range,
 }
 
-/// Какой клик означает какое действие. Ctrl и Cmd — одно и то же действие:
-/// владелец на Linux, но код не упирается в ОС.
+/// Which click means which action. Ctrl and Cmd are the same action: the owner is on Linux,
+/// but the code does not lean on the OS.
 fn pick_kind(mods: &egui::Modifiers) -> PickClick {
     if mods.shift {
         PickClick::Range
@@ -435,9 +416,9 @@ fn pick_kind(mods: &egui::Modifiers) -> PickClick {
     }
 }
 
-/// Набор файлов, внутри которого сделано выделение: вид, фильтр, поиск, порядок.
-/// Пока он тот же, выделение живёт; смена любого поля снимает его (M18),
-/// чтобы действие не задело файлы, которых на экране уже нет.
+/// The set of files the selection was made in: the view, the filter, the search, the order.
+/// While it stays the same the selection lives; a change of any field clears it (M18), so
+/// that an action does not touch files that are no longer on the screen.
 #[derive(Clone, PartialEq)]
 struct PickScope {
     view: View,
@@ -447,26 +428,26 @@ struct PickScope {
     hits: Option<usize>,
     sort: db::GridSort,
     layout: db::GridLayout,
-    /// Открытый альбом и режим «Все файлы» внутри него (M19).
+    /// The open album and the "All files" mode inside it (M19).
     album: Option<i64>,
     browse_all: bool,
 }
 
-/// Палитра интерфейса (M22, ADR 0044). Две темы из макета «functional precision»:
-/// тёмная (основная) и светлая. Токены — единственный источник цвета в экранах;
-/// собственные `from_gray`/`from_rgb` остаются только для текста поверх затемнённого
-/// кадра, где фон задаёт фотография, а не тема.
+/// The interface palette (M22, ADR 0044). Two themes from the "functional precision" mock-up:
+/// dark (the main one) and light. The tokens are the only source of colour in the screens;
+/// own `from_gray`/`from_rgb` remain only for text over a dimmed frame, where the background
+/// is set by the photo, not by the theme.
 #[derive(Clone, Copy)]
 struct Theme {
-    /// Tier 0: фон окна и полотно сетки.
+    /// Tier 0: the window background and the grid canvas.
     canvas: egui::Color32,
-    /// Tier 1: панели, верхняя и нижняя полосы.
+    /// Tier 1: the panels, the top and bottom bars.
     panel: egui::Color32,
-    /// Tier 2: карточки, всплывающие меню.
+    /// Tier 2: the cards, the popup menus.
     card: egui::Color32,
-    /// Tier 3: поля ввода, неактивные кнопки.
+    /// Tier 3: the input fields, the disabled buttons.
     field: egui::Color32,
-    /// 1 px линия между панелями и строками.
+    /// The 1 px line between panels and rows.
     border: egui::Color32,
     border_strong: egui::Color32,
     text: egui::Color32,
@@ -480,7 +461,7 @@ struct Theme {
     dark: bool,
 }
 
-/// Тёмная палитра макета: холодные графиты, янтарь — единственный сигнал.
+/// The dark palette of the mock-up: cold graphites, amber is the only signal.
 const DARK: Theme = Theme {
     canvas: egui::Color32::from_rgb(0x0c, 0x0e, 0x12),
     panel: egui::Color32::from_rgb(0x1a, 0x1c, 0x20),
@@ -499,7 +480,7 @@ const DARK: Theme = Theme {
     dark: true,
 };
 
-/// Светлая палитра макета: холодный slate, тот же янтарь с контрастом AA на белом.
+/// The light palette of the mock-up: cold slate, the same amber with AA contrast on white.
 const LIGHT: Theme = Theme {
     canvas: egui::Color32::from_rgb(0xf8, 0xfa, 0xfc),
     panel: egui::Color32::from_rgb(0xf1, 0xf5, 0xf9),
@@ -518,57 +499,57 @@ const LIGHT: Theme = Theme {
     dark: false,
 };
 
-/// Палитра текущего кадра. Тем выбирает `settings.theme`, разрешает — egui.
+/// The palette of the current frame. `settings.theme` chooses the theme, egui applies it.
 fn theme(ui: &egui::Ui) -> Theme {
     if ui.visuals().dark_mode { DARK } else { LIGHT }
 }
 
-/// Акцент: ровно «выбрано», «уверенный тег», «оставить», шаг прогресса.
+/// The accent: exactly "selected", "confident tag", "keep", a progress step.
 fn accent(ui: &egui::Ui) -> egui::Color32 {
     ui.visuals().selection.stroke.color
 }
 
-/// Второстепенный текст и служебные подписи.
+/// Secondary text and service captions.
 fn dim(ui: &egui::Ui) -> egui::Color32 {
     ui.visuals().widgets.noninteractive.fg_stroke.color
 }
 
-/// Метрики раскладки: менять только вместе с docs/UI.md.
+/// Layout metrics: change only together with docs/UI.md.
 const LEFT_W: f32 = 260.0;
-/// Зазор между плитками — 10 px из макета (`gap-2.5`), а не прежние 2 px.
+/// The gap between tiles — 10 px from the mock-up (`gap-2.5`), not the former 2 px.
 const TILE_GAP: f32 = 10.0;
-/// Полоса подписи под превью: имя и дата моноширинными цифрами.
+/// The caption strip under a preview: the name and the date in monospaced digits.
 const CELL_CAPTION_H: f32 = 22.0;
-/// Высота пункта навигации и высота строки фильтров.
+/// The height of a navigation item and of a filter row.
 const NAV_H: f32 = 28.0;
 const RIGHT_W: f32 = 280.0;
-/// Верхняя полоса 32 px и нижняя 28 px — метрики макета, не «по вкусу».
+/// The top bar is 32 px and the bottom one 28 px — mock-up metrics, not a matter of taste.
 const TOP_H: f32 = 32.0;
 const STATUS_H: f32 = 28.0;
-/// Скругления макета (Tailwind в нарисованных экранах): `rounded` = 4 — кнопки,
-/// чипы, значки; `rounded-md` = 6 — пункты навигации, меню; `rounded-lg` = 8 —
-/// карточки плиток, поля поиска, диалоги. Проза `DESIGN.md` про 0 px проигрывает
-/// нарисованным экранам — так же, как в палитре (ADR 0044).
+/// The mock-up radii (Tailwind in the drawn screens): `rounded` = 4 — buttons, chips,
+/// badges; `rounded-md` = 6 — navigation items, menus; `rounded-lg` = 8 — tile cards,
+/// search fields, dialogs. The prose of `DESIGN.md` about 0 px loses to the drawn screens —
+/// the same way as in the palette (ADR 0044).
 const RADIUS_CTRL: f32 = 4.0;
 const RADIUS_ITEM: f32 = 6.0;
 const RADIUS_CARD: f32 = 8.0;
-/// Ниже этой ширины окна сведения уходят в левую панель: сетке нужны 4 колонки.
+/// Below this window width the details move into the left panel: the grid needs 4 columns.
 const DETAILS_MIN_W: f32 = 1200.0;
 
-// Прокрутка (M22.2b). Ниже — единственное место, где задан её профиль: колесо,
-// тачпад и выбег после отрыва пальцев. Ни один `ScrollArea` своих значений не ставит.
-/// Один щелчок колеса — треть высоты окна по умолчанию (840 px): 280 px.
+// Scrolling (M22.2b). Below is the only place its profile is set: the wheel, the touchpad
+// and the coast after the fingers lift. No `ScrollArea` sets values of its own.
+/// One wheel notch — a third of the default window height (840 px): 280 px.
 const WHEEL_NOTCH_PTS: f32 = 280.0;
-/// Выбег тачпада: постоянная времени затухания скорости, с (пройденный путь = v·τ).
+/// The touchpad coast: the time constant of the speed decay, s (the distance = v·τ).
 const COAST_DECAY_S: f32 = 0.35;
-/// Короткий выбег не начинается: случайное касание не должно двигать сетку.
+/// A short coast does not start: an accidental touch must not move the grid.
 const COAST_STOP_PTS: f32 = 6.0;
-/// Пауза без событий тачпада, после которой жест считается законченным, с.
+/// The pause without touchpad events after which the gesture counts as over, s.
 const GESTURE_END_S: f64 = 0.08;
-/// Сглаживание оценки скорости жеста: постоянная времени, с.
+/// Smoothing of the gesture speed estimate: the time constant, s.
 const VEL_SMOOTH_S: f32 = 0.05;
 
-/// Варианты порядка плиток и их слова на экране (M17). «Порядок альбома» — M19.
+/// The tile order options and their words on the screen (M17). "Album order" is M19.
 const GRID_SORTS: [(db::GridSort, &str); 4] = [
     (db::GridSort::DateDesc, "Date: newest first"),
     (db::GridSort::DateAsc, "Date: oldest first"),
@@ -587,7 +568,7 @@ fn sort_label(sort: db::GridSort, lang: i18n::Lang) -> &'static str {
     }
 }
 
-/// Сравнение дат: «без даты» — всегда в конце, в обе стороны (M17).
+/// Date comparison: "no date" is always last, in both directions (M17).
 fn cmp_date_none_last(a: Option<&str>, b: Option<&str>, desc: bool) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a, b) {
@@ -604,8 +585,8 @@ fn cmp_date_none_last(a: Option<&str>, b: Option<&str>, desc: bool) -> std::cmp:
     }
 }
 
-/// Месяцы в порядке выбранной сортировки; «Без даты» — последней группой всегда (M17).
-/// Внутри группы порядок берётся из `ordered`, второго места сортировки нет.
+/// Months in the chosen sort order; "No date" is always the last group (M17).
+/// Inside a group the order comes from `ordered`, there is no second sort key.
 fn month_groups(
     ordered: &[usize],
     items: &[db::FileRow],
@@ -634,12 +615,12 @@ fn month_groups(
     groups
 }
 
-/// Фон выбранного пункта: акцент с прозрачностью, а не сплошная заливка.
+/// The background of a selected item: the accent with transparency, not a solid fill.
 fn selected_fill(ui: &egui::Ui) -> egui::Color32 {
     theme(ui).accent_soft
 }
 
-/// Источник даты съёмки: в БД латиницей, на экране на языке интерфейса.
+/// The source of the shooting date: Latin in the DB, in the interface language on the screen.
 fn date_source(src: &str, lang: i18n::Lang) -> &'static str {
     match src {
         "exif" => "EXIF",
@@ -649,15 +630,15 @@ fn date_source(src: &str, lang: i18n::Lang) -> &'static str {
     }
 }
 
-/// Основная кнопка экрана: заливка акцентом, текст — цветом фона палитры.
+/// The primary button of a screen: filled with the accent, the text in the background colour of the palette.
 fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Button<'static> {
     let t = theme(ui);
     egui::Button::new(egui::RichText::new(text).color(t.on_accent).strong())
         .fill(t.accent)
 }
 
-/// Опасное действие: рамка цветом ошибки, без заливки; при наведении — слабый тон.
-/// Слово «удалить» остаётся только у корзины ОС и строки альбома в DB (AGENTS.md §1).
+/// A dangerous action: an error-coloured border, no fill; a faint tint on hover. The word
+/// "delete" remains only for the OS trash and an album row in the DB (AGENTS.md §1).
 fn danger_button(ui: &egui::Ui, text: &str) -> egui::Button<'static> {
     let t = theme(ui);
     egui::Button::new(egui::RichText::new(text).color(t.danger))
@@ -665,14 +646,14 @@ fn danger_button(ui: &egui::Ui, text: &str) -> egui::Button<'static> {
         .stroke(egui::Stroke::new(1.0, t.danger))
 }
 
-/// GitHub-тема egui не используется: палитра целиком наша (M22).
-/// `dark` переключается только через `ThemeMode` в настройках, не отсюда.
+/// The GitHub theme of egui is not used: the palette is entirely ours (M22).
+/// `dark` is switched only through `ThemeMode` in the settings, not from here.
 fn style(ctx: &egui::Context) {
     apply_theme(ctx, db::ThemeMode::Dark);
 }
 
-/// Применить палитру и ритм (docs/UI.md § Layout). Нулевое скругление, 1 px линии,
-/// без теней: глубину задаёт только ступень тона.
+/// Apply the palette and the rhythm (docs/UI.md § Layout). Zero radius, 1 px lines, no
+/// shadows: depth is given by the tone step alone.
 fn apply_theme(ctx: &egui::Context, mode: db::ThemeMode) {
     ctx.set_theme(match mode {
         db::ThemeMode::Dark => egui::ThemePreference::Dark,
@@ -693,7 +674,7 @@ fn apply_theme(ctx: &egui::Context, mode: db::ThemeMode) {
         s.visuals.weak_text_color = Some(p.text_med);
         s.visuals.panel_fill = p.panel;
         s.visuals.window_fill = p.card;
-        // Поле ввода светлой темы — белое на сером полотне; в тёмной — полотно.
+        // The input field of the light theme is white on a grey canvas; in the dark one it is the canvas.
         s.visuals.extreme_bg_color = if p.dark { p.canvas } else { p.card };
         s.visuals.error_fg_color = p.danger;
         s.visuals.warn_fg_color = p.accent_hover;
@@ -733,8 +714,8 @@ fn apply_theme(ctx: &egui::Context, mode: db::ThemeMode) {
         s.visuals.widgets.open.fg_stroke = line(p.text);
         s.visuals.window_shadow = egui::Shadow::NONE;
         s.visuals.popup_shadow = egui::Shadow::NONE;
-        // Шкала кеглей макета: 10 — служебная caps-подпись, 11 — моно-числа,
-        // 12 — тело, 13 — плотный текст, 14 — подзаголовок, 18 — заголовок вида.
+        // The font size scale of the mock-up: 10 — a service caps caption, 11 — mono numbers,
+        // 12 — body, 13 — dense text, 14 — subheading, 18 — a view heading.
         use egui::{FontFamily::Proportional, FontId, TextStyle};
         s.text_styles.insert(TextStyle::Heading, FontId::new(18.0, Proportional));
         s.text_styles.insert(TextStyle::Body, FontId::new(13.0, Proportional));
@@ -742,46 +723,46 @@ fn apply_theme(ctx: &egui::Context, mode: db::ThemeMode) {
         s.text_styles.insert(TextStyle::Small, FontId::new(11.0, Proportional));
         s.text_styles
             .insert(TextStyle::Monospace, FontId::new(11.0, egui::FontFamily::Monospace));
-        // Прокрутка (M22.2b): прыжок к элементу (месяц, файл, фокус) — быстро и без рывка,
-        // выбег тачпада — одним профилем затухания на все области.
+        // Scrolling (M22.2b): a jump to an element (a month, a file, the focus) is fast and without a
+        // jerk; the touchpad coast is one decay profile for every area.
         s.scroll_animation.points_per_second = 2400.0;
         s.scroll_animation.duration = egui::Rangef::new(0.10, 0.30);
         s.spacing.scroll.kinetic.decay_time = COAST_DECAY_S;
         s.spacing.scroll.kinetic.stop_distance = 0.5;
     });
-    // Щелчок колеса: winit отдаёт `Line`, egui умножает его на это число.
+    // A wheel notch: winit gives `Line`, egui multiplies it by this number.
     ctx.options_mut(|o| o.input_options.line_scroll_speed = WHEEL_NOTCH_PTS);
 }
 
-/// Прокрутка колесом и тачпадом (M22.2b).
+/// Scrolling with the wheel and the touchpad (M22.2b).
 ///
-/// Колесо: один щелчок — `WHEEL_NOTCH_PTS` (egui конвертирует `Line` в points сам,
-/// профиль один на всё окно). Тачпад: winit на Linux и Windows не говорит, чем
-/// прокручивают (`MouseWheelSource::Unknown`), поэтому egui не даёт ни инерции, ни
-/// «резинки» — жест доходит один к одному и обрывается на отрыве пальцев. Здесь он
-/// доводится: скорость последних событий удерживается, и после паузы жест
-/// продолжается выбегом с затуханием `COAST_DECAY_S`, пока путь не станет короче
-/// `COAST_STOP_PTS`. Новое событие (в любую сторону) выбег отменяет — без скачка.
+/// The wheel: one notch is `WHEEL_NOTCH_PTS` (egui converts `Line` into points itself, one
+/// profile for the whole window). The touchpad: on Linux and Windows winit does not say what
+/// scrolls (`MouseWheelSource::Unknown`), so egui gives neither inertia nor "rubber banding" —
+/// the gesture arrives one to one and breaks off when the fingers lift. Here it is carried
+/// through: the speed of the last events is kept, and after the pause the gesture continues
+/// as a coast decaying with `COAST_DECAY_S` until the distance drops below `COAST_STOP_PTS`.
+/// A new event (in either direction) cancels the coast — without a jump.
 #[derive(Default)]
 struct Scroll {
-    /// Скорость жеста, points/s.
+    /// The gesture speed, points/s.
     vel: egui::Vec2,
-    /// Время последнего события тачпада, с (часы egui).
+    /// The time of the last touchpad event, s (the egui clock).
     last_event: f64,
-    /// Пальцы на тачпаде: жест идёт.
+    /// Fingers on the touchpad: the gesture is going.
     touched: bool,
-    /// Жест кончился, идёт выбег: пока `true`, нужен следующий кадр.
+    /// The gesture is over, the coast is running: while `true`, the next frame is needed.
     coasting: bool,
 }
 
 impl Scroll {
-    /// События кадра → добавка к прокрутке этого кадра. Возвращает `true`, если
-    /// выбег ещё идёт и нужен следующий кадр (в покое кадры не запрашиваются).
+    /// The frame events → the addition to the scroll of this frame. Returns `true` if the coast
+    /// is still running and the next frame is needed (at rest no frames are requested).
     fn pump(&mut self, ctx: &egui::Context) -> bool {
         let mut gesture = egui::Vec2::ZERO;
         let mut wheel = false;
-        // Ctrl/Cmd + прокрутка — это зум (жест масштаба), а не жест тачпада:
-        // выбег после него не нужен.
+        // Ctrl/Cmd + scroll is a zoom (a scale gesture), not a touchpad gesture: no coast is
+        // needed after it.
         let zoom_modifier = ctx.options(|o| o.input_options.zoom_modifier);
         let (time, dt) = ctx.input(|i| {
             let zooming = i.modifiers.matches_any(zoom_modifier);
@@ -790,8 +771,8 @@ impl Scroll {
                     unit, delta, source, ..
                 } = e
                 {
-                    // Точные (пиксельные) дельты без источника — тачпад или колесо
-                    // высокого разрешения; строчные — обычное колесо.
+                    // Exact (pixel) deltas without a source — a touchpad or a high-resolution wheel; line
+                    // deltas — an ordinary wheel.
                     if !zooming
                         && *unit == egui::MouseWheelUnit::Point
                         && *source == egui::MouseWheelSource::Unknown
@@ -806,19 +787,19 @@ impl Scroll {
         });
 
         if gesture != egui::Vec2::ZERO {
-            // Пальцы на тачпаде: кадр идёт один к одному с жестом, выбег снят.
+            // Fingers on the touchpad: the frame goes one to one with the gesture, the coast is off.
             let a = 1.0 - (-dt / VEL_SMOOTH_S).exp();
             self.vel = self.vel * (1.0 - a) + gesture / dt * a;
             self.last_event = time;
             self.touched = true;
             self.coasting = false;
         } else if wheel {
-            // Колесо шагает само (egui сглаживает щелчок); выбег тачпада отменяется.
+            // The wheel steps on its own (egui smooths the notch); the touchpad coast is cancelled.
             self.touched = false;
             self.coasting = false;
             self.vel = egui::Vec2::ZERO;
         } else if self.touched && time - self.last_event > GESTURE_END_S {
-            // Пальцы оторвались: скорость гасится за паузу и превращается в выбег.
+            // The fingers lifted: the speed fades out over the pause and turns into a coast.
             self.touched = false;
             self.vel *= (-(time - self.last_event) as f32 / COAST_DECAY_S).exp();
             self.coasting = self.vel.length() * COAST_DECAY_S >= COAST_STOP_PTS;
@@ -840,7 +821,7 @@ impl Scroll {
     }
 }
 
-/// Моноширинные цифры: размеры, счётчики, даты, размеры кадра (макет: mono-numeric).
+/// Monospaced digits: sizes, counters, dates, frame sizes (mock-up: mono-numeric).
 fn num(ui: &egui::Ui, text: impl Into<String>, size: f32) -> egui::RichText {
     let family = ui
         .style()
@@ -851,7 +832,7 @@ fn num(ui: &egui::Ui, text: impl Into<String>, size: f32) -> egui::RichText {
     egui::RichText::new(text.into()).family(family).size(size)
 }
 
-/// Служебная подпись секции: 10 px, верхний регистр, второстепенный цвет.
+/// A service caption of a section: 10 px, upper case, secondary colour.
 fn caps_label(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text.to_uppercase())
@@ -860,7 +841,7 @@ fn caps_label(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// 1 px граница пристыкованной панели: панели разделяет линия, а не зазор.
+/// The 1 px border of a docked panel: a panel is separated by a line, not by a gap.
 fn panel_edge(ui: &egui::Ui, left: bool) {
     let r = ui.max_rect();
     let x = if left { r.left() + 0.5 } else { r.right() - 0.5 };
@@ -868,9 +849,9 @@ fn panel_edge(ui: &egui::Ui, left: bool) {
         .vline(x, r.y_range(), egui::Stroke::new(1.0, theme(ui).border));
 }
 
-/// Срезать верхние углы превью под скругление карточки: картинка рисуется
-/// прямоугольной, поэтому внешние уголки возвращаем фону, на котором лежит плитка.
-/// Нижние углы закрывает полоса подписи, их трогать не нужно.
+/// Cut the top corners of a preview to the card radius: the picture is drawn rectangular,
+/// so the outer corners are returned to the background the tile lies on.
+/// The caption strip closes the bottom corners, they need no work.
 fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32) {
     let r = radius
         .min(rect.width() / 2.0)
@@ -906,7 +887,7 @@ fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32
     }
 }
 
-/// 1 px линия во всю ширину панели: глубину задаёт линия, а не тень.
+/// A 1 px line across the whole panel width: depth is given by the line, not by a shadow.
 fn hairline(ui: &mut egui::Ui) {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
@@ -914,26 +895,26 @@ fn hairline(ui: &mut egui::Ui) {
         .rect_filled(rect, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
 }
 
-/// Заголовок секции в панели: 11 px, второстепенный цвет, без капса.
+/// A section heading in a panel: 11 px, secondary colour, no caps.
 fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(8.0);
     ui.label(egui::RichText::new(text).size(11.0).color(dim(ui)));
     ui.add_space(2.0);
 }
 
-/// Строка «подпись слева — число справа»: числа всегда у правого края колонки.
+/// A "caption on the left — number on the right" row: numbers always at the right edge of the column.
 fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).size(11.0).color(dim(ui)));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Число всегда с единицей и всегда моноширинное: столбец не дёргается.
+            // The number always has its unit and is always monospaced: the column does not twitch.
             ui.label(num(ui, value, 11.0));
         });
     });
 }
 
-/// Строка карточки: подпись 11 px в колонке 72 px, значение 12 px справа с переносом.
-/// PhotoPrism-инспектор живёт такими парами, а не столбиком «подпись над значением».
+/// A card row: a caption of 11 px in a 72 px column, a value of 12 px on the right, wrapped.
+/// The PhotoPrism inspector lives on such pairs, not on a "caption above value" column.
 fn meta_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
@@ -948,7 +929,7 @@ fn meta_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.add_space(4.0);
 }
 
-/// Пункт навигации: вся ширина панели, подсветка выбора, слово слева, число справа.
+/// A navigation item: the whole panel width, a selection highlight, the word on the left, the number on the right.
 fn nav_item(
     ui: &mut egui::Ui,
     current: &mut View,
@@ -961,8 +942,8 @@ fn nav_item(
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_H), egui::Sense::click());
     if ui.is_rect_visible(rect) {
-        // Активный пункт: заливка тоном поля и текст акцентом, скругление 6 px —
-        // как в нарисованном экране (там строка `rounded-md`, без левой полосы).
+        // The active item: filled with the field tone and the text in the accent, radius 6 px —
+        // as in the drawn screen (the row is `rounded-md` there, without a left bar).
         let fill = if selected {
             th.field
         } else if resp.hovered() {
@@ -1004,7 +985,7 @@ fn nav_item(
     }
 }
 
-/// Заголовок группы навигации: 10 px капсом, широкий трекинг макета (label-caps).
+/// The heading of a navigation group: 10 px caps, the wide tracking of the mock-up (label-caps).
 fn nav_section(ui: &mut egui::Ui, text: &str) {
     ui.add_space(8.0);
     ui.label(
@@ -1015,7 +996,7 @@ fn nav_section(ui: &mut egui::Ui, text: &str) {
     ui.add_space(2.0);
 }
 
-/// Пункт левого списка в диалоге «Настройки»: та же геометрия, что у навигации.
+/// An item of the left list in the "Settings" dialog: the same geometry as the navigation.
 fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
@@ -1047,7 +1028,7 @@ fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
     resp.clicked()
 }
 
-/// Имя файла одной строкой: полный путь живёт в карточке, а не в статусе.
+/// The file name on one line: the full path lives in the card, not in the status bar.
 fn file_name(path: &str) -> String {
     Path::new(path)
         .file_name()
@@ -1056,8 +1037,8 @@ fn file_name(path: &str) -> String {
         .to_string()
 }
 
-/// Плоская секция панели: без рамки `Frame::group`, содержимое на всю ширину.
-/// Рамка в рамке спорит с фото за внимание (M16, docs/UI.md §Вёрстка).
+/// A flat section of a panel: no `Frame::group` border, the content across the whole width.
+/// A frame inside a frame competes with the photo for attention (M16, docs/UI.md § Layout).
 fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let w = ui.available_width();
     ui.scope(|ui| {
@@ -1067,7 +1048,7 @@ fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(8.0);
 }
 
-/// Чип активного фильтра: слово с «×»; клик снимает только этот фильтр (M16).
+/// The chip of an active filter: the word with "×"; a click removes only this filter (M16).
 fn filter_chip(ui: &mut egui::Ui, text: &str) -> bool {
     ui.add(
         egui::Button::new(egui::RichText::new(format!("{text} ×")).size(12.0)).small(),
@@ -1076,38 +1057,38 @@ fn filter_chip(ui: &mut egui::Ui, text: &str) -> bool {
     .clicked()
 }
 
-/// Снимок активных фильтров для строки чипов.
+/// A snapshot of the active filters for the row of chips.
 struct Chips {
     query: String,
     tag: Option<String>,
     kind: KindFilter,
-    /// Язык, на котором подписаны чипы; снимок делается один раз за кадр.
+    /// The language the chips are written in; the snapshot is taken once per frame.
     lang: i18n::Lang,
     hits: Option<usize>,
-    /// Открытый альбом (M19): чип «Альбом «Имя»» с «×».
+    /// The open album (M19): an "Album “Name”" chip with "×".
     album: Option<String>,
-    /// Мультивыбор (M18): сколько отмечено, их объём и можно ли выбирать в этом виде.
+    /// The multi-select (M18): how many are picked, their volume and whether picking is allowed in this view.
     picked: usize,
     picked_bytes: i64,
     pickable: bool,
 }
 
-/// Какие фильтры просят снять кликом по чипу.
+/// Which filters a click on a chip asks to remove.
 #[derive(Default, Clone, Copy)]
 struct FilterClear {
     query: bool,
     tag: bool,
     kind: bool,
     hits: bool,
-    /// Снять открытый альбом: вернуться к дереву альбомов.
+    /// Close the open album: go back to the album tree.
     album: bool,
-    /// «Выбрать все (M)» — отметить видимое, не трогая скрытое фильтром.
+    /// "Select all (M)" — mark what is visible without touching what the filter hides.
     pick_all: bool,
-    /// «Снять выделение» — пустое выделение, как по Esc.
+    /// "Clear the selection" — an empty selection, as on Esc.
     clear_pick: bool,
 }
 
-/// Короткая подпись для чипа: длинный путь не распирает строку фильтров.
+/// A short caption for a chip: a long path does not blow up the filter row.
 fn shorten(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()
@@ -1116,8 +1097,8 @@ fn shorten(text: &str, max: usize) -> String {
     }
 }
 
-/// Строка чипов над сеткой: видно, что включено, «×» снимает именно это, справа — итог.
-/// Строка живёт всегда (при пустом фильтре — «фильтров нет»), поэтому заголовок вида не прыгает.
+/// The row of chips above the grid: what is on is visible, "×" removes exactly that, the total is on the right.
+/// The row always exists ("no filters" when the filter is empty), so the view heading does not jump.
 fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) -> FilterClear {
     let lang = chips.lang;
     let mut clear = FilterClear::default();
@@ -1170,8 +1151,8 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                 .size(11.0)
                 .color(dim(ui)),
             );
-            // Мультивыбор (M18): счёт и две кнопки всегда на одном месте,
-            // чтобы строка чипов не прыгала при кликах.
+            // The multi-select (M18): the count and the two buttons are always in one place, so
+            // that the chip row does not jump on clicks.
             if chips.pickable {
                 if chips.picked > 0
                     && ui
@@ -1218,8 +1199,8 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
     clear
 }
 
-/// Заголовок группы сетки: месяц 14 px, число файлов и объём 11 px (как в PhotoPrism).
-/// Месяц без даты — отдельная последняя группа, а не мусорный ключ в начале списка.
+/// A grid group heading: the month at 14 px, the file count and the volume at 11 px (as in PhotoPrism).
+/// A month without a date is a separate last group, not a junk key at the top of the list.
 fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i18n::Lang) {
     let title = if key == "no date" {
         t(lang, "No date").to_string()
@@ -1235,7 +1216,7 @@ fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i1
         }
     };
     let summary = match lang {
-        // Английский ставит число перед словом: «· 5 files · 1.2 MiB».
+        // English puts the number before the word: "· 5 files · 1.2 MiB".
         i18n::Lang::En => format!(
             "· {} · {}",
             i18n::count(lang, files,"file"),
@@ -1250,7 +1231,7 @@ fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i1
     ui.add_space(4.0);
 }
 
-/// Путь альбома в дереве по уже загруженным узлам: «Дача 2024 / Май».
+/// The album path in the tree over the loaded nodes: "Dacha 2024 / May".
 fn album_label(albums: &[db::AlbumNode], id: i64) -> String {
     let mut names = Vec::new();
     let mut at = id;
@@ -1268,7 +1249,7 @@ fn album_label(albums: &[db::AlbumNode], id: i64) -> String {
     names.join(" / ")
 }
 
-/// Виден ли узел при текущем свёртывании: все его родители раскрыты.
+/// Whether a node is visible at the current collapsing: all its parents are expanded.
 fn album_visible(albums: &[db::AlbumNode], node: &db::AlbumNode, expanded: &BTreeSet<i64>) -> bool {
     let mut parent = node.parent_id;
     for _ in 0..256 {
@@ -1286,8 +1267,8 @@ fn album_visible(albums: &[db::AlbumNode], node: &db::AlbumNode, expanded: &BTre
     true
 }
 
-/// Дерево альбомов: отступ по глубине, треугольник свёртывания, счётчики.
-/// Возвращает выбранный узел; клик по треугольнику выбор не меняет.
+/// The album tree: an indent by depth, a collapse triangle, counters.
+/// Returns the selected node; a click on the triangle does not change the selection.
 fn draw_album_tree(
     ui: &mut egui::Ui,
     albums: &[db::AlbumNode],
@@ -1353,7 +1334,7 @@ fn draw_album_tree(
     chosen
 }
 
-/// Плитка подальбома: папка с именем и счётчиками, клик открывает её.
+/// A sub-album tile: a folder with a name and counters, a click opens it.
 fn draw_album_cell(
     ui: &mut egui::Ui,
     node: &db::AlbumNode,
@@ -1411,8 +1392,8 @@ fn draw_album_cell(
     resp.clicked()
 }
 
-/// Строка прогресса фонового прохода: `done/total`, «Стоп» рядом.
-/// Возвращает `true`, если нажали «Стоп».
+/// The progress row of a background pass: `done/total`, "Stop" next to it.
+/// Returns `true` if "Stop" was pressed.
 fn progress_row(ui: &mut egui::Ui, name: &str, p: &Arc<Progress>, running: bool) -> bool {
     let (d, t) = (p.done(), p.total());
     let frac = if t > 0 { d as f32 / t as f32 } else { 0.0 };
@@ -1447,7 +1428,7 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
         "photocat",
         opts,
         Box::new(move |cc| {
-            // Один стиль на всё GUI (docs/UI.md § Layout) вместе с профилем прокрутки.
+            // One style for the whole GUI (docs/UI.md § Layout) together with the scrolling profile.
             style(&cc.egui_ctx);
             Ok(Box::new(App::new(db_path.clone())))
         }),
@@ -1459,39 +1440,39 @@ struct App {
     db_path: PathBuf,
     thumbs_dir: PathBuf,
     items: Vec<FileRow>,
-    /// Файлы в корзине приложения: на диске не тронуты, из обычных видов скрыты.
+    /// Files in the app trash: untouched on disk, hidden from the ordinary views.
     trash_items: Vec<FileRow>,
-    /// Альбомы (M19): дерево, открытый узел и его файлы в порядке альбома.
+    /// Albums (M19): the tree, the open node and its files in album order.
     albums: Vec<db::AlbumNode>,
     album_selected: Option<i64>,
     album_expanded: BTreeSet<i64>,
     album_files: Vec<i64>,
     album_set: HashSet<i64>,
     album_trashed: usize,
-    /// «Все файлы» внутри вида «Альбомы»: временный взгляд, чтобы набрать снимки
-    /// и нажать «Добавить выбранные». Настройкой не сохраняется.
+    /// "All files" inside the "Albums" view: a temporary look to gather photos and press
+    /// "Add selected". It is not saved as a setting.
     album_browse_all: bool,
     album_dialog: Option<AlbumDialog>,
     album_name_input: String,
     album_move_parent: i64,
     album_delete_text: String,
-    /// Альбомы выбранного файла для карточки: кэш на один файл.
+    /// The albums of the selected file for the card: a cache for one file.
     file_albums: Vec<(i64, String)>,
     file_albums_for: Option<i64>,
-    /// Выгрузка альбома на диск (M20): диалог, план-дерево и фоновый проход.
+    /// Exporting an album to disk (M20): the dialog, the plan tree and the background pass.
     export_open: bool,
     export_album: Option<i64>,
     export_out: String,
     export_name: String,
     export_error: String,
     export_plan: Option<organize::ExportPlan>,
-    /// Для какого альбома, каталога и шаблона построен план: правка поля его устаревает.
+    /// For which album, folder and template the plan was built: editing a field makes it stale.
     export_plan_for: Option<(i64, String, String)>,
     export_report: Option<organize::ExportReport>,
     export_progress: Option<Arc<Progress>>,
     export_rx: Option<mpsc::Receiver<organize::ExportReport>>,
-    /// Целостность (M9): два каталога, файл слепка и результат последнего прохода.
-    /// Фоновые проходы те же, что у CLI (`verify`), плюс «Стоп» и прогресс в верхней панели.
+    /// Integrity (M9): two folders, a manifest file and the result of the last pass.
+    /// The background passes are the same as in the CLI (`verify`), plus "Stop" and progress in the top bar.
     integrity_a: String,
     integrity_b: String,
     integrity_manifest: String,
@@ -1500,21 +1481,21 @@ struct App {
     integrity_error: String,
     integrity_progress: Option<Arc<Progress>>,
     integrity_rx: Option<mpsc::Receiver<IntegrityReply>>,
-    /// Файл слепка уже есть: перезапись только после второго нажатия.
+    /// The manifest file exists already: overwriting only after a second press.
     integrity_overwrite: bool,
-    /// Напоминание о проверке (M10): срок считается по `settings`, баннер ничего не
-    /// запускает сам. «Напомнить позже» — решение на эту сессию.
+    /// The reminder to check (M10): the term is counted from `settings`, the banner starts nothing
+    /// by itself. "Remind me later" is a decision for this session.
     verify_due: db::VerifyDue,
     verify_banner_hidden: bool,
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
-    /// Мультивыбор плиток (M18): отмеченные файлы. Только в памяти — после перезапуска пусто.
+    /// The multi-select of tiles (M18): the marked files. In memory only — empty after a restart.
     picked: BTreeSet<i64>,
-    /// Якорь Shift+клика: файл, от которого отсчитывается диапазон по `App::ordered`.
+    /// The anchor of Shift+click: the file the range is counted from in `App::ordered`.
     pick_anchor: Option<i64>,
-    /// Набор файлов, внутри которого сделано выделение: смена вида/фильтра/поиска/порядка
-    /// его снимает с причиной в статусе.
+    /// The set of files the selection was made in: a change of the view, filter, search or order
+    /// clears it with a reason in the status bar.
     pick_scope: PickScope,
     view: View,
     groups: Vec<Group>,
@@ -1524,58 +1505,58 @@ struct App {
     kind_filter: KindFilter,
     progress: Option<Arc<Progress>>,
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
-    /// Теги CLIP: file_id → [(тег, вес)] по убыванию.
+    /// CLIP tags: file_id → [(tag, weight)] descending.
     tags: HashMap<i64, Vec<(String, f32)>>,
-    /// Словарь тегов активной модели: метки, промпты, порядок (M15.4).
+    /// The tag dictionary of the active model: labels, prompts, order (M15.4).
     tag_defs: Vec<db::TagDef>,
-    /// Правка словаря ещё не пересчитана: кнопка «Пересчитать теги» подсвечена.
+    /// An edit of the dictionary is not recomputed yet: the "Recompute the tags" button is highlighted.
     tag_dict_dirty: bool,
-    /// Новая метка и промпты в редакторе словаря.
+    /// A new label and prompts in the dictionary editor.
     tag_new_label: String,
     tag_new_prompts: String,
-    /// Путь для экспорта/импорта словаря JSON; пусто — файл в кэше.
+    /// The path for exporting and importing the JSON dictionary; empty means a file in the cache.
     tag_json_path: String,
-    /// Пересчёт тегов по сохранённым векторам (без повторного CLIP по фото).
+    /// Recomputing the tags over stored vectors (without running CLIP over the photos again).
     retag_rx: Option<mpsc::Receiver<Result<embed::RetagStats>>>,
-    /// Распределение весов по каждому тегу (по убыванию) и по лучшему тегу файла:
-    /// из него считается процентильный порог фильтра, без сортировки на каждый кадр.
+    /// The weight distribution of every tag (descending) and of the best tag of a file: the
+    /// percentile threshold of the filter is computed from it, without sorting on every frame.
     tag_dists: HashMap<String, Vec<f32>>,
     top_scores: Vec<f32>,
-    /// Свои теги владельца: file_id → подписи.
+    /// The owner's own tags: file_id → labels.
     user_tags: HashMap<i64, Vec<String>>,
     user_tag_input: String,
     tag_filter: Option<String>,
     semantic_query: String,
-    /// Результаты смыслового поиска в порядке убывания похожести.
+    /// The results of the semantic search in descending similarity.
     semantic_hits: Option<Vec<i64>>,
-    /// Модель загружена после первого поиска; дальше запросы идут без паузы.
+    /// The model is loaded after the first search; later queries go without a pause.
     ml_model: Option<embed::Model>,
     search_rx: Option<mpsc::Receiver<SearchReply>>,
     embed_progress: Option<Arc<Progress>>,
     embed_rx: Option<mpsc::Receiver<EmbedReply>>,
-    /// Настройки приложения (модель, путь, лимиты, пороги).
+    /// The application settings (model, path, limits, thresholds).
     settings: db::Settings,
-    /// Редактируемый путь к моделям: применяется кнопкой, а не на каждый символ.
+    /// The editable path to the models: applied by a button, not on every character.
     models_dir_input: String,
-    /// Согласие на скачивание весов (ADR 0015).
+    /// Consent to download the weights (ADR 0015).
     download_consent: bool,
     download_progress: Option<Arc<Progress>>,
     download_rx: Option<mpsc::Receiver<Result<embed::DownloadReport>>>,
-    /// Календарь: выбранный месяц и день.
+    /// The calendar: the selected month and day.
     cal_year: i32,
     cal_month: u32,
     cal_day: Option<String>,
-    /// Сколько тегов скрыто владельцем у файла (для «вернуть»).
+    /// How many tags the owner hid on a file (for "restore").
     hidden_tags: HashMap<i64, usize>,
-    /// Текст с фото: загружается по выбранному файлу и кэшируется.
+    /// The text of a photo: loaded for the selected file and cached.
     ocr_text: HashMap<i64, String>,
-    /// Фрагменты найденного текста с маркерами «» (для подсветки в карточке).
+    /// The fragments of the found text with «» markers (for highlighting in the card).
     ocr_snippets: HashMap<i64, String>,
-    /// Искать по тексту на фото (FTS5), а не по смыслу (CLIP).
+    /// Search the text on the photos (FTS5) instead of the meaning (CLIP).
     search_ocr: bool,
     ocr_files: i64,
     ocr_chars: i64,
-    /// Лица: группы, лица для выбранной группы и прогресс прохода.
+    /// Faces: the groups, the faces of the selected group and the progress of a pass.
     face_clusters: Vec<db::FaceCluster>,
     face_views: Vec<db::FaceView>,
     face_textures: HashMap<i64, egui::TextureHandle>,
@@ -1591,75 +1572,75 @@ struct App {
     face_download_consent: bool,
     face_download_progress: Option<Arc<Progress>>,
     face_download_rx: Option<mpsc::Receiver<Result<faces::DownloadReport>>>,
-    /// Сколько снимков пойдёт в пакетный проход по эвристике (план, не запуск).
+    /// How many photos a batch OCR pass would take by the heuristic (a plan, not a run).
     ocr_candidates: usize,
-    /// Из них — ещё без текста; «Продолжить» показывает именно остаток.
+    /// Of them — those without text yet; "Continue" shows exactly the remainder.
     ocr_remaining: usize,
     ocr_progress: Option<Arc<Progress>>,
     ocr_rx: Option<mpsc::Receiver<OcrReply>>,
-    /// Версия tesseract (путь из настроек или PATH): `None` — OCR недоступен, кнопка погашена.
+    /// The tesseract version (the path from the settings or PATH): `None` means OCR is unavailable, the button is dimmed.
     tesseract: Option<String>,
-    /// Редактируемые пути к программам: применяются кнопкой после проверки запуском.
+    /// The editable paths to the programs: applied by a button after a test launch.
     tools_input: tools::Tools,
-    /// Проверенное состояние программ (версия или ошибка) — не запускаем их на каждом кадре.
+    /// The verified state of the programs (a version or an error) — they are not started on every frame.
     tool_states: [String; 4],
-    /// Диалог «Настройки»: открыт ли и какой раздел показан.
+    /// The "Settings" dialog: whether it is open and which section is shown.
     settings_open: bool,
     settings_tab: SettingsTab,
-    /// Правая панель сведений: её можно закрыть, чтобы освободить место календарю и сетке.
+    /// The right details panel: it can be closed to free room for the calendar and the grid.
     details_open: bool,
-    /// Размер плитки и календаря; хранится в настройках.
+    /// The tile and calendar size; kept in the settings.
     tile_size: f32,
-    /// Полноэкранный просмотр и загрузка большого кадра в фоне.
+    /// The full-screen viewer and the loading of a large frame in the background.
     viewer: Option<Viewer>,
     viewer_tex: Option<(i64, egui::TextureHandle)>,
-    /// Заранее декодированный кадр выбранного файла: полный экран открывается без ожидания.
+    /// A pre-decoded frame of the selected file: the full screen opens without waiting.
     photo_cache: HashMap<i64, (usize, usize, Vec<u8>)>,
     photo_loading: HashSet<i64>,
     photo_jobs: VecDeque<i64>,
     photo_rx: Option<mpsc::Receiver<PhotoReply>>,
-    /// Встроенный плеер: видео и звук в окне приложения (ADR 0030).
+    /// The built-in player: video and sound in the application window (ADR 0030).
     video: Option<player::Player>,
-    /// Кадр плеера как текстура; обновляется из `poll_video`.
+    /// The player frame as a texture; refreshed from `poll_video`.
     video_tex: Option<egui::TextureHandle>,
-    /// Запасной путь: внешний ffplay, когда встроенный плеер отказался.
+    /// The fallback: an external ffplay when the built-in player refused.
     video_child: Option<std::process::Child>,
-    /// Когда последний раз обновляли текстуру видео: заливка кадра — самая
-    /// дорогая операция в кадре, чаще 30 раз в секунду её делать незачем.
+    /// When the video texture was last refreshed: filling the frame is the most expensive
+    /// operation in a frame, so there is no point in doing it more than 30 times a second.
     video_tex_at: Option<std::time::Instant>,
-    /// Сообщение «декодер не успевает» показывается один раз на файл.
+    /// The "the decoder cannot keep up" message is shown once per file.
     video_lag_shown: bool,
-    /// Видео доиграло: полноэкранный просмотр переходит к следующему файлу.
+    /// The video is over: the full-screen viewer moves to the next file.
     video_ended: bool,
     video_id: Option<i64>,
-    /// Календарь: градация и понедельник выбранной недели.
+    /// The calendar: the gradation and the Monday of the selected week.
     cal_scale: CalScale,
     cal_week: chrono::NaiveDate,
-    /// Выбранные лица для пакетного назначения имени.
+    /// The faces selected for a batch naming.
     face_picked: HashSet<i64>,
     face_group_input: String,
-    /// Группы, отмеченные для поиска «все вместе на одном снимке».
+    /// The groups marked for the "all together in one photo" search.
     face_picked_clusters: HashSet<i64>,
     face_together: bool,
-    /// Подтверждение очистки корзины: без него в системную корзину ничего не уходит.
+    /// The confirmation of emptying the trash: without it nothing goes to the system trash.
     trash_confirm: bool,
     trash_progress: Option<Arc<Progress>>,
     trash_rx: Option<mpsc::Receiver<TrashReply>>,
-    /// Каталоги и встроенный выбор каталога (без зависимости от системного диалога).
+    /// Folders and the built-in folder picker (without depending on the system dialog).
     roots: Vec<String>,
     roots_open: bool,
     picker_open: bool,
     picker_current: PathBuf,
     picker_entries: Vec<PathBuf>,
     picker_error: String,
-    /// Занятое место считается по кнопке, а не каждым кадром.
+    /// The used space is counted on a button press, not on every frame.
     storage_usage: Option<storage::Usage>,
     storage_confirm: Option<StorageAction>,
     status: String,
-    /// Разрешённая тема последнего кадра: палитра пересобирается только когда она
-    /// меняется (настройка или тема ОС), а не каждый кадр.
+    /// The theme allowed for the last frame: the palette is rebuilt only when it changes
+    /// (a setting or the OS theme), not on every frame.
     theme_key: Option<egui::Theme>,
-    /// Прокрутка колесом и тачпадом: скорость, выбег, пауза (M22.2b).
+    /// Scrolling with the wheel and the touchpad: the speed, the coast, the pause (M22.2b).
     scroll: Scroll,
 }
 
@@ -1901,7 +1882,7 @@ impl App {
                 )
                 .unwrap_or_default();
                 self.tools_input = self.settings.tools.clone();
-                // Проверяем tesseract и остальные программы по путям из настроек — один раз.
+                // Check tesseract and the other programs by the paths from the settings — once.
                 self.tesseract = self.settings.tools.probe(Tool::Tesseract);
                 self.refresh_tool_states();
                 self.models_dir_input = self.settings.models_dir.to_string_lossy().to_string();
@@ -1913,9 +1894,9 @@ impl App {
                 {
                     self.path_input = first.clone();
                 }
-                // Экран «Целостность» по умолчанию знает архив и место для слепка:
-                // одно нажатие, а не три поля, набранных руками. Если владелец уже
-                // настроил напоминание (M10) — берём именно его каталог и слепок.
+                // The "Integrity" screen knows the archive and the place for the manifest by default:
+                // one press instead of three fields typed by hand. If the owner has already configured
+                // a reminder (M10) — take exactly its folder and manifest.
                 if !self.settings.verify_root.trim().is_empty() {
                     self.integrity_a = self.settings.verify_root.clone();
                 }
@@ -1933,8 +1914,8 @@ impl App {
                         .to_string_lossy()
                         .into_owned();
                 }
-                // «Пора проверить» пересчитывается при загрузке и после каждого прохода,
-                // а не на каждый кадр: срок меняется раз в сутки.
+                // "Time to check" is recomputed on load and after every pass, not on every frame:
+                // the term changes once a day.
                 self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
                 self.items = rows;
                 self.trash_items = trashed;
@@ -1965,8 +1946,8 @@ impl App {
                 }
                 self.groups.clear();
                 self.init_calendar();
-                // Выделение живёт в памяти: после перечитывания индекса в нём остаются
-                // только файлы, которые всё ещё есть, а набор для сравнения — свежий.
+                // The selection lives in memory: after the index is re-read only the files that still
+                // exist remain in it, and the comparison set is fresh.
                 let alive: HashSet<i64> = self.items.iter().map(|r| r.id).collect();
                 self.picked.retain(|id| alive.contains(id));
                 self.pick_anchor = self.pick_anchor.filter(|id| alive.contains(id));
@@ -1980,9 +1961,9 @@ impl App {
         self.refresh_albums();
     }
 
-    /// Дерево альбомов и файлы открытого узла (M19). Только строки БД.
+    /// The album tree and the files of the open node (M19). DB rows only.
     fn refresh_albums(&mut self) {
-        // Состав альбомов изменился — строка «Альбомы» в карточке читается заново.
+        // The album contents changed — the "Albums" row in the card is read anew.
         self.file_albums_for = None;
         let loaded = db::open(&self.db_path).and_then(|c| {
             let tree = db::albums_tree(&c)?;
@@ -2028,11 +2009,11 @@ impl App {
         self.album_set = self.album_files.iter().copied().collect();
     }
 
-    /// Открыть альбом: показать его файлы в порядке альбома и подставить этот порядок.
+    /// Open an album: show its files in album order and apply that order.
     fn album_open(&mut self, id: i64) {
         self.album_selected = Some(id);
         self.album_browse_all = false;
-        // Родители раскрыты, иначе выбранный узел не виден в дереве.
+        // The parents are expanded, otherwise the selected node is not visible in the tree.
         let mut at = id;
         for _ in 0..256 {
             let Some(node) = self.albums.iter().find(|n| n.id == at) else {
@@ -2070,7 +2051,7 @@ impl App {
         }
     }
 
-    /// Закрыть альбом: дерево остаётся, сетка гаснет, порядок возвращается к дате.
+    /// Close the album: the tree stays, the grid dims, the order returns to the date.
     fn album_close(&mut self) {
         self.album_selected = None;
         self.album_browse_all = false;
@@ -2087,7 +2068,7 @@ impl App {
         self.albums.iter().find(|n| n.id == id)
     }
 
-    /// Сколько альбомов и строк файлов уйдёт вместе с узлом: для подтверждения.
+    /// How many albums and file rows go away with the node: for the confirmation.
     fn album_subtree(&self, id: i64) -> Vec<&db::AlbumNode> {
         let mut out = Vec::new();
         let mut seen = vec![id];
@@ -2148,7 +2129,7 @@ impl App {
         self.album_dialog = Some(dialog);
     }
 
-    /// Подтверждённое действие диалога. Все операции — строки БД, не файлы.
+    /// The confirmed action of the dialog. Every operation is DB rows, not files.
     fn album_commit_dialog(&mut self, dialog: AlbumDialog) {
         let selected = self.album_selected;
         let result: Result<String> = (|| {
@@ -2213,8 +2194,8 @@ impl App {
         }
     }
 
-    /// Диалог выгрузки альбома (M20). План строится по кнопке, копирование —
-    /// в фоновом потоке; в каталог архива и в `--out` мимо копий ничего не пишется.
+    /// The album export dialog (M20). The plan is built by a button, the copying happens in
+    /// a background thread; nothing is written into the archive folder or past the copies in `--out`.
     fn export_dialog_open(&mut self, album_id: i64) {
         self.export_open = true;
         self.export_album = Some(album_id);
@@ -2227,7 +2208,7 @@ impl App {
         }
     }
 
-    /// Собрать план по текущим полям. Только чтение БД и проверка `--out`.
+    /// Build the plan from the current fields. DB reads and a `--out` check only.
     fn export_build(&self) -> Result<organize::ExportPlan> {
         let album = self.export_album.context("альбом не выбран")?;
         let out = self.export_out.trim();
@@ -2283,7 +2264,7 @@ impl App {
         }
     }
 
-    /// Запуск копирования: план пересобирается, если поля изменились после него.
+    /// Start the copying: the plan is rebuilt if the fields changed after it.
     fn export_start(&mut self) {
         if self.export_rx.is_some() {
             return;
@@ -2313,8 +2294,8 @@ impl App {
         self.status = "выгрузка альбома идёт в фоне".into();
     }
 
-    /// Проверка полей экрана «Целостность» и разбор путей. Только чтение: ни одного
-    /// создания файла здесь нет — слепок пишется в фоне по кнопке.
+    /// Check the fields of the "Integrity" screen and parse the paths. Read only: not a single
+    /// file is created here — the manifest is written in the background by a button.
     fn integrity_plan(&self, job: IntegrityJob) -> Result<IntegrityPlan, String> {
         let lang = self.settings.lang;
         let dir = |s: &str, what: &str| -> Result<PathBuf, String> {
@@ -2389,8 +2370,8 @@ impl App {
         }
     }
 
-    /// Запуск фонового прохода. Существующий слепок не перезаписывается без второго
-    /// нажатия: возвращает `true`, если вместо запуска попросили подтверждение.
+    /// Start a background pass. An existing manifest is not overwritten without a second
+    /// press: returns `true` if a confirmation was asked for instead of starting.
     fn integrity_start(&mut self, job: IntegrityJob) {
         let lang = self.settings.lang;
         if self.integrity_rx.is_some() {
@@ -2426,8 +2407,8 @@ impl App {
                 return;
             }
         };
-        // Слепок и каталог запоминаем в настройках до запуска (M10): если проход
-        // упадёт, напоминание всё равно знает, что и где проверять.
+        // The manifest and the folder are remembered in the settings before the start (M10): if the
+        // pass fails, the reminder still knows what to check and where.
         let remembered = match &plan {
             IntegrityPlan::Manifest(root, out) => Some((root.clone(), out.clone())),
             IntegrityPlan::Check(root, file) => Some((root.clone(), file.clone())),
@@ -2478,10 +2459,10 @@ impl App {
         self.status = format!("{}: {}", job.title(lang), t(lang, "running in the background"));
     }
 
-    /// Итог завершённого прохода для напоминания (M10): дата, «ок» и полный отчёт.
-    /// Пишутся только для слепка и проверки — сверка двух копий к сроку не относится;
-    /// отмена не считается проходом, и прошлый успешный отчёт остаётся цел.
-    /// Отчёт кладётся в `<кэш>/photocat/verify-last.txt` (в архив не пишется ничего).
+    /// The outcome of a finished pass for the reminder (M10): the date, "ok" and the full report.
+    /// Written only for a manifest and a check — comparing two copies is not tied to a term;
+    /// a cancel does not count as a pass, and the previous successful report stays intact.
+    /// The report goes to `<cache>/photocat/verify-last.txt` (nothing is written into the archive).
     fn note_integrity(&mut self, outcome: &IntegrityOutcome) -> Option<String> {
         if outcome.job() == IntegrityJob::Verify || outcome.cancelled() {
             return None;
@@ -2513,8 +2494,8 @@ impl App {
         warn
     }
 
-    /// Экран «Целостность»: поля, три кнопки, прогресс в верхней панели и отчёт.
-    /// Рисуется до сетки: ей не нужны ни плитки, ни кэш превью.
+    /// The "Integrity" screen: the fields, three buttons, progress in the top bar and the report.
+    /// Drawn before the grid: it needs neither the tiles nor the preview cache.
     fn integrity_panel(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         ui.add_space(6.0);
@@ -2567,12 +2548,12 @@ impl App {
                 ui.end_row();
             });
         if a_changed {
-            // Новый каталог — новый отчёт: старый вердикт к нему не относится.
+            // A new folder — a new report: the old verdict does not apply to it.
             self.integrity_result = None;
         }
         if manifest_changed {
-            // Подтверждение относилось к старому пути — сбрасываем, чтобы не затереть
-            // чужой файл на новом.
+            // The confirmation referred to the old path — reset it so as not to overwrite someone
+            // else's file at the new one.
             self.integrity_overwrite = false;
             self.integrity_error.clear();
             self.integrity_result = None;
@@ -2632,8 +2613,8 @@ impl App {
                 .color(dim(ui)),
             );
         }
-        // Напоминание (M10): срок живёт в настройках, проверка запускается только кнопкой
-        // или кнопкой «Проверить» у баннера. 0 дней — намеренно выключено.
+        // The reminder (M10): the term lives in the settings, the check is started only by a button
+        // or by the "Check" button at the banner. 0 days means deliberately off.
         ui.add_space(4.0);
         let mut interval_changed = false;
         ui.horizontal(|ui| {
@@ -2818,7 +2799,7 @@ impl App {
         }
     }
 
-    /// Действия панели вида «Альбомы». Ошибки — в статус, данные не теряются.
+    /// The actions of the "Albums" panel. Errors go to the status bar, no data is lost.
     fn album_apply(&mut self, action: AlbumAction) {
         let Some(id) = self.album_selected else {
             return;
@@ -2892,7 +2873,7 @@ impl App {
         }
     }
 
-    /// Открыть календарь на месяце самого свежего файла.
+    /// Open the calendar on the month of the freshest file.
     fn init_calendar(&mut self) {
         if self.cal_year != 0 {
             return;
@@ -2926,7 +2907,7 @@ impl App {
         }
     }
 
-    /// Диалог «Настройки»: редко нужное, но всегда в один клик с верхней панели.
+    /// The "Settings" dialog: rarely needed, but always one click away from the top bar.
     fn settings_modal(&mut self, ctx: &egui::Context) {
         let lang = self.settings.lang;
         if !self.settings_open {
@@ -3006,7 +2987,7 @@ impl App {
         }
     }
 
-    /// Список каталогов: добавить новый, убрать из индекса (не с диска), индексировать все.
+    /// The list of folders: add a new one, remove from the index (not from disk), index them all.
     fn roots_modal(&mut self, ctx: &egui::Context) {
         if !self.roots_open {
             return;
@@ -3131,7 +3112,7 @@ impl App {
         }
     }
 
-    /// Встроенный выбор каталога: без зависимости от системного диалога и без ввода пути руками.
+    /// The built-in folder picker: no dependency on the system dialog and no typing a path by hand.
     fn picker_modal(&mut self, ctx: &egui::Context) {
         if !self.picker_open {
             return;
@@ -3218,7 +3199,7 @@ impl App {
         }
     }
 
-    /// Подтверждение очистки кэша/индекса: архив и модели не трогаются.
+    /// The confirmation of cleaning the cache or the index: the archive and the models are untouched.
     fn storage_modal(&mut self, ctx: &egui::Context) {
         let Some(action) = self.storage_confirm else {
             return;
@@ -3303,8 +3284,8 @@ impl App {
         }
     }
 
-    /// Диалог альбома (M19): имя, выбор родителя или подтверждение удаления.
-    /// Ни одна кнопка здесь не открывает и не меняет файлы на диске.
+    /// The album dialog (M19): the name, the parent choice or the delete confirmation.
+    /// Not a single button here opens or changes files on disk.
     fn album_modal(&mut self, ctx: &egui::Context) {
         let Some(dialog) = self.album_dialog else {
             return;
@@ -3314,7 +3295,7 @@ impl App {
         let mut confirm = false;
         let mut cancel = false;
         let selected = self.album_selected;
-        // Свои потомки в списке родителей недоступны: цикл запрещён и в БД, и здесь.
+        // Own descendants are unavailable in the parent list: a cycle is forbidden both in the DB and here.
         let banned: HashSet<i64> = selected
             .map(|id| self.album_subtree(id).iter().map(|n| n.id).collect())
             .unwrap_or_default();
@@ -3393,8 +3374,8 @@ impl App {
         }
     }
 
-    /// Диалог выгрузки альбома (M20): каталог, шаблон, план-дерево и отчёт.
-    /// Закрытие окна не отменяет уже запущенный проход — «Стоп» в верхней панели.
+    /// The album export dialog (M20): the folder, the template, the plan tree and the report.
+    /// Closing the window does not cancel a pass already started — "Stop" is in the top bar.
     fn export_modal(&mut self, ctx: &egui::Context) {
         if !self.export_open {
             return;
@@ -3551,7 +3532,7 @@ impl App {
         }
     }
 
-    /// Подтверждение очистки корзины: единственное действие, которое убирает файл с диска.
+    /// The confirmation of emptying the trash: the only action that removes a file from disk.
     fn trash_modal(&mut self, ctx: &egui::Context) {
         if !self.trash_confirm {
             return;
@@ -3659,9 +3640,9 @@ impl App {
         }
     }
 
-    /// Раздел «Интерфейс»: единственное место, где выбирается язык (M21, ADR 0040).
-    /// Выбор применяется сразу и сохраняется в `settings.lang`, без кнопки «Применить»:
-    /// чтобы передумать, достаточно выбрать другой язык в том же списке.
+    /// The "Interface" section: the only place where the language is chosen (M21, ADR 0040).
+    /// The choice applies at once and is saved in `settings.lang`, without an "Apply" button:
+    /// to change one's mind it is enough to pick another language in the same list.
     fn settings_interface(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         ui.label(
@@ -3692,7 +3673,7 @@ impl App {
             self.settings.lang = chosen;
             self.save_settings();
         }
-        // Тема (M22): две палитры макета и следование теме ОС. Выбор виден в том же кадре.
+        // The theme (M22): the two palettes of the mock-up and following the OS theme. The choice is visible in the same frame.
         ui.add_space(12.0);
         hairline(ui);
         ui.add_space(8.0);
@@ -4094,8 +4075,8 @@ impl App {
         self.settings_tag_dictionary(ui);
     }
 
-    /// Редактор словаря (M15.4): метки и промпты хранятся в БД на каждую модель.
-    /// Правка не пересчитывает фото: векторы картинок не зависят от промптов.
+    /// The dictionary editor (M15.4): labels and prompts are stored in the DB per model.
+    /// An edit does not recompute the photos: the image vectors do not depend on the prompts.
     fn settings_tag_dictionary(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         ui.add_space(12.0);
@@ -4303,7 +4284,7 @@ impl App {
                 };
             }
             Err(e) => {
-                // Метка могла столкнуться с занятой: показываем словарь из БД, а не свою копию.
+                // The label may have collided with a taken one: show the dictionary from the DB, not our copy.
                 if let Ok(c) = db::open(&self.db_path)
                     && let Ok(defs) =
                         db::load_tag_defs(&c, embed::active_entry(&self.settings).id)
@@ -4746,13 +4727,13 @@ impl App {
         self.status = "фильтры сброшены".into();
     }
 
-    /// Верхняя полоса 32 px: марка, поиск, состояние и вход в «Настройки».
-    /// Каталог и «Индексировать» живут в левой панели: это работа с архивом, а не поиск.
+    /// The 32 px top bar: the mark, the search, the state and the way into "Settings".
+    /// The folder and "Start indexing" live in the left panel: they are work with the archive, not a search.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let th = theme(ui);
-        // Полоса не переносится: на 1240 px поиск ужимается, а длинный счётчик
-        // состояния (EXIF, синхронизация) показывается только на широком окне.
+        // The bar does not wrap: at 1240 px the search shrinks, and a long state counter
+        // (EXIF, syncing) is shown only in a wide window.
         let wide = ui.available_width() >= 1400.0;
         let field_w = if wide { 340.0 } else { 240.0 };
         ui.horizontal(|ui| {
@@ -4763,13 +4744,13 @@ impl App {
                     .size(10.0)
                     .color(th.text_dim),
             );
-            // Разделитель марки и поиска — 1 px линия, а не отступ «на глаз».
+            // The separator between the mark and the search is a 1 px line, not an eyeballed gap.
             let (bar, _) =
                 ui.allocate_exact_size(egui::vec2(1.0, 16.0), egui::Sense::hover());
             ui.painter().rect_filled(bar, 0.0, th.border_strong);
             ui.add_space(2.0);
 
-            // Режим поиска — компактный переключатель перед полем (PhotoPrism).
+            // The search mode is a compact switch before the field (PhotoPrism).
             let mut text_mode = self.search_ocr;
             if ui
                 .selectable_label(!text_mode, egui::RichText::new(t(lang, "Semantic")).size(11.0))
@@ -4843,8 +4824,8 @@ impl App {
                 );
             }
 
-            // Справа — состояние и вход в служебные окна. Числа моноширинные, чтобы
-            // счётчик не дёргал соседей при индексации.
+            // On the right — the state and the way into the service windows. The numbers are monospaced so
+            // that the counter does not jostle its neighbours during indexing.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(t(lang, "Settings")).clicked() {
                     self.settings_open = true;
@@ -4894,7 +4875,7 @@ impl App {
             });
         });
 
-        // Прогресс — единственная третья строка: она есть, только пока идёт проход.
+        // Progress is the only third row: it exists only while a pass is running.
         if let Some(p) = &self.progress {
             let running = self.rx.is_some();
             if progress_row(ui, t(lang, "Indexing"), p, running) {
@@ -4943,8 +4924,8 @@ impl App {
             .hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, th.border));
     }
 
-    /// Баннер «Пора проверить архив» (M10). Сам ничего не запускает: "Проверить" —
-    /// нажатие, после которого идёт обычная фоновая проверка по слепку.
+    /// The "Time to check the archive" banner (M10). It starts nothing by itself: "Check" is a
+    /// press, after which the ordinary background check against the manifest runs.
     fn verify_banner(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         if self.verify_banner_hidden {
@@ -5003,8 +4984,8 @@ impl App {
         }
     }
 
-    /// Кнопка «Проверить» у баннера: тот же фон проверки по слепку, только поля
-    /// заполняются из настроек — владельцу не нужно искать экран «Целостность».
+    /// The "Check" button at the banner: the same background check against the manifest, only the
+    /// fields are filled from the settings — the owner does not have to look for the "Integrity" screen.
     fn start_reminder_check(&mut self) {
         if !self.settings.verify_root.trim().is_empty() {
             self.integrity_a = self.settings.verify_root.clone();
@@ -5014,8 +4995,8 @@ impl App {
         self.integrity_start(IntegrityJob::Check);
     }
 
-    /// Нижняя полоса 28 px: слева факт последнего действия, справа — счётчики и выбор.
-    /// Числа моноширинные: счётчик не дёргает соседей при индексации (макет: process deck).
+    /// The 28 px bottom bar: the fact of the last action on the left, the counters and the selection on the right.
+    /// The numbers are monospaced: a counter does not jostle its neighbours during indexing (mock-up: process deck).
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let th = theme(ui);
@@ -5067,11 +5048,11 @@ impl App {
         });
     }
 
-    /// Снимок фильтров для строки чипов: чипы рисуются без доступа к `self`, потому что
-    /// в этот момент сетка уже держит `&mut self.textures`. Снятие применяется после кадра.
+    /// A snapshot of the filters for the row of chips: the chips are drawn without access to `self`,
+    /// because at that moment the grid already holds `&mut self.textures`. The removal applies after the frame.
     fn chips_snapshot(&self) -> Chips {
-        // Чип альбома — только в его виде: в «Все файлы» сетка не сужена альбомом,
-        // хотя выбранный узел остаётся, чтобы вернуться к нему одним кликом.
+        // The album chip is shown only in its own view: in "All files" the grid is not narrowed by the
+        // album, although the selected node remains, to return to it with one click.
         let album = (self.view == View::Albums)
             .then(|| {
                 self.album_selected.and_then(|id| {
@@ -5096,17 +5077,17 @@ impl App {
                 .filter(|r| self.picked.contains(&r.id))
                 .map(|r| r.size)
                 .sum(),
-            // Выделение есть только в сетке: дубли, лица и корзина живут своим выбором.
+            // A selection exists only in the grid: the duplicates, faces and trash views have a choice of their own.
             pickable: self.view == View::Grid
                 || (self.view == View::Albums && self.album_selected.is_some()),
         }
     }
 
-    /// Левая панель: карта приложения. Навигация и фильтр закреплены, контекст вида — в прокрутке.
+    /// The left panel: the map of the application. The navigation and the filter are pinned, the view context scrolls.
     fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool) {
         let lang = self.settings.lang;
-        // Каталог и «Индексировать» — работа с архивом, а не поиск: они живут здесь,
-        // а верхняя полоса остаётся одной строкой 32 px (макет: working folder block).
+        // The folder and "Start indexing" are work with the archive, not a search: they live here, while
+        // the top bar stays a single 32 px row (mock-up: working folder block).
         ui.add_space(6.0);
         caps_label(ui, t(lang, "Folder"));
         ui.add_space(2.0);
@@ -5129,8 +5110,8 @@ impl App {
         ui.add_space(4.0);
         hairline(ui);
 
-        // Карта приложения — две группы с числами справа (PhotoPrism: Library / Tools).
-        // Число объясняет цену пункта до клика: 103 группы, 617 лиц, 3 в корзине.
+        // The map of the application — two groups with numbers on the right (PhotoPrism: Library / Tools).
+        // The number explains the price of an item before a click: 103 groups, 617 faces, 3 in the trash.
         nav_section(ui, t(lang, "LIBRARY"));
         let was_albums = self.view == View::Albums;
         nav_item(
@@ -5171,8 +5152,8 @@ impl App {
             t(lang, "Trash"),
             Some(self.trash_items.len().to_string()),
         );
-        // «Порядок альбома» живёт только внутри открытого альбома: вне его
-        // сортировка возвращается к дате, чтобы сетка «Все файлы» не стояла молча.
+        // "Album order" lives only inside an open album: outside it the sort returns to the date,
+        // so that the "All files" grid does not stand still silently.
         if self.view != View::Albums && self.settings.grid_sort == db::GridSort::Album {
             self.settings.grid_sort = db::GridSort::DateDesc;
             self.save_settings();
@@ -5198,7 +5179,7 @@ impl App {
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(4.0);
-        // Формат — один выбор вместо галочки: все, фото или видео (PhotoPrism: Images/Video).
+        // The format is one choice instead of a checkbox: everything, photos or video (PhotoPrism: Images/Video).
         ui.horizontal(|ui| {
             for kind in [KindFilter::All, KindFilter::Images, KindFilter::Videos] {
                 if ui
@@ -5214,8 +5195,8 @@ impl App {
         });
         ui.add_space(4.0);
 
-        // На широком окне сводка прижата к низу панели. На узком — карточка и сводка
-        // идут в общей прокрутке: иначе карточке остаётся полоска в 40 px.
+        // In a wide window the summary is pressed to the bottom of the panel. In a narrow one the card and
+        // the summary go into a common scroll: otherwise the card is left with a 40 px strip.
         if !show_card {
             egui::Panel::bottom("left-stats")
                 .resizable(false)
@@ -5248,7 +5229,7 @@ impl App {
         panel_edge(ui, false);
     }
 
-    /// Контекст вида «Дубли и серии»: порог, «Найти группы», сводка и выгрузка плана.
+    /// The context of the "Duplicates and series" view: the threshold, "Find groups", the summary and the plan export.
     fn dupes_controls(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         block(ui, |ui| {
@@ -5383,7 +5364,7 @@ impl App {
         });
     }
 
-    /// Контекст вида «Лица»: порог, проход по снимкам, пересборка групп и их список.
+    /// The context of the "Faces" view: the threshold, the pass over the photos, the regrouping and the list.
     fn faces_controls(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         block(ui, |ui| {
@@ -5533,7 +5514,7 @@ impl App {
                         });
                     }
                 });
-            // «Все вместе»: снимки, где есть хотя бы по одному лицу из каждой отмеченной группы.
+            // "All together": the photos that hold at least one face from each marked group.
             if self.face_picked_clusters.len() >= 2 {
                 let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
                 for f in &self.face_views {
@@ -5570,7 +5551,7 @@ impl App {
         });
     }
 
-    /// Блок модели: состояние, «Посчитать теги», фильтр по тегу.
+    /// The model block: the state, "Compute tags", the filter by tag.
     fn model_block(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         block(ui, |ui| {
@@ -5650,7 +5631,7 @@ impl App {
                     self.user_tags.values().flatten().cloned().collect();
                 own_tags.sort();
                 own_tags.dedup();
-                // Число справа от тега — сколько снимков с ним при текущем пороге.
+                // The number next to a tag is how many photos carry it at the current threshold.
                 let counts = self.tag_counts();
                 let labels = self.tag_labels();
                 egui::ComboBox::from_id_salt("tag_filter")
@@ -5742,7 +5723,7 @@ impl App {
         });
     }
 
-    /// Блок текста на фото: сколько уже распознано и сколько осталось.
+    /// The block of text on the photos: how much is recognized and how much is left.
     fn ocr_block(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         block(ui, |ui| {
@@ -5818,7 +5799,7 @@ impl App {
         });
     }
 
-    /// Сводка внизу левой панели: только числа с подписями, без действий.
+    /// The summary at the bottom of the left panel: numbers with captions only, no actions.
     fn stats_block(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         ui.label(
@@ -5854,7 +5835,7 @@ impl App {
         ui.add_space(4.0);
     }
 
-    /// Правая панель: сведения и действия по выбранному файлу.
+    /// The right panel: details and actions for the selected file.
     fn details_panel(&mut self, ui: &mut egui::Ui) {
         panel_edge(ui, true);
         let lang = self.settings.lang;
@@ -5878,7 +5859,7 @@ impl App {
             .show(ui, |ui| self.file_card(ui));
     }
 
-    /// Карточка файла: превью, метаданные, теги и текст. Одна на весь интерфейс.
+    /// The file card: a preview, metadata, tags and text. One for the whole interface.
     fn file_card(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let Some(id) = self.selected else {
@@ -5897,7 +5878,7 @@ impl App {
             return;
         };
 
-        // Текст с фото читается из БД один раз на файл, а не каждый кадр.
+        // The text of a photo is read from the DB once per file, not on every frame.
         if !self.ocr_text.contains_key(&id)
             && !self.ocr_snippets.contains_key(&id)
             && let Ok(conn) = db::open(&self.db_path)
@@ -5944,7 +5925,7 @@ impl App {
             );
         }
         ui.add_space(8.0);
-        // Имя файла — главное, путь — подпись под ним (PhotoPrism-инспектор).
+        // The file name is the main thing, the path is its caption (the PhotoPrism inspector).
         ui.label(egui::RichText::new(file_name(&f.path)).size(14.0));
         ui.label(egui::RichText::new(&f.path).size(11.0).color(dim(ui)));
         if self.picked.len() > 1 {
@@ -6026,8 +6007,8 @@ impl App {
             &format!("{}…", &f.sha256[..16.min(f.sha256.len())]),
         );
 
-        // Альбомы файла (M19): строка в инспекторе, «×» убирает только строку
-        // альбома. На диске ничего не меняется.
+        // The albums of the file (M19): a row in the inspector, "×" removes only the album row.
+        // Nothing changes on disk.
         if self.file_albums_for != Some(id) {
             self.file_albums_for = Some(id);
             self.file_albums = db::open(&self.db_path)
@@ -6071,9 +6052,9 @@ impl App {
         }
 
         section_label(ui, t(lang, "AI tags"));
-        // Уверенность — по отрыву первого тега от второго (порог и отрыв в настройках).
-        // Если отрыва нет, «документ» не подсвечивается: честное «не уверен» и топ-3,
-        // остальные веса — под раскрывающейся строкой, чтобы не выдавать шум за ответ.
+        // Confidence comes from the margin of the first tag over the second (threshold and margin in the settings).
+        // Without a margin "document" is not highlighted: an honest "not sure" and the top 3,
+        // the other weights under a collapsible row, so as not to pass noise off as an answer.
         let confident = self.tags.get(&id).and_then(|tags| {
             embed::confident_tag_with(tags, self.settings.tag_show, self.settings.tag_margin)
                 .map(|(tag, _)| tag.to_string())
@@ -6265,13 +6246,13 @@ impl App {
         }
     }
 
-    /// Переход из лица к снимку: не в общую сетку, а в день календаря, где он лежит.
-    /// Если даты нет — общая сетка с выделением этого файла.
+    /// Going from a face to the photo: not into the common grid but into the calendar day it lies in.
+    /// Without a date — the common grid with this file selected.
     fn open_from_faces(&mut self, file_id: i64) {
-        // Старый поиск/фильтр не должен прятать снимок в дне календаря.
+        // The old search and filter must not hide the photo inside a calendar day.
         self.reset_filters();
         self.select_one(file_id);
-        // Фильтры сняты нарочно: это не повод стирать только что сделанное выделение.
+        // The filters were removed on purpose: that is no reason to drop the selection just made.
         self.pick_scope = self.pick_scope_now();
         let date = self
             .items
@@ -6296,7 +6277,7 @@ impl App {
         }
     }
 
-    /// Поставить кадр в очередь фонового декодирования. `front` — текущий кадр важнее соседей.
+    /// Queue a frame for background decoding. `front` — the current frame matters more than its neighbours.
     fn request_photo(&mut self, id: i64, front: bool) {
         if self.photo_cache.contains_key(&id) || self.photo_loading.contains(&id) {
             return;
@@ -6326,7 +6307,7 @@ impl App {
         self.pump_photo();
     }
 
-    /// Один фоновый декодер за раз: очередь не даёт десяткам потоков съесть память.
+    /// One background decoder at a time: the queue does not let dozens of threads eat the memory.
     fn pump_photo(&mut self) {
         if self.photo_rx.is_some() {
             return;
@@ -6356,7 +6337,7 @@ impl App {
         }
     }
 
-    /// Текущий кадр, следующий, предыдущий и один за следующим — для листания и слайд-шоу.
+    /// The current frame, the next, the previous and one past the next — for paging and the slideshow.
     fn request_around(&mut self, ids: &[i64], idx: usize) {
         if ids.is_empty() {
             return;
@@ -6374,7 +6355,7 @@ impl App {
         }
     }
 
-    /// Предзагрузка выбранного файла (клик по плитке до двойного клика).
+    /// Preloading the selected file (a click on a tile before the double click).
     fn prefetch_photo(&mut self, id: i64) {
         self.request_photo(id, true);
     }
@@ -6440,9 +6421,9 @@ impl App {
         }
     }
 
-    /// Видео играет встроенный плеер: кадр в текстуру, звук через cpal.
-    /// Если файл ему не по зубам (кодек вне области, битый контейнер) —
-    /// честно уступаем внешнему `ffplay`, а не показываем чёрный экран.
+    /// The built-in player plays the video: the frame into a texture, the sound through cpal.
+    /// If the file is beyond it (a codec out of scope, a broken container) — we honestly
+    /// yield to an external `ffplay` instead of showing a black screen.
     fn start_video_playback(&mut self, f: &FileRow) {
         let lang = self.settings.lang;
         self.stop_video();
@@ -6514,7 +6495,7 @@ impl App {
         self.video_id = None;
     }
 
-    /// Кадр плеера → текстура. Пока видео играет, окно перерисовывается 30 раз в секунду.
+    /// The player frame → a texture. While the video plays the window is repainted 30 times a second.
     fn poll_video(&mut self, ctx: &egui::Context) {
         let lang = self.settings.lang;
         if let Some(child) = &mut self.video_child
@@ -6562,7 +6543,7 @@ impl App {
         }
         if p.is_finished() {
             self.status = t(lang, "the video has finished").into();
-            // Доигравший файл сам уступает место следующему (см. `viewer_modal`).
+            // A finished file gives way to the next one by itself (see `viewer_modal`).
             self.video_ended = self.viewer.is_some();
             self.video = None;
             self.video_id = None;
@@ -6577,7 +6558,7 @@ impl App {
         }
     }
 
-    /// Список для листания в полноэкранном просмотре: текущий вид и текущий фильтр.
+    /// The list for paging in the full-screen viewer: the current view and the current filter.
     fn viewer_ids(&self) -> Vec<i64> {
         match self.view {
             View::Faces if self.face_together && self.face_picked_clusters.len() >= 2 => {
@@ -6656,10 +6637,10 @@ impl App {
         self.viewer_tex = None;
     }
 
-    /// Смена файла в полноэкранном просмотре.
+    /// Changing the file in the full-screen viewer.
     ///
-    /// Видео обязательно останавливается: иначе кадр старого видео остаётся на
-    /// экране поверх нового снимка, и листание выглядит как «ничего не показывает».
+    /// The video is stopped without fail: otherwise the frame of the old video stays on the
+    /// screen over the new photo, and paging looks like "nothing is shown".
     fn viewer_step(&mut self, v: &mut Viewer, step: i32) {
         if step == 0 || v.ids.len() <= 1 {
             return;
@@ -6667,8 +6648,8 @@ impl App {
         self.stop_video();
         v.idx = (v.idx as i64 + step as i64).rem_euclid(v.ids.len() as i64) as usize;
         v.last_advance = std::time::Instant::now();
-        // Новый кадр показывается с центра: чужой сдвиг на другом снимке
-        // выглядит как обрезанный кадр без причины.
+        // A new frame is shown from the centre: someone else's offset on another photo looks
+        // like a cropped frame for no reason.
         v.pan = egui::Vec2::ZERO;
     }
 
@@ -6681,8 +6662,8 @@ impl App {
         }
         let lang = self.settings.lang;
         v.idx = v.idx.min(v.ids.len() - 1);
-        // Видео доиграло — показываем следующий файл сами: иначе показ стоит на
-        // последнем кадре, и кажется, что листание не работает.
+        // The video is over — show the next file by ourselves: otherwise the viewer stands on the
+        // last frame and it seems that paging does not work.
         let ended = std::mem::take(&mut self.video_ended);
         let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let mut step = 0i32;
@@ -6692,7 +6673,7 @@ impl App {
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
             step = -1;
         }
-        // Нажатая в тот же кадр стрелка главнее: за один кадр — один шаг.
+        // An arrow pressed in the same frame wins: one step per frame.
         if step == 0 && ended && v.idx + 1 < v.ids.len() {
             step = 1;
         }
@@ -6701,7 +6682,7 @@ impl App {
             && v.last_advance.elapsed() >= std::time::Duration::from_secs(v.interval_s)
         {
             let next = v.ids[(v.idx + 1) % v.ids.len()];
-            // Видео ждать не нужно: показывается кадр-обложка, полного декода нет.
+            // The video needs no waiting: the cover frame is shown, there is no full decode.
             let is_video = self
                 .items
                 .iter()
@@ -6714,7 +6695,7 @@ impl App {
             if ready {
                 self.viewer_step(&mut v, 1);
             } else {
-                // Не показываем мыло: ждём готовый следующий кадр.
+                // Do not show mush: wait for the ready next frame.
                 self.request_photo(next, true);
             }
         }
@@ -6774,7 +6755,7 @@ impl App {
         let mut step_click = 0i32;
         let video_active =
             self.video_id == Some(id) && (self.video.is_some() || self.video_child.is_some());
-        // Пробел — то же, что ▶: у видео пуск/пауза, у снимка слайд-шоу.
+        // Space is the same as ▶: play and pause for video, a slideshow for a photo.
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
             if f.kind == "video" {
                 if video_active && self.video.is_some() {
@@ -6790,12 +6771,12 @@ impl App {
         if v.slideshow || video_active {
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
-        // Кадр плеера принадлежит конкретному файлу: без проверки старое видео
-        // рисуется поверх нового снимка и смена файла не видна.
+        // A player frame belongs to a particular file: without the check the old video is drawn
+        // over the new photo and the file change is not visible.
         let video_frame = self.video_tex.as_ref().filter(|_| self.video_id == Some(id));
         let paused = video_active && self.video.as_ref().is_some_and(|p| !p.is_playing());
         let current_full = self.viewer_tex.as_ref().filter(|(t, _)| *t == id);
-        // У видео нет «полного кадра»: там кадр-обложка, а не загрузка.
+        // A video has no "full frame": there it is the cover frame, not a loading state.
         let stale = self
             .viewer_tex
             .as_ref()
@@ -6834,7 +6815,7 @@ impl App {
                 });
             });
             ui.add_space(4.0);
-            // Панель воспроизведения: листание, пуск/пауза, перемотка, звук.
+            // The playback bar: paging, play and pause, seeking, the volume.
             ui.horizontal_wrapped(|ui| {
                 if icon_button(ui, Icon::Prev, 32.0, t(lang, "previous file — ←")).clicked() {
                     step_click = -1;
@@ -7056,7 +7037,7 @@ impl App {
                     lang,
                 ));
             }
-            // Клик по кадру видео — как большая кнопка ▶: пуск или пауза.
+            // A click on the video frame is like a big ▶ button: play or pause.
             if f.kind == "video" && image_resp.is_some_and(|r| r.clicked()) {
                 if video_active {
                     toggle_video = true;
@@ -7105,7 +7086,7 @@ impl App {
         if start_video {
             self.start_video_playback(&f);
         }
-        // Кнопки ←/→ листают после отрисовки: кадр нового файла — следующим кадром.
+        // The ←/→ buttons page after the drawing: the frame of the new file comes next frame.
         if step_click != 0 {
             self.viewer_step(&mut v, step_click);
             ctx.request_repaint();
@@ -7120,7 +7101,7 @@ impl App {
         }
     }
 
-    /// Один проход по программам: версия, найденный файл, источник. Запускать в reload/сохранении.
+    /// One pass over the programs: the version, the file found, the source. Run on reload and on save.
     fn refresh_tool_states(&mut self) {
         let lang = self.settings.lang;
         self.tool_states = std::array::from_fn(|i| {
@@ -7152,8 +7133,8 @@ impl App {
         });
     }
 
-    /// Путь к программе сохраняется только после успешного запуска версии.
-    /// Ошибка остаётся в статусе (внизу окна), а не уходит в консоль.
+    /// The path to a program is saved only after a successful version launch.
+    /// The error stays in the status bar (at the bottom of the window), not in the console.
     fn apply_tools(&mut self) {
         let lang = self.settings.lang;
         let mut problems = Vec::new();
@@ -7207,15 +7188,15 @@ impl App {
         });
     }
 
-    /// Единственное место, где считается порядок плиток (M17).
-    /// При смысловом поиске порядок задаёт поиск, иначе — `settings.grid_sort`.
-    /// Ключ тотальный и устойчивый: дата (или имя/размер), затем `id`, поэтому
-    /// одинаковые даты не переставляются между кадрами. Сетка, полный экран и
-    /// выделение (M18) берут порядок только отсюда.
+    /// The only place where the tile order is decided (M17).
+    /// In a semantic search the search sets the order, otherwise `settings.grid_sort` does.
+    /// The key is total and stable: the date (or the name or size), then `id`, so equal dates
+    /// are not reshuffled between frames. The grid, the full screen and the selection (M18)
+    /// take their order only from here.
     fn ordered(&self, visible: &[usize]) -> Vec<usize> {
         let mut out = visible.to_vec();
         if self.semantic_hits.is_some() {
-            // `filtered()` уже отдал индексы по убыванию похожести.
+            // `filtered()` has already given the indices in descending similarity.
             return out;
         }
         let items = &self.items;
@@ -7243,8 +7224,8 @@ impl App {
                 rb.size.cmp(&ra.size).then(ra.id.cmp(&rb.id))
             }),
             db::GridSort::Album => {
-                // Порядок альбома — данные (M19). Вне открытого альбома или во
-                // временном взгляде «Все файлы» он читается как дата ↓.
+                // Album order is data (M19). Outside an open album or in the temporary "All files"
+                // look it reads as the date ↓.
                 if self.view == View::Albums
                     && self.album_selected.is_some()
                     && !self.album_browse_all
@@ -7274,7 +7255,7 @@ impl App {
         out
     }
 
-    /// Текущий набор файлов, внутри которого живёт выделение (M18).
+    /// The current set of files the selection lives in (M18).
     fn pick_scope_now(&self) -> PickScope {
         PickScope {
             view: self.view,
@@ -7289,8 +7270,8 @@ impl App {
         }
     }
 
-    /// Смена вида, фильтра, запроса, поиска или порядка снимает выделение: действие
-    /// не должно задеть файлы, которых на экране уже нет. В статусе — почему (M18).
+    /// A change of the view, filter, query, search or order clears the selection: an action
+    /// must not touch files that are no longer on the screen. The status bar says why (M18).
     fn sync_pick_scope(&mut self) {
         let now = self.pick_scope_now();
         if now == self.pick_scope {
@@ -7321,8 +7302,8 @@ impl App {
         self.clear_picked(&format!("выделение снято: {reason}"));
     }
 
-    /// Снять выделение. Факт пишется в статус только если было что снимать:
-    /// иначе действие молчит и не затирает чужое сообщение.
+    /// Clear the selection. The fact goes to the status bar only if there was something to
+    /// clear: otherwise the action stays silent and does not overwrite someone else's message.
     fn clear_picked(&mut self, message: &str) {
         if self.picked.is_empty() {
             return;
@@ -7332,7 +7313,7 @@ impl App {
         self.status = message.to_string();
     }
 
-    /// Выбрать один файл: он же — последний выбранный для инспектора.
+    /// Select one file: it is also the last one selected for the inspector.
     fn select_one(&mut self, id: i64) {
         self.selected = Some(id);
         self.picked.clear();
@@ -7340,8 +7321,8 @@ impl App {
         self.pick_anchor = Some(id);
     }
 
-    /// Клик по плитке: обычный — один, Ctrl — добавить/убрать, Shift — диапазон
-    /// по текущему порядку сетки (`order` — id в порядке `App::ordered`).
+    /// A click on a tile: a plain one selects one, Ctrl adds or removes, Shift takes a range
+    /// in the current grid order (`order` — the ids in the order of `App::ordered`).
     fn pick_clicked(&mut self, id: i64, click: PickClick, order: &[i64]) {
         match click {
             PickClick::Plain => self.select_one(id),
@@ -7354,7 +7335,7 @@ impl App {
                     self.selected = None;
                     self.status = "выделение снято".into();
                 } else {
-                    // Снятая плитка больше не «последняя выбранная»: берём оставшуюся.
+                    // A removed tile is no longer "the last selected": take one of the remaining.
                     self.selected = if self.picked.contains(&id) {
                         Some(id)
                     } else {
@@ -7372,16 +7353,16 @@ impl App {
                         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
                         self.picked = order[lo..=hi].iter().copied().collect();
                         self.selected = Some(id);
-                        // Якорь не двигаем: следующий Shift+клик продолжает от него.
+                        // The anchor is not moved: the next Shift+click continues from it.
                     }
-                    // Якоря нет в текущем наборе (сменился фильтр) — обычный клик.
+                    // The anchor is not in the current set (the filter changed) — a plain click.
                     _ => self.select_one(id),
                 }
             }
         }
     }
 
-    /// «Выбрать все»: только то, что видно сейчас (фильтр, поиск и порядок — из `ordered`).
+    /// "Select all": only what is visible now (filter, search and order come from `ordered`).
     fn pick_all(&mut self) {
         let order: Vec<i64> = self
             .ordered(&self.filtered())
@@ -7409,8 +7390,8 @@ impl App {
         );
     }
 
-    /// Esc снимает выделение, Ctrl+A берёт найденное — только в сетке, когда
-    /// клавиатура не занята полем ввода и не открыт диалог или полный экран.
+    /// Esc clears the selection, Ctrl+A takes what was found — only in the grid, when the
+    /// keyboard is not taken by an input field and no dialog or full screen is open.
     fn pick_keys(&mut self, ctx: &egui::Context) {
         let modal = self.viewer.is_some()
             || self.settings_open
@@ -7473,8 +7454,8 @@ impl App {
         out
     }
 
-    /// Порог отбора в фильтре — процентиль по выбранному тегу (ADR 0032).
-    /// 100% — самый сильный снимок этого тега, 0% — все, 70% — верхние 30%.
+    /// The cut-off threshold in the filter is a percentile over the chosen tag (ADR 0032).
+    /// 100% is the strongest photo of this tag, 0% all of them, 70% the top 30%.
     fn tag_filter_slider(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         if self.tags.is_empty() {
@@ -7521,9 +7502,9 @@ impl App {
         }
     }
 
-    /// Сырой порог для тега при текущем процентиле. На маленьком каталоге
-    /// процентиль шумный, поэтому там действует сырой порог уверенного тега.
-    /// Словарь может задать минимальный процентиль для отдельного тега (M15.4).
+    /// The raw threshold for a tag at the current percentile. On a small folder the
+    /// percentile is noisy, so the raw confident-tag threshold applies there.
+    /// The dictionary may set a minimum percentile for a single tag (M15.4).
     fn tag_threshold(&self, tag: &str) -> f32 {
         if self.tags.len() < 100 {
             return self.settings.tag_show;
@@ -7540,7 +7521,7 @@ impl App {
             .unwrap_or(self.settings.tag_show)
     }
 
-    /// Порог «все теги»: процентиль по лучшему весу каждого файла.
+    /// The "all tags" threshold: a percentile over the best weight of every file.
     fn top_threshold(&self) -> f32 {
         if self.tags.len() < 100 {
             return self.settings.tag_show;
@@ -7549,8 +7530,8 @@ impl App {
             .unwrap_or(self.settings.tag_show)
     }
 
-    /// Процентиль веса тега в индексе: 100 — самый сильный снимок этого тега.
-    /// На маленьком каталоге не показывается (там шумно), остаётся только вес.
+    /// The percentile of a tag weight in the index: 100 is the strongest photo of this tag.
+    /// Not shown on a small folder (it is noisy there), only the weight remains.
     fn tag_percentile(&self, tag: &str, score: f32) -> Option<u32> {
         if self.tags.len() < 100 {
             return None;
@@ -7559,8 +7540,8 @@ impl App {
         score_percentile(d, score)
     }
 
-    /// Метки для фильтра: включённые теги словаря по порядку, затем старые метки,
-    /// которых в словаре уже нет, — чтобы посчитанные теги не пропадали.
+    /// The labels for the filter: the enabled tags of the dictionary in order, then the old
+    /// labels that are no longer in the dictionary — so computed tags do not disappear.
     fn tag_labels(&self) -> Vec<String> {
         let mut out: Vec<String> = self
             .tag_defs
@@ -7578,8 +7559,8 @@ impl App {
         out
     }
 
-    /// Снимков на каждый тег из словаря при его процентильном пороге: число рядом
-    /// с тегом честно говорит «ноль», а не удивляет после нажатия.
+    /// How many photos per tag of the dictionary at its percentile threshold: the number next
+    /// to a tag honestly says "zero" instead of surprising after a click.
     fn tag_counts(&self) -> Vec<usize> {
         let labels = self.tag_labels();
         let mut counts = vec![0usize; labels.len()];
@@ -7614,7 +7595,7 @@ impl App {
 
 
 
-    /// `Some(id)` — только этот снимок (главное действие), `None` — пакетный проход по кандидатам.
+    /// `Some(id)` — this photo only (the main action), `None` — a batch pass over the candidates.
     fn start_ocr(&mut self, file: Option<i64>) {
         if self.ocr_rx.is_some() || self.tesseract.is_none() {
             return;
@@ -7863,8 +7844,8 @@ impl App {
     }
 }
 
-/// Плитка лица: та же метрика, что у файла (150×150 + подпись), но кадр — выровненное лицо,
-/// а не превью файла. Поэтому у неё своя загрузка текстуры, а не `draw_cell`.
+/// A face tile: the same metric as a file (150×150 + a caption), but the frame is an aligned
+/// face rather than a file preview. So it has its own texture loading, not `draw_cell`.
 struct FaceCells {
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
@@ -7873,7 +7854,7 @@ struct FaceCells {
     split_clicked: Option<i64>,
     open_clicked: Option<i64>,
     viewer_clicked: Option<i64>,
-    /// Выбранные лица: имя можно назначить сразу нескольким.
+    /// The selected faces: a name can be given to several at once.
     picked: HashSet<i64>,
     tile: f32,
 }
@@ -7941,7 +7922,7 @@ fn draw_face_cell(
             egui::FontId::proportional(11.0),
             egui::Color32::from_gray(150),
         );
-        // Ложная склейка разъединяется прямо на плитке, без перехода в другой экран.
+        // A false merge is split right on the tile, without going to another screen.
         let btn = egui::Rect::from_min_size(
             egui::pos2(img_rect.right() - 62.0, img_rect.top() + 4.0),
             egui::vec2(58.0, 20.0),
@@ -7954,7 +7935,7 @@ fn draw_face_cell(
             cs.split_clicked = Some(f.id);
             button_clicked = true;
         }
-        // Пакетное назначение: отметить несколько лиц и дать им одно имя.
+        // A batch naming: mark several faces and give them one name.
         let pick = egui::Rect::from_min_size(
             egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
             egui::vec2(66.0, 20.0),
@@ -8014,7 +7995,7 @@ fn draw_face_cell(
     }
 }
 
-/// Короткая подпись версии: первая строка и первые три слова («ffmpeg version 9.0.2»).
+/// A short version caption: the first line and the first three words ("ffmpeg version 9.0.2").
 fn short_version(line: &str) -> String {
     line.split_whitespace()
         .take(3)
@@ -8022,8 +8003,8 @@ fn short_version(line: &str) -> String {
         .join(" ")
 }
 
-/// Процентиль веса по убывающему распределению: доля снимков с меньшим весом.
-/// Самый сильный снимок тега — 100 (после округления), слабейший — 0.
+/// A weight percentile over a descending distribution: the share of photos with a lower weight.
+/// The strongest photo of a tag is 100 (after rounding), the weakest 0.
 fn score_percentile(sorted_desc: &[f32], score: f32) -> Option<u32> {
     if sorted_desc.is_empty() {
         return None;
@@ -8032,7 +8013,7 @@ fn score_percentile(sorted_desc: &[f32], score: f32) -> Option<u32> {
     Some((below as f64 * 100.0 / sorted_desc.len() as f64).round() as u32)
 }
 
-/// Строка тега в карточке: подпись, вес, процентиль и «убрать».
+/// A tag row in the card: the label, the weight, the percentile and "remove".
 fn tag_row(
     ui: &mut egui::Ui,
     tag: &str,
@@ -8070,33 +8051,33 @@ fn tag_row(
 }
 
 struct Cells<'a> {
-    /// Фон родителя под плиткой (полотно сетки или карточка группы дублей).
+    /// The background of the parent under a tile (the grid canvas or a duplicate-group card).
     bg: egui::Color32,
-    /// Как показаны файлы: плитка макета, строки по пропорциям или список (M22).
+    /// How the files are shown: the mock-up tile, rows by proportion or a list (M22).
     cell_style: db::CellStyle,
     textures: &'a mut HashMap<i64, egui::TextureHandle>,
     missing: &'a mut HashSet<i64>,
     thumbs_dir: &'a Path,
     selected: Option<i64>,
-    /// Мультивыбор (M18): отмеченные плитки — обводка и галочка без наведения.
+    /// The multi-select (M18): the marked tiles get an outline and a check mark without hovering.
     picked: &'a BTreeSet<i64>,
-    /// Клик по плитке с видом клика (Ctrl/Shift) — решение принимает `App`.
+    /// A click on a tile with the kind of the click (Ctrl/Shift) — `App` decides.
     clicked: Option<(i64, PickClick)>,
-    /// Двойной клик — полноэкранный просмотр.
+    /// A double click is the full-screen viewer.
     open_clicked: Option<i64>,
-    /// Показать на плитке кнопку «оставить» (вид «Дубли»).
+    /// Show the "keep" button on the tile (the "Duplicates" view).
     show_keep: bool,
-    /// Нажата «оставить» у файла — применить решение к его группе.
+    /// "Keep" was pressed on a file — apply the decision to its group.
     keep_clicked: Option<i64>,
-    /// Вид «Корзина»: на плитке кнопка «вернуть» и пометка «в корзине».
+    /// The "Trash" view: a "restore" button and a "in the trash" mark on the tile.
     trash_mode: bool,
     restore_clicked: Option<i64>,
-    /// Размер плитки, px: задаётся ползунком в левой панели.
+    /// The tile size, px: set by the slider in the left panel.
     tile: f32,
-    /// Язык интерфейса: подписи на плитке («без даты», «лишний») идут через `t()`.
+    /// The interface language: the captions on a tile ("no date", "spare") go through `t()`.
     lang: i18n::Lang,
-    /// Сколько новых текстур декодировать за кадр: остальное — следующим кадром,
-    /// иначе быстрая прокрутка упирается в декодирование JPEG в UI-потоке.
+    /// How many new textures to decode per frame: the rest on the next frame, otherwise fast
+    /// scrolling runs into JPEG decoding on the UI thread.
     budget: usize,
 }
 
@@ -8107,7 +8088,7 @@ fn load_texture(ctx: &egui::Context, path: &Path, name: &str) -> Option<egui::Te
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
 }
 
-/// Вписать картинку в квадрат плитки, сохранив её пропорции: по краям остаются поля.
+/// Fit the picture into the tile square keeping its proportions: margins remain at the edges.
 fn fit_rect(bounds: egui::Rect, size: egui::Vec2) -> egui::Rect {
     if size.x <= 0.0 || size.y <= 0.0 {
         return bounds;
@@ -8116,15 +8097,15 @@ fn fit_rect(bounds: egui::Rect, size: egui::Vec2) -> egui::Rect {
     egui::Rect::from_center_size(bounds.center(), size * scale)
 }
 
-/// Сдвиг увеличенного кадра: кадр не отрывается от краёв области, а когда он
-/// вписан (одна из сторон не больше области) — стоит по центру по этой стороне.
+/// The offset of a zoomed frame: the frame does not leave the edges of the area, and when it
+/// is fitted (one of the sides is not bigger than the area) it is centred along that side.
 fn clamp_pan(pan: egui::Vec2, image: egui::Vec2, area: egui::Rect) -> egui::Vec2 {
     let room = ((image - area.size()) / 2.0).max(egui::Vec2::ZERO);
     egui::vec2(pan.x.clamp(-room.x, room.x), pan.y.clamp(-room.y, room.y))
 }
 
-/// Один способ нарисовать превью: сетка, календарь и миниатюры дней используют его же.
-/// Возвращает `true`, если картинка нарисована.
+/// One way to draw a preview: the grid, the calendar and the day thumbnails all use it.
+/// Returns `true` if the picture was drawn.
 fn paint_thumb(
     ui: &egui::Ui,
     ctx: &egui::Context,
@@ -8171,12 +8152,12 @@ fn shift_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
     (y.clamp(1900, 2199), m)
 }
 
-/// Дата из `taken_at` (`ГГГГ-ММ-ДД[THH:MM]`) без паники на мусоре.
+/// A date from `taken_at` (`YYYY-MM-DD[THH:MM]`) without a panic on garbage.
 fn parse_date(s: &str) -> Option<chrono::NaiveDate> {
     chrono::NaiveDate::parse_from_str(s.get(0..10)?, "%Y-%m-%d").ok()
 }
 
-/// Понедельник недели, в которую попадает дата.
+/// The Monday of the week the date falls into.
 fn monday_of(d: chrono::NaiveDate) -> chrono::NaiveDate {
     d - chrono::Duration::days(d.weekday().num_days_from_monday() as i64)
 }
@@ -8201,8 +8182,8 @@ fn month_key(year: i32, month: u32) -> String {
     format!("{year:04}-{month:02}")
 }
 
-/// Ближайший месяц в направлении `delta`, в котором есть файлы.
-/// Пустые месяцы не показываем: листать их бессмысленно.
+/// The nearest month in the direction of `delta` that has files.
+/// Empty months are not shown: paging through them is pointless.
 fn shift_to_file_month(
     months: &BTreeSet<String>,
     year: i32,
@@ -8219,7 +8200,7 @@ fn shift_to_file_month(
     None
 }
 
-/// Ближайший месяц с файлами к указанному (сначала назад, потом вперёд).
+/// The nearest month with files to the given one (backwards first, then forwards).
 #[allow(dead_code)]
 fn nearest_file_month(months: &BTreeSet<String>, year: i32, month: u32) -> Option<(i32, u32)> {
     for d in 0..1200 {
@@ -8235,7 +8216,7 @@ fn nearest_file_month(months: &BTreeSet<String>, year: i32, month: u32) -> Optio
     None
 }
 
-/// Фрагмент текста с совпадениями: FTS5 отмечает их « », UI красит их акцентом.
+/// A text fragment with the matches: FTS5 marks them with « », the UI paints them with the accent.
 fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     let normal = ui.visuals().text_color();
     let accent = egui::Color32::from_rgb(90, 170, 255);
@@ -8277,8 +8258,8 @@ fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     job
 }
 
-/// Значок панели воспроизведения. Фигуры рисует painter, а не шрифт: эмодзи в
-/// интерфейсе запрещены, а «▶» и «‖» в разных шрифтах разной ширины и высоты.
+/// A playback bar icon. The shapes are drawn by the painter, not by a font: emoji are
+/// forbidden in the interface, and "▶" and "‖" differ in width and height between fonts.
 #[derive(Clone, Copy)]
 enum Icon {
     Prev,
@@ -8288,7 +8269,7 @@ enum Icon {
     Volume,
 }
 
-/// Кнопка-иконка панели воспроизведения: 32 px, подсказка обязательна.
+/// An icon button of the playback bar: 32 px, the tooltip is mandatory.
 fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
     let resp = resp
@@ -8300,7 +8281,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Re
     resp
 }
 
-/// Значок без действия — подпись рядом с ползунком (звук).
+/// An icon without an action — a caption next to the slider (the volume).
 fn icon_mark(ui: &mut egui::Ui, icon: Icon, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     paint_icon(
@@ -8312,7 +8293,7 @@ fn icon_mark(ui: &mut egui::Ui, icon: Icon, size: f32) {
     );
 }
 
-/// Геометрия значка: `s` — половина высоты фигуры, `c` — её центр.
+/// The geometry of an icon: `s` is half the height of the shape, `c` its centre.
 fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui::Color32) {
     match icon {
         Icon::Play => {
@@ -8384,8 +8365,8 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui:
     }
 }
 
-/// Большая кнопка воспроизведения по центру кадра видео: до запуска видно, что
-/// это видео, а не снимок, и один клик запускает его.
+/// The big play button in the centre of a video frame: before the start it is visible that
+/// this is a video and not a photo, and one click starts it.
 fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
     let center = area.center();
     let p = ui.painter();
@@ -8404,7 +8385,7 @@ fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
         Icon::Play,
         egui::Color32::from_gray(235),
     );
-    // Подпись на подложке: поверх светлого кадра текст иначе не читается.
+    // A caption on a backing plate: over a light frame the text is unreadable otherwise.
     let galley = p.layout_no_wrap(
         t(lang, "video · press ▶ to play").into(),
         egui::FontId::proportional(12.0),
@@ -8416,10 +8397,10 @@ fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
     p.galley(pos, galley, egui::Color32::from_gray(235));
 }
 
-/// Один способ нарисовать кадр в полноэкранном просмотре: 100% = вписать,
-/// больше — увеличить; увеличенный кадр таскается мышью (`pan`), края области
-/// он не покидает (прокрутка колесом не листает файл).
-/// Возвращает отклик области кадра: клик по видео — пуск или пауза.
+/// One way to draw a frame in the full-screen viewer: 100% means fitted, more means
+/// zoomed; a zoomed frame is dragged with the mouse (`pan`) and does not leave the edges
+/// of the area (the wheel does not page the file).
+/// Returns the response of the frame area: a click on a video is play or pause.
 fn draw_viewer_image(
     ui: &mut egui::Ui,
     tex: ViewerTextures<'_>,
@@ -8438,7 +8419,7 @@ fn draw_viewer_image(
     ui.painter()
         .rect_filled(area, 4.0, ui.visuals().extreme_bg_color);
     if let Some(t) = tex.video {
-        // Играющий кадр: вписываем в область, без «мыла» и без ожидания.
+        // A playing frame: fitted into the area, without mush and without waiting.
         let p = ui.painter().with_clip_rect(area.shrink(1.0));
         p.image(
             t.id(),
@@ -8457,8 +8438,8 @@ fn draw_viewer_image(
         let ts = t.size_vec2();
         let fit = (area.width() / ts.x).min(area.height() / ts.y);
         let size = ts * (fit * zoom);
-        // Увеличенный кадр таскается левой кнопкой: без этого при масштабе больше
-        // 100 % был виден только центр и рассмотреть деталь было нельзя.
+        // A zoomed frame is dragged with the left button: without this, at a scale above 100%
+        // only the centre was visible and a detail could not be examined.
         *pan = clamp_pan(*pan + resp.drag_delta(), size, area);
         if size.x > area.width() + 0.5 || size.y > area.height() + 0.5 {
             if resp.dragged() {
@@ -8475,7 +8456,7 @@ fn draw_viewer_image(
             egui::Color32::WHITE,
         );
     } else if let Some(t) = tex.stale {
-        // Пока следующий кадр декодируется, держим предыдущий резкий — без мыла.
+        // While the next frame is decoding the previous sharp one is held — without mush.
         let p = ui.painter().with_clip_rect(area.shrink(1.0));
         p.image(
             t.id(),
@@ -8491,7 +8472,7 @@ fn draw_viewer_image(
             egui::Color32::from_gray(235),
         );
     } else if let Some(t) = tex.preview {
-        // Нативная 320 px миниатюра по центру, без растягивания на весь экран.
+        // The native 320 px thumbnail in the centre, without stretching it over the whole screen.
         let size = t.size_vec2();
         let scale = (area.width() / size.x).min(area.height() / size.y).min(1.0);
         let rect = egui::Rect::from_center_size(area.center(), size * scale);
@@ -8502,7 +8483,7 @@ fn draw_viewer_image(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::from_gray(230),
         );
-        // У видео «полного кадра» не бывает: это кадр-обложка, ждать нечего.
+        // A video never has a "full frame": that is the cover frame, there is nothing to wait for.
         if f.kind != "video" {
             ui.painter().text(
                 egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
@@ -8527,8 +8508,8 @@ fn draw_viewer_image(
     resp
 }
 
-/// Пропорция кадра: по ней выбирается ширина плитки в строке. Размеры лежат в БД,
-/// поэтому раскладка не ждёт текстур; нет размера (битый файл) — 4:3.
+/// The frame proportion: it chooses the tile width in a row. The sizes live in the DB, so
+/// the layout does not wait for textures; without a size (a broken file) — 4:3.
 fn frame_aspect(f: &FileRow) -> f32 {
     if f.width > 0 && f.height > 0 {
         (f.width as f32 / f.height as f32).clamp(0.25, 4.0)
@@ -8537,9 +8518,9 @@ fn frame_aspect(f: &FileRow) -> f32 {
     }
 }
 
-/// Сколько кадров влезает в строку и какой высоты строка. Чистая функция: сетку
-/// можно проверять без окна. Высота не выходит за целевую и не падает ниже 70 %
-/// её — иначе одна строка из двух кадров растянулась бы на пол-экрана.
+/// How many frames fit in a row and how tall the row is. A pure function: the grid can be
+/// checked without a window. The height does not exceed the target and does not drop below
+/// 70% of it — otherwise one row of two frames would stretch over half the screen.
 fn row_fit(aspects: &[f32], avail: f32, target: f32, gap: f32) -> (usize, f32) {
     let mut sum = 0.0f32;
     let mut n = 0usize;
@@ -8555,7 +8536,7 @@ fn row_fit(aspects: &[f32], avail: f32, target: f32, gap: f32) -> (usize, f32) {
     (n.max(1), h)
 }
 
-/// Один вход для всех файловых сеток: вид ячейки выбирает `settings.cell_style`.
+/// One entry point for every file grid: `settings.cell_style` chooses the cell view.
 fn draw_files(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
     match cs.cell_style {
         db::CellStyle::Tiles => draw_tiles(ui, ctx, cs, files),
@@ -8564,9 +8545,9 @@ fn draw_files(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     }
 }
 
-/// Основной вид из макета: плитки одинаковой ширины, кадр 4:3, снимок вписан
-/// целиком (не растянут и не обрезан), под кадром полоса подписи. Колонки делят
-/// ширину области, как `grid-cols-6` в макете.
+/// The main view from the mock-up: tiles of equal width, a 4:3 frame, the photo fitted
+/// whole (neither stretched nor cropped), a caption strip under the frame. The columns split
+/// the width of the area, as `grid-cols-6` does in the mock-up.
 fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
     if files.is_empty() {
         return;
@@ -8578,7 +8559,7 @@ fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     let w = ((avail - gap * (per_row.saturating_sub(1)) as f32) / per_row as f32)
         .floor()
         .max(24.0);
-    // Кадр 4:3 — пропорция плитки макета; снимок вписывается в него целиком.
+    // The 4:3 frame is the proportion of the mock-up tile; the photo is fitted into it whole.
     let h = (w * 0.75).round();
     for row in files.chunks(per_row) {
         ui.horizontal(|ui| {
@@ -8591,24 +8572,24 @@ fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     }
 }
 
-/// Высота строки списка от ползунка «Плитки»: 24 + 0.16 × значение (40 px при 100,
-/// 66 px при 260). Одно значение ползунка на три вида ячейки (M22.2a).
+/// The row height from the "Tiles" slider: 24 + 0.16 × the value (40 px at 100, 66 px at 260).
+/// One slider value for three cell views (M22.2a).
 fn list_row_height(tile: f32) -> f32 {
     24.0 + 0.16 * tile.clamp(100.0, 260.0)
 }
 
-/// Кегль имени в строке списка: 12 px при 100, 14 px при 260.
+/// The font size of the name in a list row: 12 px at 100, 14 px at 260.
 fn list_name_px(tile: f32) -> f32 {
     12.0 + 2.0 * ((tile.clamp(100.0, 260.0) - 100.0) / 160.0)
 }
 
-/// Кегль моноширинных цифр (дата, размер, длительность) в строке списка: 10–12 px.
+/// The font size of the monospaced digits (date, size, duration) in a list row: 10–12 px.
 fn list_meta_px(tile: f32) -> f32 {
     10.0 + 2.0 * ((tile.clamp(100.0, 260.0) - 100.0) / 160.0)
 }
 
-/// Подсказка ползунка «Плитки» говорит, что он масштабирует в текущем виде:
-/// ширина кадра плитки, высота строки или строка списка.
+/// The tooltip of the "Tiles" slider says what it scales in the current view: the width of
+/// the tile frame, the row height or the list row.
 fn tile_hint(style: db::CellStyle) -> &'static str {
     match style {
         db::CellStyle::Tiles => {
@@ -8623,12 +8604,12 @@ fn tile_hint(style: db::CellStyle) -> &'static str {
     }
 }
 
-/// Список: строка из ползунка «Плитки» (`list_row_height`) — миниатюра 4:3 ростом
-/// `строка − 8`, имя, дата и объём. Плотный просмотр имён и дат, когда снимки уже
-/// известны; решения по дублям и корзине — те же кнопки.
+/// The list: a row of the height from the "Tiles" slider (`list_row_height`) — a 4:3
+/// thumbnail as tall as `row − 8`, the name, the date and the size. A dense view of names
+/// and dates when the photos are known already; the duplicate and trash decisions use the same buttons.
 fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
-    // Список масштабируется тем же ползунком, что плитка и ряды: высота строки,
-    // миниатюра 4:3 ростом `row − 8` и кегли имени и цифр растут вместе с ним.
+    // The list scales with the same slider as the tile and the rows: the row height, the 4:3
+    // thumbnail as tall as `row − 8` and the font sizes of the name and the digits grow with it.
     let row_h = list_row_height(cs.tile);
     let name_px = list_name_px(cs.tile);
     let meta_px = list_meta_px(cs.tile);
@@ -8694,8 +8675,8 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             tr.right_top() + egui::vec2(8.0, 0.0),
             egui::pos2(rect.right() - right, rect.bottom()),
         );
-        // Две строки текста стоят блоком по центру строки: при любом кегле они
-        // не выходят за её границы и не прижимаются к краю.
+        // Two lines of text sit as a block in the centre of the row: at any font size they do not
+        // leave its bounds and are not pressed against the edge.
         let name_top = rect.center().y - name_px - 1.0;
         let meta_top = name_top + name_px + 2.0;
         let painter = ui.painter().with_clip_rect(clip);
@@ -8756,9 +8737,9 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
     ui.add_space(4.0);
 }
 
-/// Одна раскладка на все сетки (docs/UI.md § Layout). Строки «по пропорциям»: кадр
-/// вписан в плитку без полей и без обрезки, высота строки задаётся ползунком
-/// «Плитки», ширина плитки следует пропорции кадра, а строка добирает ширину.
+/// One layout for every grid (docs/UI.md § Layout). The "by proportion" rows: the frame is
+/// fitted into the tile without margins and without cropping, the row height is set by the
+/// "Tiles" slider, the tile width follows the frame proportion, and the row takes the width.
 fn draw_flow(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
     if files.is_empty() {
         return;
@@ -8771,8 +8752,8 @@ fn draw_flow(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
     while i < aspects.len() {
         let (n, fitted) = row_fit(&aspects[i..], avail, target, gap);
         let n = n.min(aspects.len() - i);
-        // Неполная (последняя) строка остаётся целевой высоты: добивать её
-        // растягиванием двух-трёх кадров нельзя.
+        // An incomplete (last) row keeps the target height: it must not be filled by stretching
+        // two or three frames.
         let h = if i + n >= files.len() { target } else { fitted };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
@@ -8786,8 +8767,8 @@ fn draw_flow(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
     }
 }
 
-/// Плитка файла: карточка = кадр (w×h) + полоса подписи 22 px (макет: thumbnail
-/// card). Кадр заполняет плитку целиком: пропорция плитки равна пропорции снимка.
+/// A file tile: the card = the frame (w×h) + a 22 px caption strip (mock-up: thumbnail
+/// card). The frame fills the tile completely: the tile proportion equals the photo proportion.
 fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow, w: f32, h: f32) {
     let th = theme(ui);
     let (rect, resp) = ui.allocate_exact_size(
@@ -8803,7 +8784,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         rect.right_bottom(),
     );
     if ui.is_rect_visible(rect) {
-        // Карточка 8 px: верхние углы у превью, нижние — у полосы подписи.
+        // A card radius of 8 px: the top corners on the preview, the bottom ones on the caption strip.
         let top = egui::CornerRadius {
             nw: RADIUS_CARD as u8,
             ne: RADIUS_CARD as u8,
@@ -8822,8 +8803,8 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         if drawn {
             round_preview(ui, img_rect, RADIUS_CARD, cs.bg);
         }
-        // Подпись: имя файла слева, дата справа — моноширинными цифрами (M22).
-        // Имя обрезается по краю даты, а не уезжает на соседнюю плитку.
+        // The caption: the file name on the left, the date on the right in monospaced digits (M22).
+        // The name is cut at the edge of the date rather than running onto the neighbouring tile.
         let name = file_name(&f.path);
         let date = f
             .taken_at
@@ -8835,8 +8816,8 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         let font = egui::FontId::monospace(10.0);
         let date_galley = ui.painter().layout_no_wrap(date.clone(), font.clone(), th.text_dim);
         let cap_pad = 4.0;
-        // Узкая плитка (100 px) с длинной датой может не оставить места имени:
-        // тогда имя не рисуется вовсе, а не наезжает на дату.
+        // A narrow tile (100 px) with a long date may leave no room for the name: then the name is
+        // not drawn at all rather than overlapping the date.
         let name_max = (cap_rect.width() - date_galley.size().x - 3.0 * cap_pad).max(0.0);
         if name_max > 4.0 {
             let name_galley = ui.painter().layout(name.clone(), font, name_col, name_max);
@@ -8867,14 +8848,14 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             date_galley,
             th.text_dim,
         );
-        // 1 px рамка карточки: у выбранной её перекрывает акцентная обводка ниже.
+        // A 1 px border of the card: on a selected one it is covered by the accent outline below.
         ui.painter().rect_stroke(
             rect,
             egui::CornerRadius::same(RADIUS_CARD as u8),
             egui::Stroke::new(1.0, th.border),
             egui::StrokeKind::Inside,
         );
-        // Отклик на наведение: тонкая обводка и курсор — плитка читается как цель (M16).
+        // A hover response: a thin outline and the cursor — the tile reads as a target (M16).
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             ui.painter().rect_stroke(
@@ -8901,7 +8882,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 dim(ui),
             );
         }
-        // Видео видно по кадру-обложке, но подпись с длительностью не даёт спутать его с фото.
+        // A video is visible by its cover frame, but the caption with the duration does not let it pass for a photo.
         if drawn && f.kind == "video" {
             let strip = egui::Rect::from_min_max(
                 egui::pos2(img_rect.left(), img_rect.bottom() - 16.0),
@@ -8921,7 +8902,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 egui::Color32::from_gray(235),
             );
         }
-        // Решение по дублю видно на плитке в любом виде, а не только по наведению.
+        // The decision on a duplicate is visible on the tile in any view, not only on hover.
         match f.decision.as_deref() {
             Some("drop") => {
                 ui.painter().rect_filled(
@@ -8996,7 +8977,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         }
     }
     if cs.picked.contains(&f.id) {
-        // Выбранная плитка видна без наведения: обводка и квадратный флаг, а не только цвет.
+        // A selected tile is visible without hovering: an outline and a square flag, not colour alone.
         ui.painter().rect_stroke(
             rect,
             egui::CornerRadius::same(RADIUS_CARD as u8),
@@ -9035,7 +9016,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         && let Some(t) = cs.textures.get(&f.id).cloned()
     {
         resp.on_hover_ui_at_pointer(|ui| {
-            // Тултип тоже не растягивает кадр: 400 px по длинной стороне, пропорции исходные.
+            // The tooltip does not stretch the frame either: 400 px on the long side, the original proportions.
             let big = egui::load::SizedTexture::new(t.id(), t.size_vec2());
             ui.add(egui::Image::new(big).max_size(egui::vec2(400.0, 400.0)));
             ui.label(&f.path);
@@ -9047,8 +9028,8 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
-        // M22: палитра применяется до первой фигуры кадра и только при смене темы.
-        // "Система" читается у ОС, поэтому смена темы в системе видна без перезапуска.
+        // M22: the palette is applied before the first shape of the frame and only on a theme change.
+        // "System" is read from the OS, so a theme change in the system is visible without a restart.
         let resolved = match self.settings.theme {
             db::ThemeMode::Dark => egui::Theme::Dark,
             db::ThemeMode::Light => egui::Theme::Light,
@@ -9058,16 +9039,16 @@ impl eframe::App for App {
             apply_theme(ctx, self.settings.theme);
             self.theme_key = Some(resolved);
         }
-        // M22.2b: прокрутка доводится до всех областей сразу — до того, как их нарисует кадр.
-        // Пока идёт выбег тачпада, кадры просятся сами; в покое — нет.
+        // M22.2b: scrolling is carried through to every area at once — before the frame draws them.
+        // While the touchpad coast runs the frames are requested by themselves; at rest they are not.
         if self.scroll.pump(ctx) {
             ctx.request_repaint();
         }
-        // M18: выделение живёт внутри одного набора файлов; смена вида/фильтра/
-        // поиска/порядка снимает его и говорит почему. Esc и Ctrl+A — та же сетка.
+        // M18: the selection lives inside one set of files; a change of the view, filter, search or
+        // order clears it and says why. Esc and Ctrl+A work on the same grid.
         self.sync_pick_scope();
         self.pick_keys(ctx);
-        // завершение фоновой индексации
+        // the end of the background indexing
         if let Some(rx) = &self.rx {
             match rx.try_recv() {
                 Ok(res) => {
@@ -9343,7 +9324,7 @@ impl eframe::App for App {
                 Ok((job, res)) => {
                     self.integrity_rx = None;
                     self.integrity_progress = None;
-                    // Следующая запись слепка снова спросит подтверждение.
+                    // The next record of the manifest will ask for a confirmation again.
                     if job == IntegrityJob::Manifest {
                         self.integrity_overwrite = false;
                     }
@@ -9360,8 +9341,8 @@ impl eframe::App for App {
                             self.integrity_result = Some(outcome);
                         }
                         Err(e) => {
-                            // Ошибка прохода не трогает прошлый успешный отчёт и дату:
-                            // напоминание продолжает считаться от него.
+                            // A failed pass does not touch the previous successful report and date: the reminder keeps
+                            // counting from it.
                             self.integrity_error = format!("{e:#}");
                             let lang = self.settings.lang;
                             self.status = format!(
@@ -9390,9 +9371,9 @@ impl eframe::App for App {
             .resizable(false)
             .show(ui, |ui| self.status_bar(ui));
 
-        // Сведения живут в правой панели, пока в сетке остаются 4 колонки;
-        // на узком окне карточка уходит в левую, а сетка не «съёживется».
-        // На «Целостности» карточки нет: там проверка каталогов, а не файлов.
+        // The details live in the right panel while the grid keeps 4 columns; in a narrow window
+        // the card moves to the left one, and the grid does not shrink.
+        // There is no card on "Integrity": it checks folders, not files.
         let details = self.details_open
             && self.view != View::Integrity
             && ui.available_width() >= DETAILS_MIN_W;
@@ -9418,20 +9399,20 @@ impl eframe::App for App {
         self.poll_photo(ctx);
         self.poll_video(ctx);
 
-        // «Целостность» — форма, а не сетка: плитки, их кэш и порядок ей не нужны.
-        // Экран рисуется до заимствования `self.items`/`self.textures` и сам выходит из кадра.
+        // "Integrity" is a form, not a grid: it needs neither the tiles nor their cache nor the order.
+        // The screen is drawn before `self.items`/`self.textures` are borrowed and leaves the frame by itself.
         if self.view == View::Integrity {
             egui::CentralPanel::default().show(ui, |ui| self.integrity_panel(ui));
             return;
         }
 
         let visible = self.filtered();
-        // Порядок плиток считается здесь и больше нигде (M17): сетка, полный экран
-        // и выделение (M18) берут один и тот же список.
+        // The tile order is computed here and nowhere else (M17): the grid, the full screen and the
+        // selection (M18) take the very same list.
         let ordered = self.ordered(&visible);
-        // Порядок для Shift+клика — те же id в том же порядке, что и плитки.
+        // The order for Shift+click — the same ids in the same order as the tiles.
         let pick_order: Vec<i64> = ordered.iter().map(|&i| self.items[i].id).collect();
-        // Снимок фильтров снимается до того, как сетка заберёт `&mut self.textures`.
+        // The snapshot of the filters is taken before the grid borrows `&mut self.textures`.
         let chips = self.chips_snapshot();
         let tag_filter_now = self.tag_filter.clone();
         let tag_filter_raw = tag_filter_now
@@ -9455,7 +9436,7 @@ impl eframe::App for App {
             lang: self.settings.lang,
             budget: 8,
             cell_style: self.settings.cell_style,
-            // Фон, на котором лежит плитка: срез углов превью красит именно его.
+            // The background a tile lies on: the corner cuts of the preview paint exactly it.
             bg: if self.view == View::Dupes {
                 ui.visuals().faint_bg_color
             } else {
@@ -9623,8 +9604,8 @@ impl eframe::App for App {
                     ),
                 },
             ),
-            // Экран «Целостность» рисуется раньше сетки (см. `ui`), ветка нужна
-            // только для полноты разбора перечисления.
+            // The "Integrity" screen is drawn before the grid (see `ui`); the branch is needed only
+            // for the enum match to be complete.
             View::Integrity => (
                 t(lang, "Integrity").to_string(),
                 t(lang, "comparing copies and a sha256 manifest").to_string(),
@@ -9632,7 +9613,7 @@ impl eframe::App for App {
         };
 
         egui::CentralPanel::default().show(ui, |ui| {
-            // Панель содержимого: фон полотна, шапка вида и строка чипов.
+            // The content panel: the canvas background, the view heading and the row of chips.
             egui::Frame::new()
                 .fill(theme(ui).canvas)
                 .inner_margin(egui::Margin::symmetric(12, 6))
@@ -9640,11 +9621,11 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(title).size(18.0).strong());
                 ui.label(num(ui, count, 12.0).color(dim(ui)));
-                // PhotoPrism: размер плиток живёт в панели содержимого, а не в левой панели.
+                // PhotoPrism: the tile size lives in the content panel, not in the left one.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Размер задаёт плитку, высоту строки или строку списка — но
-                    // ползунок виден всегда (M22.2a): шапка не прыгает при смене
-                    // вида, а у списка из 2000 строк есть что масштабировать.
+                    // The size sets the tile, the row height or the list row — but the slider is always
+                    // visible (M22.2a): the heading does not jump on a view change, and a list of 2000 rows
+                    // has something to scale.
                     {
                         let size = ui.add(
                             egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
@@ -9665,7 +9646,7 @@ impl eframe::App for App {
                         )
                         .on_hover_text(t(lang, tile_hint(self.settings.cell_style)));
                     }
-                    // Вид ячейки (M22): плитка макета — основной, строки и список — вторые.
+                    // The cell view (M22): the mock-up tile is the main one, the rows and the list come second.
                     let mut style = self.settings.cell_style;
                     for (value, label, hint) in [
                         (
@@ -9699,12 +9680,12 @@ impl eframe::App for App {
                         self.settings.cell_style = style;
                         view_save = true;
                     }
-                    // Порядок доступен в сетке и внутри альбома (M19), но не в дереве.
+                    // The order is available in the grid and inside an album (M19), but not in the tree.
                     let album_scope_now =
                         view == View::Albums && self.album_selected.is_some();
                     if view == View::Grid || album_scope_now {
-                        // M17: как смотреть (месяцы/подряд) и в каком порядке.
-                        // Пока идёт смысловой поиск, порядок задаёт поиск — переключатель погашен.
+                        // M17: how to look (months or a run) and in which order.
+                        // While a semantic search runs the search sets the order — the switch is dimmed.
                         let searching = self.semantic_hits.is_some();
                         let mut sort = self.settings.grid_sort;
                         let sort_resp = ui.add_enabled_ui(!searching, |ui| {
@@ -9792,8 +9773,8 @@ impl eframe::App for App {
                     }
                     return;
                 }
-                // Клик по пустому месту снимает выделение: область регистрируется до
-                // плиток, поэтому клик по плитке остаётся кликом по плитке.
+                // A click on an empty place clears the selection: the area is registered before the
+                // tiles, so a click on a tile stays a click on a tile.
                 let bg = ui.interact(
                     ui.available_rect_before_wrap(),
                     egui::Id::unique("grid-empty"),
@@ -9803,9 +9784,9 @@ impl eframe::App for App {
                     .id_salt("grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        // Порядок пришёл из `App::ordered`; здесь только раскладка.
-                        // «Подряд» — одна непрерывная сетка без заголовков месяцев.
-                        // При смысловом поиске порядок задаёт поиск, поэтому список плоский.
+                        // The order came from `App::ordered`; only the layout is here.
+                        // "Run" — one continuous grid without month headings.
+                        // In a semantic search the search sets the order, so the list is flat.
                         if self.semantic_hits.is_some()
                             || self.settings.grid_layout == db::GridLayout::Flat
                         {
@@ -9813,8 +9794,8 @@ impl eframe::App for App {
                             draw_files(ui, ctx, &mut cells, &row);
                             return;
                         }
-                        // «По месяцам»: месяцы в порядке сортировки, «Без даты» — последней
-                        // группой в обе стороны; внутри месяца — порядок `ordered`.
+                        // "By months": the months in sort order, "No date" as the last group in both
+                        // directions; inside a month — the `ordered` order.
                         let ascend = self.settings.grid_sort == db::GridSort::DateAsc;
                         for (key, ids) in month_groups(&ordered, &items, ascend) {
                             let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
@@ -9829,8 +9810,8 @@ impl eframe::App for App {
                 }
             }
             View::Albums => {
-                // Дерево (M19): отступы и свёртывание. Клик открывает альбом,
-                // треугольник раскрывает подальбомы, не меняя выбора.
+                // The tree (M19): indents and collapsing. A click opens an album, the triangle expands
+                // the sub-albums without changing the selection.
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("+ Новый альбом").clicked() {
                         album_dialog_request = Some(AlbumDialog::New);
@@ -9924,8 +9905,8 @@ impl eframe::App for App {
                 ui.add_space(6.0);
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
-                    // «Все файлы» внутри альбома — временный взгляд, чтобы набрать
-                    // снимки в альбом: иначе выделение живёт только в этой сетке (M18).
+                    // "All files" inside an album — a temporary look to gather photos into an album:
+                    // otherwise the selection lives only in that grid (M18).
                     if ui
                         .selectable_label(!album_browse, "В альбоме")
                         .on_hover_text("снимки этого альбома в его порядке")
@@ -10117,8 +10098,8 @@ impl eframe::App for App {
                             .map(|d| d.chars().take(7).collect())
                             .collect();
 
-                        // Слои календаря: год → месяц → неделя → день. Вкладки возвращают наверх,
-                        // двойной клик по ячейке проваливает на слой ниже.
+                        // The calendar layers: year → month → week → day. The tabs go back up, a double click
+                        // on a cell goes one layer down.
                         ui.horizontal(|ui| {
                             for (scale, label) in [
                                 (CalScale::Year, "Year"),
@@ -10130,15 +10111,14 @@ impl eframe::App for App {
                                     .selectable_label(cal_scale == scale, t(lang, label))
                                     .clicked()
                                 {
-                                    // Выбранный день — точка опоры: месяц и неделя
-                                    // открываются там, где он лежит.
+                                    // The selected day is the anchor: the month and the week open where it lies.
                                     if let Some(d) = cal_day.as_deref().and_then(parse_date) {
                                         cal_year = d.year();
                                         cal_month = d.month();
                                         cal_week = monday_of(d);
                                     }
-                                    // В «День» без выбранного дня показываем сегодняшний,
-                                    // если он в открытом месяце, иначе первое число.
+                                    // In "Day" without a selected day we show today if it is in the open month, otherwise
+                                    // the first day of it.
                                     if scale == CalScale::Day && cal_day.is_none() {
                                         let today = chrono::Local::now().date_naive();
                                         let d = if today.year() == cal_year
@@ -10162,7 +10142,7 @@ impl eframe::App for App {
                                 cal_year = today.year();
                                 cal_month = today.month();
                                 cal_week = monday_of(today);
-                                // На слое «День» сегодня — выбор, а не сброс.
+                                // On the "Day" layer today is a choice, not a reset.
                                 cal_day = if cal_scale == CalScale::Day {
                                     Some(today.format("%Y-%m-%d").to_string())
                                 } else {
@@ -10870,7 +10850,7 @@ impl eframe::App for App {
                     .iter()
                     .filter(|f| face_selected.is_none() || f.cluster_id == face_selected)
                     .collect();
-                // Пакетное назначение: отметить лица кнопкой «выбрать» и дать одно имя.
+                // A batch naming: mark faces with the "pick" button and give them one name.
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
@@ -10973,8 +10953,8 @@ impl eframe::App for App {
                         });
                 }
             }
-            // Недостижимо: экран рисуется до сетки (см. `ui`), но перечисление
-            // должно быть разобрано целиком.
+            // Unreachable: the screen is drawn before the grid (see `ui`), but the enum must be
+            // matched completely.
             View::Integrity => {}
             }
                 });
@@ -11009,10 +10989,10 @@ impl eframe::App for App {
         let cell_click = cells.clicked;
         let keep_click = cells.keep_clicked;
         let restore_click = cells.restore_clicked;
-        // Освобождаем заимствования self.textures/missing до open_viewer/reload.
+        // Release the borrows of self.textures/missing before open_viewer/reload.
         #[allow(clippy::drop_non_drop)]
         drop(cells);
-        // Размер плиток пишется в настройки после отпускания ползунка, а не каждый кадр.
+        // The tile size is written to the settings when the slider is released, not on every frame.
         if tile_save {
             self.settings.tile_size = self.tile_size;
             self.save_settings();
@@ -11020,7 +11000,7 @@ impl eframe::App for App {
         if view_save {
             self.save_settings();
         }
-        // Диалог альбома открывается после отпускания заимствований сетки (M19).
+        // The album dialog opens after the grid borrows are released (M19).
         if let Some(dialog) = album_dialog_request {
             self.album_open_dialog(dialog);
         }
@@ -11030,7 +11010,7 @@ impl eframe::App for App {
         if let Some(id) = album_export_request {
             self.export_dialog_open(id);
         }
-        // Чип снимает ровно свой фильтр; сетка пересчитается следующим кадром.
+        // A chip removes exactly its own filter; the grid is recomputed on the next frame.
         if clear_chips.query {
             self.query.clear();
         }
@@ -11265,8 +11245,8 @@ mod tests {
         }
     }
 
-    /// Один кадр полноэкранного просмотра без окна: возвращает весь нарисованный текст.
-    /// Единственный способ проверить «листание показывает следующий файл» без GUI.
+    /// One frame of the full-screen viewer without a window: returns all the drawn text.
+    /// The only way to check that "paging shows the next file" without a GUI.
     fn viewer_frame(
         app: &mut App,
         ctx: &egui::Context,
@@ -11291,9 +11271,9 @@ mod tests {
             }
             raw
         };
-        // Модальное окно (anchored area) на первом кадре ещё не знает своего размера
-        // и рисует только фон. Поэтому кадр прогоняется дважды: событие — в первый,
-        // готовые фигуры — из второго.
+        // A modal window (an anchored area) does not know its size on the first frame and draws
+        // only the background. So the frame is run twice: the event in the first one, the ready
+        // shapes from the second.
         let first = ctx.run_ui(raw(key), |ui| {
             let ctx = ui.ctx().clone();
             app.viewer_modal(&ctx);
@@ -11311,7 +11291,7 @@ mod tests {
         texts
     }
 
-    /// Один кадр карточки файла без окна: проверяет текст «не уверен» и топ-3.
+    /// One frame of the file card without a window: it checks the "not sure" text and the top 3.
     fn card_frame(app: &mut App, ctx: &egui::Context) -> Vec<String> {
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -11329,8 +11309,8 @@ mod tests {
         texts
     }
 
-    /// Один кадр раздела диалога «Настройки» без окна: проверяет подписи раздела.
-    /// Модальное окно не рисуется: раздел — та же функция, что вызывается внутри него.
+    /// One frame of a "Settings" section without a window: it checks the captions of the section.
+    /// The modal window is not drawn: the section is the same function called inside it.
     fn settings_frame(app: &mut App, ctx: &egui::Context, tab: SettingsTab) -> Vec<String> {
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -11348,9 +11328,9 @@ mod tests {
         texts
     }
 
-    /// Один кадр модального диалога без окна: `picker_modal`, `storage_modal`, `roots_modal`.
-    /// Как и `viewer_frame`, кадр прогоняется дважды: модальное окно на первом кадре
-    /// ещё не знает своего размера и рисует только фон.
+    /// One frame of a modal dialog without a window: `picker_modal`, `storage_modal`, `roots_modal`.
+    /// Like `viewer_frame`, the frame is run twice: a modal window on the first frame does not
+    /// know its size yet and draws only the background.
     fn modal_frame(
         app: &mut App,
         ctx: &egui::Context,
@@ -11380,13 +11360,13 @@ mod tests {
         texts
     }
 
-    /// Один кадр всего окна без окна: проверяет группы по месяцам и их порядок.
-    /// `eframe::Frame::_new_kittest` — штатный тестовый кадр eframe, окно не открывается.
+    /// One frame of the whole window without a window: it checks the month groups and their order.
+    /// `eframe::Frame::_new_kittest` is the standard test frame of eframe, no window is opened.
     fn window_frame(app: &mut App, ctx: &egui::Context) -> Vec<String> {
         window_frame_with(app, ctx, Vec::new())
     }
 
-    /// Тот же кадр с событиями клавиатуры: так проверяются Esc и Ctrl+A без GUI.
+    /// The same frame with keyboard events: that is how Esc and Ctrl+A are checked without a GUI.
     fn window_frame_with(
         app: &mut App,
         ctx: &egui::Context,
@@ -11395,8 +11375,8 @@ mod tests {
         window_frame_at(app, ctx, events, egui::vec2(1240.0, 840.0))
     }
 
-    /// Кадр при заданном размере окна: высокое окно нужно, чтобы блоки левой панели
-    /// (список групп лиц) не были обрезаны и попали в нарисованный текст.
+    /// A frame at a given window size: a tall window is needed so that the blocks of the left
+    /// panel (the list of face groups) are not cut off and land in the drawn text.
     fn window_frame_at(
         app: &mut App,
         ctx: &egui::Context,
@@ -11419,7 +11399,7 @@ mod tests {
         texts
     }
 
-    /// Нажатие клавиши без модификаторов — для headless-проверки Esc и Ctrl+A.
+    /// A key press without modifiers — for the headless check of Esc and Ctrl+A.
     fn key_event(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
@@ -11430,9 +11410,9 @@ mod tests {
         }
     }
 
-    // ---- M22.2b: прокрутка колесом и тачпадом -------------------------------------------
+    // ---- M22.2b: scrolling with the wheel and the touchpad ---------------------------------
 
-    /// Событие тачпада: winit на Linux и Windows отдаёт точные дельты без источника.
+    /// A touchpad event: on Linux and Windows winit gives exact deltas without a source.
     fn trackpad_event(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
@@ -11443,7 +11423,7 @@ mod tests {
         }
     }
 
-    /// Событие тачпада с модификатором (Ctrl/Cmd — жест масштаба, а не прокрутки).
+    /// A touchpad event with a modifier (Ctrl/Cmd is a scale gesture, not a scroll).
     fn trackpad_event_mod(dy: f32, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
@@ -11454,7 +11434,7 @@ mod tests {
         }
     }
 
-    /// Событие колеса: один «щелчок» — одна строка (winit), egui сам переводит её в points.
+    /// A wheel event: one "notch" is one line (winit), egui converts it into points itself.
     fn wheel_event(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Line,
@@ -11465,8 +11445,8 @@ mod tests {
         }
     }
 
-    /// Один кадр профиля прокрутки: подать события, прогнать `Scroll::pump` и вернуть,
-    /// сколько points он добавил к прокрутке кадра и просит ли следующий кадр.
+    /// One frame of the scrolling profile: feed the events, run `Scroll::pump` and return how
+    /// many points it added to the frame scroll and whether it asks for the next frame.
     fn scroll_frame(
         scroll: &mut Scroll,
         ctx: &egui::Context,
@@ -11476,7 +11456,7 @@ mod tests {
         scroll_frame_mod(scroll, ctx, t, events, Default::default())
     }
 
-    /// То же с нажатым модификатором: так проверяется «Ctrl + прокрутка — это зум».
+    /// The same with the modifier held: that is how "Ctrl + scroll is a zoom" is checked.
     fn scroll_frame_mod(
         scroll: &mut Scroll,
         ctx: &egui::Context,
@@ -11509,18 +11489,18 @@ mod tests {
         (wants, added)
     }
 
-    /// Жест тачпада на шесть кадров и выбег до остановки: возвращает пройденный выбег
-    /// и число кадров, которые он потребовал.
+    /// A six-frame touchpad gesture and the coast to a stop: returns the distance travelled and
+    /// how many frames it took.
     fn swipe_and_coast(scroll: &mut Scroll, ctx: &egui::Context) -> (f32, usize) {
         let dt = 1.0 / 60.0;
         let mut t = 0.0;
-        // Жест: 6 кадров по 20 px — 1200 px/s, обычная скорость короткого броска.
+        // The gesture: 6 frames of 20 px — 1200 px/s, a usual short fling speed.
         for _ in 0..6 {
             let (wants, _) = scroll_frame(scroll, ctx, t, vec![trackpad_event(-20.0)]);
             assert!(!wants, "во время жеста выбег не начинается");
             t += dt;
         }
-        // Пауза между отрывом пальцев и началом выбега — не прокрутка.
+        // The pause between the fingers lifting and the coast starting is not a scroll.
         let mut waited = 0;
         while waited < 20 {
             let (wants, _) = scroll_frame(scroll, ctx, t, Vec::new());
@@ -11546,8 +11526,8 @@ mod tests {
         (coasted, frames)
     }
 
-    /// Щелчок колеса по умолчанию был 40 px на сетке в 2000 строк — 50 щелчков до месяца.
-    /// Теперь один щелчок — треть окна по умолчанию, и профиль один на обе темы.
+    /// A wheel notch used to be 40 px on a grid of 2000 rows — 50 notches to a month. Now one
+    /// notch is a third of the default window, and the profile is one for both themes.
     #[test]
     fn wheel_scrolls_a_third_of_the_screen() {
         let ctx = egui::Context::default();
@@ -11570,8 +11550,8 @@ mod tests {
         assert!((decay - COAST_DECAY_S).abs() < 1e-6, "выбег не из профиля: {decay}");
     }
 
-    /// Тачпад: после отрыва пальцев жест продолжается выбегом и останавливается сам.
-    /// Короткий жест — 200–300 px, а не «полстроки» и не полэкрана.
+    /// The touchpad: after the fingers lift the gesture continues as a coast and stops by itself.
+    /// A short gesture — 200–300 px, not "half a row" and not half a screen.
     #[test]
     fn trackpad_coasts_after_the_fingers_lift() {
         let ctx = egui::Context::default();
@@ -11585,9 +11565,9 @@ mod tests {
         assert!(frames > 5, "выбег оборвался за {frames} кадров");
     }
 
-    /// Сквозная проверка на настоящем кадре окна: колесо и тачпад двигают саму сетку.
-    /// Профиль прокрутки проверен выше по числам; здесь важно, что добавка не пропадает
-    /// по дороге к `ScrollArea`, а выбег идёт уже без событий тачпада и сам затихает.
+    /// An end-to-end check on a real window frame: the wheel and the touchpad move the grid itself.
+    /// The scrolling profile was checked by numbers above; what matters here is that the addition
+    /// does not get lost on the way to the `ScrollArea`, and that the coast runs without touchpad events and fades out by itself.
     #[test]
     fn wheel_and_trackpad_move_the_grid() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-scroll.db"));
@@ -11597,9 +11577,9 @@ mod tests {
             .map(|i| file_row(i as i64 + 1, "image", &format!("f{i}.jpg")))
             .collect();
         let ctx = egui::Context::default();
-        // Курсор в центре сетки: без него `ScrollArea` не забирает прокрутку.
+        // The cursor in the centre of the grid: without it the `ScrollArea` does not take the scroll.
         let at_grid = vec![egui::Event::PointerMoved(egui::pos2(700.0, 400.0))];
-        // Первая видимая плитка: меньшее имя на экране.
+        // The first visible tile: the smaller name on the screen.
         let first_shown = |texts: &[String]| {
             texts
                 .iter()
@@ -11611,7 +11591,7 @@ mod tests {
         let top = window_frame_with(&mut app, &ctx, at_grid.clone());
         assert_eq!(first_shown(&top), 0, "сетка не с начала: {:?}", top.len());
 
-        // Колесо: два щелчка (по трети экрана) — первые плитки уходят вверх.
+        // The wheel: two notches (a third of the screen each) — the first tiles go up.
         let mut after_wheel = top.clone();
         for _ in 0..2 {
             after_wheel = window_frame_with(&mut app, &ctx, vec![wheel_event(-1.0)]);
@@ -11622,14 +11602,14 @@ mod tests {
         let wheel_top = first_shown(&after_wheel);
         assert!(wheel_top > 0, "колесо не подвинуло сетку");
 
-        // Тачпад: жест, а после отрыва пальцев — кадры без событий.
+        // The touchpad: a gesture, and after the fingers lift — frames without events.
         for _ in 0..6 {
             let mut events = vec![trackpad_event(-20.0)];
             events.extend(at_grid.clone());
             window_frame_with(&mut app, &ctx, events);
         }
-        // Ждём начало выбега (состояние самого профиля, а не «кадр подвинулся»:
-        // сглаживание последних дельт двигает сетку и без инерции).
+        // Wait for the coast to start (the state of the profile itself, not "the frame moved":
+        // the smoothing of the last deltas moves the grid without inertia too).
         let mut coast_from = None;
         let mut settled_at = None;
         for _ in 0..300 {
@@ -11647,7 +11627,7 @@ mod tests {
             settled_at > coast_from,
             "выбег не двигает сетку: было {coast_from}, стало {settled_at}"
         );
-        // В покое профиль молчит и сетка стоит.
+        // At rest the profile is silent and the grid stands.
         let mut settled = Vec::new();
         for _ in 0..40 {
             settled = window_frame_with(&mut app, &ctx, Vec::new());
@@ -11659,7 +11639,7 @@ mod tests {
         );
     }
 
-    /// Смена направления не даёт скачка: новое касание гасит выбег в тот же кадр.
+    /// A change of direction gives no jump: a new touch cancels the coast in the same frame.
     #[test]
     fn a_new_gesture_cancels_the_coast() {
         let ctx = egui::Context::default();
@@ -11671,7 +11651,7 @@ mod tests {
             scroll_frame(&mut scroll, &ctx, t, vec![trackpad_event(-12.0)]);
             t += dt;
         }
-        // Первый кадр после паузы начинает выбег.
+        // The first frame after the pause starts the coast.
         let mut started = false;
         for _ in 0..10 {
             let (wants, _) = scroll_frame(&mut scroll, &ctx, t, Vec::new());
@@ -11682,14 +11662,14 @@ mod tests {
             }
         }
         assert!(started, "выбег так и не начался");
-        // Обратный жест: в этом кадре профиль ничего не добавляет — скачка нет,
-        // дальше колесо ведёт уже сама egui.
+        // The reverse gesture: in this frame the profile adds nothing — no jump; after that egui
+        // itself drives the wheel.
         let (wants, added) = scroll_frame(&mut scroll, &ctx, t, vec![trackpad_event(30.0)]);
         assert!(!wants, "выбег не прерван новым жестом");
         assert_eq!(added, egui::Vec2::ZERO, "скачок на смене направления: {added:?}");
     }
 
-    /// Колесо и любой другой способ прокрутки тоже обрывают выбег тачпада.
+    /// The wheel and any other way of scrolling break the touchpad coast too.
     #[test]
     fn the_wheel_cancels_the_trackpad_coast() {
         let ctx = egui::Context::default();
@@ -11702,7 +11682,7 @@ mod tests {
         assert_eq!(added, egui::Vec2::ZERO);
     }
 
-    /// Ctrl/Cmd + жест — это зум, а не прокрутка: после него сетка не должна катиться.
+    /// Ctrl/Cmd + gesture is a zoom, not a scroll: after it the grid must not roll.
     #[test]
     fn a_ctrl_gesture_does_not_coast() {
         let ctx = egui::Context::default();
@@ -11735,7 +11715,7 @@ mod tests {
         }
     }
 
-    /// В покое профиль молчит: idle-кадры не запрашиваются, окно не перерисовывается зря.
+    /// At rest the profile is silent: no idle frames are requested, the window is not repainted in vain.
     #[test]
     fn frames_are_not_requested_at_rest() {
         let ctx = egui::Context::default();
@@ -11748,8 +11728,8 @@ mod tests {
         }
     }
 
-    /// Правило «один профиль на все области»: ни один `ScrollArea` не ставит свои
-    /// множители колеса и не включает/выключает источники прокрутки.
+    /// The rule "one profile for every area": no `ScrollArea` sets wheel multipliers of its own
+    /// and does not switch the scroll sources on or off.
     #[test]
     fn scroll_areas_do_not_set_their_own_multipliers() {
         let src = include_str!("app.rs");
@@ -11759,9 +11739,9 @@ mod tests {
         assert!(src.contains("ScrollArea"), "в файле нет ни одной области прокрутки");
     }
 
-    /// Замер M22.2b на реальном корпусе: кадры сетки во время прокрутки колесом и тачпадом.
-    /// Не в обычном прогоне: `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
-    /// cargo test --release -- --ignored замер_прокрутки --nocapture`.
+    /// The M22.2b measurement on the real corpus: grid frames while scrolling with the wheel and the touchpad.
+    /// Not in the ordinary run: `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
+    /// cargo test --release -- --ignored scroll_bench --nocapture`.
     #[test]
     #[ignore]
     fn grid_scroll_measurement() {
@@ -11801,12 +11781,12 @@ mod tests {
         for _ in 0..20 {
             run(&mut drive, &mut t, Vec::new());
         }
-        // Щелчки колеса вниз — сетка едет от свежих месяцев к старым: один кадр —
-        // один щелчок, 240 «щелчков в секунду», вместе с подгрузкой превью.
+        // Wheel notches down — the grid goes from the fresh months to the old ones: one frame per
+        // notch, 240 "notches per second", together with loading the previews.
         for _ in 0..80 {
             times.push(run(&mut drive, &mut t, vec![wheel_event(-1.0)]));
         }
-        // Тачпад: непрерывный жест с выбегом (профиль добавляет инерцию сам).
+        // The touchpad: a continuous gesture with a coast (the profile adds the inertia itself).
         for _ in 0..80 {
             times.push(run(&mut drive, &mut t, vec![trackpad_event(-14.0)]));
         }
@@ -11836,10 +11816,10 @@ mod tests {
         }
     }
 
-    /// Листание в полном экране обязано менять файл в ту же секунду, а видео —
-    /// останавливаться. Иначе кадр старого видео рисуется поверх нового файла.
-    /// Владелец: «сверху документ, ниже скриншот, а мебель потом». При близких весах
-    /// карточка обязана сказать «не уверен», показать топ-3 и ничего не подсвечивать.
+    /// Paging in the full screen must change the file within the same second, and a video must
+    /// stop. Otherwise the frame of the old video is drawn over the new file.
+    /// The owner: "a document on top, a screenshot below, and the furniture later". With close
+    /// weights the card must say "not sure", show the top 3 and highlight nothing.
     #[test]
     fn card_writes_not_sure_when_tags_are_close() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -11855,7 +11835,7 @@ mod tests {
             ],
         );
         app.tag_dists = embed::tag_distributions(&app.tags);
-        // Русский текст проверяется явно: язык — поле настроек, а не глобальная переменная.
+        // The Russian text is checked explicitly: the language is a settings field, not a global variable.
         app.settings.lang = i18n::Lang::Ru;
         let texts = card_frame(&mut app, &egui::Context::default());
         assert!(
@@ -11889,8 +11869,8 @@ mod tests {
         assert!(!texts.iter().any(|t| t.contains("не уверен")), "{texts:?}");
     }
 
-    /// M21.3: карточка и инспектор переводятся целиком — заголовок, подписи, источник
-    /// даты, теги, свои теги и блок распознавания. Данные (имя файла, сами теги) не трогаем.
+    /// M21.3: the card and the inspector are translated completely — the heading, the captions,
+    /// the date source, the tags, the own tags and the recognition block. The data (the file name, the tags themselves) is not touched.
     #[test]
     fn english_translates_the_file_card() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-card-i18n.db"));
@@ -11946,9 +11926,9 @@ mod tests {
         }
     }
 
-    /// M21.4: экран «Дубли и серии» переводится целиком — панель управления, подписи
-    /// плиток и строка группы; названия форматов дублей (`reason`, `advice`) — данные
-    /// модуля `dupes`, их переводит M21.6 вместе с отчётами CLI.
+    /// M21.4: the "Duplicates and series" screen is translated completely — the control panel,
+    /// the tile captions and the group row; the names of the duplicate formats (`reason`, `advice`)
+    /// are data of the `dupes` module, M21.6 translates them together with the CLI reports.
     #[test]
     fn english_translates_the_duplicates_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-dupes-i18n.db"));
@@ -11995,8 +11975,8 @@ mod tests {
         }
     }
 
-    /// M21.4b: календарь переводится целиком — слои, месяцы, дни недели, навигация и
-    /// подписи пустых дней. Названия месяцев и дней недели живут в `i18n`, а не в `app`.
+    /// M21.4b: the calendar is translated completely — the layers, the months, the weekdays, the
+    /// navigation and the captions of empty days. The month and weekday names live in `i18n`, not in `app`.
     #[test]
     fn english_translates_the_calendar() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-calendar-i18n.db"));
@@ -12032,8 +12012,8 @@ mod tests {
         }
     }
 
-    /// M21.4c: экран «Лица» переводится целиком — панель порога, список групп, плитки
-    /// лиц и поля имени. Имена людей и пороги — данные и не переводятся.
+    /// M21.4c: the "Faces" screen is translated completely — the threshold panel, the group list,
+    /// the face tiles and the name fields. The names of people and the thresholds are data and are not translated.
     #[test]
     fn english_translates_the_faces_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-faces-i18n.db"));
@@ -12059,7 +12039,7 @@ mod tests {
         app.face_selected_cluster = Some(7);
         app.settings.lang = i18n::Lang::En;
         app.view = View::Faces;
-        // Высокое окно: список групп в левой панели не должен обрезаться.
+        // A tall window: the group list in the left panel must not be cut off.
         let texts = window_frame_at(
             &mut app,
             &egui::Context::default(),
@@ -12105,8 +12085,8 @@ mod tests {
         }
     }
 
-    /// M21.4d: корзина переводится целиком — экран, плитка и диалог подтверждения.
-    /// Модальное окно на первом кадре ещё не знает своего размера, поэтому кадров два.
+    /// M21.4d: the trash is translated completely — the screen, the tile and the confirmation dialog.
+    /// A modal window does not know its size on the first frame, so there are two frames.
     #[test]
     fn english_translates_the_trash() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-trash-i18n.db"));
@@ -12154,8 +12134,8 @@ mod tests {
         }
     }
 
-    /// M21.4e: экран «Целостность» переводится целиком — поля, три кнопки, напоминание
-    /// и вердикт. Текст отчёта — вывод модуля `verify` (как у CLI), его переводит M21.6.
+    /// M21.4e: the "Integrity" screen is translated completely — the fields, the three buttons,
+    /// the reminder and the verdict. The report text is the output of the `verify` module (as in the CLI), M21.6 translates it.
     #[test]
     fn english_translates_the_integrity_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity-i18n.db"));
@@ -12220,8 +12200,8 @@ mod tests {
                 "русская подпись «{ru}» осталась: {texts:?}"
             );
         }
-        // С M21.6 текст отчёта — вывод `verify` на том же языке: отчёт и экран
-        // больше не расходятся ни словами, ни единицами.
+        // Since M21.6 the report text is the `verify` output in the same language: the report and
+        // the screen no longer differ in words or units.
         assert!(
             texts.iter().any(|t| t.contains("verdict: the copies match")),
             "отчёт рисуется на языке отчёта: {texts:?}"
@@ -12232,18 +12212,18 @@ mod tests {
         );
     }
 
-    /// M21.4f: левая панель переведена целиком — блок модели, блок текста и сводка.
-    /// Названия моделей, теги и пути — данные и остаются как есть.
+    /// M21.4f: the left panel is translated completely — the model block, the text block and the summary.
+    /// The model titles, the tags and the paths are data and stay as they are.
     #[test]
     fn english_translates_the_left_panel() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-left-i18n.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
-        // Пустой каталог моделей: блок говорит «не скачана» на обоих языках.
+        // An empty models folder: the block says "not downloaded" in both languages.
         app.settings.models_dir =
             std::env::temp_dir().join("photocat-test-models-never-downloaded");
         app.settings.lang = i18n::Lang::En;
-        // Два кадра: размер нижней панели сводки берётся из предыдущего кадра, поэтому
-        // на первом она обрезана, а проверяемые строки появляются на втором.
+        // Two frames: the height of the bottom summary panel comes from the previous frame, so on
+        // the first one it is cropped and the checked lines appear on the second.
         let ctx = egui::Context::default();
         let size = egui::vec2(1240.0, 1100.0);
         window_frame_at(&mut app, &ctx, Vec::new(), size);
@@ -12282,8 +12262,8 @@ mod tests {
         }
     }
 
-    /// M21.4f: разделы диалога «Настройки» переведены целиком: модель, индексация,
-    /// теги со словарём, лица, хранилище и внешние программы.
+    /// M21.4f: the sections of the "Settings" dialog are translated completely: the model, the
+    /// indexing, the tags with the dictionary, the faces, the storage and the external programs.
     #[test]
     fn english_translates_the_settings_panes() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-settings-i18n.db"));
@@ -12321,7 +12301,7 @@ mod tests {
                 "нет «{want}» в разделе индексации: {index:?}"
             );
         }
-        // Пустой словарь: строка кнопок под 14 метками иначе уходит за высокий кадр.
+        // An empty dictionary: otherwise the row of buttons under 14 labels goes beyond the tall frame.
         app.tag_defs.clear();
         let tags = settings_frame(&mut app, &ctx, SettingsTab::Tags);
         for want in [
@@ -12410,8 +12390,8 @@ mod tests {
         }
     }
 
-    /// M21.5: полный экран и управление плеером переведены целиком: заголовок,
-    /// листание, слайд-шоу, масштаб, текст на фото и подпись поверх кадра видео.
+    /// M21.5: the full screen and the player controls are translated completely: the heading,
+    /// paging, the slideshow, the scale, the text on a photo and the caption over a video frame.
     #[test]
     fn english_translates_the_full_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-viewer-i18n.db"));
@@ -12452,7 +12432,7 @@ mod tests {
                 "русская подпись «{ru}» осталась на полном экране: {texts:?}"
             );
         }
-        // Видео: подпись на большой кнопке ▶ тоже переведена.
+        // Video: the caption on the big ▶ button is translated too.
         app.items = vec![file_row(2, "video", "b.mp4")];
         app.open_viewer(2);
         let texts = viewer_frame(&mut app, &ctx, None);
@@ -12466,8 +12446,8 @@ mod tests {
         );
     }
 
-    /// M21.5: каталоги архива и встроенный выбор папки переведены вместе:
-    /// открыть каталог без перевода родительского диалога — это полуперевод.
+    /// M21.5: the archive folders and the built-in folder picker are translated together:
+    /// opening a folder without translating the parent dialog is a half translation.
     #[test]
     fn english_translates_the_folders_and_the_folder_picker() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-picker-i18n.db"));
@@ -12493,7 +12473,7 @@ mod tests {
                 "русская подпись «{ru}» осталась в каталогах: {roots:?}"
             );
         }
-        // Пустой каталог: видно подсказку вместо списка подкаталогов.
+        // An empty folder: a hint is visible instead of the list of subfolders.
         let empty = std::env::temp_dir().join("photocat-test-picker-empty");
         std::fs::create_dir_all(&empty).expect("временный каталог");
         app.roots_open = false;
@@ -12523,7 +12503,7 @@ mod tests {
         app.picker_open = false;
     }
 
-    /// M21.5: подтверждение очистки кэша и индекса переведено — все три варианта.
+    /// M21.5: the confirmation of cleaning the cache and the index is translated — all three variants.
     #[test]
     fn english_translates_the_emptying_confirmation() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-storage-i18n.db"));
@@ -12548,7 +12528,7 @@ mod tests {
                     "русская подпись «{ru}» осталась в подтверждении: {texts:?}"
                 );
             }
-            // Кадр — только чтение: подтверждение снимается, ничего не удаляется.
+            // The frame is read only: the confirmation is cleared, nothing is deleted.
             app.storage_confirm = None;
         }
     }
@@ -12568,8 +12548,8 @@ mod tests {
         assert!(v.last_advance.elapsed() < std::time::Duration::from_millis(100));
     }
 
-    /// Смена файла останавливает плеер: без этого `video_id` остаётся от старого
-    /// кадра, и `poll_video` продолжает рисовать его поверх нового снимка.
+    /// Changing the file stops the player: without it `video_id` stays from the old frame and
+    /// `poll_video` keeps drawing it over the new photo.
     #[test]
     fn changing_the_file_stops_the_video() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -12580,8 +12560,8 @@ mod tests {
         assert_eq!(v.idx, 1);
     }
 
-    /// Владелец: «листание вперёд-назад ничего не показывает». Видео должно
-    /// показываться кадром-обложкой с кнопкой ▶, а стрелка — открывать следующий файл.
+    /// The owner: "paging back and forth shows nothing". A video must be shown with its cover
+    /// frame and a ▶ button, and the arrow must open the next file.
     #[test]
     fn the_video_view_draws_the_button_and_pages_with_arrows() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -12590,7 +12570,7 @@ mod tests {
             file_row(2, "video", "b.mp4"),
             file_row(3, "image", "c.jpg"),
         ];
-        // Проверяется поведение, а не язык: подписи на кадре — русские.
+        // The behaviour is checked, not the language: the captions on the frame are Russian.
         app.settings.lang = i18n::Lang::Ru;
         app.open_viewer(2);
         let ctx = egui::Context::default();
@@ -12611,9 +12591,9 @@ mod tests {
         );
     }
 
-    /// Прошлый снимок держится на экране, пока грузится следующий кадр. У видео
-    /// «следующего кадра» нет — иначе после листания на видео оставался старый снимок,
-    /// а владелец видел «ничего не показывает».
+    /// The previous photo is held on the screen while the next frame loads. A video has no
+    /// "next frame" — otherwise after paging an old photo stayed over the video and the owner
+    /// saw "nothing is shown".
     #[test]
     fn switching_to_a_video_keeps_no_previous_photo() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -12650,8 +12630,8 @@ mod tests {
         assert_eq!(v.idx, 0);
     }
 
-    /// M13d: при масштабе больше 100 % кадр таскается мышью, а при «вписать»
-    /// сдвиг сбрасывается — иначе новый снимок открывался бы обрезанным.
+    /// M13d: at a scale above 100% the frame is dragged with the mouse, and at "fit" the offset
+    /// is reset — otherwise a new photo would open cropped.
     #[test]
     fn changing_the_file_centres_the_frame() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -12661,30 +12641,30 @@ mod tests {
         assert_eq!(v.pan, egui::Vec2::ZERO);
     }
 
-    /// Сдвиг не отрывает кадр от краёв области; сторона, которая вписана,
-    /// стоит по центру.
+    /// The offset does not tear the frame away from the edges of the area; the side that is
+    /// fitted stands in the centre.
     #[test]
     fn panning_keeps_the_frame_off_the_edges() {
         let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
-        // Вписанный кадр: сдвигать нечего.
+        // A fitted frame: there is nothing to drag.
         assert_eq!(
             clamp_pan(egui::vec2(50.0, -20.0), egui::vec2(400.0, 300.0), area),
             egui::Vec2::ZERO
         );
-        // Вдвое больше области: по 200 px в стороны и по 150 px вверх-вниз.
+        // Twice the area: 200 px to each side and 150 px up and down.
         assert_eq!(
             clamp_pan(egui::vec2(999.0, -999.0), egui::vec2(800.0, 600.0), area),
             egui::vec2(200.0, -150.0)
         );
-        // Шире области, но ниже её: двигается только по горизонтали.
+        // Wider than the area but lower than it: it moves horizontally only.
         assert_eq!(
             clamp_pan(egui::vec2(0.0, 80.0), egui::vec2(1000.0, 200.0), area),
             egui::Vec2::ZERO
         );
     }
 
-    /// Подсказка о перетаскивании видна только тогда, когда есть что таскать:
-    /// при «вписать» она была бы обещанием, которого код не выполняет.
+    /// The drag hint is visible only when there is something to drag: at "fit" it would be a
+    /// promise the code does not keep.
     #[test]
     fn the_pan_hint_shows_only_when_zoomed() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -12786,12 +12766,12 @@ mod tests {
 
     #[test]
     fn the_calendar_week_starts_on_monday() {
-        assert_eq!(first_weekday_monday(2024, 1), 0); // 1 января 2024 — понедельник
-        assert_eq!(first_weekday_monday(2024, 5), 2); // 1 мая 2024 — среда
+        assert_eq!(first_weekday_monday(2024, 1), 0); // 1 January 2024 is a Monday
+        assert_eq!(first_weekday_monday(2024, 5), 2); // 1 May 2024 is a Wednesday
     }
 
-    /// Порог фильтра — процентиль своего тега, а не глобальный максимум:
-    /// на 100% у «мебели» остаётся её самый сильный снимок, на 0% — все.
+    /// The filter threshold is the percentile of its own tag, not a global maximum: at 100%
+    /// "furniture" keeps its strongest photo, at 0% all of them.
     #[test]
     fn a_tag_filter_follows_its_own_percentile() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
@@ -12816,14 +12796,14 @@ mod tests {
             .position(|l| l == "мебель")
             .expect("«мебель» есть в словаре по умолчанию");
         assert_eq!(app.tag_counts()[i], 120);
-        // Маленький каталог: процентиль шумный, действует сырой порог.
+        // A small folder: the percentile is noisy, the raw threshold applies.
         app.tags.retain(|id, _| *id < 50);
         app.settings.tag_show = 0.22;
         assert!((app.tag_threshold("мебель") - 0.22).abs() < 1e-6);
     }
 
-    /// Фильтр берёт метки из словаря, но не прячет уже посчитанные теги,
-    /// которых в словаре больше нет, и слушает минимальный процентиль тега.
+    /// The filter takes the labels from the dictionary but does not hide computed tags that are
+    /// no longer in it, and honours the minimum percentile of a tag.
     #[test]
     fn the_filter_takes_labels_from_the_dictionary_and_respects_the_percentile() {
         let path = std::env::temp_dir().join(format!(
@@ -12846,15 +12826,15 @@ mod tests {
             min_percentile: 0,
         });
         assert!(app.tag_labels().iter().any(|l| l == "Шкаф"));
-        // Старая метка вне словаря не теряется: веса уже посчитаны.
+        // An old label outside the dictionary is not lost: the weights are computed already.
         app.tags.insert(1, vec![("старый".to_string(), 0.5)]);
         assert!(app.tag_labels().iter().any(|l| l == "старый"));
-        // Выключенный тег исчезает из фильтра.
+        // A disabled tag disappears from the filter.
         if let Some(d) = app.tag_defs.iter_mut().find(|d| d.id == "custom-1") {
             d.enabled = false;
         }
         assert!(!app.tag_labels().iter().any(|l| l == "Шкаф"));
-        // Минимальный процентиль тега поднимает его порог поверх общего ползунка.
+        // The minimum percentile of a tag raises its threshold above the common slider.
         app.tags.clear();
         for id in 0..120 {
             app.tags.insert(id, vec![("пляж".to_string(), id as f32 / 120.0)]);
@@ -12888,8 +12868,8 @@ mod tests {
         assert_eq!(CalScale::Day.deeper(), None);
     }
 
-    /// Сетка — «моменты»: свежий месяц первым, внутри месяца свежие сверху,
-    /// файлы без даты — последней группой (M16, ADR 0033).
+    /// The grid is "moments": the fresh month first, inside a month the fresh ones on top, the
+    /// files without a date in the last group (M16, ADR 0033).
     #[test]
     fn the_grid_groups_by_month_from_the_newest() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-ui.db"));
@@ -12913,13 +12893,13 @@ mod tests {
         let (may, april_pos, no_date) = (pos("May 2024"), pos("April 2024"), pos("No date"));
         assert!(may < april_pos, "май свежее апреля: {texts:?}");
         assert!(april_pos < no_date, "«No date» — последняя группа: {texts:?}");
-        // Внутри месяца подписи плиток идут от свежих к старым.
+        // Inside a month the tile captions go from the fresh ones to the old ones.
         let may_new = texts.iter().position(|t| t == "2024-05-09 10:00").unwrap();
         let may_old = texts.iter().position(|t| t == "2024-05-01 08:00").unwrap();
         assert!(may_new < may_old, "внутри месяца свежие сверху: {texts:?}");
     }
 
-    /// Файлы для M17: два майских, апрельский и снимок без даты.
+    /// Files for M17: two in May, one in April and a photo without a date.
     fn m17_rows() -> Vec<db::FileRow> {
         let mut may_old = file_row(1, "image", "may-old.jpg");
         may_old.taken_at = Some("2024-05-01T08:00".into());
@@ -12980,7 +12960,7 @@ mod tests {
         app.items[2].path = "/tmp/c.jpg".into();
         let visible: Vec<usize> = (0..app.items.len()).collect();
         app.settings.grid_sort = db::GridSort::Name;
-        // Имя без учёта регистра: A, b, c, undated.
+        // The name is case-insensitive: A, b, c, undated.
         assert_eq!(app.ordered(&visible), vec![1, 0, 2, 3]);
         app.settings.grid_sort = db::GridSort::SizeDesc;
         assert_eq!(
@@ -12996,7 +12976,7 @@ mod tests {
         app.settings.grid_sort = db::GridSort::SizeDesc;
         app.semantic_hits = Some(vec![4, 1, 3]);
         assert_eq!(app.ordered(&app.filtered()), vec![3, 0, 2]);
-        // Результаты поиска — плоский список по релевантности, без групп месяцев.
+        // The search results are a flat list by relevance, without month groups.
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
             !texts.iter().any(|t| t == "май 2024"),
@@ -13016,8 +12996,8 @@ mod tests {
         assert!(texts.iter().any(|t| t.contains("2024-05-09")), "{texts:?}");
     }
 
-    /// M18: порядок сетки — тот же `App::ordered`, поэтому Shift+клик берёт
-    /// диапазон по экрану, а не по возрастанию id.
+    /// M18: the grid order is the same `App::ordered`, so Shift+click takes a range by the
+    /// screen, not by ascending id.
     fn m18_order(app: &App) -> Vec<i64> {
         let visible: Vec<usize> = (0..app.items.len()).collect();
         app.ordered(&visible)
@@ -13050,12 +13030,12 @@ mod tests {
         );
         assert_eq!(app.selected, Some(3), "последний кликнутый — в инспекторе");
 
-        // Обратный диапазон даёт тот же набор, а якорь не двигается.
+        // The reverse range gives the same set, and the anchor does not move.
         app.pick_anchor = Some(3);
         app.pick_clicked(2, PickClick::Range, &order);
         assert_eq!(app.picked, BTreeSet::from([2, 1, 3]));
 
-        // Модификаторы читаются в действие: Ctrl/Cmd и Shift — разные вещи.
+        // The modifiers are read into an action: Ctrl/Cmd and Shift are different things.
         let mut mods = egui::Modifiers::default();
         assert_eq!(pick_kind(&mods), PickClick::Plain);
         mods.command = true;
@@ -13105,7 +13085,7 @@ mod tests {
             app.status
         );
 
-        // Возвращаем набор файлов и сбрасываем сравнение, прежде чем менять порядок.
+        // Return the set of files and reset the comparison before changing the order.
         app.query.clear();
         app.sync_pick_scope();
         app.pick_all();
@@ -13114,7 +13094,7 @@ mod tests {
         assert!(app.picked.is_empty());
         assert!(app.status.contains("изменился порядок"), "{}", app.status);
 
-        // Смена вида — тоже другой набор файлов.
+        // A change of the view is another set of files too.
         app.pick_all();
         app.view = super::View::Dupes;
         app.sync_pick_scope();
@@ -13136,8 +13116,8 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Clear selection"), "{texts:?}");
     }
 
-    /// M22.2a: список масштабируется тем же ползунком «Плитки», что плитка и
-    /// ряды. Высота строки — 24 + 0.16 × значение, кегли 12–14 / 10–12 px.
+    /// M22.2a: the list scales with the same "Tiles" slider as the tile and the rows. The row
+    /// height is 24 + 0.16 × the value, the font sizes 12–14 / 10–12 px.
     #[test]
     fn the_list_scales_with_the_tiles_slider() {
         assert!(
@@ -13151,20 +13131,20 @@ mod tests {
             "{}",
             list_row_height(260.0)
         );
-        // Кегли растут вместе со строкой и остаются в полосе 12–14 / 10–12.
+        // The font sizes grow with the row and stay within 12–14 / 10–12.
         assert_eq!(list_name_px(100.0), 12.0);
         assert_eq!(list_name_px(260.0), 14.0);
         assert_eq!(list_meta_px(100.0), 10.0);
         assert_eq!(list_meta_px(260.0), 12.0);
-        // Одно значение ползунка на три вида: список его не сбрасывает.
+        // One slider value for three views: the list does not reset it.
         let mut app = m17_app();
         app.tile_size = 200.0;
         app.settings.cell_style = db::CellStyle::List;
         assert_eq!(app.tile_size, 200.0);
     }
 
-    /// Рисует `draw_list` в кадре без окна и возвращает высоту, которую заняли
-    /// две строки: так проверяется масштаб списка на настоящем коде отрисовки.
+    /// Draws `draw_list` in a frame without a window and returns the height the two rows took:
+    /// that is how the list scale is checked on the real drawing code.
     fn list_frame_height(tile: f32) -> f32 {
         let ctx = egui::Context::default();
         let rows = m17_rows();
@@ -13207,21 +13187,21 @@ mod tests {
         used
     }
 
-    /// M22.2a: список масштабируется вместе с ползунком — две строки выше при 260,
-    /// чем при 100, и ни одна строка не обрезает текст по вертикали.
+    /// M22.2a: the list scales with the slider — two rows are taller at 260 than at 100, and no
+    /// row cuts the text vertically.
     #[test]
     fn the_list_draws_taller_rows_with_a_bigger_slider() {
         let small = list_frame_height(100.0);
         let big = list_frame_height(260.0);
-        // 40 px и 65.6 px на строку, плюс зазор под ними: важна разница, а не
-        // начальный отступ кадра.
+        // 40 px and 65.6 px per row, plus the gap under them: the difference matters, not the
+        // initial frame offset.
         assert!((small - 84.0).abs() < 8.0, "две строки по 40 px: {small}");
         assert!((big - 135.2).abs() < 8.0, "две строки по 65.6 px: {big}");
         assert!((big - small - 51.2).abs() < 0.5, "{small} → {big}");
     }
 
-    /// M22.2a: ползунок размера виден в шапке во всех трёх видах ячейки —
-    /// в списке он тоже есть, поэтому шапка не прыгает при переключении.
+    /// M22.2a: the size slider is visible in the heading in all three cell views — it is in the
+    /// list too, so the heading does not jump when switching.
     #[test]
     fn the_size_slider_shows_in_all_three_views() {
         let mut app = m17_app();
@@ -13254,7 +13234,7 @@ mod tests {
         let mut app = m17_app();
         app.view = View::Albums;
         app.album_selected = Some(7);
-        // Порядок альбома — данные: id 3, затем 1, затем 4. Файла 2 в альбоме нет.
+        // Album order is data: id 3, then 1, then 4. File 2 is not in the album.
         app.album_files = vec![3, 1, 4];
         app.album_set = [3, 1, 4].into_iter().collect();
         app.settings.grid_sort = db::GridSort::Album;
@@ -13262,11 +13242,11 @@ mod tests {
         assert_eq!(visible.len(), 3);
         assert!(!visible.contains(&1), "файла 2 в альбоме нет");
         assert_eq!(app.ordered(&visible), vec![2, 0, 3], "порядок берётся из альбома");
-        // Вне альбома «Порядок альбома» читается как дата ↓, а не молчит.
+        // Outside an album "Album order" reads as the date ↓ instead of staying silent.
         app.view = View::Grid;
         app.album_selected = None;
         assert_eq!(app.ordered(&visible), vec![0, 2, 3], "вне альбома — дата ↓");
-        // «Все файлы» внутри альбома — временный взгляд: состав не сужается.
+        // "All files" inside an album is a temporary look: the contents are not narrowed.
         app.view = View::Albums;
         app.album_selected = Some(7);
         app.album_browse_all = true;
@@ -13294,11 +13274,11 @@ mod tests {
         let chips = app.chips_snapshot();
         assert_eq!(chips.album.as_deref(), Some("Дача 2024"));
         assert!(chips.pickable, "в открытом альбоме выделение работает");
-        // В «Все файлы» чипа альбома нет: сетка там не сужена альбомом.
+        // In "All files" there is no album chip: the grid there is not narrowed by the album.
         app.view = View::Grid;
         assert!(app.chips_snapshot().album.is_none());
         app.view = View::Albums;
-        // Закрытие альбома возвращает дату ↓ и гасит сетку.
+        // Closing the album returns the date ↓ and dims the grid.
         app.album_close();
         assert_eq!(app.album_selected, None);
         assert_eq!(app.settings.grid_sort, db::GridSort::DateDesc);
@@ -13340,7 +13320,7 @@ mod tests {
             texts.iter().any(|t| t.contains("Выгрузить на диск")),
             "выгрузка (M20) обозначена: {texts:?}"
         );
-        // На диске ничего не создано: альбом — только строки БД.
+        // Nothing is created on disk: an album is DB rows only.
         assert!(!std::path::Path::new("/tmp/album.jpg").exists());
     }
 
@@ -13380,7 +13360,7 @@ mod tests {
         );
         assert!(!out.join("На_печать").exists(), "план ничего не создаёт");
 
-        // Каталог внутри архива — отказ с понятным текстом, а не выгрузка в оригиналы.
+        // A folder inside the archive is a refusal with a clear text, not an export into the originals.
         let archive = out.join("archive");
         std::fs::create_dir_all(archive.join("sub")).unwrap();
         app.settings.roots = vec![archive.to_string_lossy().to_string()];
@@ -13389,7 +13369,7 @@ mod tests {
         assert!(err.contains("inside the archive folder"), "{err}");
     }
 
-    /// Экран «Целостность» существует без терминала: поля, три действия, подсказка.
+    /// The "Integrity" screen exists without a terminal: the fields, three actions, the hint.
     #[test]
     fn the_integrity_screen_shows_the_fields_and_the_buttons() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
@@ -13413,8 +13393,8 @@ mod tests {
         }
     }
 
-    /// Сверка одного и того же каталога с самим собой — не проверка, а трата времени:
-    /// отказ приходит до запуска фонового потока.
+    /// Comparing one and the same folder with itself is not a check but a waste of time: the
+    /// refusal comes before the background thread starts.
     #[test]
     fn the_check_refuses_one_path_twice() {
         let dir = std::env::temp_dir().join(format!(
@@ -13435,8 +13415,8 @@ mod tests {
         assert!(app.integrity_rx.is_none(), "проход не запускается");
     }
 
-    /// Существующий слепок не затирается первым нажатием: сначала подтверждение,
-    /// и только оно открывает запуск. Файл до подтверждения остаётся целым.
+    /// An existing manifest is not overwritten by the first press: a confirmation comes first, and
+    /// only it unlocks the start. The file stays intact until the confirmation.
     #[test]
     fn the_manifest_requires_a_confirmation_to_overwrite() {
         let dir = std::env::temp_dir().join(format!(
@@ -13455,15 +13435,15 @@ mod tests {
         assert!(app.integrity_overwrite, "ждём подтверждения");
         assert!(app.integrity_error.contains("уже есть"), "{}", app.integrity_error);
         assert_eq!(std::fs::read(&manifest).unwrap(), b"old", "старый слепок цел");
-        // Пути разбираются и при подтверждении: план готов, поток ещё не запущен.
+        // The paths are parsed on the confirmation too: the plan is ready, the thread is not started yet.
         assert!(matches!(
             app.integrity_plan(IntegrityJob::Manifest),
             Ok(IntegrityPlan::Manifest(_, _))
         ));
     }
 
-    /// Фоновый проход — не заглушка: поток считает sha256 и возвращает отчёт через `mpsc`,
-    /// который потом забирает кадр окна.
+    /// The background pass is not a stub: the thread computes sha256 and returns the report
+    /// through `mpsc`, which the window frame then takes.
     #[test]
     fn the_check_runs_in_the_background_and_returns_a_report() {
         let base = std::env::temp_dir().join(format!(
@@ -13494,8 +13474,8 @@ mod tests {
         }
     }
 
-    /// Готовый отчёт виден словами: вердикт, счётчики и кнопка копирования
-    /// берут текст из `verify`, а не собирают свой.
+    /// The finished report is visible in words: the verdict, the counters and the copy button take
+    /// the text from `verify` instead of building their own.
     #[test]
     fn the_check_result_shows_on_the_screen() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity.db"));
@@ -13533,11 +13513,11 @@ mod tests {
         );
     }
 
-    /// M10: срок вышел — есть баннер со словами и две кнопки, но сам проход не
-    /// запускается. «Напомнить позже» скрывает баннер до следующего запуска.
+    /// M10: the term is over — there is a banner with words and two buttons, but the pass itself
+    /// is not started. "Remind me later" hides the banner until the next launch.
     #[test]
     fn the_banner_reminds_about_the_check_and_does_not_start_it() {
-        // Имя уникально, а не «поверх прошлой БД»: тесты не удаляют файлов.
+        // The name is unique rather than "over the previous DB": the tests do not delete files.
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -13566,10 +13546,10 @@ mod tests {
         );
         assert!(!app.settings.verify_manifest.is_empty(), "слепок потерян");
         assert!(app.settings.verify_interval_days == 30);
-        // Панель запоминает высоту с прошлого кадра: баннер, добавленный в неё
-        // картинку, виден на втором кадре (как и окно на экране с 60 к/с).
+        // The panel remembers its height from the previous frame: a banner added to it is visible
+        // on the second frame (as the window on a 60 fps screen).
         let ctx = egui::Context::default();
-        // Текст баннера проверяется по-русски: язык — поле настроек, тест его задаёт сам.
+        // The banner text is checked in Russian: the language is a settings field, the test sets it itself.
         app.settings.lang = i18n::Lang::Ru;
         let _ = window_frame(&mut app, &ctx);
         let texts = window_frame(&mut app, &ctx);
@@ -13581,7 +13561,7 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Напомнить позже"), "{texts:?}");
         assert!(app.integrity_rx.is_none(), "баннер не запускает проход сам");
         assert!(app.integrity_progress.is_none());
-        // «Напомнить позже» — сессионное решение: срок остаётся тем же, баннер скрыт.
+        // "Remind me later" is a session decision: the term stays the same, the banner is hidden.
         app.verify_banner_hidden = true;
         let _ = window_frame(&mut app, &ctx);
         let texts = window_frame(&mut app, &ctx);
@@ -13591,8 +13571,8 @@ mod tests {
         );
     }
 
-    /// M21, ADR 0040: язык — поле настроек, а не глобальная переменная, поэтому тест
-    /// задаёт его сам. Остов окна (навигация, верхняя панель, фильтр) переводится целиком.
+    /// M21, ADR 0040: the language is a settings field, not a global variable, so the test sets it
+    /// itself. The shell of the window (navigation, top bar, filter) is translated completely.
     #[test]
     fn english_translates_the_window_shell() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-i18n.db"));
@@ -13606,8 +13586,8 @@ mod tests {
                 "нет «{needle}»: {texts:?}"
             );
         }
-        // Содержимое экранов (заголовок вида, чипы, карточка) переводится следующими
-        // шагами M21: здесь проверяется остов — навигация, верхняя панель, фильтр.
+        // The content of the screens (the view heading, the chips, the card) is translated by the
+        // next M21 steps: here the shell is checked — the navigation, the top bar, the filter.
         assert!(
             texts.iter().any(|t| t == "family archive"),
             "нет английского подзаголовка: {texts:?}"
@@ -13618,29 +13598,29 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Настройки"), "{texts:?}");
     }
 
-    /// Плитки идут строками по пропорциям кадра: превью заполняет плитку целиком,
-    /// ширина следует кадру, высота строки — ползунок «Плитки».
+    /// The tiles go in rows by the frame proportion: the preview fills the tile completely, the
+    /// width follows the frame, the row height follows the "Tiles" slider.
     #[test]
     fn grid_rows_are_built_by_proportions() {
         use super::{frame_aspect, row_fit};
-        // 10 кадров 4:3 в 700 px при целевой высоте 150: в строке 4, высота ~130.
+        // 10 frames of 4:3 in 700 px at a target height of 150: 4 in a row, height ~130.
         let a = [4.0 / 3.0; 10];
         let (n, h) = row_fit(&a, 700.0, 150.0, 2.0);
         assert_eq!(n, 4, "в строке должно быть четыре кадра 4:3");
         assert!((h - 130.0).abs() < 1.0, "высота строки {h}");
-        // Одинокая панорама не растягивается выше целевой высоты (600 px ширины).
+        // A lone panorama is not stretched above the target height (600 px of width).
         let (n, h) = row_fit(&[4.0], 700.0, 150.0, 2.0);
         assert_eq!(n, 1);
         assert_eq!(h, 150.0);
-        // Панорама и обычный кадр делят строку: ширина строки ровно 700 px.
+        // A panorama and an ordinary frame share a row: the row width is exactly 700 px.
         let (n, h) = row_fit(&[4.0, 4.0 / 3.0], 700.0, 150.0, 2.0);
         assert_eq!(n, 2);
         assert!((h * (4.0 + 4.0 / 3.0) + 2.0 - 700.0).abs() < 1.0, "h={h}");
-        // Узкое окно: один кадр 4:3 в строке, высота не больше целевой.
+        // A narrow window: one 4:3 frame in the row, the height no more than the target.
         let (n, h) = row_fit(&[4.0 / 3.0, 4.0 / 3.0], 200.0, 150.0, 2.0);
         assert_eq!(n, 1);
         assert!(h <= 150.0, "высота {h}");
-        // Пропорция берётся из размеров файла; у битого файла — 4:3.
+        // The proportion comes from the file size; a broken file gives 4:3.
         let mut f = file_row(1, "image", "a.jpg");
         assert!((frame_aspect(&f) - 4.0 / 3.0).abs() < 1e-6);
         f.width = 0;
@@ -13651,8 +13631,8 @@ mod tests {
         assert!(frame_aspect(&f) < 1.0, "портрет должен быть уже высоты");
     }
 
-    /// M22, ADR 0044: две палитры макета и выбор в настройках. Тема — данные
-    /// настроек, а не глобальная переменная, поэтому тест задаёт её сам.
+    /// M22, ADR 0044: the two palettes of the mock-up and the choice in the settings. The theme is
+    /// settings data, not a global variable, so the test sets it itself.
     #[test]
     fn the_theme_switches_the_palette_and_persists() {
         let ctx = egui::Context::default();
@@ -13667,7 +13647,7 @@ mod tests {
         let dark = ctx.style_of(egui::Theme::Dark);
         assert!(dark.visuals.dark_mode, "тёмная палитра не применилась");
         assert_eq!(dark.visuals.panel_fill, super::DARK.panel);
-        // Скругления макета: 4 у кнопок и чипов, 6 у меню, 8 у карточек и диалогов.
+        // The radii of the mock-up: 4 for buttons and chips, 6 for menus, 8 for cards and dialogs.
         assert_eq!(
             dark.visuals.widgets.inactive.corner_radius,
             egui::CornerRadius::same(super::RADIUS_CTRL as u8)
@@ -13680,7 +13660,7 @@ mod tests {
             dark.visuals.window_corner_radius,
             egui::CornerRadius::same(super::RADIUS_CARD as u8)
         );
-        // Тема хранится в `settings` (key/value, схема не меняется).
+        // The theme is stored in `settings` (key/value, the schema does not change).
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -13701,8 +13681,8 @@ mod tests {
         assert_eq!(db::load_settings(&c).theme, db::ThemeMode::Light);
     }
 
-    /// Выбор языка живёт в БД (`settings.lang`), а не в памяти процесса: после
-    /// перезапуска окно открывается на том языке, который выбрал владелец.
+    /// The language choice lives in the DB (`settings.lang`), not in the process memory: after a
+    /// restart the window opens in the language the owner chose.
     #[test]
     fn the_interface_language_is_saved_in_the_db() {
         let stamp = std::time::SystemTime::now()
@@ -13725,8 +13705,8 @@ mod tests {
         assert_eq!(app.settings.lang, i18n::Lang::Ru, "язык потерян при перезапуске");
     }
 
-    /// Прогоняет фоновый проход до результата через кадры окна: так проверяется и
-    /// запись итога в настройки, а не только сам поток.
+    /// Runs a background pass to the result through window frames: that is how the writing of the
+    /// outcome into the settings is checked, not just the thread itself.
     fn poll_integrity_to_end(app: &mut App) {
         let ctx = egui::Context::default();
         for _ in 0..300 {
@@ -13739,8 +13719,8 @@ mod tests {
         panic!("проход не завершился за 3 с");
     }
 
-    /// M10: успешный слепок и проверка пишут дату, итог и отчёт в настройки и в
-    /// `<кэш>/photocat/verify-last.txt`; напоминание после этого не срабатывает.
+    /// M10: a successful manifest and check write the date, the outcome and the report into the
+    /// settings and into `<cache>/photocat/verify-last.txt`; the reminder does not fire after that.
     #[test]
     fn a_successful_check_writes_the_result_and_clears_the_reminder() {
         let base = std::env::temp_dir().join(format!(
@@ -13759,7 +13739,7 @@ mod tests {
                 verify_manifest: manifest.to_string_lossy().into_owned(),
                 verify_interval_days: 30,
                 verify_last_at: (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339(),
-                // Отчёт и его слова проверяются по-русски: это второй язык проекта.
+                // The report and its words are checked in Russian: it is the second language of the project.
                 lang: i18n::Lang::Ru,
                 ..Default::default()
             };
@@ -13769,7 +13749,7 @@ mod tests {
         assert!(matches!(app.verify_due, db::VerifyDue::Due { .. }));
         app.integrity_a = dir.to_string_lossy().into_owned();
         app.integrity_manifest = manifest.to_string_lossy().into_owned();
-        // Слепок — тоже полный проход по архиву: он ставит точку отсчёта срока.
+        // A manifest is a full pass over the archive too: it sets the reference point of the term.
         app.integrity_start(IntegrityJob::Manifest);
         poll_integrity_to_end(&mut app);
         {
@@ -13784,7 +13764,7 @@ mod tests {
             "после записи слепка срок ещё не вышел: {:?}",
             app.verify_due
         );
-        // Проверка по этому слепку пишет свой итог и тот же файл отчёта.
+        // A check against this manifest writes its own outcome and the same report file.
         app.integrity_start(IntegrityJob::Check);
         poll_integrity_to_end(&mut app);
         let c = db::open(&db_path).unwrap();
@@ -13801,7 +13781,7 @@ mod tests {
         assert!(text.contains("совпал"), "{text}");
     }
 
-    /// M10: ошибка проверки (битый слепок) не стирает прошлый успешный отчёт и дату.
+    /// M10: a check error (a broken manifest) does not erase the previous successful report and date.
     #[test]
     fn a_failed_check_keeps_the_previous_report() {
         let base = std::env::temp_dir().join(format!(
