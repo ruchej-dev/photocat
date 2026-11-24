@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Извлечение метаданных: sha256, перцептивный dHash, EXIF (дата, GPS, камера), превью.
+//! Metadata extraction: sha256, perceptual dHash, EXIF (date, GPS, camera), previews.
 
 use crate::tools::{self, Tool};
 use anyhow::{Context, Result};
@@ -49,7 +49,7 @@ fn hex(b: &[u8]) -> String {
     s
 }
 
-/// Перцептивный хеш 64 бита (dHash = gradient) — реагирует на структуру, не на цвет.
+/// A 64-bit perceptual hash (dHash = gradient): it reacts to structure, not to colour.
 pub fn dhash(p: &Path) -> Result<u64> {
     let img = image::ImageReader::open(p)?
         .with_guessed_format()?
@@ -74,9 +74,9 @@ pub fn hamming(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }
 
-/// Резкость: дисперсия лапласиана по серому. Чем выше, тем больше в кадре чётких границ.
-/// Считается на копии не больше 512 px по длинной стороне, чтобы значения снимков разного
-/// разрешения были сравнимы между собой.
+/// Sharpness: the variance of the Laplacian over grey. The more edges in the frame, the higher it is.
+/// Computed on a copy no larger than 512 px on the long side, so photos of different
+/// resolutions stay comparable.
 pub fn sharpness(gray: &image::GrayImage) -> f32 {
     const MAX_SIDE: u32 = 512;
     let (w, h) = gray.dimensions();
@@ -112,7 +112,7 @@ pub fn sharpness(gray: &image::GrayImage) -> f32 {
     (sum2 / n as f64 - mean * mean).max(0.0) as f32
 }
 
-/// Метаданные из EXIF.
+/// Metadata from EXIF.
 #[derive(Default, Debug, Clone)]
 pub struct Meta {
     pub taken_at: Option<String>,
@@ -187,7 +187,7 @@ fn to_deg(v: &exif::Value) -> Option<f64> {
 }
 
 fn parse_exif_dt(s: &str) -> Option<String> {
-    // kamadak выдаёт "2022-09-01 08:47:14"
+    // kamadak yields "2022-09-01 08:47:14"
     let s = s.trim();
     let (d, t) = s.split_once(' ')?;
     let (y, m, day) = {
@@ -202,7 +202,7 @@ fn parse_exif_dt(s: &str) -> Option<String> {
     Some(format!("{y:0>4}-{m:0>2}-{day:0>2}T{hh:0>2}:{mm:0>2}:{ss:0>2}"))
 }
 
-/// Дата из имени вида IMG_20240517_144243 / P_20190410_102958 / VID_20230107_203018.
+/// A date from a name like IMG_20240517_144243 / P_20190410_102958 / VID_20230107_203018.
 pub fn filename_date(p: &Path) -> Option<String> {
     let name = p.file_name()?.to_str()?;
     let b = name.as_bytes();
@@ -247,12 +247,12 @@ pub fn mtime_date(p: &Path) -> Option<String> {
     Some(dt.format("%Y-%m-%dT%H:%M:%S").to_string())
 }
 
-/// Сохранить уменьшенное превью в кэш. Возвращает имя файла превью относительно кэша.
+/// Save a scaled preview into the cache. Returns the preview file name relative to the cache.
 pub fn save_thumb(src: &Path, thumbs_dir: &Path, key: &str, max_side: u32) -> Result<String> {
     let img = image::ImageReader::open(src)?
         .with_guessed_format()?
         .decode()
-        .with_context(|| format!("декодирование {}", src.display()))?;
+        .with_context(|| format!("decoding {}", src.display()))?;
     let (w, h) = img.dimensions();
     let scale = (max_side as f32 / w.max(h) as f32).min(1.0);
     let (nw, nh) = ((w as f32 * scale).round() as u32, (h as f32 * scale).round() as u32);
@@ -264,7 +264,7 @@ pub fn save_thumb(src: &Path, thumbs_dir: &Path, key: &str, max_side: u32) -> Re
     let path = thumbs_dir.join(&rel);
     if !path.exists() {
         small.to_rgb8().save_with_format(&path, image::ImageFormat::Jpeg)
-            .with_context(|| format!("запись превью {}", path.display()))?;
+            .with_context(|| format!("writing the preview {}", path.display()))?;
     }
     Ok(rel)
 }
@@ -273,7 +273,7 @@ pub fn thumb_path(thumbs_dir: &Path, rel: &str) -> PathBuf {
     thumbs_dir.join(rel)
 }
 
-/// Что ffprobe знает о видео: разрешение с учётом поворота и длительность.
+/// What ffprobe knows about a video: the resolution with the rotation applied, and the duration.
 #[derive(Debug, Clone, Copy)]
 pub struct VideoMeta {
     pub width: u32,
@@ -281,8 +281,8 @@ pub struct VideoMeta {
     pub duration_s: f64,
 }
 
-/// Длительность и разрешение через `ffprobe -of json`. Поворот кадра из side data учитывается:
-/// у вертикальных видео с телефона иначе ширина и высота меняются местами.
+/// The duration and the resolution through `ffprobe -of json`. The frame rotation from the side
+/// data is taken into account: portrait phone videos would otherwise swap width and height.
 pub fn video_probe(tools: &tools::Tools, src: &Path) -> Result<VideoMeta> {
     let out = tools
         .command(Tool::Ffprobe)
@@ -298,7 +298,7 @@ pub fn video_probe(tools: &tools::Tools, src: &Path) -> Result<VideoMeta> {
         ])
         .arg(src)
         .output()
-        .with_context(|| format!("запуск ffprobe для {}", src.display()))?;
+        .with_context(|| format!("running ffprobe for {}", src.display()))?;
     if !out.status.success() {
         anyhow::bail!(
             "ffprobe {}: {}",
@@ -309,9 +309,9 @@ pub fn video_probe(tools: &tools::Tools, src: &Path) -> Result<VideoMeta> {
     parse_probe(&out.stdout, src)
 }
 
-/// Разбор JSON от ffprobe: вынесен отдельно, чтобы проверять поворот без запуска процесса.
+/// Parsing the ffprobe JSON: split out so the rotation can be checked without starting a process.
 fn parse_probe(out: &[u8], src: &Path) -> Result<VideoMeta> {
-    let v: serde_json::Value = serde_json::from_slice(out).context("разбор ответа ffprobe")?;
+    let v: serde_json::Value = serde_json::from_slice(out).context("parsing the ffprobe answer")?;
     let stream = &v["streams"][0];
     let mut width = stream["width"].as_u64().unwrap_or(0) as u32;
     let mut height = stream["height"].as_u64().unwrap_or(0) as u32;
@@ -328,12 +328,12 @@ fn parse_probe(out: &[u8], src: &Path) -> Result<VideoMeta> {
         .or_else(|| v["format"]["duration"].as_f64())
         .unwrap_or(0.0);
     if width == 0 || height == 0 {
-        anyhow::bail!("ffprobe не дал разрешение для {}", src.display());
+        anyhow::bail!("ffprobe gave no resolution for {}", src.display());
     }
     Ok(VideoMeta { width, height, duration_s })
 }
 
-/// Кадр-обложка из видео: ищем на 10% длительности (быстрый seek до входа читает только нужное).
+/// A cover frame from a video: 10% into the duration, a fast seek to the keyframe reads only what it needs.
 fn extract_frame(
     tools: &tools::Tools,
     src: &Path,
@@ -349,7 +349,7 @@ fn extract_frame(
         .args(["-frames:v", "1", "-vf", &vf, "-q:v", "3", "-y"])
         .arg(dst)
         .output()
-        .with_context(|| format!("запуск ffmpeg для {}", src.display()))?;
+        .with_context(|| format!("running ffmpeg for {}", src.display()))?;
     if !out.status.success() {
         anyhow::bail!(
             "ffmpeg {}: {}",
@@ -358,12 +358,12 @@ fn extract_frame(
         );
     }
     if !dst.exists() {
-        anyhow::bail!("ffmpeg не создал кадр для {}", src.display());
+        anyhow::bail!("ffmpeg produced no frame for {}", src.display());
     }
     Ok(())
 }
 
-/// Полный проход по видео: ffprobe, кадр-обложка, dHash и резкость по кадру.
+/// The full pass over a video: ffprobe, the cover frame, dHash and sharpness over that frame.
 pub struct VideoInfo {
     pub width: u32,
     pub height: u32,
@@ -390,7 +390,7 @@ pub fn analyze_video(
     if empty {
         let seek = if meta.duration_s > 1.0 { meta.duration_s * 0.1 } else { 0.0 };
         if let Err(e) = extract_frame(tools, src, &path, seek, max_side) {
-            // У коротких или битых файлов seek может не найти кадр — пробуем с начала.
+            // A short or broken file may have no frame at the seek point — try from the start.
             if seek > 0.0 {
                 extract_frame(tools, src, &path, 0.0, max_side)?;
             } else {
@@ -401,7 +401,7 @@ pub fn analyze_video(
     let img = image::ImageReader::open(&path)?
         .with_guessed_format()?
         .decode()
-        .with_context(|| format!("декодирование кадра {}", path.display()))?;
+        .with_context(|| format!("decoding the frame {}", path.display()))?;
     let gray = img.to_luma8();
     Ok(VideoInfo {
         width: meta.width,
@@ -413,7 +413,7 @@ pub fn analyze_video(
     })
 }
 
-/// Установленные языковые пакеты tesseract. `None` — программы нет.
+/// The tesseract language packs installed. `None` — the program is absent.
 pub fn tesseract_langs(tools: &tools::Tools) -> Option<Vec<String>> {
     let out = tools
         .command(Tool::Tesseract)
@@ -428,7 +428,7 @@ pub fn tesseract_langs(tools: &tools::Tools) -> Option<Vec<String>> {
     Some(parse_langs(&text))
 }
 
-/// Разбор `tesseract --list-langs`: первая строка — заголовок, дальше коды по одному.
+/// Parsing `tesseract --list-langs`: the first line is a header, then one code per line.
 fn parse_langs(out: &str) -> Vec<String> {
     out.lines()
         .map(str::trim)
@@ -439,8 +439,8 @@ fn parse_langs(out: &str) -> Vec<String> {
         .collect()
 }
 
-/// Декодировать снимок с учётом EXIF-поворота: всё, что ищет координаты (лица, OCR),
-/// должно видеть кадр так же, как человек.
+/// Decode a photo with the EXIF rotation applied: everything that looks for coordinates (faces,
+/// OCR) must see the frame the way a person does.
 pub fn load_oriented(src: &Path) -> Result<image::DynamicImage> {
     use image::ImageDecoder;
     let mut decoder = image::ImageReader::open(src)?
@@ -452,9 +452,9 @@ pub fn load_oriented(src: &Path) -> Result<image::DynamicImage> {
     Ok(img)
 }
 
-/// Быстрый кадр для полноэкранного просмотра: JPEG декодируется сразу в уменьшенном
-/// масштабе через libjpeg-turbo (Linux), поворот EXIF применяется после. Остальные форматы
-/// и платформы идут через `load_oriented` + `thumbnail`.
+/// A fast frame for the full-screen viewer: a JPEG is decoded downscaled straight away
+/// through libjpeg-turbo (Linux), the EXIF rotation is applied afterwards. Other formats
+/// and platforms go through `load_oriented` + `thumbnail`.
 pub fn fast_view(src: &Path, max_side: u32) -> Result<(usize, usize, Vec<u8>)> {
     #[cfg(target_os = "linux")]
     if let Ok(frame) = fast_jpeg(src, max_side) {
@@ -468,8 +468,8 @@ pub fn fast_view(src: &Path, max_side: u32) -> Result<(usize, usize, Vec<u8>)> {
     ))
 }
 
-/// DCT-масштабирование TurboJPEG: для 108 МП снимка 1/4 даёт 3008 px за ~0,5 с вместо
-/// полного декода 12 032×9 024 и последующего ресайза (~1,3 с).
+/// TurboJPEG DCT scaling: for a 108 MP photo 1/4 gives 3008 px in ~0.5 s instead of a full
+/// decode of 12 032×9 024 and a later resize (~1.3 s).
 #[cfg(target_os = "linux")]
 fn fast_jpeg(src: &Path, max_side: u32) -> Result<(usize, usize, Vec<u8>)> {
     use turbojpeg::{Decompressor, PixelFormat, ScalingFactor};
@@ -501,7 +501,7 @@ fn fast_jpeg(src: &Path, max_side: u32) -> Result<(usize, usize, Vec<u8>)> {
     Ok(orient_rgba(scaled.width, scaled.height, img.pixels, orientation))
 }
 
-/// EXIF-поворот без декодирования пикселей.
+/// The EXIF orientation without decoding pixels.
 pub fn exif_orientation(src: &Path) -> Option<u8> {
     use std::io::BufReader;
     let file = std::fs::File::open(src).ok()?;
@@ -513,7 +513,7 @@ pub fn exif_orientation(src: &Path) -> Option<u8> {
         .map(|v| v as u8)
 }
 
-/// Применить EXIF-поворот к уже декодированным RGBA-пикселям.
+/// Apply the EXIF rotation to already decoded RGBA pixels.
 fn orient_rgba(w: usize, h: usize, data: Vec<u8>, orientation: u8) -> (usize, usize, Vec<u8>) {
     if orientation <= 1 {
         return (w, h, data);
@@ -541,8 +541,8 @@ fn orient_rgba(w: usize, h: usize, data: Vec<u8>, orientation: u8) -> (usize, us
     (w as usize, h as usize, out.into_raw())
 }
 
-/// Вход для OCR: повёрнутый по EXIF кадр не больше `max_side`, PNG в памяти.
-/// Декодируем сами: `tesseract` не читает EXIF-поворот, а снимок с телефона иначе ляжет боком.
+/// The OCR input: an EXIF-rotated frame no larger than `max_side`, a PNG in memory.
+/// We decode it ourselves: `tesseract` ignores the EXIF rotation, and a phone photo would lie on its side.
 fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
     let mut img = load_oriented(src)?;
     if img.width() > max_side || img.height() > max_side {
@@ -550,7 +550,7 @@ fn ocr_input_png(src: &Path, max_side: u32) -> Result<Vec<u8>> {
     }
     let mut png = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .with_context(|| format!("подготовка PNG для OCR {}", src.display()))?;
+        .with_context(|| format!("preparing the OCR PNG {}", src.display()))?;
     Ok(png)
 }
 
@@ -558,29 +558,29 @@ fn tesseract_text(tools: &tools::Tools, png: &[u8], lang: &str) -> Result<String
     let mut child = tools
         .command(Tool::Tesseract)
         .args(["stdin", "stdout", "-l", lang, "--psm", "3"])
-        // Один процесс tesseract не должен занимать все ядра: потоков задаёт наше планирование.
+        // One tesseract process must not take every core: our scheduler sets the thread count.
         .env("OMP_THREAD_LIMIT", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("запуск tesseract (нужны tesseract и языки {lang})"))?;
-    let mut stdin = child.stdin.take().context("tesseract: stdin недоступен")?;
+        .with_context(|| format!("running tesseract (tesseract and the languages {lang} are needed)"))?;
+    let mut stdin = child.stdin.take().context("tesseract: stdin is unavailable")?;
     let data = png.to_vec();
-    // Пишем в stdin параллельно чтению stdout: иначе большой текст упрётся в буфер трубы.
+    // Write to stdin while reading stdout: otherwise a large text hits the pipe buffer.
     let writer = std::thread::spawn(move || stdin.write_all(&data));
     let out = child.wait_with_output()?;
     writer
         .join()
-        .map_err(|_| anyhow::anyhow!("tesseract: поток записи упал"))??;
+        .map_err(|_| anyhow::anyhow!("tesseract: the writing thread died"))??;
     if !out.status.success() {
         anyhow::bail!("tesseract: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Текст с картинки через внешний `tesseract` (ADR 0018).
-/// Оригинал только читается: PNG уходит процессу в stdin, временных файлов не появляется.
+/// Text from an image through the external `tesseract` (ADR 0018).
+/// The original is only read: the PNG goes to the process on stdin, no temporary files appear.
 pub fn ocr_image(
     tools: &tools::Tools,
     src: &Path,
@@ -591,7 +591,7 @@ pub fn ocr_image(
     tesseract_text(tools, &png, lang)
 }
 
-/// Один декод на файл: размеры, dHash, превью.
+/// One decode per file: sizes, dHash, preview.
 pub struct ImageInfo {
     pub width: u32,
     pub height: u32,
@@ -606,9 +606,9 @@ pub fn analyze_image(
     key: &str,
     max_side: u32,
 ) -> Result<ImageInfo> {
-    // Читаем с EXIF-поворотом: телефонный портрет физически лежит на боку, и без
-    // `apply_orientation` превью, dHash и резкость считались бы по повёрнутому кадру.
-    // Размеры после поворота — те, что видит владелец, поэтому они и идут в БД.
+    // Read with the EXIF rotation applied: a phone portrait physically lies on its side, and
+    // without `apply_orientation` the preview, dHash and sharpness would be computed from the
+    // rotated frame. The sizes after the rotation are what the owner sees, so they go into the DB.
     let img = load_oriented(src)?;
     let (w, h) = img.dimensions();
     let gray = img.to_luma8();
@@ -619,16 +619,16 @@ pub fn analyze_image(
         (h as f32 * scale).round().max(1.0) as u32,
     );
     let small = img.resize_exact(nw, nh, image::imageops::FilterType::Triangle);
-    // Резкость — по тому же уменьшенному кадру, что уходит в превью: дёшево и сравнимо.
+    // Sharpness over the same scaled frame that goes into the preview: cheap and comparable.
     let sharpness = sharpness(&small.to_luma8());
     let sub = &key[..2.min(key.len())];
     let dir = thumbs_dir.join(sub);
     std::fs::create_dir_all(&dir)?;
     let rel = format!("{sub}/{key}.jpg");
     let path = thumbs_dir.join(&rel);
-    // Превью в кэше могло быть сделано старой версией — без EXIF-поворота. Сверяем
-    // его размеры с ожидаемыми и перезаписываем только тогда: кэш остаётся кэшем,
-    // а телефонный портрет перестаёт лежать на боку без `--refresh` всего архива.
+    // The cached preview may come from an older version — without the EXIF rotation. Its
+    // size is compared with the expected one and only then rewritten: the cache stays a cache,
+    // and a phone portrait stops lying on its side without `--refresh` of the whole archive.
     let cached = image::ImageReader::open(&path)
         .ok()
         .and_then(|r| r.into_dimensions().ok());
@@ -636,18 +636,18 @@ pub fn analyze_image(
         small
             .to_rgb8()
             .save_with_format(&path, image::ImageFormat::Jpeg)
-            .with_context(|| format!("запись превью {}", path.display()))?;
+            .with_context(|| format!("writing the preview {}", path.display()))?;
     }
     Ok(ImageInfo { width: w, height: h, dhash, sharpness, thumb: rel })
 }
 
-/// Вход CLIP: два кадра на снимок — центр-кроп и весь кадр с полями (letterbox).
+/// The CLIP input: two frames per photo — a centre crop and the whole frame with margins (letterbox).
 ///
-/// Центр-кроп даёт крупный объект, но на вертикальных и широких кадрах отрезает
-/// контекст (белые полки без верха и низа CLIP читает как лист бумаги). Весь кадр
-/// сохраняет пропорции, поэтому векторы усредняются в `embed`: модель видит и
-/// деталь, и обстановку. Превью декодируется один раз на оба кадра.
-/// Раскладка — CHW с нормализацией модели.
+/// The centre crop gives a large object, but on portrait and wide frames it cuts the context
+/// off (white shelves without top or bottom read to CLIP as a sheet of paper). The whole
+/// frame keeps the proportions, so `embed` averages the vectors: the model sees both the
+/// detail and the surroundings. The preview is decoded once for both frames.
+/// The layout is CHW with the model normalization.
 pub fn clip_inputs(
     thumb: &Path,
     size: u32,
@@ -656,7 +656,7 @@ pub fn clip_inputs(
     let img = image::ImageReader::open(thumb)?
         .with_guessed_format()?
         .decode()
-        .with_context(|| format!("декодирование превью {}", thumb.display()))?
+        .with_context(|| format!("decoding the preview {}", thumb.display()))?
         .to_rgb8();
     let (w, h) = img.dimensions();
     let side = w.min(h).max(1);
@@ -670,25 +670,25 @@ pub fn clip_inputs(
     ))
 }
 
-/// Вход SigLIP: весь кадр растягивается в квадрат `size` (у SigLIP нет центр-кропа).
-/// Полей не добавляем: processor_config.json описывает обычный resize 224×224.
+/// The SigLIP input: the whole frame is stretched into a `size` square (SigLIP has no centre crop).
+/// No margins are added: processor_config.json describes a plain 224×224 resize.
 pub fn squash_input(thumb: &Path, size: u32, norm: &ImageNorm) -> Result<Vec<f32>> {
     let img = image::ImageReader::open(thumb)?
         .with_guessed_format()?
         .decode()
-        .with_context(|| format!("декодирование превью {}", thumb.display()))?
+        .with_context(|| format!("decoding the preview {}", thumb.display()))?
         .to_rgb8();
     let scaled = image::imageops::resize(&img, size, size, norm.filter());
     Ok(to_chw(&scaled, size, norm))
 }
 
-/// Параметры предобработки кадра: у CLIP и SigLIP разные средние/дисперсии и фильтр.
+/// The preprocessing parameters: CLIP and SigLIP differ in mean/variance and in the filter.
 #[derive(Clone, Copy, Debug)]
 pub struct ImageNorm {
     pub mean: [f32; 3],
     pub std: [f32; 3],
-    /// SigLIP обучен на bicubic-ресайзе; CLIP-путь оставлен билинейным, чтобы
-    /// уже посчитанные векторы не пришлось пересчитывать.
+    /// SigLIP was trained on a bicubic resize; the CLIP path stays bilinear so the vectors
+    /// already computed do not have to be recomputed.
     pub cubic: bool,
 }
 
@@ -702,21 +702,21 @@ impl ImageNorm {
     }
 }
 
-/// Нормализация CLIP ViT-B/32 (и её мультиязычной текстовой башни).
+/// The CLIP ViT-B/32 normalization (and that of its multilingual text tower).
 pub const CLIP_NORM: ImageNorm = ImageNorm {
     mean: [0.481_454_7, 0.457_827_5, 0.408_210_7],
     std: [0.268_629_5, 0.261_302_6, 0.275_777_1],
     cubic: false,
 };
 
-/// Нормализация SigLIP: mean/std 0.5 по processor_config.json.
+/// The SigLIP normalization: mean/std 0.5 per processor_config.json.
 pub const SIGLIP_NORM: ImageNorm = ImageNorm {
     mean: [0.5, 0.5, 0.5],
     std: [0.5, 0.5, 0.5],
     cubic: true,
 };
 
-/// Нормализация модели и раскладка RGB → CHW.
+/// The model normalization and the RGB → CHW layout.
 fn to_chw(img: &image::RgbImage, size: u32, norm: &ImageNorm) -> Vec<f32> {
     let plane = (size * size) as usize;
     let mut out = vec![0f32; plane * 3];
@@ -732,8 +732,8 @@ fn to_chw(img: &image::RgbImage, size: u32, norm: &ImageNorm) -> Vec<f32> {
     out
 }
 
-/// Вписать кадр в квадрат `size`, сохранив пропорции; поля — средний цвет кадра.
-/// Средний цвет не вносит в картинку чёрную рамку, которой в архиве нет.
+/// Fit the frame into a `size` square keeping the proportions; the margins take the mean colour.
+/// The mean colour does not put a black frame into the picture that the archive does not have.
 fn letterbox(img: &image::RgbImage, size: u32) -> image::RgbImage {
     letterbox_with(img, size, image::imageops::FilterType::Triangle)
 }
@@ -758,7 +758,7 @@ fn letterbox_with(
     canvas
 }
 
-/// Средний цвет кадра (по всем пикселям, без прозрачности).
+/// The mean colour of the frame (over all pixels, without transparency).
 fn average_color(img: &image::RgbImage) -> image::Rgb<u8> {
     let n = (img.width() as u64 * img.height() as u64).max(1);
     let mut sum = [0u64; 3];
@@ -785,19 +785,19 @@ mod tests {
 
     use super::*;
 
-    /// APP1 с одним тегом EXIF Orientation — минимальный, но валидный TIFF.
+    /// APP1 with a single EXIF Orientation tag — a minimal but valid TIFF.
     fn exif_app1(orientation: u16) -> Vec<u8> {
         let mut tiff = Vec::new();
         tiff.extend_from_slice(b"II");
         tiff.extend_from_slice(&42u16.to_le_bytes());
         tiff.extend_from_slice(&8u32.to_le_bytes());
-        tiff.extend_from_slice(&1u16.to_le_bytes()); // число записей IFD0
+        tiff.extend_from_slice(&1u16.to_le_bytes()); // the number of IFD0 entries
         tiff.extend_from_slice(&0x0112u16.to_le_bytes()); // Orientation
         tiff.extend_from_slice(&3u16.to_le_bytes()); // SHORT
         tiff.extend_from_slice(&1u32.to_le_bytes()); // count
         tiff.extend_from_slice(&orientation.to_le_bytes());
         tiff.extend_from_slice(&[0, 0]);
-        tiff.extend_from_slice(&0u32.to_le_bytes()); // следующего IFD нет
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // no next IFD
         let mut seg = Vec::new();
         seg.extend_from_slice(&[0xFF, 0xE1]);
         seg.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
@@ -806,8 +806,8 @@ mod tests {
         seg
     }
 
-    /// M22: телефонный портрет физически лежит на боку, а EXIF говорит «повернуть».
-    /// Превью, размеры и хеш обязаны считаться по тому кадру, который видит владелец.
+    /// M22: a phone portrait physically lies on its side while EXIF says "rotate".
+    /// The preview, the sizes and the hash must come from the frame the owner sees.
     #[test]
     fn the_preview_respects_the_exif_orientation() {
         let mut jpeg = Vec::new();
@@ -817,7 +817,7 @@ mod tests {
             .unwrap();
         let mut with_exif = Vec::with_capacity(jpeg.len() + 40);
         with_exif.extend_from_slice(&jpeg[..2]); // SOI
-        with_exif.extend_from_slice(&exif_app1(6)); // повернуть на 90°
+        with_exif.extend_from_slice(&exif_app1(6)); // rotate by 90°
         with_exif.extend_from_slice(&jpeg[2..]);
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -831,11 +831,11 @@ mod tests {
         let path = dir.join("rot.jpg");
         std::fs::write(&path, &with_exif).unwrap();
         let info = analyze_image(&path, &dir.join("thumbs"), "0123456789abcdef01234567", 320)
-            .expect("файл с EXIF-поворотом читается");
+            .expect("a file with the EXIF rotation is readable");
         assert_eq!(
             (info.width, info.height),
             (20, 40),
-            "размеры должны быть после поворота"
+            "the sizes must be those after the rotation"
         );
         let thumb = image::ImageReader::open(dir.join("thumbs").join(&info.thumb))
             .unwrap()
@@ -844,13 +844,13 @@ mod tests {
         assert_eq!(
             (thumb.width(), thumb.height()),
             (20, 40),
-            "превью тоже повёрнуто"
+            "the preview is rotated too"
         );
-        // Каталог не удаляем: проверка архитектуры запрещает удаление файлов в src/.
+        // The folder is not removed: the architecture check forbids deleting files in src/.
     }
 
     #[test]
-    #[ignore = "нужен PHOTOCAT_BIG_JPEG: путь к тяжёлому JPEG"]
+    #[ignore = "needs PHOTOCAT_BIG_JPEG: a path to a heavy JPEG"]
     fn fast_view_beats_a_full_decode_of_a_big_jpeg() {
         let Some(path) = std::env::var_os("PHOTOCAT_BIG_JPEG").map(std::path::PathBuf::from)
         else {
@@ -864,7 +864,7 @@ mod tests {
         let img = load_oriented(&path).unwrap().thumbnail(1920, 1920);
         assert!(img.width() > 0);
         let full = t1.elapsed();
-        println!("fast_view {w}x{h}: {fast:?}; полный декод + thumbnail: {full:?}");
+        println!("fast_view {w}x{h}: {fast:?}; a full decode + thumbnail: {full:?}");
         assert!(fast < full);
     }
 
@@ -907,16 +907,16 @@ mod tests {
 
     #[test]
     fn letterbox_keeps_the_proportions_and_fills_the_margins_with_the_mean_colour() {
-        // Вертикальный кадр 100×200: в квадрат 20 он войдёт как 10×20 по центру.
+        // A portrait frame 100×200 fits a 20 square as 10×20 in the centre.
         let tall = image::RgbImage::from_pixel(100, 200, image::Rgb([255, 0, 0]));
         let out = letterbox(&tall, 20);
         assert_eq!(out.dimensions(), (20, 20));
         assert_eq!(out.get_pixel(2, 10), &image::Rgb([255, 0, 0]));
         assert_eq!(out.get_pixel(10, 10), &image::Rgb([255, 0, 0]));
-        // Поля слева и справа — средний цвет кадра, а не чёрная рамка.
+        // The margins left and right take the mean colour, not a black frame.
         assert_eq!(out.get_pixel(1, 10), &image::Rgb([255, 0, 0]));
 
-        // Широкий 200×100: 20×10 по центру, поля сверху и снизу.
+        // A wide 200×100: 20×10 in the centre, margins above and below.
         let wide = image::RgbImage::from_pixel(200, 100, image::Rgb([0, 0, 255]));
         let out = letterbox(&wide, 20);
         assert_eq!(out.dimensions(), (20, 20));
@@ -926,8 +926,8 @@ mod tests {
 
     #[test]
     fn the_clip_input_gives_two_frames_of_one_size() {
-        // Временный файл перезаписывается, но не удаляется: архив неприкосновенен,
-        // а удаление файлов в `src/` запрещено проверкой границ.
+        // The temporary file is overwritten but not removed: the archive is untouchable,
+        // and deleting files in `src/` is forbidden by the boundary check.
         let path = std::env::temp_dir().join("photocat-clip-inputs.png");
         image::RgbImage::from_pixel(160, 320, image::Rgb([120, 130, 140]))
             .save(&path)
@@ -936,7 +936,7 @@ mod tests {
         let plane = (224 * 224) as usize;
         assert_eq!(center.len(), plane * 3);
         assert_eq!(whole.len(), plane * 3);
-        // Центр-кроп вертикального кадра — это его середина, не растянутые поля.
+        // The centre crop of a portrait frame is its middle, not stretched margins.
         assert!(center.iter().all(|v| v.is_finite()));
         assert!(whole.iter().all(|v| v.is_finite()));
     }

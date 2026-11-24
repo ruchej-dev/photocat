@@ -155,7 +155,7 @@ impl IntegrityOutcome {
                         i18n::Lang::Ru => format!(
                             "слепок записан: {} файлов ({}) → {}",
                             stats.files,
-                            db::human(stats.bytes as i64),
+                            db::human_in(lang, stats.bytes as i64),
                             out.display()
                         ),
                     }
@@ -1293,6 +1293,7 @@ fn draw_album_tree(
     albums: &[db::AlbumNode],
     selected: Option<i64>,
     expanded: &mut BTreeSet<i64>,
+    lang: i18n::Lang,
 ) -> Option<i64> {
     let mut chosen = None;
     for node in albums {
@@ -1332,7 +1333,7 @@ fn draw_album_tree(
                 node.files,
                 trashed,
                 node.subalbums,
-                db::human(node.bytes)
+                db::human_in(lang, node.bytes)
             );
             if ui
                 .selectable_label(selected == Some(node.id), text)
@@ -1353,7 +1354,12 @@ fn draw_album_tree(
 }
 
 /// Плитка подальбома: папка с именем и счётчиками, клик открывает её.
-fn draw_album_cell(ui: &mut egui::Ui, node: &db::AlbumNode, tile: f32) -> bool {
+fn draw_album_cell(
+    ui: &mut egui::Ui,
+    node: &db::AlbumNode,
+    tile: f32,
+    lang: i18n::Lang,
+) -> bool {
     let w = tile.clamp(100.0, 260.0);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 96.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
@@ -1388,7 +1394,7 @@ fn draw_album_cell(ui: &mut egui::Ui, node: &db::AlbumNode, tile: f32) -> bool {
         ui.painter().text(
             egui::pos2(rect.left() + 10.0, rect.top() + 72.0),
             egui::Align2::LEFT_TOP,
-            db::human(node.bytes),
+            db::human_in(lang, node.bytes),
             egui::FontId::proportional(11.0),
             dim(ui),
         );
@@ -1886,7 +1892,7 @@ impl App {
                 self.status = format!(
                     "в индексе {} файлов, {}",
                     rows.len(),
-                    db::human(rows.iter().map(|r| r.size).sum())
+                    db::human_in(settings.lang, rows.iter().map(|r| r.size).sum())
                 );
                 self.settings = settings;
                 self.tag_defs = embed::ensure_tag_defs(
@@ -3565,7 +3571,7 @@ impl App {
                     db::human_in(lang, bytes)
                 ),
                 i18n::Lang::Ru => {
-                    format!("Будет перенесено в системную корзину ОС: файлов {n}, {}.", db::human(bytes))
+                    format!("Будет перенесено в системную корзину ОС: файлов {n}, {}.", db::human_in(lang, bytes))
                 }
             });
             ui.label(
@@ -5281,7 +5287,7 @@ impl App {
                     i18n::Lang::Ru => format!(
                         "групп: {}, дублей на {}, за {:.1} с",
                         self.groups.len(),
-                        db::human(waste),
+                        db::human_in(lang, waste),
                         t0.elapsed().as_secs_f32()
                     ),
                 };
@@ -5298,7 +5304,7 @@ impl App {
                     "в группах {}, помечено лишними {}, освободится {}",
                     sum.groups,
                     sum.marked_drop,
-                    db::human(sum.freed)
+                    db::human_in(lang, sum.freed)
                 ),
             };
             ui.label(egui::RichText::new(summary).size(11.0).color(dim(ui)));
@@ -7395,7 +7401,11 @@ impl App {
         if !self.selected.is_some_and(|id| self.picked.contains(&id)) {
             self.selected = Some(first);
         }
-        self.status = format!("выбрано {} · {}", self.picked.len(), db::human(bytes));
+        self.status = format!(
+            "выбрано {} · {}",
+            self.picked.len(),
+            db::human_in(self.settings.lang, bytes)
+        );
     }
 
     /// Esc снимает выделение, Ctrl+A берёт найденное — только в сетке, когда
@@ -9572,7 +9582,7 @@ impl eframe::App for App {
                             db::human_in(lang, waste)
                         ),
                         i18n::Lang::Ru => {
-                            format!("групп {}, зря {}", groups.len(), db::human(waste))
+                            format!("групп {}, зря {}", groups.len(), db::human_in(lang, waste))
                         }
                     },
                 )
@@ -9608,7 +9618,7 @@ impl eframe::App for App {
                     i18n::Lang::Ru => format!(
                         "файлов {}, {}",
                         self.trash_items.len(),
-                        db::human(self.trash_items.iter().map(|r| r.size).sum())
+                        db::human_in(lang, self.trash_items.iter().map(|r| r.size).sum())
                     ),
                 },
             ),
@@ -9842,7 +9852,7 @@ impl eframe::App for App {
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             if let Some(id) =
-                                draw_album_tree(ui, &albums, album_selected, &mut album_expanded)
+                                draw_album_tree(ui, &albums, album_selected, &mut album_expanded, lang)
                             {
                                 album_action = Some(AlbumAction::Select(id));
                             }
@@ -9904,7 +9914,7 @@ impl eframe::App for App {
                     ui.label(egui::RichText::new("Подальбомы").size(11.0).color(dim(ui)));
                     ui.horizontal_wrapped(|ui| {
                         for child in &children {
-                            if draw_album_cell(ui, child, self.tile_size) {
+                            if draw_album_cell(ui, child, self.tile_size, lang) {
                                 album_action = Some(AlbumAction::Select(child.id));
                             }
                         }
@@ -10049,7 +10059,7 @@ impl eframe::App for App {
                                         n + 1,
                                         reason,
                                         g.members.len(),
-                                        db::human(g.waste)
+                                        db::human_in(lang, g.waste)
                                     ),
                                 };
                                 ui.label(head);
@@ -10387,7 +10397,7 @@ impl eframe::App for App {
                                     ),
                                     i18n::Lang::Ru => format!(
                                         "{month_n} файлов за месяц, {}",
-                                        db::human(month_bytes)
+                                        db::human_in(lang, month_bytes)
                                     ),
                                 });
                                 if month_n == 0 {
@@ -10721,7 +10731,7 @@ impl eframe::App for App {
                                             i18n::Lang::Ru => format!(
                                                 "{day} — {} файлов, {}",
                                                 idxs.len(),
-                                                db::human(bytes)
+                                                db::human_in(lang, bytes)
                                             ),
                                         });
                                         let row: Vec<&FileRow> =

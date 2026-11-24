@@ -15,10 +15,10 @@ use std::sync::OnceLock;
 /// The language of the interface. Stored in the DB as a code (`en`, `ru`), chosen in the settings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Lang {
-    /// Основной язык проекта (docs/, README, коммиты).
+    /// The main language of the project (docs/, README, commits).
     #[default]
     En,
-    /// Второй язык: прежний интерфейс и прежняя документация.
+    /// The second language: the former interface and the former documentation.
     Ru,
 }
 
@@ -32,7 +32,7 @@ impl Lang {
         }
     }
 
-    /// Неизвестное или пустое значение — основной язык, без падения (как `GridSort::parse`).
+    /// An unknown or empty value means the main language, never a panic (like `GridSort::parse`).
     pub fn parse(s: &str) -> Lang {
         match s.trim().to_ascii_lowercase().as_str() {
             "ru" | "rus" | "russian" => Lang::Ru,
@@ -40,7 +40,7 @@ impl Lang {
         }
     }
 
-    /// Подпись в списке выбора: всегда на своём языке, чтобы её узнали без перевода.
+    /// The label in the chooser: always in its own language, so it is recognised without a translation.
     pub fn label(self) -> &'static str {
         match self {
             Lang::En => "English",
@@ -48,10 +48,10 @@ impl Lang {
         }
     }
 
-    /// Язык из ярлыка локали: `ru_RU.UTF-8`, `en_US`, `ru:en`, `ru-RU`. `None` — локаль
-    /// не про язык (`C`, `POSIX`) или язык нам неизвестен: тогда решает вызывающий.
+    /// The language from a locale tag: `ru_RU.UTF-8`, `en_US`, `ru:en`, `ru-RU`. `None` means the tag
+    /// is not about a language (`C`, `POSIX`), or the language is unknown: the caller decides then.
     pub fn from_tag(tag: &str) -> Option<Lang> {
-        // `LANGUAGE` — список предпочтений через `:`; берём первый знакомый язык.
+        // `LANGUAGE` is a preference list separated by `:`; the first known language wins.
         for part in tag.split(':') {
             let Some(head) = part.trim().split(['.', '@']).next() else {
                 continue;
@@ -68,10 +68,10 @@ impl Lang {
         None
     }
 
-    /// Язык системы на первом запуске (M21, ADR 0040). Порядок переменных — как у
-    /// POSIX: заданный `LC_ALL`/`LC_MESSAGES` решает сам (`C` там — это «без языка»,
-    /// дальше не смотрим); иначе `LANGUAGE` (список предпочтений) и `LANG`.
-    /// Неизвестный язык — английский, как просил владелец.
+    /// The language of the system on the first launch (M21, ADR 0040). The order of the variables
+    /// follows POSIX: a set `LC_ALL`/`LC_MESSAGES` decides on its own (`C` there means "no
+    /// language", nothing else is looked at); otherwise `LANGUAGE` (a preference list) and `LANG`.
+    /// An unknown language means English, as the owner asked.
     pub fn from_env() -> Lang {
         for key in ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"] {
             let Ok(value) = std::env::var(key) else {
@@ -143,7 +143,7 @@ const NOUNS: &[(&str, [&str; 2], [&str; 3])] = &[
     ),
 ];
 
-/// A counter with the right number: «3 files» / «3 файла», «1 file» / «1 файл».
+/// A counter with the right number: English has two plural forms, Russian three.
 /// English needs two forms, Russian three: [one, 2–4, 5+]. The noun is a key of `NOUNS`.
 pub fn count(lang: Lang, n: usize, noun: &'static str) -> String {
     let entry = NOUNS
@@ -168,6 +168,15 @@ pub fn count(lang: Lang, n: usize, noun: &'static str) -> String {
             };
             format!("{n} {word}")
         }
+    }
+}
+
+/// The size units of the interface: bytes and their binary multiples.
+/// The number format is one; only these five labels change with the language.
+pub fn units(lang: Lang) -> [&'static str; 5] {
+    match lang {
+        Lang::En => ["B", "KiB", "MiB", "GiB", "TiB"],
+        Lang::Ru => ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"],
     }
 }
 
@@ -224,7 +233,7 @@ pub fn weekday(lang: Lang, day: usize) -> &'static str {
 const RU_WEEKDAYS: [&str; 7] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const EN_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/// «found 4 of 10» / «найдено 4 из 10».
+/// «found 4 of 10» — the same phrase in both languages, built in one place.
 pub fn found(lang: Lang, shown: usize, total: usize) -> String {
     match lang {
         Lang::En => format!("found {shown} of {total}"),
@@ -232,17 +241,17 @@ pub fn found(lang: Lang, shown: usize, total: usize) -> String {
     }
 }
 
-/// «by relevance: 4 files» / «по релевантности: 4 файла».
+/// «by relevance: 4 files» — the whole phrase is translated, the number is substituted.
 pub fn relevance(lang: Lang, n: usize) -> String {
     format!("{} {}", t(lang, "by relevance:"), count(lang, n, "file"))
 }
 
-/// «Select all (4)» / «Выбрать все (4)».
+/// «Select all (4)».
 pub fn select_all(lang: Lang, n: usize) -> String {
     format!("{} ({n})", t(lang, "Select all"))
 }
 
-/// «3 of 12» / «3 из 12» — the counter of the full screen.
+/// «3 of 12» — the counter of the full screen.
 pub fn position(lang: Lang, index: usize, total: usize) -> String {
     match lang {
         Lang::En => format!("{index} of {total}"),
@@ -250,7 +259,7 @@ pub fn position(lang: Lang, index: usize, total: usize) -> String {
     }
 }
 
-/// «3 s» / «3 с» — the slideshow interval.
+/// «3 s» — the slideshow interval.
 pub fn seconds(lang: Lang, n: u64) -> String {
     match lang {
         Lang::En => format!("{n} s"),
@@ -358,9 +367,9 @@ default: GUI"#,
 /// once: `t("Settings")` in the navigation, the dialog title and a hint gives one word.
 /// Filled screen by screen (see `plan/I18N.md`).
 const PAIRS: &[(&str, &str)] = &[
-    // --- CLI: справка ---------------------------------------------------------
+    // --- CLI: the help text ---------------------------------------------------
     USAGE,
-    // --- остов приложения: навигация, верхняя панель, статус -------------------
+    // --- the window shell: navigation, the top bar, the status ----------------
     ("All files", "Все файлы"),
     ("Albums", "Альбомы"),
     ("Calendar", "Календарь"),
@@ -408,7 +417,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("no recognized text yet", "нет распознанного текста"),
     ("model not downloaded", "модель не скачана"),
     ("search cleared", "поиск сброшен"),
-    // --- сетка, чипы, порядок --------------------------------------------------
+    // --- the grid, chips, order ------------------------------------------------
     ("Tiles", "Плитки"),
     (
         "tile size (a tile: frame width, rows: row height), 100–260 px",
@@ -490,7 +499,7 @@ const PAIRS: &[(&str, &str)] = &[
         "reminder postponed until the next launch",
         "напоминание отложено до следующего запуска",
     ),
-    // --- карточка файла и инспектор --------------------------------------------
+    // --- the file card and the inspector ---------------------------------------
     ("File details", "Сведения о файле"),
     ("Hide", "Скрыть"),
     ("free up room for the grid and calendar", "освободить место сетке и календарю"),
@@ -561,7 +570,7 @@ const PAIRS: &[(&str, &str)] = &[
         "full screen: the frame and all recognized text",
         "полный экран: кадр и весь распознанный текст",
     ),
-    // --- дубли и серии ----------------------------------------------------------
+    // --- duplicates and series -------------------------------------------------
     ("Find groups", "Найти группы"),
     ("Export the plan", "Экспорт плана"),
     (
@@ -590,7 +599,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("decision not saved", "решение не сохранено"),
     ("spare", "лишний"),
     ("keep", "оставить"),
-    // --- календарь --------------------------------------------------------------
+    // --- the calendar ----------------------------------------------------------
     ("Year", "Год"),
     ("Month", "Месяц"),
     ("Week", "Неделя"),
@@ -615,7 +624,7 @@ const PAIRS: &[(&str, &str)] = &[
         "Pick a day in the calendar — its photos appear below.",
         "Выберите день в календаре — ниже появятся снимки.",
     ),
-    // --- лица --------------------------------------------------------------------
+    // --- people ----------------------------------------------------------------
     ("Merge threshold:", "Порог склейки:"),
     ("face model not downloaded", "модель лиц не скачана"),
     ("Face settings", "Настройки лиц"),
@@ -690,7 +699,7 @@ const PAIRS: &[(&str, &str)] = &[
         "downloading the face model: weights only, no photos",
         "скачивание модели лиц: только веса, без фотографий",
     ),
-    // --- корзина ---------------------------------------------------------------
+    // --- the trash -------------------------------------------------------------
     (
         "Files in the app trash: untouched on disk. “Restore” brings them back to the archive, \
          “Empty the trash” moves them to the OS trash after a confirmation.",
@@ -722,7 +731,7 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("Move to the OS trash", "Переместить в системную корзину"),
     ("Cancel", "Отмена"),
-    // --- целостность ------------------------------------------------------------
+    // --- integrity -------------------------------------------------------------
     ("comparing copies", "сверка копий"),
     ("writing the manifest", "запись слепка"),
     ("checking against the manifest", "проверка по слепку"),
@@ -821,7 +830,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("the outcome was not saved in the settings", "итог не сохранён в настройках"),
     ("report not written to", "отчёт не записан в"),
     ("error", "ошибка"),
-    // --- диалог «Настройки» ----------------------------------------------------
+    // --- the settings dialog ---------------------------------------------------
     ("AI model", "Модель ИИ"),
     ("Indexing & duplicates", "Индексация и дубли"),
     ("Tags", "Теги"),
@@ -854,7 +863,7 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("settings not saved", "настройки не сохранены"),
 
-    // --- левая панель: модель, теги, текст, сводка (M21.4f) --------------------
+    // --- the left panel: model, tags, text, summary (M21.4f) -------------------
     ("Compute tags", "Посчитать теги"),
     ("Model settings", "Настройки модели"),
     ("with a confident tag:", "с уверенным тегом:"),
@@ -900,7 +909,7 @@ const PAIRS: &[(&str, &str)] = &[
         "100% — самый сильный снимок этого тега, 0% — все; 70% — верхние 30%",
     ),
 
-    // --- настройки: модель (M21.4f) ---------------------------------------------
+    // --- settings: model (M21.4f) ----------------------------------------------
     ("Model", "Модель"),
     ("dims", "призн."),
     ("Model state", "Состояние модели"),
@@ -944,7 +953,7 @@ const PAIRS: &[(&str, &str)] = &[
         "Теги и векторы привязаны к модели: после смены модели их нужно посчитать.",
     ),
 
-    // --- настройки: индексация и дубли (M21.4f) ---------------------------------
+    // --- settings: indexing and duplicates (M21.4f) ----------------------------
     ("Indexing threads", "Потоков на индексацию"),
     ("threads", "потоков"),
     ("Duplicate threshold", "Порог дублей"),
@@ -956,7 +965,7 @@ const PAIRS: &[(&str, &str)] = &[
          находятся при любом пороге.",
     ),
 
-    // --- настройки: теги и словарь (M21.4f) -------------------------------------
+    // --- settings: tags and the dictionary (M21.4f) ----------------------------
     ("Tag filter threshold", "Порог фильтра по тегу"),
     ("tags are not computed yet", "теги ещё не посчитаны"),
     ("Confident tag threshold (cosine)", "Порог уверенного тега (косинус)"),
@@ -1051,7 +1060,7 @@ const PAIRS: &[(&str, &str)] = &[
         "CLIP: пересчёт тегов по сохранённым векторам…",
     ),
 
-    // --- настройки: лица (M21.4f) -----------------------------------------------
+    // --- settings: faces (M21.4f) ----------------------------------------------
     ("Face merge threshold (cosine)", "Порог склейки лиц (косинус)"),
     (
         "A higher threshold — fewer false merges, but one person may split into groups. \
@@ -1069,7 +1078,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("the face model is not ready", "модель лиц не готова"),
     ("face files:", "файлов лиц:"),
 
-    // --- настройки: хранилище (M21.4f) ------------------------------------------
+    // --- settings: storage (M21.4f) --------------------------------------------
     ("Index", "Индекс"),
     ("DB", "БД"),
     ("Cache", "Кэш"),
@@ -1103,7 +1112,7 @@ const PAIRS: &[(&str, &str)] = &[
          Витрина по датам — отдельная команда с явным подтверждением.",
     ),
 
-    // --- настройки: внешние программы (M21.4f) ----------------------------------
+    // --- settings: external programs (M21.4f) ----------------------------------
     (
         "Empty — the program is looked up in PATH. A path is checked by running it when saved; \
          without the program only its part is disabled.",
@@ -1137,7 +1146,7 @@ const PAIRS: &[(&str, &str)] = &[
         "веса модели придётся положить вручную (scripts/fetch-model.sh)",
     ),
 
-    // --- полный экран, плеер, выбор каталога, очистка кэша (M21.5) ----------------
+    // --- the full screen, the player, the folder chooser, the cache (M21.5) -----
     ("previous file — ←", "предыдущий файл — ←"),
     ("next file — →", "следующий файл — →"),
     ("ffplay in its own window", "ffplay отдельным окном"),
@@ -1186,7 +1195,7 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("the video stopped", "видео остановилось"),
     ("the video has finished", "видео доиграло"),
-    // Каталоги архива и выбор папки.
+    // Archive folders and the folder picker.
     ("Archive folders", "Каталоги архива"),
     (
         "You can index several folders. “Add a folder…” offers indexing straight away; \
@@ -1209,7 +1218,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("the folder was not removed from the index", "каталог не убран из индекса"),
     ("rows deleted", "удалено строк"),
     ("the files on disk are intact", "файлы на диске целы"),
-    // Очистка кэша и индекса: подтверждение.
+    // Cache and index cleanup: the confirmation.
     ("Clear the previews?", "Очистить превью?"),
     (
         "Only the files in <cache>/photocat/thumbs are deleted. The grid shows “no preview” \
@@ -1237,7 +1246,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("index reset; index a folder now", "индекс сброшен; проиндексируйте каталог"),
     ("cache cleared", "кэш очищен"),
     ("cleaning failed", "очистка не удалась"),
-    // --- CLI: отчёты и сообщения команд (M21.6) -------------------------------
+    // --- CLI: reports and command messages (M21.6) -----------------------------
     ("stopped: ", "остановлено: "),
     ("indexed {}/{} files ({}), unchanged {}, errors {}, {} s", "проиндексировано {}/{} файлов ({}), без изменений {}, ошибок {}, за {} с"),
     ("indexing: {}/{} files, {} errors", "индексация: {}/{} файлов, ошибок {}"),
@@ -1293,7 +1302,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("loading the CLIP model…", "загрузка модели CLIP…"),
     ("CLIP: {}/{} files, {} errors — {}", "CLIP: {}/{} файлов, ошибок {} — {}"),
     ("clusters: {} over {} photos, {} s → {}", "кластеров: {} на {} фото, за {} с → {}"),
-    // --- M15.7: размеченная проверка тегов ---------------------------------------
+    // --- M15.7: the labelled tag check -----------------------------------------
     ("no labels yet: fill in {} and run again", "разметки нет: заполните {} и повторите"),
     ("rows in the labels: {} · labelled {} · “other” {} · skipped {} · not labelled {} · missing from the index {}", "строк в разметке: {} · размечено {} · «другое» {} · пропущено {} · не размечено {} · нет в индексе {}"),
     ("a dictionary label fits {} % of the shots; {} of them allow a second label", "словарь покрывает {} % снимков; у {} допустима не одна метка"),
@@ -1437,7 +1446,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("query “{}”: {} results in {} ms", "запрос «{}»: результатов {} за {} мс"),
     ("repeat {}: {} ms", "повтор {}: {} мс"),
     ("on average: {} ms", "в среднем: {} мс"),
-    // --- названия и описания моделей в каталоге (M21.6, M15.6) ------------------
+    // --- the titles and notes of the model catalogue (M21.6, M15.6) -----------
     ("CLIP ViT-B/32, multilingual", "CLIP ViT-B/32, мультиязычная"),
     ("CLIP ViT-B/32, English", "CLIP ViT-B/32, английская"),
     ("SigLIP base 224, English", "SigLIP base 224, английская"),
@@ -1530,6 +1539,12 @@ mod tests {
         assert_eq!(month_name(Lang::En, 12), "December");
         assert_eq!(month_name(Lang::Ru, 0), "январь");
         assert_eq!(month_name(Lang::Ru, 99), "декабрь");
+    }
+
+    #[test]
+    fn the_size_units_follow_the_language() {
+        assert_eq!(units(Lang::En), ["B", "KiB", "MiB", "GiB", "TiB"]);
+        assert_eq!(units(Lang::Ru), ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"]);
     }
 
     #[test]

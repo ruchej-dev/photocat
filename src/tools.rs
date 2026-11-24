@@ -1,14 +1,14 @@
-//! Внешние программы (`ffmpeg`, `ffprobe`, `tesseract`, `curl`): откуда брать путь и как проверить.
+//! External programs (`ffmpeg`, `ffprobe`, `tesseract`, `curl`): where the path comes from and how it is checked.
 //!
-//! Пустое поле в настройках — программа ищется в `PATH`; непустое — запускается по указанному пути.
-//! Отсутствие программы — состояние, а не падение: отключается только её вид работы (ADR 0019, 0020).
+//! An empty field in the settings means the program is looked up in `PATH`; a non-empty one is run at that path.
+//! A missing program is a state, not a crash: only its kind of work is switched off (ADR 0019, 0020).
 
 use crate::i18n::{self, Lang};
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Программы, которые приложение запускает процессами.
+/// The programs the application starts as processes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Ffmpeg,
@@ -17,7 +17,7 @@ pub enum Tool {
     Curl,
 }
 
-/// Все программы в порядке показа в интерфейсе и `doctor`.
+/// Every program in the order the interface and `doctor` show it.
 pub const ALL: [Tool; 4] = [Tool::Ffmpeg, Tool::Ffprobe, Tool::Tesseract, Tool::Curl];
 
 impl Tool {
@@ -30,7 +30,7 @@ impl Tool {
         }
     }
 
-    /// Аргументы, после которых программа печатает версию и завершается.
+    /// The arguments after which the program prints its version and exits.
     pub fn version_args(self) -> &'static [&'static str] {
         match self {
             Tool::Ffmpeg | Tool::Ffprobe => &["-version"],
@@ -38,7 +38,7 @@ impl Tool {
         }
     }
 
-    /// Ключ настройки в БД (`settings.value`).
+    /// The settings key in the DB (`settings.value`).
     pub fn setting_key(self) -> &'static str {
         match self {
             Tool::Ffmpeg => "tool_ffmpeg",
@@ -48,7 +48,7 @@ impl Tool {
         }
     }
 
-    /// Зачем нужна — для «Настроек» и `doctor` (M21.6: язык интерфейса или отчёта).
+    /// Why it is needed — for "Settings" and `doctor` (M21.6: the language of the interface or report).
     pub fn purpose(self, lang: Lang) -> &'static str {
         i18n::t(
             lang,
@@ -61,7 +61,7 @@ impl Tool {
         )
     }
 
-    /// Что перестанет работать без неё. Остальное приложение работает всегда.
+    /// What stops working without it. The rest of the application always works.
     pub fn without(self, lang: Lang) -> &'static str {
         i18n::t(
             lang,
@@ -77,8 +77,8 @@ impl Tool {
     }
 }
 
-/// Плеер видео: `ffplay` рядом с настроенным `ffmpeg` или из `PATH`.
-/// ffplay сам декодирует и видео, и звук — второй поток и ручной звук не нужны.
+/// The video player: `ffplay` next to the configured `ffmpeg`, or from `PATH`.
+/// ffplay decodes both video and sound itself — no second stream and no manual audio are needed.
 pub fn ffplay(tools: &Tools, path: &Path) -> Result<std::process::Child> {
     let name = if cfg!(windows) { "ffplay.exe" } else { "ffplay" };
     let program = tools
@@ -98,11 +98,11 @@ pub fn ffplay(tools: &Tools, path: &Path) -> Result<std::process::Child> {
         cmd.creation_flags(0x0800_0000);
     }
     cmd.spawn()
-        .with_context(|| format!("не запустить ffplay для {}", path.display()))
+        .with_context(|| format!("cannot start ffplay for {}", path.display()))
 }
 
-/// Открыть файл системным проигрывателем/просмотрщиком: приложение не декодирует видео сам.
-/// Процесс запускается и не ждёт завершения; ошибка запуска возвращается, а не глотается.
+/// Open a file in the system player/viewer: the application does not decode video itself.
+/// The process is started without waiting for it to finish; a failure to start is returned, not swallowed.
 pub fn open_path(path: &Path) -> Result<()> {
     let mut cmd = {
         #[cfg(target_os = "windows")]
@@ -127,11 +127,11 @@ pub fn open_path(path: &Path) -> Result<()> {
         cmd.creation_flags(0x0800_0000);
     }
     cmd.spawn()
-        .with_context(|| format!("не открыть {}", path.display()))?;
+        .with_context(|| format!("cannot open {}", path.display()))?;
     Ok(())
 }
 
-/// Явные пути к программам. Пустая строка = `PATH`.
+/// Explicit paths to the programs. An empty string means `PATH`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tools {
     pub ffmpeg: String,
@@ -159,18 +159,18 @@ impl Tools {
         }
     }
 
-    /// Владелец задал путь явно (пусто — ищем в `PATH`).
+    /// The owner set the path explicitly (empty means a lookup in `PATH`).
     pub fn configured(&self, tool: Tool) -> bool {
         !self.get(tool).trim().is_empty()
     }
 
-    /// Что передаётся в `Command::new`: явный путь или имя программы для поиска в `PATH`.
+    /// What goes into `Command::new`: an explicit path, or the program name to search in `PATH`.
     pub fn program(&self, tool: Tool) -> &str {
         let custom = self.get(tool).trim();
         if custom.is_empty() { tool.name() } else { custom }
     }
 
-    /// Откуда взята программа — словами для интерфейса и `doctor`.
+    /// Where the program came from, in words for the interface and `doctor`.
     pub fn source(&self, tool: Tool, lang: Lang) -> &'static str {
         i18n::t(
             lang,
@@ -182,7 +182,7 @@ impl Tools {
         )
     }
 
-    /// Где программа лежит на самом деле: явный путь или первый найденный в `PATH`.
+    /// Where the program really lies: the explicit path, or the first one found in `PATH`.
     pub fn locate(&self, tool: Tool) -> Option<PathBuf> {
         let program = self.program(tool);
         let path = Path::new(program);
@@ -192,7 +192,7 @@ impl Tools {
         search_path(program)
     }
 
-    /// Команда с подавленным консольным окном на Windows (ADR 0019, п. 3).
+    /// A command with the console window suppressed on Windows (ADR 0019, item 3).
     pub fn command(&self, tool: Tool) -> Command {
         #[allow(unused_mut)]
         let mut cmd = Command::new(self.program(tool));
@@ -204,15 +204,15 @@ impl Tools {
         cmd
     }
 
-    /// Проверить путь: запустить программу и получить первую строку версии.
-    /// Ошибка содержит и путь, и причину — её показывает статус, а не консоль.
+    /// Check a path: run the program and take the first line of its version.
+    /// The error carries both the path and the reason — the status shows it, not a console.
     pub fn version(&self, tool: Tool) -> Result<String> {
         let program = self.program(tool);
         let out = self
             .command(tool)
             .args(tool.version_args())
             .output()
-            .with_context(|| format!("{}: не запустить «{program}»", tool.name()))?;
+            .with_context(|| format!("{}: cannot start “{program}”", tool.name()))?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
             let detail = stderr.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
@@ -220,8 +220,8 @@ impl Tools {
                 "{} «{program}»: {}{}",
                 tool.name(),
                 match out.status.code() {
-                    Some(code) => format!("код выхода {code}"),
-                    None => "процесс прерван".to_string(),
+                    Some(code) => format!("exit code {code}"),
+                    None => "the process was interrupted".to_string(),
                 },
                 if detail.is_empty() { String::new() } else { format!(" — {detail}") }
             );
@@ -229,18 +229,18 @@ impl Tools {
         let stdout = String::from_utf8_lossy(&out.stdout);
         let line = stdout.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
         if line.is_empty() {
-            bail!("{} «{program}»: запустилась, но версию не сообщила", tool.name());
+            bail!("{} “{program}”: started but reported no version", tool.name());
         }
         Ok(line.to_string())
     }
 
-    /// Версия или `None`: для проверок «работает ли» без шума об ошибке.
+    /// The version, or `None`: for "does it work" checks without noise about an error.
     pub fn probe(&self, tool: Tool) -> Option<String> {
         self.version(tool).ok()
     }
 }
 
-/// Поиск имени программы в `PATH`. Явные пути сюда не попадают.
+/// A lookup of the program name in `PATH`. Explicit paths never get here.
 fn search_path(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -250,7 +250,7 @@ fn search_path(program: &str) -> Option<PathBuf> {
         }
         #[cfg(windows)]
         {
-            // На Windows `Command` подставляет `.exe` сам, а для показа пути это делаем мы.
+            // On Windows `Command` appends `.exe` itself, but for showing the path we do it.
             for ext in ["exe", "cmd", "bat"] {
                 let candidate = dir.join(format!("{program}.{ext}"));
                 if candidate.is_file() {
@@ -282,7 +282,7 @@ mod tests {
         *t.get_mut(Tool::Tesseract) = "/opt/ocr/bin/tesseract".into();
         assert_eq!(t.program(Tool::Tesseract), "/opt/ocr/bin/tesseract");
         assert_eq!(t.source(Tool::Tesseract, Lang::Ru), "задано в настройках");
-        // Пробелы вокруг пути не должны ломать запуск.
+        // Spaces around a path must not break the launch.
         *t.get_mut(Tool::Ffmpeg) = "  ffmpeg  ".into();
         assert_eq!(t.program(Tool::Ffmpeg), "ffmpeg");
         assert!(t.configured(Tool::Ffmpeg));
@@ -327,7 +327,7 @@ mod tests {
         let mut t = Tools::default();
         *t.get_mut(Tool::Ffmpeg) = fake.to_string_lossy().to_string();
         assert_eq!(t.locate(Tool::Ffmpeg), Some(fake.clone()));
-        // Файл есть, но это не программа: ошибка запуска, а не тихий успех.
+        // The file exists but is not a program: a launch error, not a silent success.
         assert!(t.version(Tool::Ffmpeg).is_err());
     }
 }

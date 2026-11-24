@@ -1,4 +1,4 @@
-//! Работа с SQLite: схема, вставка, чтение, статистика.
+//! SQLite: the schema, inserts, reads, statistics.
 
 use crate::i18n::{self, Lang};
 use anyhow::{Context, Result};
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// Прогресс индексации (атомики, чтобы читать из GUI-потока).
+/// Indexing progress (atomics, so the GUI thread can read it).
 #[derive(Default)]
 pub struct Progress {
     done: AtomicUsize,
@@ -23,7 +23,7 @@ impl Progress {
     pub fn set_total(&self, n: usize) {
         self.total.store(n, Ordering::Relaxed);
     }
-    /// Начать заново (например, при переходе к следующей модели-кандидату).
+    /// Start over (for instance, when moving to the next candidate model).
     pub fn reset(&self) {
         self.done.store(0, Ordering::Relaxed);
         self.cancel.store(false, Ordering::Relaxed);
@@ -40,7 +40,7 @@ impl Progress {
     pub fn finish(&self) {
         self.finished.store(true, Ordering::Relaxed);
     }
-    /// Попросить прогон остановиться: воркеры проверяют флаг между файлами.
+    /// Ask the pass to stop: the workers check the flag between files.
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
@@ -68,7 +68,7 @@ impl Progress {
 }
 
 pub fn cache_dir() -> PathBuf {
-    // Linux — XDG, Windows — LOCALAPPDATA, macOS — обычный ~/.cache: без платформенных крейтов.
+    // Linux — XDG, Windows — LOCALAPPDATA, macOS — the usual ~/.cache: no platform crates.
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
@@ -83,20 +83,20 @@ pub fn resolve_db(explicit: Option<&Path>) -> Result<PathBuf> {
         None => cache_dir().join("photocat.db"),
     };
     if let Some(dir) = p.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("не создать {}", dir.display()))?;
+        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
     }
     Ok(p)
 }
 
 pub fn open(db: &Path) -> Result<Connection> {
-    let c = Connection::open(db).with_context(|| format!("не открыть БД {}", db.display()))?;
+    let c = Connection::open(db).with_context(|| format!("cannot open the DB {}", db.display()))?;
     init(&c)?;
     Ok(c)
 }
 
-/// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
-/// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
-/// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
+/// The schema version. It changes together with the DDL below: old DBs catch up once.
+/// While the version matches, `open` writes nothing — the DB can be read in parallel
+/// with a long pass (indexing, OCR) without hitting a lock.
 const SCHEMA_VERSION: i64 = 8;
 
 fn init(c: &Connection) -> Result<()> {
@@ -279,15 +279,15 @@ fn init(c: &Connection) -> Result<()> {
          );
          CREATE INDEX IF NOT EXISTS album_files_file ON album_files(file_id);",
     )?;
-    // Схема старых БД дополняется на месте: данные не теряются при обновлении.
+    // The schema of older DBs is extended in place: no data is lost on an upgrade.
     ensure_column(c, "files", "sharpness", "REAL")?;
     ensure_column(c, "files", "decision", "TEXT")?;
     ensure_column(c, "files", "duration_s", "REAL")?;
     ensure_column(c, "files", "trashed_at", "INTEGER")?;
-    // Схема 7: теги разных моделей не смешиваются — ключ (file_id, tag, source).
-    // Старая таблица перестраивается на месте, данные сохраняются; триггер сброса
-    // тегов при смене sha256 пересоздаётся, иначе он ссылался бы на старую таблицу
-    // и удалял только legacy-источник `clip`.
+    // Schema 7: tags of different models do not mix — the key is (file_id, tag, source).
+    // The old table is rebuilt in place and the data is kept; the trigger that resets
+    // tags on a sha256 change is recreated, otherwise it would point at the old table
+    // and delete only the legacy `clip` source.
     if version < 7 {
         c.execute_batch(
             "BEGIN;
@@ -319,14 +319,14 @@ fn init(c: &Connection) -> Result<()> {
                AND (source = 'clip' OR source LIKE 'clip:%');
          END;",
     )?;
-    // Схема 8: превью картинок считаются с EXIF-поворотом (M22). Старые превью
-    // телефонных портретов лежат на боку, поэтому путь к превью стирается: следующий
-    // `index` увидит `thumb IS NULL` и пересчитает кадр. Файлы, теги и альбомы не
-    // трогаются, на диске ничего не меняется.
+    // Schema 8: image previews follow the EXIF orientation (M22). Old previews of
+    // phone portraits lie on their side, so the preview path is cleared: the next
+    // `index` sees `thumb IS NULL` and recomputes the frame. Files, tags and albums are
+    // untouched, nothing on disk changes.
     if version < 8 {
         c.execute("UPDATE files SET thumb = NULL WHERE kind = 'image'", [])?;
     }
-    // Теги старых версий были без модели в источнике; переводим на id текущей модели.
+    // Tags of older versions had no model in the source; they move to the current model id.
     c.execute(
         "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
         [],
@@ -335,7 +335,7 @@ fn init(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Как сетка показывает файлы: группами по месяцам или одной непрерывной лентой (M17).
+/// How the grid shows files: grouped by months or one continuous ribbon (M17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GridLayout {
     #[default]
@@ -351,7 +351,7 @@ impl GridLayout {
         }
     }
 
-    /// Неизвестное значение из старой БД — значение по умолчанию, без падения.
+    /// An unknown value from an old DB means the default, never a panic.
     pub fn parse(value: &str) -> Self {
         match value {
             "flat" => GridLayout::Flat,
@@ -360,8 +360,8 @@ impl GridLayout {
     }
 }
 
-/// Тема интерфейса (M22, ADR 0044): тёмная, светлая или как в системе.
-/// Две палитры из макета — `dark` и `light`; `system` берёт выбор ОС.
+/// The interface theme (M22, ADR 0044): dark, light or follow the system.
+/// The two palettes of the mock-up are `dark` and `light`; `system` takes the OS choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThemeMode {
     #[default]
@@ -379,7 +379,7 @@ impl ThemeMode {
         }
     }
 
-    /// Неизвестное значение из старой БД — значение по умолчанию, без падения.
+    /// An unknown value from an old DB means the default, never a panic.
     pub fn parse(value: &str) -> Self {
         match value {
             "light" => ThemeMode::Light,
@@ -389,15 +389,15 @@ impl ThemeMode {
     }
 }
 
-/// Как показаны файлы в сетке (M22): плитка макета, строки по пропорциям или список.
+/// How files are shown in the grid (M22): the mock-up tile, proportion rows or a list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellStyle {
-    /// Плитка как в макете: кадр 4:3, снимок вписан целиком, подпись снизу.
+    /// The mock-up tile: a 4:3 frame, the snapshot fitted whole, the caption below.
     #[default]
     Tiles,
-    /// Строки по пропорциям: высота строки из ползунка, ширина плитки по кадру.
+    /// Proportion rows: the row height comes from the slider, the tile width from the frame.
     Rows,
-    /// Список: миниатюра, имя, дата, размер.
+    /// A list: thumbnail, name, date, size.
     List,
 }
 
@@ -410,7 +410,7 @@ impl CellStyle {
         }
     }
 
-    /// Неизвестное значение из старой БД — значение по умолчанию, без падения.
+    /// An unknown value from an old DB means the default, never a panic.
     pub fn parse(value: &str) -> Self {
         match value {
             "rows" => CellStyle::Rows,
@@ -420,8 +420,8 @@ impl CellStyle {
     }
 }
 
-/// Порядок плиток (M17). «Порядок альбома» (M19) действует только внутри
-/// выбранного альбома; вне его читается как «дата: новые сверху».
+/// The order of the tiles (M17). "Album order" (M19) works only inside the chosen
+/// album; outside it reads as "date: newest first".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GridSort {
     #[default]
@@ -454,74 +454,74 @@ impl GridSort {
     }
 }
 
-/// Тег в словаре: метка, промпты и порядок. Живёт в БД на каждую модель (M15.4),
-/// потому что метки — конфигурация владельца, а не константа в коде.
+/// A tag in the dictionary: the label, the prompts and the order. It lives in the DB per
+/// model (M15.4), because labels are the owner's configuration, not a constant in the code.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TagDef {
-    /// id модели (`embeddings.model`): у каждой модели свой словарь.
+    /// The model id (`embeddings.model`): every model has its own dictionary.
     pub model: String,
-    /// Стабильный ключ строки: по нему тег переименовывают и удаляют.
+    /// The stable key of the row: the tag is renamed and removed by it.
     pub id: String,
-    /// Подпись по-русски: она же ключ в `tags.tag`.
+    /// The label in Russian: it is also the key in `tags.tag`.
     pub label: String,
-    /// 2–3 общих шаблона; пустой список — тег выключен по смыслу.
+    /// 2–3 general templates; an empty list means the tag is off by definition.
     pub prompts: Vec<String>,
     pub enabled: bool,
-    /// Порядок в фильтре и редакторе.
+    /// The order in the filter and the editor.
     pub position: i64,
-    /// Минимальный процентиль показа тега (0 — сколько выбрано ползунком).
+    /// The minimum percentile for showing the tag (0 — whatever the slider picks).
     pub min_percentile: i32,
 }
 
-/// Настройки приложения. Хранятся в БД (рядом с индексом), а не в файле у архива.
+/// The application settings. Kept in the DB (next to the index), not in a file by the archive.
 #[derive(Debug, Clone)]
 pub struct Settings {
-    /// Куда скачивать модели и откуда их читать.
+    /// Where to download models to and read them from.
     pub models_dir: PathBuf,
-    /// id модели из каталога; пусто — первая доступная.
+    /// The catalogue model id; empty means the first available one.
     pub model_id: String,
-    /// Потолок размера скачиваемой модели, МиБ.
+    /// The size ceiling of a downloaded model, MiB.
     pub max_model_mb: u64,
-    /// Потоков на индексацию по умолчанию.
+    /// Indexing threads by default.
     pub index_jobs: usize,
-    /// Порог похожести dHash по умолчанию.
+    /// The default dHash similarity threshold.
     pub max_dist: u32,
-    /// Порог уверенного тега (сырой косинус) и отрыв от второго.
-    /// Это про карточку, OCR и `{tag}` в витрине, а не про фильтр.
+    /// The confident-tag threshold (raw cosine) and the margin over the second tag.
+    /// This is about the card, OCR and `{tag}` in the showcase, not about the filter.
     pub tag_show: f32,
     pub tag_margin: f32,
-    /// Порог отбора в фильтре по тегу — процентиль 0–100 (ADR 0032).
-    /// 100% — самый сильный снимок этого тега, 0% — все; 70% — верхние 30%.
+    /// The threshold of the tag filter — a percentile 0–100 (ADR 0032).
+    /// 100% — the strongest photo of this tag, 0% — all; 70% — the top 30%.
     pub tag_show_pct: i32,
-    /// Языки tesseract для распознавания текста, например `rus+eng`.
+    /// The tesseract languages for text recognition, for instance `rus+eng`.
     pub ocr_lang: String,
-    /// Пути к внешним программам; пусто — берётся из `PATH` (ADR 0020).
+    /// Paths to external programs; empty means a lookup in `PATH` (ADR 0020).
     pub tools: crate::tools::Tools,
-    /// Порог косинуса для склейки лиц в одного человека (ADR 0021).
+    /// The cosine threshold for merging faces into one person (ADR 0021).
     pub face_threshold: f32,
-    /// Размер плитки сетки, px (docs/UI.md).
+    /// The grid tile size, px (docs/UI.md).
     pub tile_size: f32,
-    /// Представление сетки: месяцы или плоская лента (M17).
+    /// The grid layout: months or a flat ribbon (M17).
     pub grid_layout: GridLayout,
-    /// Порядок плиток: дата, имя или размер (M17).
+    /// The tile order: date, name or size (M17).
     pub grid_sort: GridSort,
-    /// Как показаны файлы: плитка макета, строки по пропорциям или список (M22).
+    /// How files are shown: the mock-up tile, proportion rows or a list (M22).
     pub cell_style: CellStyle,
-    /// Каталоги, которые индексируются одной кнопкой; пусто — путь из верхней панели.
+    /// Folders indexed with one button; empty means the path from the top bar.
     pub roots: Vec<String>,
-    /// Напоминание о проверке целостности (M10): каталог и слепок, к которым относится
-    /// срок, интервал в днях (0 — напоминание выключено) и итог прошлого прохода.
+    /// The integrity reminder (M10): the folder and the manifest the term belongs to,
+    /// the interval in days (0 — the reminder is off) and the result of the last pass.
     pub verify_root: String,
     pub verify_manifest: String,
     pub verify_interval_days: u32,
-    /// RFC3339 UTC последнего полного прохода по архиву (слепок или проверка).
+    /// RFC3339 UTC of the last complete pass over the archive (a manifest or a check).
     pub verify_last_at: String,
     pub verify_last_ok: bool,
-    /// Тот же текст отчёта, что уходит в `<кэш>/photocat/verify-last.txt`.
+    /// The same report text that goes to `<cache>/photocat/verify-last.txt`.
     pub verify_last_report: String,
-    /// Язык интерфейса (M21, ADR 0040): `en` — основной, `ru` — второй.
+    /// The interface language (M21, ADR 0040): `en` is the main one, `ru` the second.
     pub lang: crate::i18n::Lang,
-    /// Тема интерфейса (M22, ADR 0044): тёмная по умолчанию, светлая — выбор владельца.
+    /// The interface theme (M22, ADR 0044): dark by default, light at the owner's choice.
     pub theme: ThemeMode,
 }
 
@@ -549,14 +549,14 @@ impl Default for Settings {
             roots: Vec::new(),
             verify_root: String::new(),
             verify_manifest: String::new(),
-            // 30 дней — спокойный срок для семейного архива; 0 выключает напоминание.
+            // 30 days is a calm term for a family archive; 0 switches the reminder off.
             verify_interval_days: 30,
             verify_last_at: String::new(),
             verify_last_ok: false,
             verify_last_report: String::new(),
-            // Проект продолжается на английском; русский остаётся выбором в настройках.
+            // The project continues in English; Russian stays a choice in the settings.
             lang: crate::i18n::Lang::En,
-            // Макет рисует тёмную палитру основной: семейный архив смотрят вечерами.
+            // The mock-up paints the dark palette as the main one: a family archive is looked at in the evening.
             theme: ThemeMode::Dark,
         }
     }
@@ -618,9 +618,9 @@ pub fn load_settings(conn: &Connection) -> Settings {
         }
     }
     if !has_tag_pct {
-        // Миграция M15.2: раньше `tag_show` был и фильтром, и порогом уверенности,
-        // поэтому ползунок уводил его до 0.50. Фильтр теперь в процентилях (70% по
-        // умолчанию), а уверенность возвращается к ADR 0013 — 0.22 и отрыв 0.01.
+        // Migration M15.2: `tag_show` used to be both a filter and a confidence threshold,
+        // so the slider drove it down to 0.50. The filter is in percentiles now (70% by
+        // default) and confidence is back to ADR 0013 — 0.22 with a margin of 0.01.
         s.tag_show = 0.22;
         s.tag_show_pct = 70;
     }
@@ -669,35 +669,35 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
     Ok(())
 }
 
-/// Пора ли проверять архив по слепку (M10). Считается по настройкам, а не по таймеру:
-/// приложение само ничего не запускает, только говорит «пора».
+/// Whether it is time to check the archive against the manifest (M10). Computed from the
+/// settings, not from a timer: the application starts nothing itself, it only says "due".
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VerifyDue {
-    /// Слепок не задан — напоминать не о чем.
+    /// No manifest is set — nothing to remind about.
     NoManifest,
-    /// Интервал 0 — владелец выключил напоминание.
+    /// The interval is 0 — the owner switched the reminder off.
     Disabled,
-    /// Срок ещё не вышел; `days_left` — сколько полных дней осталось.
+    /// The term has not come yet; `days_left` is how many full days remain.
     NotYet { days_left: i64 },
-    /// Срок вышел; `days_over` — на сколько дней (0 — ровно срок).
+    /// The term has passed; `days_over` is by how many days (0 — exactly due).
     Due { days_over: i64 },
 }
 
-/// RFC3339 → UTC. Пустое или испорченное значение — `None`.
+/// RFC3339 → UTC. An empty or broken value means `None`.
 pub fn parse_stamp(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s.trim())
         .ok()
         .map(|d| d.with_timezone(&chrono::Utc))
 }
 
-/// Решение «пора / не пора» одной функцией: одинаково для баннера и для тестов.
-/// `now` передаётся явно, чтобы «ровно срок» и «часы назад» проверялись без ожидания.
+/// The "due / not due" decision in one function: the same for the banner and for the tests.
+/// `now` is passed explicitly, so "exactly due" and "an hour ago" are checked without waiting.
 ///
-/// * нет слепка → `NoManifest`;
-/// * интервал 0 → `Disabled`;
-/// * слепка ещё не проверяли (пусто или мусор в дате) → `Due`;
-/// * дата в будущем (часы перевели назад) → `NotYet`: срок не наступил, паники нет;
-/// * иначе — по календарным суткам.
+/// * no manifest → `NoManifest`;
+/// * interval 0 → `Disabled`;
+/// * the manifest has never been checked (empty or broken date) → `Due`;
+/// * a date in the future (the clock was turned back) → `NotYet`: not due yet, no panic;
+/// * otherwise — by calendar days.
 pub fn verify_due(s: &Settings, now: chrono::DateTime<chrono::Utc>) -> VerifyDue {
     if s.verify_manifest.trim().is_empty() {
         return VerifyDue::NoManifest;
@@ -722,9 +722,9 @@ pub fn verify_due(s: &Settings, now: chrono::DateTime<chrono::Utc>) -> VerifyDue
     }
 }
 
-/// Одно значение из `settings` — для служебных ключей вроде версии словаря тегов.
-/// Язык интерфейса на первом запуске (M21, ADR 0040): если владелец его ещё не выбирал,
-/// берём локаль системы и сохраняем — дальше язык читается из БД, а не угадывается заново.
+/// One value from `settings` — for service keys like the dictionary version.
+/// The interface language on the first launch (M21, ADR 0040): if the owner has not chosen it
+/// yet, the system locale is taken and stored — afterwards the language is read from the DB, not guessed again.
 pub fn ensure_lang(conn: &Connection) -> Result<()> {
     if get_setting(conn, "lang").is_none() {
         set_setting(conn, "lang", crate::i18n::Lang::from_env().code())?;
@@ -756,13 +756,13 @@ pub fn hide_tag(db: &Path, file_id: i64, tag: &str) -> Result<()> {
     Ok(())
 }
 
-/// Вернуть все скрытые теги файла (оригинал не трогается, решение живёт в БД).
+/// Bring back every hidden tag of a file (the original is untouched, the decision lives in the DB).
 pub fn unhide_tags(db: &Path, file_id: i64) -> Result<usize> {
     let conn = open(db)?;
     Ok(conn.execute("DELETE FROM tag_hidden WHERE file_id=?1", params![file_id])?)
 }
 
-/// file_id → сколько тегов скрыто владельцем.
+/// file_id → how many tags the owner has hidden.
 pub fn load_hidden_counts(conn: &Connection) -> Result<HashMap<i64, usize>> {
     let mut st = conn.prepare("SELECT file_id, COUNT(*) FROM tag_hidden GROUP BY file_id")?;
     let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
@@ -774,7 +774,7 @@ pub fn load_hidden_counts(conn: &Connection) -> Result<HashMap<i64, usize>> {
     Ok(out)
 }
 
-/// Свои теги владельца: file_id → список подписей.
+/// The owner's own tags: file_id → a list of labels.
 pub fn load_user_tags(conn: &Connection) -> Result<HashMap<i64, Vec<String>>> {
     let mut st = conn.prepare("SELECT file_id, tag FROM user_tags ORDER BY tag")?;
     let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
@@ -828,7 +828,7 @@ fn ensure_column(c: &Connection, table: &str, column: &str, decl: &str) -> Resul
     Ok(())
 }
 
-/// Одна запись каталога.
+/// One catalogue entry.
 #[derive(Debug, Clone)]
 pub struct FileRow {
     pub id: i64,
@@ -846,12 +846,12 @@ pub struct FileRow {
     pub camera: Option<String>,
     pub dhash: Option<i64>,
     pub sharpness: Option<f64>,
-    /// Длительность видео в секундах; `NULL` у фото и у файлов без ffprobe.
+/// The video duration in seconds; `NULL` for photos and for files without ffprobe.
     pub duration_s: Option<f64>,
     pub thumb: Option<String>,
-    /// Решение владельца по дублю: `keep` | `drop` | `NULL` (не решено).
+/// The owner's decision on a duplicate: `keep` | `drop` | `NULL` (undecided).
     pub decision: Option<String>,
-    /// Время помещения в корзину приложения; `NULL` — файл в обычных видах.
+/// The time the file was put into the app trash; `NULL` means it shows in the usual views.
     #[allow(dead_code)]
     pub trashed_at: Option<i64>,
 }
@@ -892,7 +892,7 @@ pub fn insert(conn: &Connection, r: &FileRow) -> Result<()> {
     Ok(())
 }
 
-/// Пометить файл группы «оставить», остальные — «лишний». Оригиналы не трогаем: только БД.
+/// Mark one file of a group "keep", the rest "spare". Originals are untouched: DB rows only.
 pub fn mark_keep(db: &Path, keep: i64, drops: &[i64]) -> Result<()> {
     let mut conn = open(db)?;
     mark_keep_conn(&mut conn, keep, drops)
@@ -922,7 +922,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<FileRow>> {
     load_where(conn, "trashed_at IS NULL")
 }
 
-/// Файлы корзины приложения: они ещё на диске, но скрыты из обычных видов.
+/// The files of the app trash: still on disk, but hidden from the usual views.
 pub fn load_trashed(conn: &Connection) -> Result<Vec<FileRow>> {
     load_where(conn, "trashed_at IS NOT NULL")
 }
@@ -969,7 +969,7 @@ fn load_where(conn: &Connection, filter: &str) -> Result<Vec<FileRow>> {
     Ok(out)
 }
 
-/// Пометить файл в корзину приложения: на диске ничего не меняется.
+/// Put a file into the app trash: nothing on disk changes.
 pub fn mark_trashed(db: &Path, file_id: i64) -> Result<()> {
     let conn = open(db)?;
     conn.execute(
@@ -979,7 +979,7 @@ pub fn mark_trashed(db: &Path, file_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Вернуть файл из корзины приложения.
+/// Bring a file back from the app trash.
 pub fn untrash(db: &Path, file_id: i64) -> Result<()> {
     let conn = open(db)?;
     conn.execute(
@@ -989,13 +989,13 @@ pub fn untrash(db: &Path, file_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Убрать файл из индекса после переноса в системную корзину. Оригинал уже не наш.
+/// Drop a file from the index after it moved to the OS trash. The original is not ours any more.
 pub fn purge_file(db: &Path, file_id: i64) -> Result<()> {
     let conn = open(db)?;
     delete_file_rows(&conn, &[file_id])
 }
 
-/// Убрать каталог из индекса: строки БД, не файлы на диске.
+/// Drop a folder from the index: DB rows, not files on disk.
 pub fn remove_root(db: &Path, root: &str) -> Result<usize> {
     let mut conn = open(db)?;
     let root = root.trim_end_matches(['/', '\\']);
@@ -1032,8 +1032,8 @@ fn delete_file_rows(conn: &Connection, ids: &[i64]) -> Result<()> {
 }
 
 fn delete_file_rows_tx(tx: &Connection, ids: &[i64]) -> Result<()> {
-    // Альбомы хранят только id файлов: строку убираем вместе с файлом, иначе
-    // осталась бы «висячая» ссылка, а порядок альбома — с дыркой.
+    // Albums keep file ids only: the row is removed together with the file, otherwise
+    // a dangling reference would stay and the album order would keep a hole.
     let mut albums: Vec<i64> = Vec::new();
     for id in ids {
         let file_albums: Vec<i64> = {
@@ -1064,7 +1064,7 @@ fn delete_file_rows_tx(tx: &Connection, ids: &[i64]) -> Result<()> {
     Ok(())
 }
 
-/// sha256 уже посчитанных векторов: file_id → sha256 файла на момент расчёта.
+/// sha256 of the vectors already computed: file_id → the file's sha256 at the time of the run.
 pub fn embedding_shas(conn: &Connection, model: &str) -> Result<HashMap<i64, String>> {
     let mut st = conn.prepare("SELECT file_id, sha256 FROM embeddings WHERE model=?1")?;
     let rows = st.query_map([model], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -1076,7 +1076,7 @@ pub fn embedding_shas(conn: &Connection, model: &str) -> Result<HashMap<i64, Str
     Ok(out)
 }
 
-/// Все векторы модели: `(file_id, f32)` для косинусного поиска и кластеризации.
+/// Every vector of a model: `(file_id, f32)` for cosine search and clustering.
 pub fn load_embeddings(conn: &Connection, model: &str) -> Result<Vec<(i64, Vec<f32>)>> {
     let mut st = conn.prepare("SELECT file_id, vec FROM embeddings WHERE model=?1")?;
     let rows = st.query_map([model], |r| {
@@ -1096,7 +1096,7 @@ pub fn load_embeddings(conn: &Connection, model: &str) -> Result<Vec<(i64, Vec<f
     Ok(out)
 }
 
-/// Удалить векторы модели: пересчёт с новым входом модели. Архив и превью не трогаются.
+/// Drop the vectors of a model: a recompute with a new model input. The archive and previews are untouched.
 pub fn clear_embeddings(conn: &Connection, model: &str) -> Result<usize> {
     Ok(conn.execute("DELETE FROM embeddings WHERE model=?1", params![model])?)
 }
@@ -1121,7 +1121,7 @@ pub fn save_embedding(
     Ok(())
 }
 
-/// Одно найденное лицо: рамка, эмбеддинг и кластер. Вектор — f32 в BLOB.
+/// One detected face: the box, the embedding and the cluster. The vector is f32 in a BLOB.
 #[derive(Debug, Clone)]
 pub struct FaceRow {
     pub id: i64,
@@ -1137,7 +1137,7 @@ pub struct FaceRow {
     pub manual: bool,
 }
 
-/// Лицо для интерфейса: без эмбеддинга, зато с путём и датой исходного файла.
+/// A face for the interface: no embedding, but with the path and the date of the source file.
 #[derive(Debug, Clone)]
 pub struct FaceView {
     pub id: i64,
@@ -1173,7 +1173,7 @@ fn f32_from_blob(blob: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-/// sha256 уже просканированных на лица файлов: file_id → sha256 на момент прохода.
+/// sha256 of the files already scanned for faces: file_id → sha256 at the time of the pass.
 pub fn face_scan_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
     let mut st = conn.prepare("SELECT file_id, sha256 FROM face_scans")?;
     let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -1185,7 +1185,7 @@ pub fn face_scan_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
     Ok(out)
 }
 
-/// Заменить лица одного файла и отметить его просканированным. Пустой список — тоже результат.
+/// Replace the faces of one file and mark it scanned. An empty list is a result too.
 pub fn save_faces_for_file(
     conn: &Connection,
     file_id: i64,
@@ -1223,7 +1223,7 @@ pub fn save_faces_for_file(
     Ok(())
 }
 
-/// Все лица с эмбеддингами — для кластеризации.
+/// Every face with its embedding — for clustering.
 pub fn load_faces(conn: &Connection) -> Result<Vec<FaceRow>> {
     let mut st = conn.prepare(
         "SELECT id,x,y,w,h,score,quality,thumb,embedding,cluster_id,manual
@@ -1251,7 +1251,7 @@ pub fn load_faces(conn: &Connection) -> Result<Vec<FaceRow>> {
     Ok(out)
 }
 
-/// Лица для сетки: `cluster_id=None` — все. Сначала крупные и уверенные.
+/// Faces for the grid: `cluster_id=None` means all. The large and confident ones come first.
 pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec<FaceView>> {
     let mut st = conn.prepare(
         "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id
@@ -1306,7 +1306,7 @@ pub fn create_face_cluster(conn: &Connection) -> Result<i64> {
     Ok(conn.last_insert_rowid())
 }
 
-/// Записать привязку лиц к кластерам. `manual` — владелец поставил её вручную.
+/// Store the assignment of faces to clusters. `manual` means the owner set it by hand.
 pub fn save_face_assignments(
     conn: &mut Connection,
     assignments: &[(i64, Option<i64>)],
@@ -1331,9 +1331,9 @@ pub fn label_face_cluster(conn: &Connection, cluster_id: i64, label: &str) -> Re
     Ok(())
 }
 
-/// Собрать несколько отмеченных лиц в группу с одним именем. Если имя уже есть,
-/// используется существующая группа; пустое имя создаёт новую без подписи.
-/// `manual=1` закрепляет решение при пересборке.
+/// Put several picked faces into one named group. If the name exists already,
+/// the existing group is used; an empty name creates a new one without a label.
+/// `manual=1` pins the decision through a rebuild.
 pub fn group_faces(conn: &Connection, face_ids: &[i64], label: &str) -> Result<i64> {
     let label = label.trim();
     let existing: Option<i64> = if label.is_empty() {
@@ -1368,7 +1368,7 @@ pub fn group_faces(conn: &Connection, face_ids: &[i64], label: &str) -> Result<i
     Ok(cluster_id)
 }
 
-/// Отделить одно лицо в новую группу: ложная склейка разъединяется одним действием.
+/// Split one face into a new group: a false merge is undone with one action.
 pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
     let tx = conn.transaction()?;
     tx.execute(
@@ -1381,13 +1381,13 @@ pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
         params![cluster_id, face_id],
     )?;
     if n == 0 {
-        anyhow::bail!("нет такого лица: {face_id}");
+        anyhow::bail!("no such face: {face_id}");
     }
     tx.commit()?;
     Ok(cluster_id)
 }
 
-/// Убрать кластеры без лиц. Кластер с подписью остаётся, даже если пока пуст.
+/// Remove clusters without faces. A named cluster stays even while it is empty.
 pub fn delete_empty_face_clusters(conn: &Connection) -> Result<usize> {
     Ok(conn.execute(
         "DELETE FROM face_clusters
@@ -1398,7 +1398,7 @@ pub fn delete_empty_face_clusters(conn: &Connection) -> Result<usize> {
     )?)
 }
 
-/// План прохода по лицам: `(снимков всего, ещё не просканировано)`.
+/// The plan of the face pass: `(photos in all, not scanned yet)`.
 pub fn face_scan_plan(conn: &Connection) -> Result<(usize, usize)> {
     let images: i64 = conn.query_row("SELECT COUNT(*) FROM files WHERE kind='image'", [], |r| {
         r.get(0)
@@ -1412,7 +1412,7 @@ pub fn face_scan_plan(conn: &Connection) -> Result<(usize, usize)> {
     Ok((images as usize, todo as usize))
 }
 
-/// `(лиц, снимков с лицами, кластеров)` — для панели и отчёта.
+/// `(faces, photos with faces, clusters)` — for the panel and the report.
 pub fn face_summary(conn: &Connection) -> Result<(i64, i64, i64)> {
     let faces: i64 = conn.query_row("SELECT COUNT(*) FROM faces", [], |r| r.get(0))?;
     let photos: i64 = conn.query_row("SELECT COUNT(DISTINCT file_id) FROM faces", [], |r| {
@@ -1426,7 +1426,7 @@ pub fn face_summary(conn: &Connection) -> Result<(i64, i64, i64)> {
     Ok((faces, photos, clusters))
 }
 
-/// Заменить теги одного источника у файла (CLIP пересчитывается целиком).
+/// Replace the tags of one source on a file (CLIP is recomputed as a whole).
 pub fn replace_tags(
     conn: &Connection,
     file_id: i64,
@@ -1444,9 +1444,9 @@ pub fn replace_tags(
     Ok(())
 }
 
-/// Все теги: file_id → [(тег, вес)] по убыванию веса.
-/// Все видимые теги выбранного источника: file_id → [(тег, вес)] по убыванию.
-/// Скрытые владельцем теги (`tag_hidden`) в результат не попадают.
+/// Every tag: file_id → [(tag, weight)] by descending weight.
+/// Every visible tag of the chosen source: file_id → [(tag, weight)] by descending weight.
+/// Tags hidden by the owner (`tag_hidden`) do not appear in the result.
 pub fn load_tags(conn: &Connection, source: &str) -> Result<HashMap<i64, Vec<(String, f32)>>> {
     let mut st = conn.prepare(
         "SELECT t.file_id, t.tag, COALESCE(t.score,0)
@@ -1466,14 +1466,14 @@ pub fn load_tags(conn: &Connection, source: &str) -> Result<HashMap<i64, Vec<(St
     Ok(out)
 }
 
-/// Файл, годный в размеченную выборку M15.7: картинка не в корзине, с превью и с тегами
-/// модели. Порядок — по sha256: выборка не зависит от имён и дат и повторяется один в один.
+/// A file fit for the labelled sample M15.7: an image not in the trash, with a preview and with
+/// the model's tags. The order is by sha256: the sample does not depend on names or dates and repeats exactly.
 #[derive(Debug, Clone)]
 pub struct TaggedFile {
     pub id: i64,
     pub path: String,
     pub sha256: String,
-    /// Путь превью относительно `<кэш>/photocat/thumbs`.
+    /// The preview path relative to `<cache>/photocat/thumbs`.
     pub thumb: Option<String>,
 }
 
@@ -1501,7 +1501,7 @@ pub fn tagged_files(conn: &Connection, source: &str) -> Result<Vec<TaggedFile>> 
     Ok(out)
 }
 
-/// sha256 текста, уже распознанного у файла: file_id → sha256 файла на момент OCR.
+/// sha256 of the text already recognized for a file: file_id → the file's sha256 at the time of the OCR.
 pub fn ocr_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
     let mut st = conn.prepare("SELECT file_id, sha256 FROM ocr")?;
     let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -1513,7 +1513,7 @@ pub fn ocr_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
     Ok(out)
 }
 
-/// Записать распознанный текст. Текст живёт в БД: рядом с оригиналом ничего не пишется.
+/// Store the recognized text. The text lives in the DB: nothing is written next to the original.
 pub fn save_ocr(
     conn: &Connection,
     file_id: i64,
@@ -1548,7 +1548,7 @@ pub fn load_ocr(conn: &Connection, file_id: i64) -> Result<Option<String>> {
     }
 }
 
-/// Сколько файлов с текстом и сколько всего знаков распознано.
+/// How many files have text and how many characters were recognized in all.
 pub fn ocr_summary(conn: &Connection) -> Result<(i64, i64)> {
     Ok(conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(chars),0) FROM ocr",
@@ -1557,7 +1557,7 @@ pub fn ocr_summary(conn: &Connection) -> Result<(i64, i64)> {
     )?)
 }
 
-/// Словарь тегов модели в порядке показа. Пусто — модель ещё не засеяна дефолтом.
+/// The tag dictionary of a model in display order. Empty means the model has not been seeded yet.
 pub fn load_tag_defs(conn: &Connection, model: &str) -> Result<Vec<TagDef>> {
     let mut st = conn.prepare(
         "SELECT tag_id, label, prompts, enabled, position, min_pct
@@ -1583,8 +1583,8 @@ pub fn load_tag_defs(conn: &Connection, model: &str) -> Result<Vec<TagDef>> {
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-/// Записать тег словаря на место (по `model`+`id`), не трогая соседей.
-/// Метка уникальна внутри модели: иначе `tags` получит две строки с одним ключом.
+/// Store a dictionary tag in place (by `model`+`id`) without touching its neighbours.
+/// The label is unique inside a model: otherwise `tags` would get two rows with one key.
 pub fn save_tag_def(conn: &Connection, d: &TagDef) -> Result<()> {
     let taken: Option<String> = conn
         .query_row(
@@ -1594,7 +1594,7 @@ pub fn save_tag_def(conn: &Connection, d: &TagDef) -> Result<()> {
         )
         .ok();
     if let Some(other) = taken {
-        anyhow::bail!("метка «{}» уже занята тегом {other}", d.label);
+        anyhow::bail!("the label “{}” is already taken by tag {other}", d.label);
     }
     let prompts = d
         .prompts
@@ -1622,7 +1622,7 @@ pub fn save_tag_def(conn: &Connection, d: &TagDef) -> Result<()> {
     Ok(())
 }
 
-/// Убрать тег из словаря. Строки `tags` с этой меткой удалит пересчёт тегов.
+/// Remove a tag from the dictionary. The `tags` rows with this label are deleted by the tag recompute.
 pub fn delete_tag_def(conn: &Connection, model: &str, id: &str) -> Result<usize> {
     Ok(conn.execute(
         "DELETE FROM tag_defs WHERE model=?1 AND tag_id=?2",
@@ -1630,7 +1630,7 @@ pub fn delete_tag_def(conn: &Connection, model: &str, id: &str) -> Result<usize>
     )?)
 }
 
-/// Заменить словарь модели целиком (импорт JSON, «вернуть стандартные теги»).
+/// Replace the whole dictionary of a model (JSON import, "back to the default tags").
 pub fn replace_tag_defs(conn: &Connection, model: &str, defs: &[TagDef]) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM tag_defs WHERE model=?1", [model])?;
@@ -1641,7 +1641,7 @@ pub fn replace_tag_defs(conn: &Connection, model: &str, defs: &[TagDef]) -> Resu
     Ok(())
 }
 
-/// Сколько файлов имеет каждый тег источника — для `tags --list` и пустого словаря.
+/// How many files each tag of the source has — for `tags --list` and an empty dictionary.
 pub fn tag_file_counts(conn: &Connection, source: &str) -> Result<HashMap<String, usize>> {
     let mut st = conn.prepare("SELECT tag, COUNT(*) FROM tags WHERE source=?1 GROUP BY tag")?;
     let rows = st.query_map([source], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
@@ -1653,9 +1653,9 @@ pub fn tag_file_counts(conn: &Connection, source: &str) -> Result<HashMap<String
     Ok(out)
 }
 
-/// Все видимые теги с весами: file_id → [(тег, вес)] по убыванию.
-/// Один тег из нескольких моделей берётся по лучшему весу, чтобы догадки не дублировались.
-/// Нужен проходу OCR: там тег «документ»/«скриншот» — повод искать текст.
+/// Every visible tag with weights: file_id → [(tag, weight)] by descending weight.
+/// One tag from several models is taken by the best weight, so guesses are not duplicated.
+/// The OCR pass needs it: the tag "document"/"screenshot" is the reason to look for text.
 pub fn load_visible_tags(conn: &Connection) -> Result<HashMap<i64, Vec<(String, f32)>>> {
     let mut st = conn.prepare(
         "WITH visible AS (
@@ -1682,8 +1682,8 @@ pub fn load_visible_tags(conn: &Connection) -> Result<HashMap<i64, Vec<(String, 
     Ok(out)
 }
 
-/// Запрос для FTS5: каждое слово — префикс, кавычки снимают спецсимволы.
-/// Пустая строка — `None`, а не ошибка синтаксиса FTS.
+/// An FTS5 query: every word is a prefix, quotes strip the special characters.
+/// An empty string means `None`, not an FTS syntax error.
 pub fn fts_query(q: &str) -> Option<String> {
     let terms: Vec<String> = q
         .split_whitespace()
@@ -1698,8 +1698,8 @@ pub fn fts_query(q: &str) -> Option<String> {
     }
 }
 
-/// Полнотекстовый поиск по распознанному тексту: `(file_id, фрагмент с «…»)`.
-/// Фрагмент уже подсвечен маркерами: UI красит совпадения, CLI печатает как есть.
+/// Full-text search over recognized text: `(file_id, a fragment with "…")`.
+/// The fragment is already marked up: the UI colours the matches, the CLI prints it as is.
 pub fn search_ocr(conn: &Connection, q: &str, limit: usize) -> Result<Vec<(i64, String)>> {
     let Some(match_q) = fts_query(q) else {
         return Ok(Vec::new());
@@ -1721,20 +1721,14 @@ pub fn search_ocr(conn: &Connection, q: &str, limit: usize) -> Result<Vec<(i64, 
 }
 
 pub fn human(bytes: i64) -> String {
-    human_with(bytes, ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"])
+    human_with(bytes, ["B", "KiB", "MiB", "GiB", "TiB"])
 }
 
-/// То же, что `human`, но единицы на языке интерфейса (M21): `21.2 ГиБ` / `21.2 GiB`.
-/// Формат числа один, меняются только подписи единиц, поэтому функция живёт здесь,
-/// рядом с `human`, а не в `i18n`.
+/// The same as `human`, but with the units of the interface language (M21).
+/// The number format is one, only the unit labels change, so the function lives here,
+/// next to `human`, and not in `i18n`.
 pub fn human_in(lang: crate::i18n::Lang, bytes: i64) -> String {
-    human_with(
-        bytes,
-        match lang {
-            crate::i18n::Lang::En => ["B", "KiB", "MiB", "GiB", "TiB"],
-            crate::i18n::Lang::Ru => ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"],
-        },
-    )
+    human_with(bytes, crate::i18n::units(lang))
 }
 
 fn human_with(bytes: i64, units: [&str; 5]) -> String {
@@ -1752,7 +1746,7 @@ fn human_with(bytes: i64, units: [&str; 5]) -> String {
     }
 }
 
-/// Длительность видео: `М:СС`, от часа — `Ч:ММ:СС`. Округление до секунды.
+/// The video duration: `M:SS`, from an hour `H:MM:SS`. Rounded to the second.
 pub fn duration(secs: f64) -> String {
     let total = secs.round().max(0.0) as u64;
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
@@ -1763,38 +1757,38 @@ pub fn duration(secs: f64) -> String {
     }
 }
 
-/// Узел дерева альбомов (M19). Альбом — только строки в БД: ни один файл на диске
-/// не создаётся, не меняется и не перемещается.
+/// An album tree node (M19). An album is DB rows only: no file on disk is created,
+/// changed or moved.
 #[derive(Debug, Clone)]
 pub struct AlbumNode {
     pub id: i64,
-    /// 0 — корень дерева.
+    /// 0 is the root of the tree.
     pub parent_id: i64,
     pub position: i64,
     pub name: String,
     pub note: String,
-    /// Глубина в дереве: 0 у корня. Нужна интерфейсу для отступа.
+    /// The depth in the tree: 0 at the root. The interface needs it for the indent.
     pub depth: usize,
-    /// Сколько файлов в альбоме (включая попавшие в корзину приложения).
+    /// How many files the album has (including those in the app trash).
     pub files: i64,
-    /// Сколько из них в корзине приложения: в сетке они скрыты.
+    /// How many of them are in the app trash: the grid hides those.
     pub trashed: i64,
     pub subalbums: i64,
     pub bytes: i64,
-    /// Превью первого неудалённого файла по порядку; `None` — пустой альбом.
+    /// The preview of the first file in order that is not in the trash; `None` for an empty album.
     pub cover: Option<String>,
 }
 
 fn album_name(name: &str) -> Result<String> {
     let name = name.trim();
     if name.is_empty() {
-        anyhow::bail!("имя альбома пустое");
+        anyhow::bail!("the album name is empty");
     }
     if name.chars().count() > 80 {
-        anyhow::bail!("имя альбома длиннее 80 символов");
+        anyhow::bail!("the album name is longer than 80 characters");
     }
     if name.chars().any(char::is_control) {
-        anyhow::bail!("в имени альбома есть управляющий символ");
+        anyhow::bail!("the album name contains a control character");
     }
     Ok(name.to_string())
 }
@@ -1815,7 +1809,7 @@ fn sibling_name_free(conn: &Connection, parent: i64, name_key: &str, except: i64
         )
         .optional()?;
     if let Some(id) = taken {
-        anyhow::bail!("альбом с таким именем уже есть среди соседей (id {id})");
+        anyhow::bail!("an album with this name already exists among the siblings (id {id})");
     }
     Ok(())
 }
@@ -1881,21 +1875,21 @@ fn path_in(map: &HashMap<i64, (i64, String)>, id: i64) -> String {
     names.join(" / ")
 }
 
-/// Путь альбома в дереве: «Дача 2024 / Май».
+/// The path of an album in the tree: "Dacha 2024 / May".
 pub fn album_path(conn: &Connection, id: i64) -> Result<String> {
     let map = album_rows(conn)?;
     if !map.contains_key(&id) {
-        anyhow::bail!("альбома {id} нет");
+        anyhow::bail!("there is no album {id}");
     }
     Ok(path_in(&map, id))
 }
 
-/// Создать альбом в конце списка соседей. `parent_id = 0` — корень дерева.
+/// Create an album at the end of its siblings. `parent_id = 0` is the root of the tree.
 pub fn create_album(conn: &Connection, parent_id: i64, name: &str, note: &str) -> Result<i64> {
     let name = album_name(name)?;
     let tx = conn.unchecked_transaction()?;
     if parent_id != 0 && !album_exists(&tx, parent_id)? {
-        anyhow::bail!("родительского альбома {parent_id} нет");
+        anyhow::bail!("there is no parent album {parent_id}");
     }
     let key = name.to_lowercase();
     sibling_name_free(&tx, parent_id, &key, 0)?;
@@ -1915,14 +1909,14 @@ pub fn create_album(conn: &Connection, parent_id: i64, name: &str, note: &str) -
     Ok(id)
 }
 
-/// Переименовать альбом. Имя уникально среди соседей без учёта регистра.
+/// Rename an album. The name is unique among the siblings, case-insensitively.
 pub fn rename_album(conn: &Connection, id: i64, name: &str) -> Result<()> {
     let name = album_name(name)?;
     let tx = conn.unchecked_transaction()?;
     let parent: i64 = tx
         .query_row("SELECT parent_id FROM albums WHERE id=?1", [id], |r| r.get(0))
         .optional()?
-        .context("альбома нет")?;
+        .context("there is no album")?;
     let key = name.to_lowercase();
     sibling_name_free(&tx, parent, &key, id)?;
     tx.execute(
@@ -1933,8 +1927,8 @@ pub fn rename_album(conn: &Connection, id: i64, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Переместить альбом к другому родителю. `position = None` — в конец.
-/// Новый родитель не может быть самим альбомом или его потомком.
+/// Move an album to another parent. `position = None` means the end.
+/// The new parent cannot be the album itself or its descendant.
 pub fn move_album(
     conn: &Connection,
     id: i64,
@@ -1949,14 +1943,14 @@ pub fn move_album(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?
-        .context("альбома нет")?;
+        .context("there is no album")?;
     if new_parent == id {
-        anyhow::bail!("альбом нельзя переместить в самого себя");
+        anyhow::bail!("an album cannot be moved into itself");
     }
     if new_parent != 0 && !album_exists(&tx, new_parent)? {
-        anyhow::bail!("родительского альбома {new_parent} нет");
+        anyhow::bail!("there is no parent album {new_parent}");
     }
-    // Цикл: идём вверх от нового родителя; если дошли до id — отказ.
+    // A cycle: walk up from the new parent; reaching the id means a refusal.
     let mut at = new_parent;
     for _ in 0..1000 {
         if at == 0 {
@@ -1971,7 +1965,7 @@ pub fn move_album(
             break;
         };
         if parent == id {
-            anyhow::bail!("нельзя переместить альбом внутрь его подальбома");
+            anyhow::bail!("an album cannot be moved into its own subalbum");
         }
         at = parent;
     }
@@ -2004,13 +1998,13 @@ pub fn move_album(
     Ok(())
 }
 
-/// Удалить альбом со всем поддеревом. Только строки: файлы на диске целы.
+/// Delete an album with its whole subtree. Rows only: the files on disk are intact.
 pub fn delete_album(conn: &Connection, id: i64) -> Result<usize> {
     let tx = conn.unchecked_transaction()?;
     let parent: i64 = tx
         .query_row("SELECT parent_id FROM albums WHERE id=?1", [id], |r| r.get(0))
         .optional()?
-        .context("альбома нет")?;
+        .context("there is no album")?;
     let ids: Vec<i64> = {
         let mut st = tx.prepare(
             "WITH RECURSIVE sub(id) AS (
@@ -2031,12 +2025,12 @@ pub fn delete_album(conn: &Connection, id: i64) -> Result<usize> {
     Ok(ids.len())
 }
 
-/// Добавить файлы в конец альбома. Повтор не плодит строки: возвращает
-/// `(добавлено, уже было)`. Файлов, которых нет в индексе, не бывает.
+/// Append files to an album. A repeat does not duplicate rows: it returns
+/// `(added, already there)`. Files missing from the index cannot appear here.
 pub fn add_to_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> Result<(usize, usize)> {
     let tx = conn.unchecked_transaction()?;
     if !album_exists(&tx, album_id)? {
-        anyhow::bail!("альбома {album_id} нет");
+        anyhow::bail!("there is no album {album_id}");
     }
     let mut position: i64 = tx.query_row(
         "SELECT COALESCE(MAX(position),-1)+1 FROM album_files WHERE album_id=?1",
@@ -2080,7 +2074,7 @@ pub fn add_to_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> Resul
     Ok((added, already))
 }
 
-/// Убрать файлы из альбома и сжать порядок. Возвращает число удалённых строк.
+/// Remove files from an album and compact the order. Returns the number of deleted rows.
 pub fn remove_from_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> Result<usize> {
     let tx = conn.unchecked_transaction()?;
     let mut removed = 0usize;
@@ -2097,7 +2091,7 @@ pub fn remove_from_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> 
     Ok(removed)
 }
 
-/// «Выше/Ниже» внутри альбома: `delta` — −1 или +1. Порядок снова плотный 0..n−1.
+/// "Up/Down" inside an album: `delta` is −1 or +1. The order becomes dense 0..n−1 again.
 pub fn move_in_album(
     conn: &Connection,
     album_id: i64,
@@ -2131,8 +2125,8 @@ pub fn move_in_album(
     Ok(true)
 }
 
-/// Дерево альбомов в порядке обхода: корни по `position`, затем их подальбомы.
-/// `depth` — отступ для интерфейса; счётчики — строки и объём файлов альбома.
+/// The album tree in traversal order: the roots by `position`, then their subalbums.
+/// `depth` is the indent for the interface; the counters are the rows and the size of the album.
 pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
     let mut st = conn.prepare(
         "SELECT a.id, a.parent_id, a.position, a.name, a.note,
@@ -2185,15 +2179,15 @@ pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
     }
     let mut out = Vec::new();
     walk(0, 0, &mut by_parent, &mut out);
-    // Строка с потерянным родителем не должна пропасть из интерфейса.
+    // A row with a lost parent must not disappear from the interface.
     while let Some(&parent) = by_parent.keys().min() {
         walk(parent, 0, &mut by_parent, &mut out);
     }
     Ok(out)
 }
 
-/// Файлы альбома в его порядке. Включает строки корзины приложения: интерфейс
-/// скрывает их в сетке и считает отдельно, а данные остаются.
+/// The files of an album in its order. Includes the app trash rows: the interface
+/// hides them in the grid and counts them separately, while the data stays.
 pub fn album_items(conn: &Connection, album_id: i64) -> Result<Vec<FileRow>> {
     let sql = "SELECT f.id, f.path, f.size, f.sha256, f.kind, COALESCE(f.width,0),
                 COALESCE(f.height,0), f.taken_at, COALESCE(f.taken_src,''), f.lat, f.lon,
@@ -2210,12 +2204,12 @@ pub fn album_items(conn: &Connection, album_id: i64) -> Result<Vec<FileRow>> {
     Ok(out)
 }
 
-/// Поддерево альбома в порядке дерева: корень, затем его подальбомы.
-/// Нужно выгрузке (M20): структура на диске повторяет это дерево.
+/// The subtree of an album in tree order: the root, then its subalbums.
+/// The export needs it (M20): the structure on disk repeats this tree.
 pub fn album_subtree(conn: &Connection, id: i64) -> Result<Vec<AlbumNode>> {
     let tree = albums_tree(conn)?;
     if !tree.iter().any(|n| n.id == id) {
-        anyhow::bail!("альбома {id} нет");
+        anyhow::bail!("there is no album {id}");
     }
     let mut ids = vec![id];
     loop {
@@ -2233,8 +2227,8 @@ pub fn album_subtree(conn: &Connection, id: i64) -> Result<Vec<AlbumNode>> {
     Ok(tree.into_iter().filter(|n| ids.contains(&n.id)).collect())
 }
 
-/// Данные для выгрузки альбома (M20): узлы поддерева и их файлы в порядке
-/// альбома. Только чтение; ни один файл на диске не открывается.
+/// Data for the album export (M20): the nodes of the subtree and their files in album
+/// order. Read-only; not a single file on disk is opened.
 pub fn album_export_data(
     conn: &Connection,
     id: i64,
@@ -2247,7 +2241,7 @@ pub fn album_export_data(
     Ok(out)
 }
 
-/// Альбомы, в которых лежит файл: id и путь в дереве. Для инспектора и карточки.
+/// The albums a file lies in: the id and the path in the tree. For the inspector and the card.
 pub fn album_refs_of_file(conn: &Connection, file_id: i64) -> Result<Vec<(i64, String)>> {
     let map = album_rows(conn)?;
     let ids: Vec<i64> = {
@@ -2265,8 +2259,8 @@ pub fn album_refs_of_file(conn: &Connection, file_id: i64) -> Result<Vec<(i64, S
     Ok(out)
 }
 
-/// Только пути альбомов файла — для инспектора (M19). Карточка берёт
-/// `album_refs_of_file`, потому что «×» нужен id; эта форма — для отчётов.
+/// Only the album paths of a file — for the inspector (M19). The card takes
+/// `album_refs_of_file`, because the "×" needs the id; this form is for reports.
 #[allow(dead_code)]
 pub fn albums_of_file(conn: &Connection, file_id: i64) -> Result<Vec<String>> {
     Ok(album_refs_of_file(conn, file_id)?
@@ -2275,14 +2269,14 @@ pub fn albums_of_file(conn: &Connection, file_id: i64) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Печать статистики индекса на языке интерфейса (M21.6).
+/// Print the index statistics in the interface language (M21.6).
 pub fn print_stats(lang: Lang, db_path: &Path) -> Result<()> {
     print!("{}", stats_text(lang, db_path)?);
     Ok(())
 }
 
-/// Текст статистики отдельной функцией: его печатает CLI, а тест проверяет язык
-/// и числа, не перехватывая stdout.
+/// The statistics text as a separate function: the CLI prints it, a test checks the language
+/// and the numbers without capturing stdout.
 pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
     use std::fmt::Write;
     let conn = open(db_path)?;
@@ -2473,7 +2467,7 @@ mod tests {
         assert!(moved.manual);
         assert_ne!(split, clustered);
 
-        // Подмена содержимого стирает лица и отметку прохода — их нельзя показывать.
+        // Replacing the content wipes the faces and the pass mark — they must not be shown.
         insert(&c, &row("/a.jpg", "bb", 1.0)).unwrap();
         assert!(load_faces(&c).unwrap().is_empty());
         assert!(face_scan_shas(&c).unwrap().is_empty());
@@ -2541,7 +2535,7 @@ mod tests {
         )
         .unwrap();
         init(&c).unwrap();
-        init(&c).unwrap(); // повторный вызов не падает
+        init(&c).unwrap(); // a repeated call does not fail
         let r = row("/old.jpg", "aa", 7.5);
         insert(&c, &r).unwrap();
         let loaded = load_all(&c).unwrap();
@@ -2551,7 +2545,7 @@ mod tests {
         assert_eq!(loaded[0].duration_s, None);
     }
 
-    /// Схема 7: теги разных моделей живут рядом, а смена sha256 снимает все CLIP-теги.
+    /// Schema 7: tags of different models live side by side, and a sha256 change drops every CLIP tag.
     #[test]
     fn migration_7_does_not_mix_the_tags_of_two_models() {
         let c = Connection::open_in_memory().unwrap();
@@ -2582,12 +2576,12 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         assert_eq!(load_tags(&c, "clip:m1").unwrap()[&1][0].0, "пляж");
         assert!(load_tags(&c, "clip:m2").unwrap().is_empty());
-        // Теперь ключ допускает обе модели у одного файла — раньше это был конфликт.
+        // The key now allows both models on one file — it used to be a conflict.
         replace_tags(&c, 1, "clip:m1", &[("пляж".into(), 0.35)]).unwrap();
         replace_tags(&c, 1, "clip:m2", &[("пляж".into(), 0.45)]).unwrap();
         assert_eq!(load_tags(&c, "clip:m1").unwrap()[&1].len(), 1);
         assert_eq!(load_tags(&c, "clip:m2").unwrap()[&1].len(), 1);
-        // Смена содержимого снимает теги всех моделей, а не только legacy `clip`.
+        // A content change drops the tags of every model, not only the legacy `clip`.
         c.execute("UPDATE files SET sha256='bb' WHERE id=1", []).unwrap();
         assert!(load_tags(&c, "clip:m1").unwrap().is_empty());
         assert!(load_tags(&c, "clip:m2").unwrap().is_empty());
@@ -2637,7 +2631,7 @@ mod tests {
             Some("\"справка\"* AND \"2024\"*")
         );
         assert_eq!(fts_query(""), None);
-        assert_eq!(fts_query("  \"*  "), None); // одни спецсимволы — не ошибка FTS, пустой запрос
+        assert_eq!(fts_query("  \"*  "), None); // only special characters — not an FTS error, an empty query
         assert_eq!(fts_query("a\"b*").as_deref(), Some("\"ab\"*"));
     }
 
@@ -2662,7 +2656,7 @@ mod tests {
             hits[0].1
         );
         assert!(search_ocr(&c, "договор", 10).unwrap().is_empty());
-        // синтаксис FTS не должен превращать пользовательский ввод в ошибку
+        // the FTS syntax must not turn user input into an error
         assert!(search_ocr(&c, "\"),", 10).is_ok());
     }
 
@@ -2707,7 +2701,7 @@ mod tests {
     fn the_old_tag_threshold_migrates_to_a_percentile() {
         let c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
-        // Старая база: ползунок фильтра увёл tag_show до 0.50, ключа процентиля нет.
+        // An old DB: the filter slider drove tag_show down to 0.50, there is no percentile key.
         c.execute(
             "INSERT INTO settings(key,value) VALUES('tag_show','0.50')",
             [],
@@ -2716,7 +2710,7 @@ mod tests {
         let s = load_settings(&c);
         assert_eq!(s.tag_show_pct, 70);
         assert!((s.tag_show - 0.22).abs() < 1e-6);
-        // После сохранения миграция закреплена в БД и не повторяется.
+        // Once saved, the migration is fixed in the DB and does not run again.
         c.execute("UPDATE settings SET value='0.31' WHERE key='tag_show'", []).unwrap();
         save_settings(&c, &s).unwrap();
         c.execute("UPDATE settings SET value='0.31' WHERE key='tag_show'", []).unwrap();
@@ -2785,8 +2779,8 @@ mod tests {
         assert_eq!(GridSort::Album.as_str(), "album");
     }
 
-    /// «Пора / не пора» — все случаи из M10: нет слепка, выключено, ровно срок,
-    /// просрочено, ещё рано и часы назад.
+    /// "Due / not due" — every case from M10: no manifest, switched off, exactly due,
+    /// overdue, too early, and the clock turned back.
     #[test]
     fn the_reminder_counts_the_due_date_from_the_manifest() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-11-24T12:00:00Z")
@@ -2798,46 +2792,46 @@ mod tests {
             verify_interval_days: 30,
             ..Default::default()
         };
-        // Слепка нет — напоминать не о чем, даже если срок задан.
+        // No manifest — nothing to remind about, even with a term set.
         let no_manifest = Settings {
             verify_manifest: String::new(),
             ..base.clone()
         };
         assert_eq!(verify_due(&no_manifest, now), VerifyDue::NoManifest);
-        // Интервал 0 — выключено владельцем.
+        // Interval 0 — switched off by the owner.
         let off = Settings {
             verify_interval_days: 0,
             ..base.clone()
         };
         assert_eq!(verify_due(&off, now), VerifyDue::Disabled);
-        // Прошлого прохода не было — сразу пора.
+        // No last pass — due straight away.
         assert_eq!(verify_due(&base, now), VerifyDue::Due { days_over: 0 });
-        // Испорченная дата — тот же ответ: лучше напомнить, чем молчать.
+        // A broken date gives the same answer: better to remind than to stay silent.
         let broken = Settings {
             verify_last_at: "вчера".into(),
             ..base.clone()
         };
         assert_eq!(verify_due(&broken, now), VerifyDue::Due { days_over: 0 });
-        // Ровно 30 дней — пора.
+        // Exactly 30 days — due.
         let exactly = Settings {
             verify_last_at: (now - chrono::Duration::days(30)).to_rfc3339(),
             ..base.clone()
         };
         assert_eq!(verify_due(&exactly, now), VerifyDue::Due { days_over: 0 });
-        // Просрочено на 5 дней.
+        // Overdue by 5 days.
         let overdue = Settings {
             verify_last_at: (now - chrono::Duration::days(35)).to_rfc3339(),
             ..base.clone()
         };
         assert_eq!(verify_due(&overdue, now), VerifyDue::Due { days_over: 5 });
-        // Ещё рано: 29 дней и 12 часов из 30 — остался один день.
+        // Too early: 29 days and 12 hours out of 30 — one day is left.
         let early = Settings {
             verify_last_at: (now - chrono::Duration::days(29) - chrono::Duration::hours(12))
                 .to_rfc3339(),
             ..base.clone()
         };
         assert_eq!(verify_due(&early, now), VerifyDue::NotYet { days_left: 1 });
-        // Часы перевели назад: дата в будущем — не пора и без паники.
+        // The clock was turned back: a date in the future — not due, and no panic.
         let future = Settings {
             verify_last_at: (now + chrono::Duration::days(5)).to_rfc3339(),
             ..base.clone()
@@ -2940,12 +2934,12 @@ mod tests {
         assert_eq!(a.decision.as_deref(), Some("keep"));
         assert_eq!(b.decision.as_deref(), Some("drop"));
 
-        insert(&c, &r).unwrap(); // переиндексация того же файла
+        insert(&c, &r).unwrap(); // re-indexing the same file
         assert_eq!(load_all(&c).unwrap()[0].decision.as_deref(), Some("keep"));
 
         let mut changed = r.clone();
         changed.sha256 = "cc".into();
-        insert(&c, &changed).unwrap(); // файл подменили — решение устарело
+        insert(&c, &changed).unwrap(); // the file was replaced — the decision went stale
         assert_eq!(load_all(&c).unwrap()[0].decision, None);
     }
     fn three_files(c: &Connection) -> Vec<i64> {
@@ -2982,7 +2976,7 @@ mod tests {
             vec!["Дача 2024".to_string()]
         );
 
-        // Порядок подальбомов — данные: «Май» можно опустить ниже «Июня».
+        // The order of subalbums is data: "May" can go below "June".
         move_album(&c, may, dacha, Some(1)).unwrap();
         let tree = albums_tree(&c).unwrap();
         let siblings: Vec<&str> = tree
@@ -2991,7 +2985,7 @@ mod tests {
             .map(|n| n.name.as_str())
             .collect();
         assert_eq!(siblings, ["Июнь", "Май"]);
-        // Ветвь «На печать» осталась на месте.
+        // The "To print" branch stayed in place.
         assert_eq!(
             tree.iter().find(|n| n.id == to_print).unwrap().position,
             1
@@ -3005,12 +2999,12 @@ mod tests {
         let dacha_2024 = create_album(&c, 0, "Дача 2024", "").unwrap();
         let dacha_2025 = create_album(&c, 0, "Дача 2025", "").unwrap();
         assert!(create_album(&c, 0, "дача 2024", "").is_err());
-        // В разных ветвях одинаковые имена разрешены.
+        // Equal names are allowed in different branches.
         create_album(&c, dacha_2024, "Май", "").unwrap();
         create_album(&c, dacha_2025, "Май", "").unwrap();
         assert!(create_album(&c, dacha_2024, "  ", "").is_err());
         assert!(create_album(&c, 0, &"я".repeat(81), "").is_err());
-        // 80 символов — уже допустимо; хвостовые пробелы срезаются.
+        // 80 characters are allowed already; trailing spaces are trimmed.
         let id = create_album(&c, 0, &format!("  {}  ", "я".repeat(80)), "").unwrap();
         assert_eq!(album_path(&c, id).unwrap().chars().count(), 80);
         assert!(rename_album(&c, dacha_2024, "Дача 2025").is_err());
@@ -3028,7 +3022,7 @@ mod tests {
         let e = create_album(&c, 0, "E", "").unwrap();
         assert!(move_album(&c, a, b, None).is_err());
         assert!(move_album(&c, a, a, None).is_err());
-        // Перенос в конец и в начало: позиции плотные 0..n−1.
+        // Moving to the end and to the start: the positions stay dense 0..n−1.
         move_album(&c, d, 0, None).unwrap();
         let roots = |c: &Connection| -> Vec<String> {
             albums_tree(c)
@@ -3050,7 +3044,7 @@ mod tests {
         );
         move_album(&c, d, 0, Some(0)).unwrap();
         assert_eq!(roots(&c), ["D", "A", "E"]);
-        // Имена по-прежнему уникальны среди новых соседей.
+        // The names stay unique among the new siblings.
         assert!(move_album(&c, e, a, None).is_ok());
         assert!(create_album(&c, a, "E", "").is_err());
     }
@@ -3072,9 +3066,9 @@ mod tests {
         assert!(albums_tree(&c).unwrap().iter().all(|n| n.name != "Май"));
         assert_eq!(album_items(&c, may).unwrap().len(), 0);
         assert_eq!(album_items(&c, to_print).unwrap().len(), 3);
-        // Файлы на диске не наши: строки files целы.
+        // The files on disk are not ours: the `files` rows are intact.
         assert_eq!(load_all(&c).unwrap().len(), 3);
-        // «На печать» остался единственным корнем с позицией 0.
+        // "To print" stayed the only root with position 0.
         let root = &albums_tree(&c).unwrap()[0];
         assert_eq!((root.name.as_str(), root.position), ("На печать", 0));
     }
@@ -3095,7 +3089,7 @@ mod tests {
             .map(|r| r.id)
             .collect();
         assert_eq!(order, ids);
-        // «Выше/Ниже» меняет только порядок, не состав.
+        // "Up/Down" changes the order only, not the content.
         assert!(move_in_album(&c, album, ids[2], -1).unwrap());
         let order: Vec<i64> = album_items(&c, album)
             .unwrap()
@@ -3104,7 +3098,7 @@ mod tests {
             .collect();
         assert_eq!(order, [ids[0], ids[2], ids[1]]);
         assert!(!move_in_album(&c, album, ids[0], -1).unwrap());
-        // Убрали средний — позиции снова 0,1,2 без дырки.
+        // The middle one was removed — the positions are 0,1,2 again without a hole.
         assert_eq!(remove_from_album(&c, album, &[ids[2]]).unwrap(), 1);
         let positions: Vec<i64> = {
             let mut st = c
@@ -3127,7 +3121,7 @@ mod tests {
             .unwrap();
         let node = &albums_tree(&c).unwrap()[0];
         assert_eq!((node.files, node.trashed), (3, 1));
-        // Сетка берёт только неудалённые, данные альбома не теряются.
+        // The grid takes the undeleted ones only, the album data is not lost.
         let visible = album_items(&c, album)
             .unwrap()
             .into_iter()
@@ -3143,7 +3137,7 @@ mod tests {
         let ids = three_files(&c);
         let album = create_album(&c, 0, "Май", "").unwrap();
         add_to_album(&c, album, &ids).unwrap();
-        // Так же, как «убрать каталог» и сброс индекса: строки files → album_files.
+        // The same as "drop a folder" and the index reset: `files` rows → `album_files`.
         delete_file_rows(&c, &[ids[1]]).unwrap();
         let left = album_items(&c, album).unwrap();
         assert_eq!(left.len(), 2);
@@ -3159,7 +3153,7 @@ mod tests {
         let _ = &mut c;
     }
 
-    /// Словарь тегов: правка сохраняется на месте, метка уникальна, удаление чистит одну строку.
+    /// The tag dictionary: an edit is saved in place, the label is unique, a removal clears one row.
     #[test]
     fn the_tag_dictionary_is_stored_in_the_db_per_model() {
         let c = Connection::open_in_memory().unwrap();
@@ -3179,7 +3173,7 @@ mod tests {
         assert_eq!(defs.len(), 2);
         assert_eq!(defs[0].label, "пляж");
         assert_eq!(defs[0].prompts.len(), 2);
-        // Правка по id: метка и промпты меняются, строка не дублируется.
+        // Editing by id: the label and the prompts change, the row is not duplicated.
         let mut d = defs[0].clone();
         d.label = "пляж и берег".into();
         d.prompts = vec!["фотография берега".into()];
@@ -3191,12 +3185,12 @@ mod tests {
         assert_eq!(defs[0].label, "пляж и берег");
         assert!(!defs[0].enabled);
         assert_eq!(defs[0].min_percentile, 30);
-        // Вторая модель — свой словарь, чужие метки не мешают.
+        // The second model has its own dictionary, foreign labels do not interfere.
         let mut other = mk("beach", "пляж", 0);
         other.model = "m2".into();
         save_tag_def(&c, &other).unwrap();
         assert_eq!(load_tag_defs(&c, "m2").unwrap().len(), 1);
-        // Метка уникальна внутри модели: иначе две строки `tags` с одним ключом.
+        // The label is unique inside a model: otherwise two `tags` rows with one key.
         let mut clash = mk("clash", "море", 2);
         clash.model = "m1".into();
         assert!(save_tag_def(&c, &clash).is_err());
@@ -3224,8 +3218,8 @@ mod tests {
         let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         assert_eq!(load_all(&c).unwrap().len(), 2);
-        // Схема 8 (M22): превью картинок пересчитываются с EXIF-поворотом, поэтому
-        // путь стирается; обложка видео остаётся, строки не теряются.
+        // Schema 8 (M22): image previews are recomputed with the EXIF rotation, so the path
+        // is cleared; a video cover stays, no rows are lost.
         let rows = load_all(&c).unwrap();
         let image = rows.iter().find(|r| r.kind == "image").unwrap();
         assert!(image.thumb.is_none(), "превью картинки должно быть пересчитано");
@@ -3234,7 +3228,7 @@ mod tests {
         let album = create_album(&c, 0, "Старое", "").unwrap();
         add_to_album(&c, album, &[id_of(&c, "/old.jpg")]).unwrap();
         assert_eq!(album_items(&c, album).unwrap().len(), 1);
-        init(&c).unwrap(); // повторный init не падает и не плодит таблиц/строк
+        init(&c).unwrap(); // a repeated init does not fail and does not duplicate tables or rows
         assert_eq!(albums_tree(&c).unwrap().len(), 1);
         assert_eq!(album_items(&c, album).unwrap().len(), 1);
     }

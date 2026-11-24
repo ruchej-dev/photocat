@@ -1,7 +1,7 @@
-//! Занятое место и очистка кэша. Архив не трогается: только `<кэш>/photocat/` и БД.
+//! Used space and cache cleanup. The archive is untouched: only `<cache>/photocat/` and the DB.
 //!
-//! Это единственный модуль, которому разрешено удалять файлы, и только внутри кэша
-//! приложения. Пути проверяются: всё, что вне `db::cache_dir()`, не удаляется.
+//! This is the only module allowed to delete files, and only inside the application cache.
+//! Paths are checked: anything outside `db::cache_dir()` is not deleted.
 
 use crate::db;
 use anyhow::{Context, Result, bail};
@@ -26,14 +26,14 @@ impl std::fmt::Display for Cleared {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "удалено файлов {}, {}",
+            "removed {} files, {}",
             self.files,
             db::human(self.bytes as i64)
         )
     }
 }
 
-/// Размер каталога без разыменования симлинков; ошибки чтения пропускаются.
+/// The size of a folder without following symlinks; read errors are skipped.
 pub fn dir_size(dir: &Path) -> (usize, u64) {
     let mut files = 0usize;
     let mut bytes = 0u64;
@@ -68,7 +68,7 @@ pub fn usage(db_path: &Path, models_dir: &Path) -> Usage {
     }
 }
 
-/// Удалить каталог только внутри кэша photocat. Возвращает число файлов и байт.
+/// Delete a folder only inside the photocat cache. Returns the number of files and bytes.
 fn clear_cache_dir(dir: &Path) -> Result<Cleared> {
     if !dir.exists() {
         return Ok(Cleared::default());
@@ -76,25 +76,25 @@ fn clear_cache_dir(dir: &Path) -> Result<Cleared> {
     let cache = db::cache_dir();
     let dir = dir
         .canonicalize()
-        .with_context(|| format!("не найти {}", dir.display()))?;
+        .with_context(|| format!("cannot find {}", dir.display()))?;
     let cache = cache
         .canonicalize()
-        .with_context(|| format!("не найти {}", cache.display()))?;
+        .with_context(|| format!("cannot find {}", cache.display()))?;
     if dir == cache || !dir.starts_with(&cache) {
-        bail!("отказ: {} вне кэша photocat", dir.display());
+        bail!("refused: {} is outside the photocat cache", dir.display());
     }
     let (files, bytes) = dir_size(&dir);
-    std::fs::remove_dir_all(&dir).with_context(|| format!("не очистить {}", dir.display()))?;
+    std::fs::remove_dir_all(&dir).with_context(|| format!("cannot clear {}", dir.display()))?;
     std::fs::create_dir_all(&dir)?;
     Ok(Cleared { files, bytes })
 }
 
-/// Превью фото и обложек видео. После очистки сетка покажет «нет превью» до переиндексации.
+/// Previews of photos and video covers. After cleanup the grid shows "no preview" until a re-index.
 pub fn clear_thumbs() -> Result<Cleared> {
     clear_cache_dir(&db::cache_dir().join("thumbs"))
 }
 
-/// Кропы лиц вместе со строками лиц: повторный проход снова найдёт лица.
+/// Face crops together with the face rows: a repeated pass finds the faces again.
 pub fn clear_faces(db_path: &Path) -> Result<Cleared> {
     let cleared = clear_cache_dir(&db::cache_dir().join("faces"))?;
     let conn = db::open(db_path)?;
@@ -106,7 +106,7 @@ pub fn clear_faces(db_path: &Path) -> Result<Cleared> {
     Ok(cleared)
 }
 
-/// Сбросить индекс: строки файлов, теги, OCR, векторы и лица. Настройки и модели остаются.
+/// Reset the index: file rows, tags, OCR, vectors and faces. The settings and the models stay.
 pub fn reset_index(db_path: &Path) -> Result<()> {
     let conn = db::open(db_path)?;
     let tx = conn.unchecked_transaction()?;
@@ -122,7 +122,7 @@ pub fn reset_index(db_path: &Path) -> Result<()> {
         "files",
     ] {
         tx.execute(&format!("DELETE FROM {table}"), [])
-            .with_context(|| format!("не очистить таблицу {table}"))?;
+            .with_context(|| format!("cannot clear the table {table}"))?;
     }
     tx.commit()?;
     Ok(())

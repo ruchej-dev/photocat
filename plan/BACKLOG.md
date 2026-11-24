@@ -1068,7 +1068,8 @@ logs, errors and the source text of the interface. Russian survives only as a tr
 5. `plan/I18N.md`, `docs/ARCHITECTURE.md` and `AGENTS.md` §6 describe the new direction. ✅ (M23.1)
 
 **Steps.** M23.1 — identifiers, the inverted table, the guard, the documents (done). M23.2 — L0/L1:
-`i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs`. M23.3 — L2: `dupes`, `embed`, `eval`,
+`i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs` (done: no Cyrillic left, the size units
+moved into `i18n::units`, `db::human` speaks English and the GUI uses `human_in`). M23.3 — L2: `dupes`, `embed`, `eval`,
 `ocr`, `faces`, `organize`, `verify`, `recycle`, `index`, `player`. M23.4 — `app.rs` (the bulk:
 comments and the remaining labels). M23.5 — `main.rs`, the tests and `scripts/`. M23.6 — the
 corpus pass and the numbers in `docs/ARCHITECTURE.md`.

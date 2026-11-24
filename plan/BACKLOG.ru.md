@@ -957,7 +957,8 @@ was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 5. `plan/I18N.md`, `docs/ARCHITECTURE.md` и `AGENTS.md` §6 описывают новое направление. ✅ (M23.1)
 
 **Шаги.** M23.1 — идентификаторы, развёрнутая таблица, проверка, документы (сделано). M23.2 — L0/L1:
-`i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs`. M23.3 — L2: `dupes`, `embed`, `eval`,
+`i18n.rs`, `derive.rs`, `tools.rs`, `db.rs`, `storage.rs` (сделано: кириллицы не осталось, единицы
+размера переехали в `i18n::units`, `db::human` говорит по-английски, GUI зовёт `human_in`). M23.3 — L2: `dupes`, `embed`, `eval`,
 `ocr`, `faces`, `organize`, `verify`, `recycle`, `index`, `player`. M23.4 — `app.rs` (основной
 объём: комментарии и оставшиеся подписи). M23.5 — `main.rs`, тесты и `scripts/`. M23.6 — прогон
 по корпусу и числа в `docs/ARCHITECTURE.md`.
