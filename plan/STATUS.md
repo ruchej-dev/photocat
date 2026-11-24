@@ -5,7 +5,9 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen) → next:M13e (pinning the month heading when scrolling, `docs/UI.md` §Debt item 7); the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews) → next:M22.2a (the list view scales with the size slider and the slider never disappears), then M22.2b (trackpad and wheel scrolling), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+
+Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Where we are
 
@@ -32,7 +34,12 @@ similar shots are searched above 20 thousand through a block index of dHash: on 
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
-(ADR 0033). Since M13d a zoomed frame in the full screen is dragged with the mouse: at a scale above
+(ADR 0033). Since M22 the shell is painted from the owner's mock-up (ADR 0044): one token palette with
+two themes (dark by default, light and "follow the system" in the settings), radii 4/6/8, amber as the
+only signal, monospace numbers, a 32 px top strip with the search and the state, a 28 px bottom strip
+with the counters, the working folder moved into the left panel, and a tile card with a 22 px caption
+band (name + date), and three cell views — the mock-up's 4:3 tile (default), proportion rows and a
+list (M22). Since M13d a zoomed frame in the full screen is dragged with the mouse: at a scale above
 100 % a detail is looked at, not the centre of the frame.
 
 `photocat` can: index a folder (sha256 + dHash + sharpness + EXIF + preview), find exact copies and
@@ -1890,3 +1897,61 @@ the pointer table describe the drag.
 
 **Not done, deliberately.** No wheel zoom, no double-click "fit ↔ 100 %", no panning of the video
 frame: the video is fitted by design, and no gesture is promised that the code does not do.
+
+## M22.1/M22.2 — two themes and the main screen after the mock-up (2026-11-24) ✅
+
+The owner brought a mock-up set made outside the repository: seven HTML screens, a dark and a light
+design system, and the rule "for screens without a layout, build by the same rules". The digest is
+`plan/M22-ui-spec.md`; the decision is ADR 0044.
+
+**What appeared.** `app::Theme` with two palettes (`DARK` — cool graphite `#0c0e12`/`#1a1c20`, amber
+`#f59e0b`; `LIGHT` — slate `#f8fafc`/`#ffffff`, amber `#d97706`), `settings.theme` (`dark | light |
+system`, key/value, `SCHEMA_VERSION` unchanged), `apply_theme` filling `egui::Visuals` from the tokens
+and setting the mock-up's radii (4/6/8 px), the type scale 10/11/12/13/14/18 and the mono/caps
+helpers; "Settings →
+Interface" has "Interface theme". The main screen follows `photocat_1`: a 32 px top strip (brand,
+search mode, query, Find/Reset, the archive state, Folders/Details/Settings) and a 28 px bottom strip
+(the last fact, the counters and the selection in monospace); the folder field and "Index / Refresh"
+move into the left panel above the navigation; navigation rows have a 2 px accent edge and the card
+tone when active; the content panel is the canvas tone and its title is 18 px; a tile is an 8 px rounded card
+with a 1 px frame and a 22 px caption band (the file name in mono 10 clipped against the date, the
+date in `text_dim`); selection is a 2 px accent line plus a square check flag; video keeps the
+`▶ M:SS` strip. Red (`danger`) appears only on "To trash".
+
+**Checks.** `cargo test` — 222 passed, 6 `#[ignore]` (new: the palette switches, the radii are 4/6/8, the theme
+survives a settings roundtrip, the proportion rows pack four 4:3 frames into 700 px at the target
+height and keep a lonely panorama at it, an EXIF-rotated JPEG is stored and previewed in the displayed
+orientation, the 7 → 8 migration keeps rows and clears only image previews); `cargo clippy --all-targets` — clean; `check.sh` — 52
+checks, 0 violations; `timeout 8 ./target/debug/photocat gui` — the window lived to the timeout, no
+panic and no output. No file operation, no network call and no schema change: `theme` is a settings
+row like `lang`.
+
+**Owner's review on the same day.** The mock-up's tile is back as the **main cell view**
+(`settings.cell_style = tiles`): one width from the "Tiles" slider, the columns share the width, a 4:3
+frame and a 22 px caption band, and the snapshot is *fitted inside whole* — no crop, no stretch. The
+proportion rows became a **second view** (`rows`: the row height from the slider, the row fills the
+width, the tile width follows the frame, no margins) and a **third, `list`**, was added: a 44 px row
+with a 58×40 thumbnail, the name, the date and the size. All three share one entry point
+(`draw_files`) and the same click/selection rules. The grid gap grew to the mock-up's **10 px**
+(`gap-2.5`), month groups are separated by 24 px.
+
+Previews now follow the **EXIF orientation** (ADR 0045): `analyze_image` decodes through
+`load_oriented`, so a phone portrait is upright and `files.width/height` are the displayed dimensions;
+the cached preview is overwritten when its own dimensions do not match the expected ones. On the
+corpus this showed on `IMG_20240822_124033.jpg` (orientation 6): now 1792×3904 in the DB and a 147×320
+preview (it was 3904×1792 and a sideways 320×147 before). Re-indexing 1972 images / 3.8 GiB took
+252 s in the dev profile (release is about four times faster); 258 videos were skipped, one broken JPEG
+(`P_20200724_154351.jpg`) is still reported as before. `SCHEMA_VERSION` 7 → 8 clears `files.thumb`
+for images once, so an old DB cures itself on the next `index`; videos, tags and albums are untouched.
+
+The radii came back: the rendered mock-up screens round their
+controls, navigation rows and cards, so `apply_theme` now sets 4 / 6 / 8 px by role (the design-system
+prose claimed 0 px; the screen wins, as with the palette), and the preview corners are cut to the card
+radius. The answers to the disputed questions are recorded in `plan/M22-ui-spec.md` §5: amber stays,
+no bundled fonts (the built-in families, the binary must not grow), previews keep the fit, favourites
+become a later task, albums keep the nested tree, the selection stays in the chips row.
+
+**Not done, deliberately.** Screens other than the main one keep the old visual details until their
+task (M22.3–M22.11); the sticky month heading is M22.4; bundled fonts, cropped 4:3 previews, a
+floating selection bar, favourites, ratings, share/delete and the mock-up's non-existent EXIF, GPU,
+tray and update functions are refused (§5 of the spec, with the recommendation to the owner).

@@ -456,17 +456,106 @@ struct PickScope {
     browse_all: bool,
 }
 
-/// Акцент проекта: значит ровно «выбрано», «уверенный тег», «оставить» (docs/UI.md).
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(90, 170, 255);
-/// Второстепенный текст и служебные подписи; темнее 150 не опускаемся.
-const DIM: egui::Color32 = egui::Color32::from_gray(150);
+/// Палитра интерфейса (M22, ADR 0044). Две темы из макета «functional precision»:
+/// тёмная (основная) и светлая. Токены — единственный источник цвета в экранах;
+/// собственные `from_gray`/`from_rgb` остаются только для текста поверх затемнённого
+/// кадра, где фон задаёт фотография, а не тема.
+#[derive(Clone, Copy)]
+struct Theme {
+    /// Tier 0: фон окна и полотно сетки.
+    canvas: egui::Color32,
+    /// Tier 1: панели, верхняя и нижняя полосы.
+    panel: egui::Color32,
+    /// Tier 2: карточки, всплывающие меню.
+    card: egui::Color32,
+    /// Tier 3: поля ввода, неактивные кнопки.
+    field: egui::Color32,
+    /// 1 px линия между панелями и строками.
+    border: egui::Color32,
+    border_strong: egui::Color32,
+    text: egui::Color32,
+    text_med: egui::Color32,
+    text_dim: egui::Color32,
+    accent: egui::Color32,
+    accent_hover: egui::Color32,
+    on_accent: egui::Color32,
+    accent_soft: egui::Color32,
+    danger: egui::Color32,
+    dark: bool,
+}
+
+/// Тёмная палитра макета: холодные графиты, янтарь — единственный сигнал.
+const DARK: Theme = Theme {
+    canvas: egui::Color32::from_rgb(0x0c, 0x0e, 0x12),
+    panel: egui::Color32::from_rgb(0x1a, 0x1c, 0x20),
+    card: egui::Color32::from_rgb(0x1e, 0x20, 0x24),
+    field: egui::Color32::from_rgb(0x28, 0x2a, 0x2e),
+    border: egui::Color32::from_rgb(0x2b, 0x2e, 0x35),
+    border_strong: egui::Color32::from_rgb(0x37, 0x3c, 0x4a),
+    text: egui::Color32::from_rgb(0xe2, 0xe2, 0xe8),
+    text_med: egui::Color32::from_rgb(0xa7, 0xaa, 0xb3),
+    text_dim: egui::Color32::from_rgb(0x7b, 0x80, 0x8c),
+    accent: egui::Color32::from_rgb(0xf5, 0x9e, 0x0b),
+    accent_hover: egui::Color32::from_rgb(0xd9, 0x77, 0x06),
+    on_accent: egui::Color32::from_rgb(0x11, 0x13, 0x17),
+    accent_soft: egui::Color32::from_rgba_premultiplied(0x3a, 0x25, 0x02, 38),
+    danger: egui::Color32::from_rgb(0xef, 0x44, 0x44),
+    dark: true,
+};
+
+/// Светлая палитра макета: холодный slate, тот же янтарь с контрастом AA на белом.
+const LIGHT: Theme = Theme {
+    canvas: egui::Color32::from_rgb(0xf8, 0xfa, 0xfc),
+    panel: egui::Color32::from_rgb(0xf1, 0xf5, 0xf9),
+    card: egui::Color32::from_rgb(0xff, 0xff, 0xff),
+    field: egui::Color32::from_rgb(0xe2, 0xe8, 0xf0),
+    border: egui::Color32::from_rgb(0xe2, 0xe8, 0xf0),
+    border_strong: egui::Color32::from_rgb(0xcb, 0xd5, 0xe1),
+    text: egui::Color32::from_rgb(0x0f, 0x17, 0x2a),
+    text_med: egui::Color32::from_rgb(0x47, 0x55, 0x69),
+    text_dim: egui::Color32::from_rgb(0x64, 0x74, 0x8b),
+    accent: egui::Color32::from_rgb(0xd9, 0x77, 0x06),
+    accent_hover: egui::Color32::from_rgb(0xb4, 0x53, 0x09),
+    on_accent: egui::Color32::from_rgb(0xff, 0xff, 0xff),
+    accent_soft: egui::Color32::from_rgb(0xfe, 0xf3, 0xc7),
+    danger: egui::Color32::from_rgb(0xdc, 0x26, 0x26),
+    dark: false,
+};
+
+/// Палитра текущего кадра. Тем выбирает `settings.theme`, разрешает — egui.
+fn theme(ui: &egui::Ui) -> Theme {
+    if ui.visuals().dark_mode { DARK } else { LIGHT }
+}
+
+/// Акцент: ровно «выбрано», «уверенный тег», «оставить», шаг прогресса.
+fn accent(ui: &egui::Ui) -> egui::Color32 {
+    ui.visuals().selection.stroke.color
+}
+
+/// Второстепенный текст и служебные подписи.
+fn dim(ui: &egui::Ui) -> egui::Color32 {
+    ui.visuals().widgets.noninteractive.fg_stroke.color
+}
+
 /// Метрики раскладки: менять только вместе с docs/UI.md.
 const LEFT_W: f32 = 260.0;
-/// Шаг сетки плиток: в PhotoPrism снимки стоят вплотную, у нас 2 px из шкалы 4 px.
-const TILE_GAP: f32 = 2.0;
+/// Зазор между плитками — 10 px из макета (`gap-2.5`), а не прежние 2 px.
+const TILE_GAP: f32 = 10.0;
+/// Полоса подписи под превью: имя и дата моноширинными цифрами.
+const CELL_CAPTION_H: f32 = 22.0;
 /// Высота пункта навигации и высота строки фильтров.
 const NAV_H: f32 = 28.0;
 const RIGHT_W: f32 = 280.0;
+/// Верхняя полоса 32 px и нижняя 28 px — метрики макета, не «по вкусу».
+const TOP_H: f32 = 32.0;
+const STATUS_H: f32 = 28.0;
+/// Скругления макета (Tailwind в нарисованных экранах): `rounded` = 4 — кнопки,
+/// чипы, значки; `rounded-md` = 6 — пункты навигации, меню; `rounded-lg` = 8 —
+/// карточки плиток, поля поиска, диалоги. Проза `DESIGN.md` про 0 px проигрывает
+/// нарисованным экранам — так же, как в палитре (ADR 0044).
+const RADIUS_CTRL: f32 = 4.0;
+const RADIUS_ITEM: f32 = 6.0;
+const RADIUS_CARD: f32 = 8.0;
 /// Ниже этой ширины окна сведения уходят в левую панель: сетке нужны 4 колонки.
 const DETAILS_MIN_W: f32 = 1200.0;
 
@@ -537,8 +626,8 @@ fn month_groups(
 }
 
 /// Фон выбранного пункта: акцент с прозрачностью, а не сплошная заливка.
-fn selected_fill() -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(90, 170, 255, 40)
+fn selected_fill(ui: &egui::Ui) -> egui::Color32 {
+    theme(ui).accent_soft
 }
 
 /// Источник даты съёмки: в БД латиницей, на экране на языке интерфейса.
@@ -551,15 +640,38 @@ fn date_source(src: &str, lang: i18n::Lang) -> &'static str {
     }
 }
 
-/// Основная кнопка экрана: единственное место, где фон красится акцентом.
-fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text).color(ACCENT))
-        .fill(egui::Color32::from_rgba_unmultiplied(90, 170, 255, 32))
+/// Основная кнопка экрана: заливка акцентом, текст — цветом фона палитры.
+fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Button<'static> {
+    let t = theme(ui);
+    egui::Button::new(egui::RichText::new(text).color(t.on_accent).strong())
+        .fill(t.accent)
 }
 
-/// Один стиль на всё GUI (docs/UI.md §Вёрстка): плотный ритм, скругление 4 px, без теней.
-/// Палитра остаётся из `visuals()`; акцент — единственный собственный цвет.
+/// Опасное действие: рамка цветом ошибки, без заливки; при наведении — слабый тон.
+/// Слово «удалить» остаётся только у корзины ОС и строки альбома в DB (AGENTS.md §1).
+fn danger_button(ui: &egui::Ui, text: &str) -> egui::Button<'static> {
+    let t = theme(ui);
+    egui::Button::new(egui::RichText::new(text).color(t.danger))
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::new(1.0, t.danger))
+}
+
+/// GitHub-тема egui не используется: палитра целиком наша (M22).
+/// `dark` переключается только через `ThemeMode` в настройках, не отсюда.
 fn style(ctx: &egui::Context) {
+    apply_theme(ctx, db::ThemeMode::Dark);
+}
+
+/// Применить палитру и ритм (docs/UI.md § Layout). Нулевое скругление, 1 px линии,
+/// без теней: глубину задаёт только ступень тона.
+fn apply_theme(ctx: &egui::Context, mode: db::ThemeMode) {
+    ctx.set_theme(match mode {
+        db::ThemeMode::Dark => egui::ThemePreference::Dark,
+        db::ThemeMode::Light => egui::ThemePreference::Light,
+        db::ThemeMode::System => egui::ThemePreference::System,
+    });
+    let p = if ctx.theme() == egui::Theme::Light { LIGHT } else { DARK };
+    let line = |c| egui::Stroke::new(1.0, c);
     ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         s.spacing.button_padding = egui::vec2(10.0, 4.0);
@@ -567,33 +679,151 @@ fn style(ctx: &egui::Context) {
         s.spacing.menu_margin = egui::Margin::same(6);
         s.spacing.indent = 16.0;
         s.spacing.slider_width = 120.0;
-        s.visuals.selection.bg_fill = selected_fill();
-        s.visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
-        s.visuals.window_corner_radius = egui::CornerRadius::same(4);
-        s.visuals.menu_corner_radius = egui::CornerRadius::same(4);
-        s.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(4);
-        s.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
-        s.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
-        s.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
-        s.visuals.widgets.open.corner_radius = egui::CornerRadius::same(4);
+        s.visuals.dark_mode = p.dark;
+        s.visuals.override_text_color = Some(p.text);
+        s.visuals.weak_text_color = Some(p.text_med);
+        s.visuals.panel_fill = p.panel;
+        s.visuals.window_fill = p.card;
+        // Поле ввода светлой темы — белое на сером полотне; в тёмной — полотно.
+        s.visuals.extreme_bg_color = if p.dark { p.canvas } else { p.card };
+        s.visuals.error_fg_color = p.danger;
+        s.visuals.warn_fg_color = p.accent_hover;
+        s.visuals.faint_bg_color = p.card;
+        s.visuals.code_bg_color = p.canvas;
+        s.visuals.window_stroke = line(p.border_strong);
+        s.visuals.hyperlink_color = p.accent;
+        s.visuals.selection.bg_fill = p.accent_soft;
+        s.visuals.selection.stroke = line(p.accent);
+        let ctrl = egui::CornerRadius::same(RADIUS_CTRL as u8);
+        s.visuals.window_corner_radius = egui::CornerRadius::same(RADIUS_CARD as u8);
+        s.visuals.menu_corner_radius = egui::CornerRadius::same(RADIUS_ITEM as u8);
+        s.visuals.widgets.noninteractive.corner_radius = ctrl;
+        s.visuals.widgets.inactive.corner_radius = ctrl;
+        s.visuals.widgets.hovered.corner_radius = ctrl;
+        s.visuals.widgets.active.corner_radius = ctrl;
+        s.visuals.widgets.open.corner_radius = ctrl;
+        s.visuals.widgets.noninteractive.bg_fill = p.panel;
+        s.visuals.widgets.noninteractive.weak_bg_fill = p.panel;
+        s.visuals.widgets.noninteractive.bg_stroke = line(p.border);
+        s.visuals.widgets.noninteractive.fg_stroke = line(p.text_med);
+        s.visuals.widgets.inactive.bg_fill = p.field;
+        s.visuals.widgets.inactive.weak_bg_fill = p.card;
+        s.visuals.widgets.inactive.bg_stroke = line(p.border_strong);
+        s.visuals.widgets.inactive.fg_stroke = line(p.text);
+        s.visuals.widgets.hovered.bg_fill = p.field;
+        s.visuals.widgets.hovered.weak_bg_fill = p.field;
+        s.visuals.widgets.hovered.bg_stroke = line(p.accent);
+        s.visuals.widgets.hovered.fg_stroke = line(p.text);
+        s.visuals.widgets.active.bg_fill = p.accent_soft;
+        s.visuals.widgets.active.weak_bg_fill = p.accent_soft;
+        s.visuals.widgets.active.bg_stroke = line(p.accent);
+        s.visuals.widgets.active.fg_stroke = line(p.text);
+        s.visuals.widgets.open.bg_fill = p.card;
+        s.visuals.widgets.open.weak_bg_fill = p.card;
+        s.visuals.widgets.open.bg_stroke = line(p.border_strong);
+        s.visuals.widgets.open.fg_stroke = line(p.text);
         s.visuals.window_shadow = egui::Shadow::NONE;
         s.visuals.popup_shadow = egui::Shadow::NONE;
+        // Шкала кеглей макета: 10 — служебная caps-подпись, 11 — моно-числа,
+        // 12 — тело, 13 — плотный текст, 14 — подзаголовок, 18 — заголовок вида.
+        use egui::{FontFamily::Proportional, FontId, TextStyle};
+        s.text_styles.insert(TextStyle::Heading, FontId::new(18.0, Proportional));
+        s.text_styles.insert(TextStyle::Body, FontId::new(13.0, Proportional));
+        s.text_styles.insert(TextStyle::Button, FontId::new(13.0, Proportional));
+        s.text_styles.insert(TextStyle::Small, FontId::new(11.0, Proportional));
+        s.text_styles
+            .insert(TextStyle::Monospace, FontId::new(11.0, egui::FontFamily::Monospace));
     });
+}
+
+/// Моноширинные цифры: размеры, счётчики, даты, размеры кадра (макет: mono-numeric).
+fn num(ui: &egui::Ui, text: impl Into<String>, size: f32) -> egui::RichText {
+    let family = ui
+        .style()
+        .text_styles
+        .get(&egui::TextStyle::Monospace)
+        .map(|f| f.family.clone())
+        .unwrap_or(egui::FontFamily::Monospace);
+    egui::RichText::new(text.into()).family(family).size(size)
+}
+
+/// Служебная подпись секции: 10 px, верхний регистр, второстепенный цвет.
+fn caps_label(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text.to_uppercase())
+            .size(10.0)
+            .color(dim(ui)),
+    );
+}
+
+/// 1 px граница пристыкованной панели: панели разделяет линия, а не зазор.
+fn panel_edge(ui: &egui::Ui, left: bool) {
+    let r = ui.max_rect();
+    let x = if left { r.left() + 0.5 } else { r.right() - 0.5 };
+    ui.painter()
+        .vline(x, r.y_range(), egui::Stroke::new(1.0, theme(ui).border));
+}
+
+/// Срезать верхние углы превью под скругление карточки: картинка рисуется
+/// прямоугольной, поэтому внешние уголки возвращаем фону, на котором лежит плитка.
+/// Нижние углы закрывает полоса подписи, их трогать не нужно.
+fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32) {
+    let r = radius
+        .min(rect.width() / 2.0)
+        .min(rect.height() / 2.0);
+    if r < 0.5 {
+        return;
+    }
+    let arc = |anchor: egui::Pos2, center: egui::Pos2, a0: f32, a1: f32| {
+        let mut pts = Vec::with_capacity(6);
+        pts.push(anchor);
+        for i in 0..=4 {
+            let th = a0 + (a1 - a0) * i as f32 / 4.0;
+            pts.push(center + egui::vec2(r * th.cos(), r * th.sin()));
+        }
+        pts
+    };
+    let (l, t, rt) = (rect.left(), rect.top(), rect.right());
+    let nw = arc(
+        egui::pos2(l, t),
+        egui::pos2(l + r, t + r),
+        std::f32::consts::PI,
+        1.5 * std::f32::consts::PI,
+    );
+    let ne = arc(
+        egui::pos2(rt, t),
+        egui::pos2(rt - r, t + r),
+        1.5 * std::f32::consts::PI,
+        2.0 * std::f32::consts::PI,
+    );
+    for pts in [nw, ne] {
+        ui.painter()
+            .add(egui::Shape::convex_polygon(pts, bg, egui::Stroke::NONE));
+    }
+}
+
+/// 1 px линия во всю ширину панели: глубину задаёт линия, а не тень.
+fn hairline(ui: &mut egui::Ui) {
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
 }
 
 /// Заголовок секции в панели: 11 px, второстепенный цвет, без капса.
 fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(8.0);
-    ui.label(egui::RichText::new(text).size(11.0).color(DIM));
+    ui.label(egui::RichText::new(text).size(11.0).color(dim(ui)));
     ui.add_space(2.0);
 }
 
 /// Строка «подпись слева — число справа»: числа всегда у правого края колонки.
 fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(label).size(12.0).color(DIM));
+        ui.label(egui::RichText::new(label).size(11.0).color(dim(ui)));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(egui::RichText::new(value).size(12.0));
+            // Число всегда с единицей и всегда моноширинное: столбец не дёргается.
+            ui.label(num(ui, value, 11.0));
         });
     });
 }
@@ -606,7 +836,7 @@ fn meta_row(ui: &mut egui::Ui, label: &str, value: &str) {
             egui::vec2(72.0, 0.0),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.label(egui::RichText::new(label).size(11.0).color(DIM));
+                ui.label(egui::RichText::new(label).size(11.0).color(dim(ui)));
             },
         );
         ui.add(egui::Label::new(egui::RichText::new(value).size(12.0)).wrap());
@@ -623,29 +853,33 @@ fn nav_item(
     count: Option<String>,
 ) {
     let selected = *current == view;
+    let th = theme(ui);
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_H), egui::Sense::click());
     if ui.is_rect_visible(rect) {
+        // Активный пункт: заливка тоном поля и текст акцентом, скругление 6 px —
+        // как в нарисованном экране (там строка `rounded-md`, без левой полосы).
         let fill = if selected {
-            selected_fill()
+            th.field
         } else if resp.hovered() {
-            ui.visuals().widgets.hovered.weak_bg_fill
+            th.card
         } else {
             egui::Color32::TRANSPARENT
         };
-        ui.painter().rect_filled(rect, 4.0, fill);
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(RADIUS_ITEM as u8), fill);
         let color = if selected {
-            ACCENT
+            th.accent
         } else if resp.hovered() {
-            ui.visuals().text_color()
+            th.text
         } else {
-            egui::Color32::from_gray(190)
+            th.text_med
         };
         ui.painter().text(
             rect.left_center() + egui::vec2(8.0, 0.0),
             egui::Align2::LEFT_CENTER,
             text,
-            egui::FontId::proportional(14.0),
+            egui::FontId::proportional(13.0),
             color,
         );
         if let Some(count) = count {
@@ -653,8 +887,8 @@ fn nav_item(
                 rect.right_center() + egui::vec2(-8.0, 0.0),
                 egui::Align2::RIGHT_CENTER,
                 count,
-                egui::FontId::proportional(11.0),
-                if selected { ACCENT } else { DIM },
+                egui::FontId::monospace(11.0),
+                if selected { th.accent } else { th.text_dim },
             );
         }
     }
@@ -666,10 +900,14 @@ fn nav_item(
     }
 }
 
-/// Заголовок группы навигации: 11 px приглушённым, без рамки (M16).
+/// Заголовок группы навигации: 10 px капсом, широкий трекинг макета (label-caps).
 fn nav_section(ui: &mut egui::Ui, text: &str) {
     ui.add_space(8.0);
-    ui.label(egui::RichText::new(text).size(11.0).color(DIM));
+    ui.label(
+        egui::RichText::new(text.to_uppercase())
+            .size(10.0)
+            .color(dim(ui)),
+    );
     ui.add_space(2.0);
 }
 
@@ -679,22 +917,23 @@ fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let fill = if selected {
-            selected_fill()
+            selected_fill(ui)
         } else if resp.hovered() {
             ui.visuals().widgets.hovered.weak_bg_fill
         } else {
             egui::Color32::TRANSPARENT
         };
-        ui.painter().rect_filled(rect, 3.0, fill);
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(RADIUS_ITEM as u8), fill);
         ui.painter().text(
             rect.left_center() + egui::vec2(8.0, 0.0),
             egui::Align2::LEFT_CENTER,
             text,
-            egui::FontId::proportional(14.0),
+            egui::FontId::proportional(13.0),
             if selected {
-                ACCENT
+                accent(ui)
             } else {
-                egui::Color32::from_gray(190)
+                theme(ui).text_med
             },
         );
     }
@@ -825,7 +1064,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                     t(lang, "фильтров нет").to_string()
                 })
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             // Мультивыбор (M18): счёт и две кнопки всегда на одном месте,
             // чтобы строка чипов не прыгала при кликах.
@@ -867,7 +1106,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                         i18n::Lang::En => format!("{} selected · {size}", chips.picked),
                         i18n::Lang::Ru => format!("выбрано {} · {size}", chips.picked),
                     };
-                    ui.label(egui::RichText::new(text).size(11.0).color(ACCENT));
+                    ui.label(egui::RichText::new(text).size(11.0).color(accent(ui)));
                 }
             }
         });
@@ -901,8 +1140,8 @@ fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i1
         i18n::Lang::Ru => format!("· файлов {files} · {}", db::human_in(lang, bytes)),
     };
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(title).size(14.0));
-        ui.label(egui::RichText::new(summary).size(11.0).color(DIM));
+        ui.label(egui::RichText::new(title).size(14.0).strong());
+        ui.label(num(ui, summary, 11.0).color(dim(ui)));
     });
     ui.add_space(4.0);
 }
@@ -1020,13 +1259,13 @@ fn draw_album_cell(ui: &mut egui::Ui, node: &db::AlbumNode, tile: f32) -> bool {
             egui::pos2(rect.left() + 10.0, rect.top() + 10.0),
             egui::vec2(w - 20.0, 34.0),
         );
-        ui.painter().rect_filled(folder, 3.0, selected_fill());
+        ui.painter().rect_filled(folder, 3.0, selected_fill(ui));
         ui.painter().text(
             egui::pos2(rect.left() + 10.0, rect.top() + 22.0),
             egui::Align2::LEFT_CENTER,
             "▸",
             egui::FontId::proportional(14.0),
-            ACCENT,
+            accent(ui),
         );
         ui.painter().text(
             egui::pos2(rect.left() + 28.0, rect.top() + 22.0),
@@ -1040,14 +1279,14 @@ fn draw_album_cell(ui: &mut egui::Ui, node: &db::AlbumNode, tile: f32) -> bool {
             egui::Align2::LEFT_TOP,
             format!("файлов {}", node.files),
             egui::FontId::proportional(11.0),
-            DIM,
+            dim(ui),
         );
         ui.painter().text(
             egui::pos2(rect.left() + 10.0, rect.top() + 72.0),
             egui::Align2::LEFT_TOP,
             db::human(node.bytes),
             egui::FontId::proportional(11.0),
-            DIM,
+            dim(ui),
         );
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1312,6 +1551,9 @@ struct App {
     storage_usage: Option<storage::Usage>,
     storage_confirm: Option<StorageAction>,
     status: String,
+    /// Разрешённая тема последнего кадра: палитра пересобирается только когда она
+    /// меняется (настройка или тема ОС), а не каждый кадр.
+    theme_key: Option<egui::Theme>,
 }
 
 impl App {
@@ -1473,6 +1715,7 @@ impl App {
             storage_usage: None,
             storage_confirm: None,
             status: String::new(),
+            theme_key: None,
         };
         me.reload();
         me
@@ -2170,7 +2413,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "сверка копий и слепок sha256"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(4.0);
         ui.label(
@@ -2181,7 +2424,7 @@ impl App {
                  только по кнопке. В каталог архива не записывается ничего.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.add_space(8.0);
         let mut a_changed = false;
@@ -2246,8 +2489,9 @@ impl App {
         let mut copy = false;
         let mut copy_last = false;
         ui.horizontal(|ui| {
+            let b = primary_button(ui, t(lang, "Сверить копии"));
             if ui
-                .add_enabled(!running, primary_button(t(lang, "Сверить копии")))
+                .add_enabled(!running, b)
                 .on_hover_text(t(lang, "сравнить каталог A и каталог B побайтово"))
                 .clicked()
             {
@@ -2278,7 +2522,7 @@ impl App {
                     "проход идёт: прогресс и «Стоп» — в верхней панели",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
         }
         // Напоминание (M10): срок живёт в настройках, проверка запускается только кнопкой
@@ -2301,7 +2545,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "0 — не напоминать"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
         });
         if interval_changed {
@@ -2338,7 +2582,7 @@ impl App {
         } else {
             t(lang, "дата последнего прохода непонятна — напомним при запуске").to_string()
         };
-        ui.label(egui::RichText::new(last).size(11.0).color(DIM));
+        ui.label(egui::RichText::new(last).size(11.0).color(dim(ui)));
         let (next, urgent) = match self.verify_due {
             db::VerifyDue::NoManifest => {
                 (t(lang, "напоминание: слепок не задан").to_string(), false)
@@ -2369,7 +2613,7 @@ impl App {
         ui.label(
             egui::RichText::new(next)
                 .size(11.0)
-                .color(if urgent { ACCENT } else { DIM }),
+                .color(if urgent { accent(ui) } else { dim(ui) }),
         );
         if !self.settings.verify_last_report.is_empty() {
             ui.horizontal(|ui| {
@@ -2380,7 +2624,7 @@ impl App {
                         db::cache_dir().join("verify-last.txt").display()
                     ))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
                 if ui.button(t(lang, "Скопировать прошлый отчёт")).clicked() {
                     copy_last = true;
@@ -2407,9 +2651,9 @@ impl App {
             ui.add_space(6.0);
             ui.separator();
             let color = if cancelled {
-                DIM
+                dim(ui)
             } else if ok {
-                ACCENT
+                accent(ui)
             } else {
                 ui.visuals().error_fg_color
             };
@@ -2428,7 +2672,7 @@ impl App {
                         t(lang, "тот же отчёт, что печатает CLI; в архив ничего не записано")
                     ))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
             });
             ui.add_space(4.0);
@@ -2605,7 +2849,7 @@ impl App {
                                     "Изменения сохраняются сразу; оригиналы не меняются.",
                                 ))
                                 .size(11.0)
-                                .color(DIM),
+                                .color(dim(ui)),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -2676,7 +2920,7 @@ impl App {
                      индексацию; «Убрать из индекса» удаляет только строки БД — файлы на диске целы.",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             ui.add_space(8.0);
             if roots.is_empty() {
@@ -2709,8 +2953,9 @@ impl App {
                 if ui.button(t(lang, "Добавить каталог…")).clicked() {
                     add = true;
                 }
+                let b = primary_button(ui, t(lang, "Индексировать все"));
                 if ui
-                    .add_enabled(!roots.is_empty(), primary_button(t(lang, "Индексировать все")))
+                    .add_enabled(!roots.is_empty(), b)
                     .clicked()
                 {
                     index_all = true;
@@ -2799,10 +3044,10 @@ impl App {
             ui.label(
                 egui::RichText::new(current.display().to_string())
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             if !error.is_empty() {
-                ui.label(egui::RichText::new(error).size(12.0).color(DIM));
+                ui.label(egui::RichText::new(error).size(12.0).color(dim(ui)));
             }
             ui.horizontal(|ui| {
                 if let Some(parent) = current.parent()
@@ -2810,8 +3055,9 @@ impl App {
                 {
                     nav = Some(parent.to_path_buf());
                 }
+                let b = primary_button(ui, t(lang, "Добавить и индексировать"));
                 if ui
-                    .add(primary_button(t(lang, "Добавить и индексировать")))
+                    .add(b)
                     .clicked()
                 {
                     add = true;
@@ -2910,7 +3156,8 @@ impl App {
             ui.label(text);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.add(primary_button(button)).clicked() {
+                let b = primary_button(ui, button);
+                if ui.add(b).clicked() {
                     confirmed = true;
                 }
                 if ui.button(t(lang, "Отмена")).clicked() {
@@ -3021,7 +3268,8 @@ impl App {
                     AlbumDialog::Move => "Переместить",
                     AlbumDialog::Delete => "Удалить альбом",
                 };
-                if ui.add(primary_button(label)).clicked() {
+                let b = primary_button(ui, label);
+                if ui.add(b).clicked() {
                     confirm = true;
                 }
                 if ui.button("Отмена").clicked() {
@@ -3090,7 +3338,7 @@ impl App {
                      архива не меняются; в цели ничего не перезаписывается и не удаляется.",
                 )
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             ui.add_space(6.0);
             egui::Grid::new("export-fields")
@@ -3118,7 +3366,7 @@ impl App {
                      {n} — позиция в альбоме; каталоги подальбомов без номеров.",
                 )
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -3140,7 +3388,7 @@ impl App {
                 }
             });
             if let Some(text) = &progress_text {
-                ui.label(egui::RichText::new(text).size(11.0).color(DIM));
+                ui.label(egui::RichText::new(text).size(11.0).color(dim(ui)));
             }
             if !error.is_empty() {
                 ui.label(
@@ -3154,7 +3402,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(plan.summary(self.settings.lang))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                 );
                 egui::ScrollArea::both()
                     .id_salt("export-plan")
@@ -3173,7 +3421,7 @@ impl App {
                 ui.separator();
                 ui.label(&report_text);
                 for line in errors.iter().take(5) {
-                    ui.label(egui::RichText::new(line).size(11.0).color(DIM));
+                    ui.label(egui::RichText::new(line).size(11.0).color(dim(ui)));
                 }
                 if ui.button("Скопировать отчёт").clicked() {
                     copy = true;
@@ -3235,8 +3483,9 @@ impl App {
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
+                let b = primary_button(ui, t(lang, "Переместить в системную корзину"));
                 if ui
-                    .add(primary_button(t(lang, "Переместить в системную корзину")))
+                    .add(b)
                     .clicked()
                 {
                     confirmed = true;
@@ -3317,7 +3566,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Язык интерфейса"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let mut chosen = self.settings.lang;
@@ -3337,11 +3586,46 @@ impl App {
                  вторым; экраны, ещё не переведённые, показываются по-русски.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         if chosen != self.settings.lang {
             self.settings.lang = chosen;
             self.save_settings();
+        }
+        // Тема (M22): две палитры макета и следование теме ОС. Выбор виден в том же кадре.
+        ui.add_space(12.0);
+        hairline(ui);
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(t(lang, "Тема интерфейса"))
+                .size(12.0)
+                .color(dim(ui)),
+        );
+        ui.add_space(2.0);
+        let mut mode = self.settings.theme;
+        ui.horizontal(|ui| {
+            for (value, label) in [
+                (db::ThemeMode::Dark, t(lang, "Тёмная")),
+                (db::ThemeMode::Light, t(lang, "Светлая")),
+                (db::ThemeMode::System, t(lang, "Как в системе")),
+            ] {
+                ui.selectable_value(&mut mode, value, label);
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(t(
+                lang,
+                "Тёмная — основная: снимки смотрят вечерами. Светлая — та же сетка на белом, \
+                 для дневной работы. Тема не меняет ни файлов, ни базы.",
+            ))
+            .size(11.0)
+            .color(dim(ui)),
+        );
+        if mode != self.settings.theme {
+            self.settings.theme = mode;
+            self.save_settings();
+            self.theme_key = None;
         }
     }
 
@@ -3350,7 +3634,7 @@ impl App {
         let current = embed::active_entry(&self.settings);
         let current_id = current.id;
         let mut chosen = current_id;
-        ui.label(egui::RichText::new(t(lang, "Модель")).size(12.0).color(DIM));
+        ui.label(egui::RichText::new(t(lang, "Модель")).size(12.0).color(dim(ui)));
         ui.add_space(2.0);
         egui::ComboBox::from_id_salt("model_pick")
             .width(380.0)
@@ -3390,7 +3674,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Состояние модели"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let state = if embed::model_present(&self.settings) {
@@ -3407,9 +3691,9 @@ impl App {
         };
         ui.label(egui::RichText::new(state).size(12.0).color(
             if embed::model_present(&self.settings) {
-                ACCENT
+                accent(ui)
             } else {
-                DIM
+                dim(ui)
             },
         ));
         if ui.button(t(lang, "Проверить модель")).clicked() {
@@ -3434,7 +3718,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Папка моделей"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         ui.horizontal(|ui| {
@@ -3457,14 +3741,14 @@ impl App {
         ui.label(
             egui::RichText::new(self.settings.models_dir.display().to_string())
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(12.0);
 
         ui.label(
             egui::RichText::new(t(lang, "Лимит на скачивание"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         ui.horizontal(|ui| {
@@ -3487,7 +3771,7 @@ impl App {
                  загрузчик ищет совместимую в пределах лимита.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.add_space(8.0);
         for e in embed::catalog() {
@@ -3518,7 +3802,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Согласие на сеть"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         ui.checkbox(
@@ -3535,16 +3819,14 @@ impl App {
                  Пользовательские данные не отправляются.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.add_space(8.0);
         let busy = self.download_rx.is_some();
         ui.horizontal(|ui| {
+            let b = primary_button(ui, t(lang, "Скачать модель"));
             if ui
-                .add_enabled(
-                    self.download_consent && !busy,
-                    primary_button(t(lang, "Скачать модель")),
-                )
+                .add_enabled(self.download_consent && !busy, b)
                 .clicked()
             {
                 self.start_download();
@@ -3563,7 +3845,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "кнопка погашена: нужно согласие на сеть"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
         }
         if let Some(p) = &self.download_progress {
@@ -3582,7 +3864,7 @@ impl App {
                         p.msg()
                     }),
             );
-            ui.label(egui::RichText::new(p.msg()).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(p.msg()).size(11.0).color(dim(ui)));
         }
         ui.add_space(8.0);
         ui.label(
@@ -3591,7 +3873,7 @@ impl App {
                 "Теги и векторы привязаны к модели: после смены модели их нужно посчитать.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
     }
 
@@ -3600,7 +3882,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Потоков на индексацию"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let r = ui.add(
@@ -3615,7 +3897,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Порог дублей"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let r = ui.add(
@@ -3633,7 +3915,7 @@ impl App {
                  находятся при любом пороге.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
     }
 
@@ -3642,7 +3924,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Порог фильтра по тегу"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         self.tag_filter_slider(ui);
@@ -3671,12 +3953,12 @@ impl App {
                 ),
             }
         };
-        ui.label(egui::RichText::new(above).size(11.0).color(DIM));
+        ui.label(egui::RichText::new(above).size(11.0).color(dim(ui)));
         ui.add_space(12.0);
         ui.label(
             egui::RichText::new(t(lang, "Порог уверенного тега (косинус)"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let r = ui.add(
@@ -3692,13 +3974,13 @@ impl App {
                  только если он выше порога и отрывается от второго.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.add_space(12.0);
         ui.label(
             egui::RichText::new(t(lang, "Отрыв от второго тега"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let r = ui.add(egui::Slider::new(&mut self.settings.tag_margin, 0.0..=0.10));
@@ -3713,7 +3995,7 @@ impl App {
                  скрывает его у одного фото и переживает пересчёт.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         self.settings_tag_dictionary(ui);
     }
@@ -3728,7 +4010,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Словарь тегов"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.label(
             egui::RichText::new(t(
@@ -3737,7 +4019,7 @@ impl App {
                  фото: векторы уже сохранены, пересчитываются только веса.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         if self.tag_defs.is_empty() {
             ui.label(
@@ -3746,7 +4028,7 @@ impl App {
                     "словарь ещё не засеян — он появится после первого «Посчитать теги»",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
         }
         let mut edited: Option<db::TagDef> = None;
@@ -3896,7 +4178,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "словарь изменён — нажмите «Пересчитать теги»"))
                     .size(11.0)
-                    .color(ACCENT),
+                    .color(accent(ui)),
             );
         }
         if add {
@@ -4150,13 +4432,13 @@ impl App {
                 }
             ))
             .size(12.0)
-            .color(if present { ACCENT } else { DIM }),
+            .color(if present { accent(ui) } else { dim(ui) }),
         );
         ui.add_space(12.0);
         ui.label(
             egui::RichText::new(t(lang, "Порог склейки лиц (косинус)"))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let r =
@@ -4171,7 +4453,7 @@ impl App {
                  на группы. Модели SCRFD и ArcFace — ONNX, локально.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.add_space(12.0);
         ui.checkbox(
@@ -4180,10 +4462,11 @@ impl App {
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
+            let b = primary_button(ui, t(lang, "Скачать модель лиц"));
             if ui
                 .add_enabled(
                     self.face_download_consent && self.face_download_rx.is_none(),
-                    primary_button(t(lang, "Скачать модель лиц")),
+                    b,
                 )
                 .clicked()
             {
@@ -4205,7 +4488,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "кнопка погашена: нужно согласие на сеть"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
         }
         if let Some(p) = &self.face_download_progress {
@@ -4224,7 +4507,7 @@ impl App {
                         p.msg()
                     }),
             );
-            ui.label(egui::RichText::new(p.msg()).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(p.msg()).size(11.0).color(dim(ui)));
         }
     }
 
@@ -4286,7 +4569,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Очистка кэша и индекса"))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         if ui
             .button(t(lang, "Очистить превью…"))
@@ -4323,7 +4606,7 @@ impl App {
                  Витрина по датам — отдельная команда с явным подтверждением.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
     }
 
@@ -4336,11 +4619,11 @@ impl App {
                  без программы отключается только её работа.",
             ))
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.add_space(8.0);
         for (i, tool) in tools::ALL.into_iter().enumerate() {
-            ui.label(egui::RichText::new(tool.name()).size(12.0).color(DIM));
+            ui.label(egui::RichText::new(tool.name()).size(12.0).color(dim(ui)));
             ui.add_space(2.0);
             let input = self.tools_input.get_mut(tool);
             ui.add(
@@ -4351,7 +4634,7 @@ impl App {
             ui.label(
                 egui::RichText::new(&self.tool_states[i])
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             ui.label(
                 egui::RichText::new(format!(
@@ -4360,7 +4643,7 @@ impl App {
                     tool.without(lang)
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             ui.add_space(8.0);
         }
@@ -4381,68 +4664,41 @@ impl App {
         self.status = "фильтры сброшены".into();
     }
 
-    /// Верхняя панель: две строки управления, дальше — только прогресс прохода.
+    /// Верхняя полоса 32 px: марка, поиск, состояние и вход в «Настройки».
+    /// Каталог и «Индексировать» живут в левой панели: это работа с архивом, а не поиск.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
-        ui.add_space(4.0);
+        let th = theme(ui);
+        // Полоса не переносится: на 1240 px поиск ужимается, а длинный счётчик
+        // состояния (EXIF, синхронизация) показывается только на широком окне.
+        let wide = ui.available_width() >= 1400.0;
+        let field_w = if wide { 340.0 } else { 240.0 };
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(t(lang, "Каталог")).size(11.0).color(DIM));
-            let w = (ui.available_width() - 470.0).clamp(240.0, 520.0);
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.path_input)
-                    .hint_text(t(lang, "путь к каталогу; несколько — кнопкой «Каталоги»"))
-                    .desired_width(w),
+            ui.set_min_height(TOP_H - 6.0);
+            ui.label(egui::RichText::new("photocat").size(14.0).strong());
+            ui.label(
+                egui::RichText::new(t(lang, "семейный архив"))
+                    .size(10.0)
+                    .color(th.text_dim),
             );
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add(primary_button(t(lang, "Индексировать"))).clicked() || enter {
-                self.start_index();
-            }
-            if ui.button(t(lang, "Обновить")).clicked() {
-                self.reload();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(t(lang, "Настройки")).clicked() {
-                    self.settings_open = true;
-                }
-                if ui
-                    .button(format!("{} ({})", t(lang, "Каталоги"), self.roots.len()))
-                    .on_hover_text(t(
-                        lang,
-                        "добавить несколько каталогов и убрать каталог из индекса",
-                    ))
-                    .clicked()
-                {
-                    self.roots_open = true;
-                }
-                if ui
-                    .button(if self.details_open {
-                        t(lang, "Скрыть сведения")
-                    } else {
-                        t(lang, "Сведения")
-                    })
-                    .on_hover_text(t(
-                        lang,
-                        "правая панель с датой, камерой, тегами и текстом",
-                    ))
-                    .clicked()
-                {
-                    self.details_open = !self.details_open;
-                }
-            });
-        });
+            // Разделитель марки и поиска — 1 px линия, а не отступ «на глаз».
+            let (bar, _) =
+                ui.allocate_exact_size(egui::vec2(1.0, 16.0), egui::Sense::hover());
+            ui.painter().rect_filled(bar, 0.0, th.border_strong);
+            ui.add_space(2.0);
 
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            // Режим поиска — сегментированный переключатель перед полем (PhotoPrism).
+            // Режим поиска — компактный переключатель перед полем (PhotoPrism).
             let mut text_mode = self.search_ocr;
             if ui
-                .selectable_label(!text_mode, egui::RichText::new(t(lang, "Смысловой")).size(12.0))
+                .selectable_label(!text_mode, egui::RichText::new(t(lang, "Смысловой")).size(11.0))
+                .on_hover_text(t(lang, "поиск по содержимому снимков"))
                 .clicked()
             {
                 text_mode = false;
             }
             if ui
-                .selectable_label(text_mode, egui::RichText::new(t(lang, "По тексту")).size(12.0))
+                .selectable_label(text_mode, egui::RichText::new(t(lang, "По тексту")).size(11.0))
+                .on_hover_text(t(lang, "поиск по распознанному тексту"))
                 .clicked()
             {
                 text_mode = true;
@@ -4469,10 +4725,13 @@ impl App {
                     } else {
                         t(lang, "торт, море, мебель, документ")
                     })
-                    .desired_width(340.0),
+                    .desired_width(field_w),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add_enabled(ready, egui::Button::new(t(lang, "Найти"))).clicked() || (enter && ready)
+            if ui
+                .add_enabled(ready, egui::Button::new(t(lang, "Найти")))
+                .clicked()
+                || (enter && ready)
             {
                 self.start_search();
             }
@@ -4488,7 +4747,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(t(lang, "загрузка модели…"))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                 );
             } else if !ready {
                 ui.label(
@@ -4498,11 +4757,62 @@ impl App {
                         t(lang, "модель не скачана")
                     })
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
             }
+
+            // Справа — состояние и вход в служебные окна. Числа моноширинные, чтобы
+            // счётчик не дёргал соседей при индексации.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(t(lang, "Настройки")).clicked() {
+                    self.settings_open = true;
+                }
+                if ui
+                    .button(if self.details_open {
+                        t(lang, "Скрыть сведения")
+                    } else {
+                        t(lang, "Сведения")
+                    })
+                    .on_hover_text(t(lang, "правая панель с датой, камерой, тегами и текстом"))
+                    .clicked()
+                {
+                    self.details_open = !self.details_open;
+                }
+                if ui
+                    .button(format!("{} ({})", t(lang, "Каталоги"), self.roots.len()))
+                    .on_hover_text(t(
+                        lang,
+                        "добавить несколько каталогов и убрать каталог из индекса",
+                    ))
+                    .clicked()
+                {
+                    self.roots_open = true;
+                }
+                if wide {
+                    let facts = match lang {
+                        i18n::Lang::En => format!(
+                            "{} files · {} with EXIF · synced",
+                            self.items.len(),
+                            self.items
+                                .iter()
+                                .filter(|r| r.taken_src == "exif")
+                                .count()
+                        ),
+                        i18n::Lang::Ru => format!(
+                            "{} файлов · {} с EXIF · синхронизировано",
+                            self.items.len(),
+                            self.items
+                                .iter()
+                                .filter(|r| r.taken_src == "exif")
+                                .count()
+                        ),
+                    };
+                    ui.label(num(ui, facts, 10.0).color(dim(ui)));
+                }
+            });
         });
 
+        // Прогресс — единственная третья строка: она есть, только пока идёт проход.
         if let Some(p) = &self.progress {
             let running = self.rx.is_some();
             if progress_row(ui, t(lang, "Индексация"), p, running) {
@@ -4546,7 +4856,9 @@ impl App {
             }
         }
         self.verify_banner(ui);
-        ui.add_space(4.0);
+        let r = ui.max_rect();
+        ui.painter()
+            .hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, th.border));
     }
 
     /// Баннер «Пора проверить архив» (M10). Сам ничего не запускает: "Проверить" —
@@ -4575,7 +4887,7 @@ impl App {
                 egui::RichText::new(t(lang, "Пора проверить архив"))
                     .size(13.0)
                     .strong()
-                    .color(ACCENT),
+                    .color(accent(ui)),
             );
             let fact = match last {
                 Some(date) if days_over > 0 => format!(
@@ -4584,7 +4896,7 @@ impl App {
                 Some(date) => format!("слепок {manifest} · прошлый проход {date} · срок вышел"),
                 None => format!("слепок {manifest} · прохода ещё не было"),
             };
-            ui.label(egui::RichText::new(fact).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(fact).size(11.0).color(dim(ui)));
             if ui
                 .button(t(lang, "Проверить"))
                 .on_hover_text(t(lang, "прочитать архив и сверить с сохранённым слепком"))
@@ -4620,17 +4932,24 @@ impl App {
         self.integrity_start(IntegrityJob::Check);
     }
 
-    /// Строка статуса: факт слева, выбранный файл справа.
+    /// Нижняя полоса 28 px: слева факт последнего действия, справа — счётчики и выбор.
+    /// Числа моноширинные: счётчик не дёргает соседей при индексации (макет: process deck).
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
+        let th = theme(ui);
+        let top = ui.max_rect();
+        ui.painter()
+            .hline(top.x_range(), top.top() + 0.5, egui::Stroke::new(1.0, th.border));
         ui.horizontal(|ui| {
+            ui.set_min_height(STATUS_H - 6.0);
             ui.label(
                 egui::RichText::new(if self.status.is_empty() {
                     "—"
                 } else {
                     &self.status
                 })
-                .size(11.0),
+                .size(11.0)
+                .color(th.text_med),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(f) = self
@@ -4642,20 +4961,26 @@ impl App {
                         .as_deref()
                         .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
                         .unwrap_or_else(|| t(lang, "без даты").into());
-                    ui.label(
-                        egui::RichText::new(if self.picked.len() > 1 {
-                            format!(
-                                "Выбрано {} · последний: {} · {date}",
-                                self.picked.len(),
-                                file_name(&f.path)
-                            )
-                        } else {
-                            format!("Выбрано: {} · {date}", file_name(&f.path))
-                        })
-                        .size(11.0)
-                        .color(DIM),
-                    );
+                    let text = if self.picked.len() > 1 {
+                        format!(
+                            "{} {} · {} · {date}",
+                            t(lang, "Выбрано"),
+                            self.picked.len(),
+                            file_name(&f.path)
+                        )
+                    } else {
+                        format!("{}: {} · {date}", t(lang, "Выбрано"), file_name(&f.path))
+                    };
+                    ui.label(num(ui, text, 10.0).color(th.text_med));
+                    let (bar, _) =
+                        ui.allocate_exact_size(egui::vec2(1.0, 14.0), egui::Sense::hover());
+                    ui.painter().rect_filled(bar, 0.0, th.border_strong);
                 }
+                let total = match lang {
+                    i18n::Lang::En => format!("{} files", self.items.len()),
+                    i18n::Lang::Ru => format!("{} файлов", self.items.len()),
+                };
+                ui.label(num(ui, total, 10.0).color(th.text_dim));
             });
         });
     }
@@ -4698,11 +5023,29 @@ impl App {
     /// Левая панель: карта приложения. Навигация и фильтр закреплены, контекст вида — в прокрутке.
     fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool) {
         let lang = self.settings.lang;
+        // Каталог и «Индексировать» — работа с архивом, а не поиск: они живут здесь,
+        // а верхняя полоса остаётся одной строкой 32 px (макет: working folder block).
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("photocat").size(16.0));
-        ui.label(egui::RichText::new(t(lang, "семейный архив")).size(11.0).color(DIM));
-        ui.add_space(8.0);
-        ui.separator();
+        caps_label(ui, t(lang, "Каталог"));
+        ui.add_space(2.0);
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut self.path_input)
+                .hint_text(t(lang, "путь к каталогу; несколько — кнопкой «Каталоги»"))
+                .desired_width(f32::INFINITY),
+        );
+        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(4.0);
+        let index = primary_button(ui, t(lang, "Индексировать"));
+        ui.horizontal(|ui| {
+            if ui.add(index).clicked() || enter {
+                self.start_index();
+            }
+            if ui.button(t(lang, "Обновить")).clicked() {
+                self.reload();
+            }
+        });
+        ui.add_space(4.0);
+        hairline(ui);
 
         // Карта приложения — две группы с числами справа (PhotoPrism: Library / Tools).
         // Число объясняет цену пункта до клика: 103 группы, 617 лиц, 3 в корзине.
@@ -4760,12 +5103,12 @@ impl App {
         }
 
         ui.add_space(8.0);
-        ui.separator();
+        hairline(ui);
         nav_section(ui, t(lang, "ФИЛЬТР"));
         ui.label(
             egui::RichText::new(t(lang, "Поиск по пути или дате"))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add(
             egui::TextEdit::singleline(&mut self.query)
@@ -4796,7 +5139,7 @@ impl App {
                 .resizable(false)
                 .show(ui, |ui| {
                     ui.add_space(4.0);
-                    ui.separator();
+                    hairline(ui);
                     self.stats_block(ui);
                 });
         }
@@ -4813,13 +5156,14 @@ impl App {
                 self.ocr_block(ui);
                 if show_card {
                     ui.add_space(8.0);
-                    ui.separator();
+                    hairline(ui);
                     self.file_card(ui);
                     ui.add_space(8.0);
-                    ui.separator();
+                    hairline(ui);
                     self.stats_block(ui);
                 }
             });
+        panel_edge(ui, false);
     }
 
     /// Контекст вида «Дубли и серии»: порог, «Найти группы», сводка и выгрузка плана.
@@ -4829,7 +5173,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "Дубли и серии"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             ui.add_space(4.0);
             let threshold = match lang {
@@ -4842,8 +5186,9 @@ impl App {
                 self.settings.max_dist = self.max_dist;
                 self.save_settings();
             }
+            let b = primary_button(ui, t(lang, "Найти группы"));
             if ui
-                .add(primary_button(t(lang, "Найти группы")))
+                .add(b)
                 .clicked()
             {
                 let t0 = std::time::Instant::now();
@@ -4885,7 +5230,7 @@ impl App {
                     db::human(sum.freed)
                 ),
             };
-            ui.label(egui::RichText::new(summary).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(summary).size(11.0).color(dim(ui)));
             let has_groups = !self.groups.is_empty();
             ui.add_space(4.0);
             if ui
@@ -4932,7 +5277,7 @@ impl App {
                      лишними. Файлы не удаляются; решение хранится в БД и попадает в план.",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             ui.label(
                 egui::RichText::new(t(
@@ -4941,7 +5286,7 @@ impl App {
                      удаление.",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             let no_sharp = self
                 .items
@@ -4958,7 +5303,7 @@ impl App {
                         format!("резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог")
                     }
                 };
-                ui.label(egui::RichText::new(note).size(11.0).color(DIM));
+                ui.label(egui::RichText::new(note).size(11.0).color(dim(ui)));
             }
         });
     }
@@ -4970,7 +5315,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "Лица"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             ui.add_space(4.0);
             ui.label(egui::RichText::new(format!(
@@ -4989,7 +5334,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(t(lang, "модель лиц не скачана"))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                 );
                 if ui.button(t(lang, "Настройки лиц")).clicked() {
                     self.settings_open = true;
@@ -5008,7 +5353,7 @@ impl App {
                     self.face_clusters.len()
                 ),
             };
-            ui.label(egui::RichText::new(found).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(found).size(11.0).color(dim(ui)));
             let todo = match lang {
                 i18n::Lang::En => format!(
                     "no faces yet: {} of {}",
@@ -5019,7 +5364,7 @@ impl App {
                     format!("ещё без лиц: {} из {} снимков", self.face_todo, self.face_images)
                 }
             };
-            ui.label(egui::RichText::new(todo).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(todo).size(11.0).color(dim(ui)));
             ui.add_space(4.0);
             if self.face_rx.is_some() {
                 ui.label(t(lang, "пересобираю группы…"));
@@ -5064,7 +5409,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "Группы"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             let clusters = self.face_clusters.clone();
             egui::ScrollArea::vertical()
@@ -5158,7 +5503,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "Модель ИИ"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             ui.add_space(2.0);
             if embed::model_present(&self.settings) {
@@ -5170,7 +5515,7 @@ impl App {
                         db::human_in(lang, embed::model_bytes_in(&self.settings.models_dir, entry))
                     ))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
                 let defs = self.tag_defs.iter().filter(|d| d.enabled).count().max(1);
                 let hint = match lang {
@@ -5214,7 +5559,7 @@ impl App {
                         t(lang, "с уверенным тегом:")
                     ))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
                 let free = match lang {
                     i18n::Lang::En => format!(
@@ -5225,7 +5570,7 @@ impl App {
                     ),
                 };
                 ui.label(
-                    egui::RichText::new(free).size(11.0).color(DIM),
+                    egui::RichText::new(free).size(11.0).color(dim(ui)),
                 );
                 let mut own_tags: Vec<String> =
                     self.user_tags.values().flatten().cloned().collect();
@@ -5283,7 +5628,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(t(lang, "Порог фильтра"))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                 );
                 self.tag_filter_slider(ui);
                 if !self.tags.is_empty() && counts.iter().all(|n| *n == 0) {
@@ -5293,7 +5638,7 @@ impl App {
                             "ни один тег не проходит порог — опустите ползунок",
                         ))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                     );
                 }
                 if let Some(hits) = &self.semantic_hits {
@@ -5310,14 +5655,14 @@ impl App {
                             )
                         ))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                     );
                 }
             } else {
                 ui.label(
                     egui::RichText::new(t(lang, "модель не скачана"))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                 );
             }
             if ui.button(t(lang, "Настройки модели")).clicked() {
@@ -5334,7 +5679,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "Текст на фото"))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
             ui.add_space(2.0);
             if self.tesseract.is_none() {
@@ -5344,7 +5689,7 @@ impl App {
                         "tesseract не запускается — путь в «Настройках»",
                     ))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
             }
             let images = self.items.iter().filter(|r| r.kind == "image").count();
@@ -5356,7 +5701,7 @@ impl App {
                 ),
                 i18n::Lang::Ru => format!("с текстом: {} из {images} снимков", self.ocr_files),
             };
-            ui.label(egui::RichText::new(with_text).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(with_text).size(11.0).color(dim(ui)));
             let candidates = match lang {
                 i18n::Lang::En => format!(
                     "candidates: {}, left: {}",
@@ -5367,7 +5712,7 @@ impl App {
                     self.ocr_candidates, self.ocr_remaining
                 ),
             };
-            ui.label(egui::RichText::new(candidates).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(candidates).size(11.0).color(dim(ui)));
             ui.add_space(4.0);
             if self.ocr_rx.is_some() {
                 if ui.button(t(lang, "Стоп")).clicked()
@@ -5410,7 +5755,7 @@ impl App {
         ui.label(
             egui::RichText::new(t(lang, "Сводка"))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
         );
         ui.add_space(2.0);
         let n = self.items.len();
@@ -5434,7 +5779,7 @@ impl App {
                     "нажмите «Индексировать» — обложки создаст ffmpeg",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
         }
         ui.add_space(4.0);
@@ -5442,6 +5787,7 @@ impl App {
 
     /// Правая панель: сведения и действия по выбранному файлу.
     fn details_panel(&mut self, ui: &mut egui::Ui) {
+        panel_edge(ui, true);
         let lang = self.settings.lang;
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -5474,7 +5820,7 @@ impl App {
                     "Выберите снимок в сетке — здесь появятся дата, камера, теги и текст.",
                 ))
                 .size(12.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             return;
         };
@@ -5512,6 +5858,8 @@ impl App {
             tile: self.tile_size,
             lang,
             budget: 4,
+            bg: ui.visuals().extreme_bg_color,
+            cell_style: db::CellStyle::Tiles,
         };
         if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
             let txt = match f.kind.as_str() {
@@ -5523,13 +5871,13 @@ impl App {
                 egui::Align2::CENTER_CENTER,
                 txt,
                 egui::FontId::proportional(12.0),
-                DIM,
+                dim(ui),
             );
         }
         ui.add_space(8.0);
         // Имя файла — главное, путь — подпись под ним (PhotoPrism-инспектор).
         ui.label(egui::RichText::new(file_name(&f.path)).size(14.0));
-        ui.label(egui::RichText::new(&f.path).size(11.0).color(DIM));
+        ui.label(egui::RichText::new(&f.path).size(11.0).color(dim(ui)));
         if self.picked.len() > 1 {
             let bytes: i64 = self
                 .items
@@ -5545,7 +5893,7 @@ impl App {
                     db::human_in(lang, bytes)
                 ))
                 .size(11.0)
-                .color(ACCENT),
+                .color(accent(ui)),
             );
         }
         ui.add_space(6.0);
@@ -5557,8 +5905,9 @@ impl App {
             {
                 self.open_viewer(id);
             }
+            let b = danger_button(ui, t(lang, "В корзину"));
             if ui
-                .button(t(lang, "В корзину"))
+                .add(b)
                 .on_hover_text(t(
                     lang,
                     "убрать из обычных видов в корзину приложения; на диске файл не меняется",
@@ -5667,14 +6016,14 @@ impl App {
                     ui.label(
                         egui::RichText::new(format!("{} {tag}", t(lang, "тег:")))
                             .size(12.0)
-                            .color(ACCENT),
+                            .color(accent(ui)),
                     );
                 }
                 None if !tags.is_empty() => {
                     ui.label(
                         egui::RichText::new(t(lang, "тег: не уверен — первые веса близки"))
                             .size(12.0)
-                            .color(DIM),
+                            .color(dim(ui)),
                     );
                 }
                 None => {}
@@ -5702,7 +6051,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "тег: не посчитан"))
                     .size(12.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
         }
         if let Some(tag) = hide {
@@ -5742,7 +6091,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(lang, "пока нет"))
                     .size(12.0)
-                    .color(DIM),
+                    .color(dim(ui)),
             );
         }
         let mut remove_own: Option<String> = None;
@@ -5814,7 +6163,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(t(lang, "кнопка погашена: tesseract не запускается"))
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                 );
             }
             let shown = self
@@ -6403,7 +6752,7 @@ impl App {
                     .as_deref()
                     .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
                     .unwrap_or_else(|| t(lang, "без даты").into());
-                ui.label(egui::RichText::new(date).size(11.0).color(DIM));
+                ui.label(egui::RichText::new(date).size(11.0).color(dim(ui)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(t(lang, "Закрыть")).clicked() {
                         close = true;
@@ -6411,7 +6760,7 @@ impl App {
                     ui.label(
                         egui::RichText::new(i18n::position(lang, v.idx + 1, v.ids.len()))
                             .size(11.0)
-                            .color(DIM),
+                            .color(dim(ui)),
                     );
                 });
             });
@@ -6427,7 +6776,7 @@ impl App {
                         ui.label(
                             egui::RichText::new(t(lang, "ffplay отдельным окном"))
                                 .size(11.0)
-                                .color(DIM),
+                                .color(dim(ui)),
                         );
                     } else if icon_button(
                         ui,
@@ -6471,7 +6820,7 @@ impl App {
                                 db::duration(dur)
                             ))
                             .size(11.0)
-                            .color(DIM),
+                            .color(dim(ui)),
                         );
                         let w = (ui.available_width() - 220.0).max(160.0);
                         let resp = ui.add_sized(
@@ -6498,7 +6847,7 @@ impl App {
                             ui.label(
                                 egui::RichText::new(t(lang, "нет устройства"))
                                     .size(11.0)
-                                    .color(DIM),
+                                    .color(dim(ui)),
                             );
                         }
                     }
@@ -6525,7 +6874,7 @@ impl App {
                     {
                         new_slideshow = !v.slideshow;
                     }
-                    ui.label(egui::RichText::new(t(lang, "интервал:")).size(11.0).color(DIM));
+                    ui.label(egui::RichText::new(t(lang, "интервал:")).size(11.0).color(dim(ui)));
                     for secs in [3u64, 5, 10] {
                         if ui
                             .selectable_label(v.interval_s == secs, i18n::seconds(lang, secs))
@@ -6553,13 +6902,13 @@ impl App {
                         v.zoom * 100.0
                     ))
                     .size(11.0)
-                    .color(DIM),
+                    .color(dim(ui)),
                 );
                 if v.zoom > 1.0 {
                     ui.label(
                         egui::RichText::new(t(lang, "перетаскивание — сдвиг кадра"))
                             .size(11.0)
-                            .color(DIM),
+                            .color(dim(ui)),
                     );
                 }
                 if ui
@@ -6604,7 +6953,7 @@ impl App {
                             ui.label(
                                 egui::RichText::new(t(lang, "Текст на фото"))
                                     .size(11.0)
-                                    .color(DIM),
+                                    .color(dim(ui)),
                             );
                             let text = self.ocr_text.get(&id).cloned().unwrap_or_default();
                             if text.trim().is_empty() {
@@ -6614,7 +6963,7 @@ impl App {
                                         "Текст не распознан. Кнопка «Распознать текст» — в карточке файла.",
                                     ))
                                     .size(12.0)
-                                    .color(DIM),
+                                    .color(dim(ui)),
                                 );
                             } else {
                                 ui.add(egui::Label::new(text).wrap());
@@ -7062,7 +7411,7 @@ impl App {
                     "теги ещё не посчитаны — нажмите «Посчитать теги»",
                 ))
                 .size(11.0)
-                .color(DIM),
+                .color(dim(ui)),
             );
             return;
         }
@@ -7095,7 +7444,7 @@ impl App {
                     self.settings.tag_show
                 ),
             };
-            ui.label(egui::RichText::new(few).size(11.0).color(DIM));
+            ui.label(egui::RichText::new(few).size(11.0).color(dim(ui)));
         }
     }
 
@@ -7497,7 +7846,7 @@ fn draw_face_cell(
                 egui::Align2::CENTER_CENTER,
                 t(lang, "нет кадра"),
                 egui::FontId::proportional(12.0),
-                DIM,
+                dim(ui),
             );
         }
         let date = f
@@ -7622,7 +7971,7 @@ fn tag_row(
 ) {
     ui.horizontal(|ui| {
         let color = if confident == Some(tag) {
-            ACCENT
+            accent(ui)
         } else {
             ui.visuals().text_color()
         };
@@ -7633,7 +7982,7 @@ fn tag_row(
                 None => format!("{score:.2}"),
             })
             .size(11.0)
-            .color(DIM),
+            .color(dim(ui)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
@@ -7648,6 +7997,10 @@ fn tag_row(
 }
 
 struct Cells<'a> {
+    /// Фон родителя под плиткой (полотно сетки или карточка группы дублей).
+    bg: egui::Color32,
+    /// Как показаны файлы: плитка макета, строки по пропорциям или список (M22).
+    cell_style: db::CellStyle,
     textures: &'a mut HashMap<i64, egui::TextureHandle>,
     missing: &'a mut HashSet<i64>,
     thumbs_dir: &'a Path,
@@ -8092,7 +8445,7 @@ fn draw_viewer_image(
             egui::Align2::CENTER_CENTER,
             t(lang, "полный кадр загружается…"),
             egui::FontId::proportional(14.0),
-            DIM,
+            dim(ui),
         );
     }
     if f.kind == "video" {
@@ -8101,21 +8454,318 @@ fn draw_viewer_image(
     resp
 }
 
-fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow) {
-    let w = cs.tile.clamp(100.0, 260.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, w + 26.0), egui::Sense::click());
-    let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
-    if ui.is_rect_visible(rect) {
+/// Пропорция кадра: по ней выбирается ширина плитки в строке. Размеры лежат в БД,
+/// поэтому раскладка не ждёт текстур; нет размера (битый файл) — 4:3.
+fn frame_aspect(f: &FileRow) -> f32 {
+    if f.width > 0 && f.height > 0 {
+        (f.width as f32 / f.height as f32).clamp(0.25, 4.0)
+    } else {
+        4.0 / 3.0
+    }
+}
+
+/// Сколько кадров влезает в строку и какой высоты строка. Чистая функция: сетку
+/// можно проверять без окна. Высота не выходит за целевую и не падает ниже 70 %
+/// её — иначе одна строка из двух кадров растянулась бы на пол-экрана.
+fn row_fit(aspects: &[f32], avail: f32, target: f32, gap: f32) -> (usize, f32) {
+    let mut sum = 0.0f32;
+    let mut n = 0usize;
+    while n < aspects.len() {
+        sum += aspects[n];
+        n += 1;
+        if sum * target + gap * (n - 1) as f32 >= avail {
+            break;
+        }
+    }
+    let gaps = gap * (n.saturating_sub(1)) as f32;
+    let h = ((avail - gaps) / sum.max(0.01)).clamp(target * 0.7, target);
+    (n.max(1), h)
+}
+
+/// Один вход для всех файловых сеток: вид ячейки выбирает `settings.cell_style`.
+fn draw_files(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
+    match cs.cell_style {
+        db::CellStyle::Tiles => draw_tiles(ui, ctx, cs, files),
+        db::CellStyle::Rows => draw_flow(ui, ctx, cs, files),
+        db::CellStyle::List => draw_list(ui, ctx, cs, files),
+    }
+}
+
+/// Основной вид из макета: плитки одинаковой ширины, кадр 4:3, снимок вписан
+/// целиком (не растянут и не обрезан), под кадром полоса подписи. Колонки делят
+/// ширину области, как `grid-cols-6` в макете.
+fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
+    if files.is_empty() {
+        return;
+    }
+    let gap = TILE_GAP;
+    let target = cs.tile.clamp(100.0, 260.0);
+    let avail = ui.available_width().max(64.0);
+    let per_row = (((avail + gap) / (target + gap)).floor() as usize).max(1);
+    let w = ((avail - gap * (per_row.saturating_sub(1)) as f32) / per_row as f32)
+        .floor()
+        .max(24.0);
+    // Кадр 4:3 — пропорция плитки макета; снимок вписывается в него целиком.
+    let h = (w * 0.75).round();
+    for row in files.chunks(per_row) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+            for &f in row {
+                draw_cell(ui, ctx, cs, f, w, h);
+            }
+        });
+        ui.add_space(gap);
+    }
+}
+
+/// Список: строка 44 px — миниатюра 58×40, имя, дата и объём. Плотный просмотр
+/// имён и дат, когда снимки уже известны; решения по дублям и корзине — те же кнопки.
+fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
+    let row_h = 44.0;
+    let thumb = egui::vec2(58.0, 40.0);
+    for &f in files {
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), row_h),
+            egui::Sense::click(),
+        );
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
+        let th = theme(ui);
+        let chosen = cs.picked.contains(&f.id) || cs.selected == Some(f.id);
+        let fill = if chosen {
+            th.accent_soft
+        } else if resp.hovered() {
+            th.card
+        } else {
+            egui::Color32::TRANSPARENT
+        };
         ui.painter()
-            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+            .rect_filled(rect, egui::CornerRadius::same(RADIUS_CTRL as u8), fill);
+        if chosen {
+            let bar = egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height()));
+            ui.painter().rect_filled(bar, 0.0, th.accent);
+        }
+        let tr = egui::Rect::from_min_size(
+            rect.left_top() + egui::vec2(6.0, 2.0),
+            thumb,
+        );
+        ui.painter().rect_filled(tr, 2.0, th.canvas);
+        if !paint_thumb(ui, ctx, cs, f, tr) {
+            ui.painter().text(
+                tr.center(),
+                egui::Align2::CENTER_CENTER,
+                "—",
+                egui::FontId::proportional(11.0),
+                th.text_dim,
+            );
+        }
+        let name = file_name(&f.path);
+        let date = f
+            .taken_at
+            .as_deref()
+            .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
+            .unwrap_or_else(|| t(cs.lang, "без даты").to_string());
+        let kind = if f.kind == "video" {
+            match f.duration_s {
+                Some(d) => format!("▶ {}", db::duration(d)),
+                None => t(cs.lang, "▶ видео").to_string(),
+            }
+        } else {
+            match (f.width, f.height) {
+                (w, h) if w > 0 && h > 0 => format!("{w}×{h}"),
+                _ => String::new(),
+            }
+        };
+        let meta = format!("{date} · {}", db::human_in(cs.lang, f.size));
+        let right = if cs.show_keep || cs.trash_mode { 96.0 } else { 132.0 };
+        let clip = egui::Rect::from_min_max(
+            tr.right_top() + egui::vec2(8.0, 0.0),
+            egui::pos2(rect.right() - right, rect.bottom()),
+        );
+        let painter = ui.painter().with_clip_rect(clip);
+        painter.text(
+            egui::pos2(clip.left(), rect.top() + 6.0),
+            egui::Align2::LEFT_TOP,
+            &name,
+            egui::FontId::proportional(12.0),
+            if chosen { th.accent } else { th.text },
+        );
+        painter.text(
+            egui::pos2(clip.left(), rect.top() + 24.0),
+            egui::Align2::LEFT_TOP,
+            &meta,
+            egui::FontId::monospace(10.0),
+            th.text_dim,
+        );
+        ui.painter().text(
+            egui::pos2(rect.right() - 8.0, rect.top() + 6.0),
+            egui::Align2::RIGHT_TOP,
+            &kind,
+            egui::FontId::monospace(10.0),
+            th.text_med,
+        );
+        if cs.show_keep {
+            let btn = egui::Rect::from_min_size(
+                egui::pos2(rect.right() - 78.0, rect.top() + 12.0),
+                egui::vec2(70.0, 20.0),
+            );
+            if ui
+                .place(btn, egui::Button::new(t(cs.lang, "оставить")).small())
+                .clicked()
+            {
+                cs.keep_clicked = Some(f.id);
+            }
+        }
+        if cs.trash_mode {
+            let btn = egui::Rect::from_min_size(
+                egui::pos2(rect.right() - 78.0, rect.top() + 12.0),
+                egui::vec2(70.0, 20.0),
+            );
+            if ui
+                .place(btn, egui::Button::new(t(cs.lang, "вернуть")).small())
+                .clicked()
+            {
+                cs.restore_clicked = Some(f.id);
+            }
+        }
+        if resp.clicked() {
+            let mods = ui.input(|i| i.modifiers);
+            cs.clicked = Some((f.id, pick_kind(&mods)));
+        }
+        if resp.double_clicked() {
+            cs.open_clicked = Some(f.id);
+        }
+        resp.on_hover_text(&f.path);
+    }
+    ui.add_space(4.0);
+}
+
+/// Одна раскладка на все сетки (docs/UI.md § Layout). Строки «по пропорциям»: кадр
+/// вписан в плитку без полей и без обрезки, высота строки задаётся ползунком
+/// «Плитки», ширина плитки следует пропорции кадра, а строка добирает ширину.
+fn draw_flow(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
+    if files.is_empty() {
+        return;
+    }
+    let gap = TILE_GAP;
+    let target = cs.tile.clamp(100.0, 260.0);
+    let avail = ui.available_width().max(64.0);
+    let aspects: Vec<f32> = files.iter().map(|f| frame_aspect(f)).collect();
+    let mut i = 0usize;
+    while i < aspects.len() {
+        let (n, fitted) = row_fit(&aspects[i..], avail, target, gap);
+        let n = n.min(aspects.len() - i);
+        // Неполная (последняя) строка остаётся целевой высоты: добивать её
+        // растягиванием двух-трёх кадров нельзя.
+        let h = if i + n >= files.len() { target } else { fitted };
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+            for &f in &files[i..i + n] {
+                let w = (h * frame_aspect(f)).round().clamp(24.0, avail);
+                draw_cell(ui, ctx, cs, f, w, h);
+            }
+        });
+        ui.add_space(gap);
+        i += n;
+    }
+}
+
+/// Плитка файла: карточка = кадр (w×h) + полоса подписи 22 px (макет: thumbnail
+/// card). Кадр заполняет плитку целиком: пропорция плитки равна пропорции снимка.
+fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow, w: f32, h: f32) {
+    let th = theme(ui);
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(w, h + CELL_CAPTION_H),
+        egui::Sense::click(),
+    );
+    let img_rect = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(rect.right(), rect.top() + h),
+    );
+    let cap_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), img_rect.bottom()),
+        rect.right_bottom(),
+    );
+    if ui.is_rect_visible(rect) {
+        // Карточка 8 px: верхние углы у превью, нижние — у полосы подписи.
+        let top = egui::CornerRadius {
+            nw: RADIUS_CARD as u8,
+            ne: RADIUS_CARD as u8,
+            sw: 0,
+            se: 0,
+        };
+        let bottom = egui::CornerRadius {
+            nw: 0,
+            ne: 0,
+            sw: RADIUS_CARD as u8,
+            se: RADIUS_CARD as u8,
+        };
+        ui.painter().rect_filled(img_rect, top, th.canvas);
+        ui.painter().rect_filled(cap_rect, bottom, th.panel);
         let drawn = paint_thumb(ui, ctx, cs, f, img_rect);
+        if drawn {
+            round_preview(ui, img_rect, RADIUS_CARD, cs.bg);
+        }
+        // Подпись: имя файла слева, дата справа — моноширинными цифрами (M22).
+        // Имя обрезается по краю даты, а не уезжает на соседнюю плитку.
+        let name = file_name(&f.path);
+        let date = f
+            .taken_at
+            .as_deref()
+            .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
+            .unwrap_or_else(|| t(cs.lang, "без даты").to_string());
+        let chosen = cs.picked.contains(&f.id) || cs.selected == Some(f.id);
+        let name_col = if chosen { th.accent } else { th.text_med };
+        let font = egui::FontId::monospace(10.0);
+        let date_galley = ui.painter().layout_no_wrap(date.clone(), font.clone(), th.text_dim);
+        let cap_pad = 4.0;
+        // Узкая плитка (100 px) с длинной датой может не оставить места имени:
+        // тогда имя не рисуется вовсе, а не наезжает на дату.
+        let name_max = (cap_rect.width() - date_galley.size().x - 3.0 * cap_pad).max(0.0);
+        if name_max > 4.0 {
+            let name_galley = ui.painter().layout(name.clone(), font, name_col, name_max);
+            let name_right =
+                (cap_rect.right() - date_galley.size().x - 2.0 * cap_pad).max(cap_rect.left());
+            let clip = cap_rect.intersect(egui::Rect::from_min_max(
+                cap_rect.min,
+                egui::pos2(name_right, cap_rect.bottom()),
+            ));
+            if clip.is_positive() {
+                let painter = ui.painter().with_clip_rect(clip);
+                painter.galley(
+                    egui::pos2(
+                        cap_rect.left() + cap_pad,
+                        cap_rect.center().y - name_galley.size().y / 2.0,
+                    ),
+                    name_galley,
+                    name_col,
+                );
+            }
+        }
+        let cap_painter = ui.painter().with_clip_rect(cap_rect);
+        cap_painter.galley(
+            egui::pos2(
+                cap_rect.right() - date_galley.size().x - cap_pad,
+                cap_rect.center().y - date_galley.size().y / 2.0,
+            ),
+            date_galley,
+            th.text_dim,
+        );
+        // 1 px рамка карточки: у выбранной её перекрывает акцентная обводка ниже.
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(RADIUS_CARD as u8),
+            egui::Stroke::new(1.0, th.border),
+            egui::StrokeKind::Inside,
+        );
         // Отклик на наведение: тонкая обводка и курсор — плитка читается как цель (M16).
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             ui.painter().rect_stroke(
-                img_rect,
-                4.0,
-                egui::Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color),
+                rect,
+                egui::CornerRadius::same(RADIUS_CARD as u8),
+                egui::Stroke::new(1.0, th.border_strong),
                 egui::StrokeKind::Inside,
             );
         }
@@ -8133,7 +8783,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 egui::Align2::CENTER_CENTER,
                 txt,
                 egui::FontId::proportional(12.0),
-                DIM,
+                dim(ui),
             );
         }
         // Видео видно по кадру-обложке, но подпись с длительностью не даёт спутать его с фото.
@@ -8156,23 +8806,14 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                 egui::Color32::from_gray(235),
             );
         }
-        let date = f
-            .taken_at
-            .as_deref()
-            .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-            .unwrap_or_else(|| t(cs.lang, "без даты").to_string());
-        ui.painter().text(
-            egui::pos2(rect.left() + 3.0, img_rect.bottom() + 3.0),
-            egui::Align2::LEFT_TOP,
-            date,
-            egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(190),
-        );
         // Решение по дублю видно на плитке в любом виде, а не только по наведению.
         match f.decision.as_deref() {
             Some("drop") => {
-                ui.painter()
-                    .rect_filled(img_rect, 4.0, egui::Color32::from_black_alpha(150));
+                ui.painter().rect_filled(
+                    img_rect,
+                    egui::CornerRadius::same(RADIUS_CARD as u8),
+                    egui::Color32::from_black_alpha(150),
+                );
                 ui.painter().text(
                     img_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -8184,8 +8825,8 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             Some("keep") => {
                 ui.painter().rect_stroke(
                     img_rect,
-                    4.0,
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
+                    egui::CornerRadius::same(RADIUS_CARD as u8),
+                    egui::Stroke::new(2.0, accent(ui)),
                     egui::StrokeKind::Inside,
                 );
                 ui.painter().text(
@@ -8193,7 +8834,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
                     egui::Align2::LEFT_TOP,
                     t(cs.lang, "оставить"),
                     egui::FontId::proportional(12.0),
-                    egui::Color32::from_rgb(90, 170, 255),
+                    accent(ui),
                 );
             }
             _ => {}
@@ -8211,8 +8852,11 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             }
         }
         if cs.trash_mode {
-            ui.painter()
-                .rect_filled(img_rect, 4.0, egui::Color32::from_black_alpha(90));
+            ui.painter().rect_filled(
+                img_rect,
+                egui::CornerRadius::same(RADIUS_CARD as u8),
+                egui::Color32::from_black_alpha(90),
+            );
             ui.painter().text(
                 egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
                 egui::Align2::LEFT_TOP,
@@ -8237,28 +8881,31 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         }
     }
     if cs.picked.contains(&f.id) {
-        // Выбранная плитка видна без наведения: обводка и галочка, а не только цвет.
+        // Выбранная плитка видна без наведения: обводка и квадратный флаг, а не только цвет.
         ui.painter().rect_stroke(
             rect,
-            4.0,
-            egui::Stroke::new(2.0, ACCENT),
+            egui::CornerRadius::same(RADIUS_CARD as u8),
+            egui::Stroke::new(2.0, accent(ui)),
             egui::StrokeKind::Inside,
         );
-        let badge = egui::pos2(img_rect.right() - 13.0, img_rect.top() + 13.0);
+        let badge = egui::Rect::from_min_size(
+            egui::pos2(img_rect.right() - 20.0, img_rect.top() + 6.0),
+            egui::vec2(14.0, 14.0),
+        );
         ui.painter()
-            .circle_filled(badge, 9.0, ACCENT);
+            .rect_filled(badge, egui::CornerRadius::same(RADIUS_CTRL as u8), accent(ui));
         ui.painter().text(
-            badge,
+            badge.center(),
             egui::Align2::CENTER_CENTER,
             "✓",
-            egui::FontId::proportional(12.0),
-            egui::Color32::WHITE,
+            egui::FontId::proportional(11.0),
+            theme(ui).on_accent,
         );
     } else if cs.selected == Some(f.id) {
         ui.painter().rect_stroke(
             rect,
-            4.0,
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
+            egui::CornerRadius::same(RADIUS_CARD as u8),
+            egui::Stroke::new(2.0, accent(ui)),
             egui::StrokeKind::Inside,
         );
     }
@@ -8285,6 +8932,17 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
+        // M22: палитра применяется до первой фигуры кадра и только при смене темы.
+        // "Система" читается у ОС, поэтому смена темы в системе видна без перезапуска.
+        let resolved = match self.settings.theme {
+            db::ThemeMode::Dark => egui::Theme::Dark,
+            db::ThemeMode::Light => egui::Theme::Light,
+            db::ThemeMode::System => ctx.system_theme().unwrap_or(egui::Theme::Dark),
+        };
+        if self.theme_key != Some(resolved) {
+            apply_theme(ctx, self.settings.theme);
+            self.theme_key = Some(resolved);
+        }
         // M18: выделение живёт внутри одного набора файлов; смена вида/фильтра/
         // поиска/порядка снимает его и говорит почему. Esc и Ctrl+A — та же сетка.
         self.sync_pick_scope();
@@ -8676,6 +9334,13 @@ impl eframe::App for App {
             tile: self.tile_size,
             lang: self.settings.lang,
             budget: 8,
+            cell_style: self.settings.cell_style,
+            // Фон, на котором лежит плитка: срез углов превью красит именно его.
+            bg: if self.view == View::Dupes {
+                ui.visuals().faint_bg_color
+            } else {
+                theme(ui).canvas
+            },
         };
         let groups = std::mem::take(&mut self.groups);
         let trash_items = std::mem::take(&mut self.trash_items);
@@ -8851,30 +9516,74 @@ impl eframe::App for App {
         };
 
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.add_space(6.0);
+            // Панель содержимого: фон полотна, шапка вида и строка чипов.
+            egui::Frame::new()
+                .fill(theme(ui).canvas)
+                .inner_margin(egui::Margin::symmetric(12, 6))
+                .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(title).size(18.0));
-                ui.label(egui::RichText::new(count).size(12.0).color(DIM));
+                ui.label(egui::RichText::new(title).size(18.0).strong());
+                ui.label(num(ui, count, 12.0).color(dim(ui)));
                 // PhotoPrism: размер плиток живёт в панели содержимого, а не в левой панели.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let size = ui.add(
-                        egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
-                            .step_by(10.0)
-                            .show_value(false),
-                    );
-                    if size.drag_stopped() || size.lost_focus() {
-                        tile_save = true;
+                    // Размер относится к плиткам и строкам; списку он не нужен.
+                    if self.settings.cell_style != db::CellStyle::List {
+                        let size = ui.add(
+                            egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
+                                .step_by(10.0)
+                                .show_value(false),
+                        );
+                        if size.drag_stopped() || size.lost_focus() {
+                            tile_save = true;
+                        }
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} {:.0}",
+                                t(lang, "Плитки"),
+                                self.tile_size
+                            ))
+                            .size(11.0)
+                            .color(dim(ui)),
+                        )
+                        .on_hover_text(t(
+                            lang,
+                            "размер плитки (плитка — ширина кадра, строки — высота), 100–260 px",
+                        ));
                     }
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} {:.0}",
-                            t(lang, "Плитки"),
-                            self.tile_size
-                        ))
-                        .size(11.0)
-                        .color(DIM),
-                    )
-                    .on_hover_text(t(lang, "размер плиток, 100–260 px"));
+                    // Вид ячейки (M22): плитка макета — основной, строки и список — вторые.
+                    let mut style = self.settings.cell_style;
+                    for (value, label, hint) in [
+                        (
+                            db::CellStyle::Tiles,
+                            t(lang, "Плитка"),
+                            t(lang, "как в макете: кадр 4:3, снимок вписан целиком"),
+                        ),
+                        (
+                            db::CellStyle::Rows,
+                            t(lang, "Ряды"),
+                            t(lang, "строки по пропорциям: ширина плитки по кадру"),
+                        ),
+                        (
+                            db::CellStyle::List,
+                            t(lang, "Список"),
+                            t(lang, "список: имя, дата и размер в строку"),
+                        ),
+                    ] {
+                        if ui
+                            .selectable_label(
+                                style == value,
+                                egui::RichText::new(label).size(11.0),
+                            )
+                            .on_hover_text(hint)
+                            .clicked()
+                        {
+                            style = value;
+                        }
+                    }
+                    if style != self.settings.cell_style {
+                        self.settings.cell_style = style;
+                        view_save = true;
+                    }
                     // Порядок доступен в сетке и внутри альбома (M19), но не в дереве.
                     let album_scope_now =
                         view == View::Albums && self.album_selected.is_some();
@@ -8902,7 +9611,7 @@ impl eframe::App for App {
                                         sort_label(sort, lang)
                                     ))
                                     .size(11.0)
-                                    .color(DIM),
+                                    .color(dim(ui)),
                                 );
                             })
                         });
@@ -8986,14 +9695,8 @@ impl eframe::App for App {
                         if self.semantic_hits.is_some()
                             || self.settings.grid_layout == db::GridLayout::Flat
                         {
-                            ui.scope(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
-                                ui.horizontal_wrapped(|ui| {
-                                    for &i in &ordered {
-                                        draw_cell(ui, ctx, &mut cells, &items[i]);
-                                    }
-                                });
-                            });
+                            let row: Vec<&FileRow> = ordered.iter().map(|&i| &items[i]).collect();
+                            draw_files(ui, ctx, &mut cells, &row);
                             return;
                         }
                         // «По месяцам»: месяцы в порядке сортировки, «Без даты» — последней
@@ -9002,15 +9705,9 @@ impl eframe::App for App {
                         for (key, ids) in month_groups(&ordered, &items, ascend) {
                             let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
                             month_header(ui, &key, ids.len(), bytes, lang);
-                            ui.scope(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
-                                ui.horizontal_wrapped(|ui| {
-                                    for &i in &ids {
-                                        draw_cell(ui, ctx, &mut cells, &items[i]);
-                                    }
-                                });
-                            });
-                            ui.add_space(16.0);
+                            let row: Vec<&FileRow> = ids.iter().map(|&i| &items[i]).collect();
+                            draw_files(ui, ctx, &mut cells, &row);
+                            ui.add_space(24.0);
                         }
                     });
                 if bg.clicked() && cells.clicked.is_none() {
@@ -9031,7 +9728,7 @@ impl eframe::App for App {
                                  Только данные: файлы на диске не меняются.",
                             )
                             .size(11.0)
-                            .color(DIM),
+                            .color(dim(ui)),
                         );
                     }
                 });
@@ -9101,7 +9798,7 @@ impl eframe::App for App {
                     .collect();
                 if !children.is_empty() {
                     ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Подальбомы").size(11.0).color(DIM));
+                    ui.label(egui::RichText::new("Подальбомы").size(11.0).color(dim(ui)));
                     ui.horizontal_wrapped(|ui| {
                         for child in &children {
                             if draw_album_cell(ui, child, self.tile_size) {
@@ -9193,7 +9890,7 @@ impl eframe::App for App {
                              нажмите «Добавить выбранные».",
                         )
                         .size(11.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                     );
                 }
                 ui.add_space(4.0);
@@ -9218,14 +9915,8 @@ impl eframe::App for App {
                     .id_salt("album-grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.scope(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
-                            ui.horizontal_wrapped(|ui| {
-                                for &i in &ordered {
-                                    draw_cell(ui, ctx, &mut cells, &items[i]);
-                                }
-                            });
-                        });
+                        let row: Vec<&FileRow> = ordered.iter().map(|&i| &items[i]).collect();
+                        draw_files(ui, ctx, &mut cells, &row);
                     });
                 if bg.clicked() && cells.clicked.is_none() {
                     empty_click = true;
@@ -9284,11 +9975,9 @@ impl eframe::App for App {
                                     ),
                                 };
                                 ui.label(advice);
-                                ui.horizontal_wrapped(|ui| {
-                                    for &i in &g.members {
-                                        draw_cell(ui, ctx, &mut cells, &items[i]);
-                                    }
-                                });
+                                let row: Vec<&FileRow> =
+                                    g.members.iter().map(|&i| &items[i]).collect();
+                                draw_files(ui, ctx, &mut cells, &row);
                             });
                         }
                     });
@@ -9529,7 +10218,7 @@ impl eframe::App for App {
                                                     egui::Align2::RIGHT_TOP,
                                                     format!("{count}"),
                                                     egui::FontId::proportional(11.0),
-                                                    DIM,
+                                                    dim(ui),
                                                 );
                                                 let ids: Vec<usize> = by_day
                                                     .iter()
@@ -9711,7 +10400,7 @@ impl eframe::App for App {
                                                         egui::Align2::RIGHT_TOP,
                                                         ids.len().to_string(),
                                                         egui::FontId::proportional(11.0),
-                                                        DIM,
+                                                        dim(ui),
                                                     );
                                                     let area = egui::Rect::from_min_max(
                                                         rect.left_top()
@@ -9831,7 +10520,7 @@ impl eframe::App for App {
                                                     egui::Align2::RIGHT_TOP,
                                                     ids.len().to_string(),
                                                     egui::FontId::proportional(11.0),
-                                                    DIM,
+                                                    dim(ui),
                                                 );
                                                 let area = egui::Rect::from_min_max(
                                                     rect.left_top() + egui::vec2(4.0, 24.0),
@@ -9903,11 +10592,9 @@ impl eframe::App for App {
                                             files_n(idxs.len()),
                                             db::human_in(lang, bytes)
                                         ));
-                                        ui.horizontal_wrapped(|ui| {
-                                            for &i in idxs {
-                                                draw_cell(ui, ctx, &mut cells, &items[i]);
-                                            }
-                                        });
+                                        let row: Vec<&FileRow> =
+                                            idxs.iter().map(|&i| &items[i]).collect();
+                                        draw_files(ui, ctx, &mut cells, &row);
                                     }
                                     _ => {
                                         ui.label(t(lang, "В этот день файлов нет."));
@@ -9934,11 +10621,9 @@ impl eframe::App for App {
                                                 db::human(bytes)
                                             ),
                                         });
-                                        ui.horizontal_wrapped(|ui| {
-                                            for &i in idxs {
-                                                draw_cell(ui, ctx, &mut cells, &items[i]);
-                                            }
-                                        });
+                                        let row: Vec<&FileRow> =
+                                            idxs.iter().map(|&i| &items[i]).collect();
+                                        draw_files(ui, ctx, &mut cells, &row);
                                     }
                                     None => {
                                         ui.label(t(lang, "В этот день файлов нет."));
@@ -9961,11 +10646,9 @@ impl eframe::App for App {
                             })
                             .id_salt("no-date")
                             .show(ui, |ui| {
-                                ui.horizontal_wrapped(|ui| {
-                                    for &i in idxs {
-                                        draw_cell(ui, ctx, &mut cells, &items[i]);
-                                    }
-                                });
+                                let row: Vec<&FileRow> =
+                                    idxs.iter().map(|&i| &items[i]).collect();
+                                draw_files(ui, ctx, &mut cells, &row);
                             });
                         }
                     });
@@ -10007,7 +10690,7 @@ impl eframe::App for App {
                         ui.label(
                             egui::RichText::new(names.join(" + "))
                                 .size(12.0)
-                                .color(DIM),
+                                .color(dim(ui)),
                         );
                     });
                     let found = match lang {
@@ -10026,13 +10709,9 @@ impl eframe::App for App {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                for f in &items {
-                                    if ids.contains(&f.id) {
-                                        draw_cell(ui, ctx, &mut cells, f);
-                                    }
-                                }
-                            });
+                            let row: Vec<&FileRow> =
+                                items.iter().filter(|f| ids.contains(&f.id)).collect();
+                            draw_files(ui, ctx, &mut cells, &row);
                         });
                 } else {
                 let current = face_clusters
@@ -10071,7 +10750,7 @@ impl eframe::App for App {
                             "Выберите группу слева, чтобы дать ей имя, или разъединяйте плитки.",
                         ))
                         .size(12.0)
-                        .color(DIM),
+                        .color(dim(ui)),
                     );
                 }
                 let shown: Vec<&db::FaceView> = face_views
@@ -10155,12 +10834,16 @@ impl eframe::App for App {
                         if ui.button(t(lang, "Вернуть всё")).clicked() {
                             trash_restore_all = true;
                         }
-                        if ui
-                            .add(primary_button(&format!(
+                        let b = primary_button(
+                            ui,
+                            &format!(
                                 "{} ({})",
                                 t(lang, "Очистить корзину"),
                                 trash_items.len()
-                            )))
+                            ),
+                        );
+                        if ui
+                            .add(b)
                             .on_hover_text(t(
                                 lang,
                                 "перенос в системную корзину ОС; безвозвратного удаления нет",
@@ -10173,11 +10856,8 @@ impl eframe::App for App {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                for r in &trash_items {
-                                    draw_cell(ui, ctx, &mut cells, r);
-                                }
-                            });
+                            let row: Vec<&FileRow> = trash_items.iter().collect();
+                            draw_files(ui, ctx, &mut cells, &row);
                         });
                 }
             }
@@ -10185,6 +10865,7 @@ impl eframe::App for App {
             // должно быть разобрано целиком.
             View::Integrity => {}
             }
+                });
         });
 
         self.items = items;
@@ -12331,6 +13012,89 @@ mod tests {
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(texts.iter().any(|t| t == "Все файлы"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Настройки"), "{texts:?}");
+    }
+
+    /// Плитки идут строками по пропорциям кадра: превью заполняет плитку целиком,
+    /// ширина следует кадру, высота строки — ползунок «Плитки».
+    #[test]
+    fn строки_сетки_собираются_по_пропорциям() {
+        use super::{frame_aspect, row_fit};
+        // 10 кадров 4:3 в 700 px при целевой высоте 150: в строке 4, высота ~130.
+        let a = [4.0 / 3.0; 10];
+        let (n, h) = row_fit(&a, 700.0, 150.0, 2.0);
+        assert_eq!(n, 4, "в строке должно быть четыре кадра 4:3");
+        assert!((h - 130.0).abs() < 1.0, "высота строки {h}");
+        // Одинокая панорама не растягивается выше целевой высоты (600 px ширины).
+        let (n, h) = row_fit(&[4.0], 700.0, 150.0, 2.0);
+        assert_eq!(n, 1);
+        assert_eq!(h, 150.0);
+        // Панорама и обычный кадр делят строку: ширина строки ровно 700 px.
+        let (n, h) = row_fit(&[4.0, 4.0 / 3.0], 700.0, 150.0, 2.0);
+        assert_eq!(n, 2);
+        assert!((h * (4.0 + 4.0 / 3.0) + 2.0 - 700.0).abs() < 1.0, "h={h}");
+        // Узкое окно: один кадр 4:3 в строке, высота не больше целевой.
+        let (n, h) = row_fit(&[4.0 / 3.0, 4.0 / 3.0], 200.0, 150.0, 2.0);
+        assert_eq!(n, 1);
+        assert!(h <= 150.0, "высота {h}");
+        // Пропорция берётся из размеров файла; у битого файла — 4:3.
+        let mut f = file_row(1, "image", "a.jpg");
+        assert!((frame_aspect(&f) - 4.0 / 3.0).abs() < 1e-6);
+        f.width = 0;
+        f.height = 0;
+        assert!((frame_aspect(&f) - 4.0 / 3.0).abs() < 1e-6);
+        f.width = 240;
+        f.height = 320;
+        assert!(frame_aspect(&f) < 1.0, "портрет должен быть уже высоты");
+    }
+
+    /// M22, ADR 0044: две палитры макета и выбор в настройках. Тема — данные
+    /// настроек, а не глобальная переменная, поэтому тест задаёт её сам.
+    #[test]
+    fn тема_переключает_палитру_и_сохраняется() {
+        let ctx = egui::Context::default();
+        super::apply_theme(&ctx, db::ThemeMode::Light);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        let light = ctx.style_of(egui::Theme::Light);
+        assert!(!light.visuals.dark_mode, "светлая палитра не применилась");
+        assert_eq!(light.visuals.panel_fill, super::LIGHT.panel);
+        assert_eq!(super::LIGHT.accent, egui::Color32::from_rgb(0xd9, 0x77, 0x06));
+        super::apply_theme(&ctx, db::ThemeMode::Dark);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        let dark = ctx.style_of(egui::Theme::Dark);
+        assert!(dark.visuals.dark_mode, "тёмная палитра не применилась");
+        assert_eq!(dark.visuals.panel_fill, super::DARK.panel);
+        // Скругления макета: 4 у кнопок и чипов, 6 у меню, 8 у карточек и диалогов.
+        assert_eq!(
+            dark.visuals.widgets.inactive.corner_radius,
+            egui::CornerRadius::same(super::RADIUS_CTRL as u8)
+        );
+        assert_eq!(
+            dark.visuals.menu_corner_radius,
+            egui::CornerRadius::same(super::RADIUS_ITEM as u8)
+        );
+        assert_eq!(
+            dark.visuals.window_corner_radius,
+            egui::CornerRadius::same(super::RADIUS_CARD as u8)
+        );
+        // Тема хранится в `settings` (key/value, схема не меняется).
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "photocat-theme-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let c = db::open(&path).unwrap();
+            let s = db::Settings {
+                theme: db::ThemeMode::Light,
+                ..Default::default()
+            };
+            db::save_settings(&c, &s).unwrap();
+        }
+        let c = db::open(&path).unwrap();
+        assert_eq!(db::load_settings(&c).theme, db::ThemeMode::Light);
     }
 
     /// Выбор языка живёт в БД (`settings.lang`), а не в памяти процесса: после

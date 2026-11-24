@@ -606,10 +606,10 @@ pub fn analyze_image(
     key: &str,
     max_side: u32,
 ) -> Result<ImageInfo> {
-    let img = image::ImageReader::open(src)?
-        .with_guessed_format()?
-        .decode()
-        .with_context(|| format!("декодирование {}", src.display()))?;
+    // Читаем с EXIF-поворотом: телефонный портрет физически лежит на боку, и без
+    // `apply_orientation` превью, dHash и резкость считались бы по повёрнутому кадру.
+    // Размеры после поворота — те, что видит владелец, поэтому они и идут в БД.
+    let img = load_oriented(src)?;
     let (w, h) = img.dimensions();
     let gray = img.to_luma8();
     let dhash = dhash_of(&gray);
@@ -626,7 +626,13 @@ pub fn analyze_image(
     std::fs::create_dir_all(&dir)?;
     let rel = format!("{sub}/{key}.jpg");
     let path = thumbs_dir.join(&rel);
-    if !path.exists() {
+    // Превью в кэше могло быть сделано старой версией — без EXIF-поворота. Сверяем
+    // его размеры с ожидаемыми и перезаписываем только тогда: кэш остаётся кэшем,
+    // а телефонный портрет перестаёт лежать на боку без `--refresh` всего архива.
+    let cached = image::ImageReader::open(&path)
+        .ok()
+        .and_then(|r| r.into_dimensions().ok());
+    if cached != Some((nw, nh)) {
         small
             .to_rgb8()
             .save_with_format(&path, image::ImageFormat::Jpeg)
@@ -778,6 +784,70 @@ mod tests {
     }
 
     use super::*;
+
+    /// APP1 с одним тегом EXIF Orientation — минимальный, но валидный TIFF.
+    fn exif_app1(orientation: u16) -> Vec<u8> {
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(b"II");
+        tiff.extend_from_slice(&42u16.to_le_bytes());
+        tiff.extend_from_slice(&8u32.to_le_bytes());
+        tiff.extend_from_slice(&1u16.to_le_bytes()); // число записей IFD0
+        tiff.extend_from_slice(&0x0112u16.to_le_bytes()); // Orientation
+        tiff.extend_from_slice(&3u16.to_le_bytes()); // SHORT
+        tiff.extend_from_slice(&1u32.to_le_bytes()); // count
+        tiff.extend_from_slice(&orientation.to_le_bytes());
+        tiff.extend_from_slice(&[0, 0]);
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // следующего IFD нет
+        let mut seg = Vec::new();
+        seg.extend_from_slice(&[0xFF, 0xE1]);
+        seg.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+        seg.extend_from_slice(b"Exif\0\0");
+        seg.extend_from_slice(&tiff);
+        seg
+    }
+
+    /// M22: телефонный портрет физически лежит на боку, а EXIF говорит «повернуть».
+    /// Превью, размеры и хеш обязаны считаться по тому кадру, который видит владелец.
+    #[test]
+    fn превью_учитывает_exif_поворот() {
+        let mut jpeg = Vec::new();
+        let img = image::RgbImage::from_pixel(40, 20, image::Rgb([120, 130, 140]));
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
+            .encode_image(&img)
+            .unwrap();
+        let mut with_exif = Vec::with_capacity(jpeg.len() + 40);
+        with_exif.extend_from_slice(&jpeg[..2]); // SOI
+        with_exif.extend_from_slice(&exif_app1(6)); // повернуть на 90°
+        with_exif.extend_from_slice(&jpeg[2..]);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-orient-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rot.jpg");
+        std::fs::write(&path, &with_exif).unwrap();
+        let info = analyze_image(&path, &dir.join("thumbs"), "0123456789abcdef01234567", 320)
+            .expect("файл с EXIF-поворотом читается");
+        assert_eq!(
+            (info.width, info.height),
+            (20, 40),
+            "размеры должны быть после поворота"
+        );
+        let thumb = image::ImageReader::open(dir.join("thumbs").join(&info.thumb))
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(
+            (thumb.width(), thumb.height()),
+            (20, 40),
+            "превью тоже повёрнуто"
+        );
+        // Каталог не удаляем: проверка архитектуры запрещает удаление файлов в src/.
+    }
 
     #[test]
     #[ignore = "нужен PHOTOCAT_BIG_JPEG: путь к тяжёлому JPEG"]

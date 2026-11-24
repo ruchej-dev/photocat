@@ -43,13 +43,35 @@ cannot be changed alone, and what is checked by eye. The sections "Layout", "Int
 in a second" are requirements for the interface; what the code does not do yet is in § Debt against
 the interface rules at the end of the file.
 
-- **One theme** (`app::style`, M16): step `8×6`, button padding `10×4`, minimum target `32×26`,
-  nesting indent 16, slider 120 px, rounding 4 px, shadows off. Colours come from `ui.visuals()`
-  except the accent; the theme overrides no palette, only the rhythm and the shape.
+- **Two themes, one token palette** (M22, ADR 0044). `app::Theme` is the only source of colour:
+  `DARK` (the main one) and `LIGHT`; `settings.theme` is `dark | light | system`, `system` follows the
+  OS and is re-read every frame. `apply_theme` fills `egui::Visuals` from the tokens and sets the
+  shape: step `8×6`, button padding `10×4`, minimum target `32×26`, nesting indent 16, slider 120 px,
+  **radius 4 / 6 / 8 px** (controls, items and menus, cards and dialogs — the radii of the rendered
+  mock-up screens), shadows off. A screen never writes a colour by hand; the only exception is text
+  over a darkened frame, where the background is a photograph. The tokens (canvas, panel, card,
+  field, borders, three text tiers, `accent`, `accent_hover`, `on_accent`, `accent_soft`, `danger`)
+  are listed in `plan/M22-ui-spec.md` §2.1.
 - **A 4 px grid.** Spacing only `2, 4, 6, 8, 12, 16, 24`. Inside a group 4, between groups 8, between
   sections 12, before a heading 8.
-- **Tiles sit tight:** the grid step is `2 px` on both axes (M16, like PhotoPrism); the gap is set
-  only inside the grid area and does not change `item_spacing` of other screens.
+- **Three cell views, the mock-up's tile is the main one** (M22, `settings.cell_style`): the
+  segment "Tile / Rows / List" in the content panel header, next to the size slider.
+  **Tile** (default) — one width for all tiles, a **4:3 frame**, the preview *fitted inside it whole*
+  (no crop, no stretch), a 22 px caption band; the columns share the available width. **Rows** —
+  the row height comes from the slider, the row fills the width, so a tile's width follows its
+  frame's aspect and the preview fills the tile with no margins; a row is never lower than 70 % of
+  the slider and the last row keeps the target height. **List** — one row 44 px: a 58×40 thumbnail,
+  the name, the date and the size; the size slider is hidden. All three share one entry point
+  (`draw_files`) and the same click/selection/tooltip rules.
+- **The grid step is 10 px** (M22, the mock-up's `gap-2.5`), both between tiles in a row and between
+  rows; the gap does not change `item_spacing` of other screens.
+- **A tile's aspect never stretches a snapshot** (M22): the frame is 4:3 in the tile view and equal to
+  the frame's own ratio in the rows view; a file without dimensions (broken, no preview) gets 4:3.
+  The rows layout is computed from `files.width`/`files.height`, so it does not wait for textures.
+- **Previews follow the EXIF orientation** (M22): the thumbnail is built with the rotation applied, so
+  a phone portrait is shown upright in the grid, in the card and in the full screen; `width`/`height`
+  in the DB are the displayed dimensions. A stale preview is rewritten when its dimensions do not
+  match (ADR 0045).
 - **Sections are flat:** an 11 px label in the muted colour, the content, a thin line. `Frame::group`
   is not used around panel blocks and the card — a frame inside a frame competes with the photo.
 - **The grid is grouped by month** (M16): the heading "May 2024" at 14 px + "· 132 files · 5.4 GiB"
@@ -60,21 +82,33 @@ the interface rules at the end of the file.
   first", "Name", "Size: largest first"). "Flat" is one continuous ribbon without month headings.
   "No date" is the last group in both directions. While a semantic search runs, sorting and grouping
   are disabled: the results are a flat list by relevance, "the search sets the order".
-- **Fonts are only `11, 12, 14, 16, 18`**. No more than four sizes on a screen. Two weights: normal
-  and `small/weak`. No italics, CAPS or letter spacing.
-- **Colour** comes from `ui.visuals()`; the one of our own is the accent `rgb(90,170,255)`. It means
-  only "selected", "confident tag", "keep". No more than one accent per tile.
-- **Readable text** is no darker than `gray(150)`: the caption under a tile `gray(190)`, the word
-  "spare" `gray(210)`, text on a dimmed frame `gray(235)`.
+- **Fonts are only `10, 11, 12, 13, 14, 18`** (M22). 10 px is allowed only for caps section labels
+  and mono-numeric values; 18 px is the view title; 13 px is the dense body. No more than four sizes
+  on a screen. Two weights: normal and `strong/small`. No italics; CAPS only for section labels.
+- **Numbers are monospace** (M22): every number with a unit, every counter, date, size, ratio and
+  duration goes through the numeric family, so a column does not jitter while indexing. Section
+  labels are `label-caps`: 10 px, uppercase, `text_dim`.
+- **Colour** comes from the `Theme` tokens; `accent` (amber) means only "selected", "confident tag",
+  "keep", progress. No more than one accent per tile. `danger` (red) is allowed only on the path to
+  the OS trash.
+- **Readable text** is the `text_med`/`text_dim` tier of the theme: the caption under a tile
+  `text_dim`, the word "spare" `text`, text on a dimmed frame `gray(235)` (a photograph, not a
+  theme). Contrast is checked in both themes (`plan/M22-ui-spec.md` M22.11).
 - **One scroll per region.** No nested `ScrollArea`; the exception is the face group list
   (`max_height 250`).
 - **A place for a tile is always reserved**: no preview — the text goes in the same rectangle. There
   are no layout jumps while loading.
-- **A tile:** background → the whole preview → a 16 px video bar → the decision mark → a 26 px
-  caption (date on the left, secondary on the right) → a 2 px selection outline.
-- **The top bar** is no more than two rows of controls; the third row is the pass progress only.
-  Row 1: folder + "Index" + "Refresh" + on the right "Folders", "Details", "Settings". Row 2: the
-  segmented search mode, the field, "Find", "Reset".
+- **A tile:** a card with an 8 px radius and a 1 px frame → the preview, fitted whole into the
+  frame (4:3 in the tile view, the frame's own ratio in the rows view) → a 16 px video bar → the
+  decision mark → a 22 px caption band (`panel` tone, a mono 10 file name on the left, the date in
+  `text_dim` on the right) → a 2 px accent selection outline and a square check flag. The list view
+  keeps the same words and accent: a row with a 58×40 thumbnail, the name and the date · size.
+- **The top strip is 32 px and one row** (M22): brand + subtitle, the search mode, the query,
+  "Find", "Reset", the state, "Folders (N)", "Details", "Settings". The third row is the pass
+  progress only. The folder field and "Index / Refresh" live in the left panel: working with the
+  archive is not search.
+- **The bottom strip is 28 px** (M22): the last fact on the left, the file counters and the
+  selection on the right, all in the numeric family.
 - **The content panel:** the view title at 18 px, the facts next to it at 12 px; on the right "Tiles"
   with a 100–260 px slider, "By months / Flat" and the "Sort" menu; below, the chips of active
   filters with "×" and the total "found N of M". The filter row stays in place when the filter is
@@ -165,6 +199,7 @@ a rare one.
 | Selecting several files | Ctrl/Shift+click on tiles, "Select all (M)" above the grid | 1 |
 | Albums: tree, subalbums, order | left panel "Albums (N)" → the tree in the content panel; "+ New album", "+ Subalbum" | 1–2 |
 | Tile size ("Tiles") | above the grid, to the right of the view title | 0 |
+| Cell view (tile / rows / list) | there too, next to the size slider | 1 |
 | Layout and sort | there too: "By months / Flat" and the "Sort" menu | 1 |
 | The main action of the view | left panel, the first group after navigation | 1 |
 | Totals and counters of the view | in the view title and in the navigation numbers | 0 |
@@ -189,8 +224,10 @@ a rare one.
 
 | What | Value | Where |
 |---|---|---|
-| Grid cell | 100–260 px (the "Tiles" slider above the grid, 150 by default) + 26 px for the caption; the preview fits entirely with its proportions kept, the margins are filled with the background; a video gets a "▶ M:SS" bar at the bottom of the frame | `app.rs::draw_cell` |
-| Grid step | 2 px on both axes inside the grid area; other screens live on the common `item_spacing` 8×6 | `ui()` → `View::Grid` |
+| Cell view "Tile" (default) | one tile width from the "Tiles" slider (100–260 px, 150 by default), the columns share the available width; a 4:3 frame + a 22 px caption band; the preview fitted inside whole (no crop); a video gets a "▶ M:SS" bar at the bottom of the frame | `app.rs::draw_tiles`, `draw_cell` |
+| Cell view "Rows" | the row height comes from the slider and never falls below 70 % of it; the row fills the available width, so a tile's width follows its frame's aspect; the preview fills the tile (no crop, no margins) | `app.rs::draw_flow`, `row_fit` |
+| Cell view "List" | a row 44 px: a 58×40 thumbnail, the name at 12 px, the date · size in mono 10, the kind/duration on the right; the size slider is hidden | `app.rs::draw_list` |
+| Grid step | 10 px between tiles inside a row and between rows (the mock-up's `gap-2.5`); other screens live on the common `item_spacing` 8×6 | `app.rs::draw_tiles`, `draw_flow` |
 | Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group | `app.rs::month_header` |
 | Content panel | view title 18 px + facts 12 px; on the right "Tiles" 11 px and a 120 px slider; next to it the "By months / Flat" buttons and the "Sort" menu (11 px label); the chips row 26 px high | `ui()` → `draw_filter_chips` |
 | Navigation item | 28 px high, 14 px label on the left, 11 px number on the right; the selected one — accent fill 40/255 and accent text | `app.rs::nav_item` |
@@ -206,7 +243,9 @@ a rare one.
 | Right panel | 280 px; closed by "Hide" and by "Details" in the top bar; hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right` |
 | Preview in the card | the panel width, 4:3, no higher than 210 px, the frame fitted entirely; below the file name 14 px and the path 11 px | `App::file_card` |
 | "Settings" dialog | 760×620 px, a 200 px section list on the left, fields up to 520 px | `App::settings_modal` |
-| Caption under a cell | the date `YYYY-MM-DD HH:MM` or "no date", 11 px | `draw_cell` |
+| Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name is clipped, never written over the date | `draw_cell` |
+| Top strip | 32 px, one row, `panel` tone, 1 px bottom line | `App::top_bar` |
+| Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters | `App::status_bar` |
 | Selection | a 2 px `rgb(90,170,255)` outline on the selected tile and a tick in a circle of the same colour; "N selected · size" at 11 px in the chips row | `draw_cell`, `draw_filter_chips` |
 | Album tree | a row 26 px, a 14 px indent per level, a 22 px triangle, a 14 px label; "N files · M subalbums · size" at 11 px next to it; the tree area no higher than 190 px | `draw_album_tree` |
 | Subalbum tile | 100–260 px (like a grid tile) × 96 px; the name 13 px, "N files" and the size 11 px; a click opens it | `draw_album_cell` |
@@ -220,7 +259,7 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
 
 | Screen | What is on it | Main action |
 |---|---|---|
-| Grid (`View::Grid`) | the folder field, "Index", "Refresh", "Details", "Folders", "Settings"; the second row — the "Semantic / By text" switch, the query field, "Find", "Reset"; on the left two navigation sections with numbers and the "Filter" section (path/date, "All / Photos / Videos"), the model and text blocks, the summary; above the grid — the view title at 18 px, "Tiles" with a slider, "By months / Flat", the "Sort" menu and filter chips with "×"; in the model block — a tag filter with the snapshot count next to each tag ("furniture · 669") and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; step 2 px, a video comes with a cover frame and a "▶ M:SS" caption; in the chips row — "N selected · size", "Select all (M)", "Clear the selection"; on the right — the details of the selected file | find and open |
+| Grid (`View::Grid`) | the top strip: brand, the "Semantic / By text" switch, the query field, "Find", "Reset", the archive state, "Folders (N)", "Details", "Settings"; the left panel, top down: the "Catalog" block (the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos"), the model and text blocks, the summary pinned at the bottom; above the grid — the view title at 18 px, the facts at 12 px in the numeric family, "Tiles" with a slider, "By months / Flat", the "Sort" menu and the filter chips with "×"; in the model block — a tag filter with the snapshot count next to each tag ("furniture · 669") and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; in the chips row — "N selected · size", "Select all (M)", "Clear the selection"; on the right — the details of the selected file; the bottom strip: the last fact and the counters | find and open |
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed", groups as pictures with the caption "N files · X wasted" and the advice "keep <name> — sharper than the rest"; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 months, a month — a grid of weeks Mon–Sun with thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects; on the "Day" layer — the snapshots in a `draw_cell` grid; on the upper layers below — the selected day and "No date" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups", the group list with names, photo counts and a "together" tick, the face crops of the selected group, "not him", "pick" and "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" button | name a person, split off strangers and find photos where people are together |
@@ -482,7 +521,7 @@ are what the owner sees in English mode. See `plan/I18N.md`.
 - Model catalogue: "217.5 MiB · in place", "148.6 MiB · not downloaded", "over the limit"; the limit
   is "250 MiB" with a unit.
 - Search mode: "Semantic" / "By text" (a switch, the active one has an accent underline).
-- Content panel: "Tiles", "By months / Flat", "Sort", "All", "Photos", "Videos", "found N of M"; the
+- Content panel: "Tiles", the cell views "Tile / Rows / List", "By months / Flat", "Sort", "All", "Photos", "Videos", "found N of M"; the
   filter chips — "path/date: … ×", "tag: … ×", "by relevance: … ×" (a chip has only one "×" and the
   tooltip "remove the filter").
 - Month heading: "May 2024" and "· 132 files · 5.4 GiB"; without a date — "No date"; a month with
@@ -514,7 +553,8 @@ are what the owner sees in English mode. See `plan/I18N.md`.
 
 ## What the interface will not have
 
-- Theme settings, accent colours, a "compact mode" — until asked.
+- A third theme, accent colours, a "compact mode" (the one choice is dark / light / follow the
+  system, M22); an icon font (the player's geometric signs and words stay).
 - Modal confirmations for non-destructive actions.
 - Progress bars that move "approximately": only real `done/total`.
 - Emoji icons instead of words, except "▶" for video. The geometric player signs (⏮ ⏸ ⏭, sound) are
@@ -540,8 +580,8 @@ everywhere yet. An item is either fixed or gets an exception line here with a re
    that watching does not start over from the first snapshot. On the other files the end of a video
    opens the next one — that is "change the file automatically".
 7. The month heading is not pinned when scrolling: `ScrollArea` in egui gives no sticky row without
-   manual drawing over the area. The month is visible at the start of the group; pinning it is the
-   next task.
+   manual drawing over the area. The month is visible at the start of the group; pinning it is M22.4
+   (it folded in the former M13e).
 8. Duplicate decisions are made one tile at a time: the multi-selection (M18) works in the grid,
    in albums and in the trash, but marking N snapshots of a group as "spare" at once is not possible
    — batch actions over duplicates are not promised, that is a separate task.

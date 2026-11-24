@@ -396,7 +396,22 @@ const PAIRS: &[(&str, &str)] = &[
     ("поиск сброшен", "search cleared"),
     // --- сетка, чипы, порядок --------------------------------------------------
     ("Плитки", "Tiles"),
-    ("размер плиток, 100–260 px", "tile size, 100–260 px"),
+    (
+        "размер плитки (плитка — ширина кадра, строки — высота), 100–260 px",
+        "tile size (a tile: frame width, rows: row height), 100–260 px",
+    ),
+    ("Плитка", "Tile"),
+    ("Ряды", "Rows"),
+    ("Список", "List"),
+    (
+        "как в макете: кадр 4:3, снимок вписан целиком",
+        "as in the mock-up: a 4:3 frame, the snapshot fitted whole",
+    ),
+    (
+        "строки по пропорциям: ширина плитки по кадру",
+        "proportion rows: the tile width follows the frame",
+    ),
+    ("список: имя, дата и размер в строку", "a list: name, date and size in one row"),
     ("Сортировка", "Sort"),
     ("Дата: новые сверху", "Date: newest first"),
     ("Дата: старые сверху", "Date: oldest first"),
@@ -805,6 +820,16 @@ const PAIRS: &[(&str, &str)] = &[
          stays second; screens not translated yet fall back to Russian.",
     ),
     ("настройки сохранены", "settings saved"),
+    ("Тема интерфейса", "Interface theme"),
+    ("Тёмная", "Dark"),
+    ("Светлая", "Light"),
+    ("Как в системе", "Follow the system"),
+    (
+        "Тёмная — основная: снимки смотрят вечерами. Светлая — та же сетка на белом, \
+         для дневной работы. Тема не меняет ни файлов, ни базы.",
+        "Dark is the main one: snapshots are looked at in the evening. Light is the same \
+         grid on white, for daytime work. The theme changes neither files nor the database.",
+    ),
     ("настройки не сохранены", "settings not saved"),
 
     // --- левая панель: модель, теги, текст, сводка (M21.4f) --------------------

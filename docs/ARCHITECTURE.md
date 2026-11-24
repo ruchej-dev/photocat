@@ -106,7 +106,11 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   and the card shows them in a separate block. A change of `sha256` does not wipe own tags — that is
   a human decision.
 - `thumb`: a path relative to `~/.cache/photocat/thumbs/`, the key is `sha256[..24]` (identical
-  files share one preview).
+  files share one preview). The preview is built **with the EXIF orientation applied** (`load_oriented`),
+  so `width`/`height` in the row are the dimensions the owner sees, not the raw pixel order. The cached
+  file is rewritten when its own dimensions do not match the expected ones — that is the only way an
+  old sideways preview is cured without re-hashing the whole archive; the file is overwritten in the
+  cache, never deleted (see ADR 0045).
 - `faces.embedding`: the ArcFace vector, 512 f32 (2 KiB), of an aligned face; `thumb` is the 112 px
   crop in the cache, key `<sha256[..24]>-<face number>`. `manual=1` means the owner split the face
   off with the "not him" button; such groups are not rebuilt. Replacing `files.sha256` via a trigger

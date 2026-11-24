@@ -1002,3 +1002,42 @@ was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 
 **Next.** M21.8c: `plan/SESSION.md`, `plan/M15-tags.md`, `plan/M16-interface.md`,
 `plan/M19-albums.md`; `plan/M3-clusters.md` stays uncommitted.
+
+---
+
+## M22 — the desktop UI specification: two themes and screen-by-screen conformance
+
+**Goal.** The owner's mock-up set (outside the repository) becomes the interface: one token palette
+with a dark and a light theme, the layout of the main screens, and the same rules for the screens the
+mock-up has no layout for.
+
+**Source of truth.** `plan/M22-ui-spec.md`: the token table, the layout metrics, the screen-to-mock-up
+map, the rules for an unsupported screen, the disputed questions and the full task list (M22.1–M22.11).
+
+**Acceptance criteria (whole block).**
+1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
+   (`dark | light | system`, key/value, `SCHEMA_VERSION` unchanged), "Settings → Interface → theme".
+   Radius 4/6/8 px (controls; navigation and menus; cards and dialogs), no shadows, the type scale
+   10/11/12/13/14/18, monospace numbers, caps labels.
+2. The main screen follows `photocat_1`: a 32 px top strip and a 28 px bottom strip, the working
+   folder in the left panel; three cell views — the mock-up's 4:3 tile (default) with the preview
+   fitted whole and a 22 px caption band, proportion rows, and a list; a 10 px gap, accent selection.
+   Previews follow the EXIF orientation and a stale preview is rewritten when its dimensions differ.
+3. Calendar (`photocat_2`, `photocat_12`), albums (`photocat_3`) and the viewer (`photocat_5/6`) are
+   brought to the same tokens; the albums keep the tree (an owner's decision is asked in the spec §5).
+4. Duplicates, faces, trash and integrity have no mock-up: they are built from the same parts, with
+   one accent and red only on the OS-trash path.
+5. The settings dialog gets the section list and the theme control; the mock-up's non-existent
+   functions (autostart, tray, GPU, updates, metadata backup) are not added.
+6. The sticky month heading (the former M13e) is closed in M22.4.
+7. The list view keeps the size slider and scales with it (row, thumbnail, name); the header never
+   jumps when the cell view changes. Trackpad and wheel scrolling is smooth and fast in every region
+   (M22.2a, M22.2b in the spec).
+8. Every task ends with a measurement or a look at the result, `cargo test`, `clippy`, `check.sh`;
+   `docs/UI.md` § Layout, § Metrics and § "What the interface will not have" follow the code.
+
+**Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/DECISIONS.md`, `plan/`.
+
+**Not doing.** A third theme, an accent picker, a "compact mode", bundled fonts until the owner
+decides, cropped previews, a floating selection bar, favourites/ratings/share/permanent delete, the
+mock-up's EXIF/GPU/tray/update functions, a network call, a file operation.

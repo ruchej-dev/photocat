@@ -1068,3 +1068,90 @@ sha256 in `plan/STATUS.md` § M15.6 tail, so the experiment can be repeated.
 **What it forbids.** Adding an fp16 entry to the catalogue "because it is more precise" without the
 same measurement; treating a lower false-positive rate as a win while the true-positive rate falls
 further; keeping a dependency for a variant that lost.
+
+## 0044. Two themes from the mock-up: one token palette, the mock-up's radii, amber as the only signal
+
+The owner brought a mock-up set made outside the repository (Stitch): seven screens in HTML, two
+design-system files (`functional_precision_desktop`, `functional_precision_light`) and the rule "for
+screens without a layout, build by the same rules". The code has had one theme since M16: colours
+came from `egui::Visuals`, the only own colour was the blue accent `rgb(90,170,255)`, the radius was
+4 px, the caption under a tile was 26 px with the date, and `docs/UI.md` listed "theme settings" as
+something the interface would not have.
+
+**Decision.** The palette moves into one `app::Theme` struct with two constants, `DARK` (the default)
+and `LIGHT`; `settings.theme` is `dark | light | system` and is stored in the key/value `settings`
+table, so `SCHEMA_VERSION` does not move. `apply_theme` fills `egui::Visuals` from the tokens and sets
+the shape for both palettes: the mock-up's radii (4 px for controls, chips and badges, 6 px for
+navigation rows and menus, 8 px for tile cards, fields and dialogs), no shadows, the type scale
+10/11/12/13/14/18,
+monospace for numbers, uppercase caps labels. Screens read `theme(ui)` / `accent(ui)` / `dim(ui)` and
+never write a colour by hand; the single exception is text over a darkened frame, where the
+background is a photograph. `danger` is a second colour, allowed only on the path to the OS trash.
+
+Where the sources disagree, the rendered HTML wins for dark (cool graphite `#0c0e12`/`#1a1c20`), and
+the light `DESIGN.md` wins for light (slate `#f8fafc`/`#ffffff`/`#e2e8f0`, amber `#d97706`). The dark
+front-matter of `DESIGN.md` is a warm Material scheme (`on-surface-variant #d8c3ad`) that contradicts
+its own prose ("deep, cool industrial grays") and the rendered screens; a warm cast also tints the
+judgement of a photograph, which is the one thing a photo cataloguer must not do.
+
+**Why two themes and not "follow the system all the time" only.** The archive is looked at in the
+evening and in daylight; the owner asked for both palettes. "System" is offered as a third option
+but the default is dark, because the mock-up's dark screen is the reference and because a light
+window at night is the brighter thing in the room.
+
+**Why these radii.** The design-system prose claims a strict 0 px, but every rendered screen of the
+mock-up uses Tailwind `rounded` / `rounded-md` / `rounded-lg` (4 / 6 / 8 px) on exactly three roles:
+controls and chips, navigation rows and menus, cards and dialogs. The owner's verdict is the screen,
+not the prose — the same rule that settled the palette — so the three radii are adopted and no fourth
+is invented. A monospaced number does not shift its neighbours while indexing; 10 px is admitted only
+for caps labels and numbers, where it is decoration around a value, never for a sentence.
+
+**What it forbids.** A colour literal in a screen; a second accent; a third theme or an accent
+picker; a fourth radius or a radius on a single screen; shadows/gradients; a 13 px body turning into
+10 px prose;
+bundled fonts (Inter, JetBrains Mono) until the owner decides — the mock-up's fonts are replaced by
+the egui defaults for now, and no font file is added to the repository or to `NOTICE`.
+
+**Consequences.** A screen that still uses `ui.visuals()` for a semantic colour now gets the theme
+tokens through `Visuals`, so the light theme works without touching the screen; a screen that needs
+a token the `Visuals` mapping does not cover calls `theme(ui)`. `docs/UI.md` § Layout, § Metrics and
+§ "What the interface will not have" are updated in the same change, and the task list for the
+remaining screens is `plan/M22-ui-spec.md` § 6.
+
+## 0045. Previews follow the EXIF orientation; a stale preview is overwritten, not deleted
+
+`derive::analyze_image` decoded a snapshot with `ImageReader::decode`, which ignores the EXIF
+orientation. A phone writes the pixels sideways and records "rotate 90°" in the file; the preview,
+the dHash, the sharpness and `files.width/height` were therefore all computed on the sideways frame,
+and the grid, the card and the full screen showed such a portrait lying on its side. The owner
+brought `IMG_20240822_124033.jpg` (orientation 6) as the evidence.
+
+Fixing the decode alone was not enough: a preview is cached by `sha256[..24]` under
+`<cache>/photocat/thumbs/` and `analyze_image` wrote it only when the file was missing. The file was
+already there (wrong), so a corrected decoder would have kept showing the old sideways preview, and
+`can_skip` would have skipped the file anyway, because path, size and mtime had not changed.
+
+**Decision.** The preview is built from `load_oriented` (the decoder's orientation applied), and
+`files.width`/`files.height` become the **displayed** dimensions. When the cached preview's own
+dimensions do not match the expected ones, it is rewritten in the cache. `SCHEMA_VERSION` 7 → 8
+clears `files.thumb` for images once, so the next `index` re-analyzes rows whose width/height were
+stored unrotated; video covers are left alone (ffmpeg autorotates the frame, and `ffprobe` already
+reports the rotated size).
+
+**Why overwrite instead of a new key.** A new key (`<sha>-o`) would orphan every old preview (about
+29 MB on the corpus) and regenerate them for nothing, and it would also have to regenerate video
+covers. Overwriting a file in our own cache is not an archive operation: the archive is never
+touched, and the cache is cleaned only by `storage.rs`, which already has that right. Deleting the
+stale file instead is forbidden by the architecture check ("no deleting or renaming in `src/`") and
+unnecessary.
+
+**Cost.** `apply_orientation` allocates a rotated copy for the six non-trivial orientations, so a
+worker holds one extra photo in memory at the peak. The one-time re-index after the upgrade decodes
+every image: on the corpus 1972 images / 3.8 GiB — 252 s in the dev profile (release is about four
+times faster, the documented 65 s order); every later pass skips them again as before. Thumbnails of
+untouched files are not rewritten: the dimensions match and the write is skipped.
+
+**What it forbids.** Building a preview without the orientation; storing raw `width`/`height` while
+the preview is rotated; writing a preview "because the code changed" without checking its own
+dimensions; deleting or renaming a cache file anywhere outside `src/storage.rs`; touching the
+archive to "fix" a preview.

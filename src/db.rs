@@ -97,7 +97,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// Версия схемы. Меняется вместе с DDL ниже: старые БД догоняют её один раз.
 /// Пока версия совпадает, `open` не делает ни одной записи — читать БД можно
 /// параллельно с долгим прогоном (индексация, OCR), не упираясь в блокировку.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -319,6 +319,13 @@ fn init(c: &Connection) -> Result<()> {
                AND (source = 'clip' OR source LIKE 'clip:%');
          END;",
     )?;
+    // Схема 8: превью картинок считаются с EXIF-поворотом (M22). Старые превью
+    // телефонных портретов лежат на боку, поэтому путь к превью стирается: следующий
+    // `index` увидит `thumb IS NULL` и пересчитает кадр. Файлы, теги и альбомы не
+    // трогаются, на диске ничего не меняется.
+    if version < 8 {
+        c.execute("UPDATE files SET thumb = NULL WHERE kind = 'image'", [])?;
+    }
     // Теги старых версий были без модели в источнике; переводим на id текущей модели.
     c.execute(
         "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
@@ -349,6 +356,66 @@ impl GridLayout {
         match value {
             "flat" => GridLayout::Flat,
             _ => GridLayout::Months,
+        }
+    }
+}
+
+/// Тема интерфейса (M22, ADR 0044): тёмная, светлая или как в системе.
+/// Две палитры из макета — `dark` и `light`; `system` берёт выбор ОС.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
+impl ThemeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "dark",
+            ThemeMode::Light => "light",
+            ThemeMode::System => "system",
+        }
+    }
+
+    /// Неизвестное значение из старой БД — значение по умолчанию, без падения.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "light" => ThemeMode::Light,
+            "system" => ThemeMode::System,
+            _ => ThemeMode::Dark,
+        }
+    }
+}
+
+/// Как показаны файлы в сетке (M22): плитка макета, строки по пропорциям или список.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CellStyle {
+    /// Плитка как в макете: кадр 4:3, снимок вписан целиком, подпись снизу.
+    #[default]
+    Tiles,
+    /// Строки по пропорциям: высота строки из ползунка, ширина плитки по кадру.
+    Rows,
+    /// Список: миниатюра, имя, дата, размер.
+    List,
+}
+
+impl CellStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CellStyle::Tiles => "tiles",
+            CellStyle::Rows => "rows",
+            CellStyle::List => "list",
+        }
+    }
+
+    /// Неизвестное значение из старой БД — значение по умолчанию, без падения.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "rows" => CellStyle::Rows,
+            "list" => CellStyle::List,
+            _ => CellStyle::Tiles,
         }
     }
 }
@@ -438,6 +505,8 @@ pub struct Settings {
     pub grid_layout: GridLayout,
     /// Порядок плиток: дата, имя или размер (M17).
     pub grid_sort: GridSort,
+    /// Как показаны файлы: плитка макета, строки по пропорциям или список (M22).
+    pub cell_style: CellStyle,
     /// Каталоги, которые индексируются одной кнопкой; пусто — путь из верхней панели.
     pub roots: Vec<String>,
     /// Напоминание о проверке целостности (M10): каталог и слепок, к которым относится
@@ -452,6 +521,8 @@ pub struct Settings {
     pub verify_last_report: String,
     /// Язык интерфейса (M21, ADR 0040): `en` — основной, `ru` — второй.
     pub lang: crate::i18n::Lang,
+    /// Тема интерфейса (M22, ADR 0044): тёмная по умолчанию, светлая — выбор владельца.
+    pub theme: ThemeMode,
 }
 
 impl Default for Settings {
@@ -474,6 +545,7 @@ impl Default for Settings {
             tile_size: 150.0,
             grid_layout: GridLayout::Months,
             grid_sort: GridSort::DateDesc,
+            cell_style: CellStyle::Tiles,
             roots: Vec::new(),
             verify_root: String::new(),
             verify_manifest: String::new(),
@@ -484,6 +556,8 @@ impl Default for Settings {
             verify_last_report: String::new(),
             // Проект продолжается на английском; русский остаётся выбором в настройках.
             lang: crate::i18n::Lang::En,
+            // Макет рисует тёмную палитру основной: семейный архив смотрят вечерами.
+            theme: ThemeMode::Dark,
         }
     }
 }
@@ -521,6 +595,7 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "tile_size" => s.tile_size = v.parse().unwrap_or(s.tile_size),
             "grid_layout" => s.grid_layout = GridLayout::parse(&v),
             "grid_sort" => s.grid_sort = GridSort::parse(&v),
+            "cell_style" => s.cell_style = CellStyle::parse(&v),
             "roots" => {
                 s.roots = v
                     .lines()
@@ -538,6 +613,7 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "verify_last_ok" => s.verify_last_ok = v == "1" || v == "true",
             "verify_last_report" => s.verify_last_report = v,
             "lang" => s.lang = crate::i18n::Lang::parse(&v),
+            "theme" => s.theme = ThemeMode::parse(&v),
             _ => {}
         }
     }
@@ -566,6 +642,7 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("tile_size", s.tile_size.to_string()),
         ("grid_layout", s.grid_layout.as_str().to_string()),
         ("grid_sort", s.grid_sort.as_str().to_string()),
+        ("cell_style", s.cell_style.as_str().to_string()),
         ("roots", s.roots.join("\n")),
         ("verify_root", s.verify_root.clone()),
         ("verify_manifest", s.verify_manifest.clone()),
@@ -577,6 +654,7 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ),
         ("verify_last_report", s.verify_last_report.clone()),
         ("lang", s.lang.code().to_string()),
+        ("theme", s.theme.as_str().to_string()),
     ];
     for tool in crate::tools::ALL {
         pairs.push((tool.setting_key(), s.tools.get(tool).to_string()));
@@ -2501,7 +2579,7 @@ mod tests {
         .unwrap();
         init(&c).unwrap();
         let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, SCHEMA_VERSION);
         assert_eq!(load_tags(&c, "clip:m1").unwrap()[&1][0].0, "пляж");
         assert!(load_tags(&c, "clip:m2").unwrap().is_empty());
         // Теперь ключ допускает обе модели у одного файла — раньше это был конфликт.
@@ -3135,14 +3213,24 @@ mod tests {
                 mtime INTEGER, sha256 TEXT, kind TEXT NOT NULL, width INTEGER, height INTEGER,
                 taken_at TEXT, taken_src TEXT, lat REAL, lon REAL, camera TEXT, dhash INTEGER,
                 thumb TEXT, indexed_at INTEGER NOT NULL);
-             INSERT INTO files(path,size,kind,indexed_at) VALUES('/old.jpg',10,'image',0);
+             INSERT INTO files(path,size,kind,thumb,indexed_at)
+                VALUES('/old.jpg',10,'image','aa/old.jpg',0);
+             INSERT INTO files(path,size,kind,thumb,indexed_at)
+                VALUES('/old.mp4',20,'video','bb/old.jpg',0);
              PRAGMA user_version=4;",
         )
         .unwrap();
         init(&c).unwrap();
         let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 7);
-        assert_eq!(load_all(&c).unwrap().len(), 1);
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(load_all(&c).unwrap().len(), 2);
+        // Схема 8 (M22): превью картинок пересчитываются с EXIF-поворотом, поэтому
+        // путь стирается; обложка видео остаётся, строки не теряются.
+        let rows = load_all(&c).unwrap();
+        let image = rows.iter().find(|r| r.kind == "image").unwrap();
+        assert!(image.thumb.is_none(), "превью картинки должно быть пересчитано");
+        let video = rows.iter().find(|r| r.kind == "video").unwrap();
+        assert_eq!(video.thumb.as_deref(), Some("bb/old.jpg"));
         let album = create_album(&c, 0, "Старое", "").unwrap();
         add_to_album(&c, album, &[id_of(&c, "/old.jpg")]).unwrap();
         assert_eq!(album_items(&c, album).unwrap().len(), 1);
