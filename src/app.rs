@@ -8518,11 +8518,49 @@ fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     }
 }
 
-/// Список: строка 44 px — миниатюра 58×40, имя, дата и объём. Плотный просмотр
-/// имён и дат, когда снимки уже известны; решения по дублям и корзине — те же кнопки.
+/// Высота строки списка от ползунка «Плитки»: 24 + 0.16 × значение (40 px при 100,
+/// 66 px при 260). Одно значение ползунка на три вида ячейки (M22.2a).
+fn list_row_height(tile: f32) -> f32 {
+    24.0 + 0.16 * tile.clamp(100.0, 260.0)
+}
+
+/// Кегль имени в строке списка: 12 px при 100, 14 px при 260.
+fn list_name_px(tile: f32) -> f32 {
+    12.0 + 2.0 * ((tile.clamp(100.0, 260.0) - 100.0) / 160.0)
+}
+
+/// Кегль моноширинных цифр (дата, размер, длительность) в строке списка: 10–12 px.
+fn list_meta_px(tile: f32) -> f32 {
+    10.0 + 2.0 * ((tile.clamp(100.0, 260.0) - 100.0) / 160.0)
+}
+
+/// Подсказка ползунка «Плитки» говорит, что он масштабирует в текущем виде:
+/// ширина кадра плитки, высота строки или строка списка.
+fn tile_hint(style: db::CellStyle) -> &'static str {
+    match style {
+        db::CellStyle::Tiles => {
+            "размер плитки (плитка — ширина кадра, строки — высота), 100–260 px"
+        }
+        db::CellStyle::Rows => {
+            "высота строки: ширина плитки следует пропорции кадра, 100–260 px"
+        }
+        db::CellStyle::List => {
+            "размер строки списка: высота, миниатюра и кегль подписей, 100–260 px"
+        }
+    }
+}
+
+/// Список: строка из ползунка «Плитки» (`list_row_height`) — миниатюра 4:3 ростом
+/// `строка − 8`, имя, дата и объём. Плотный просмотр имён и дат, когда снимки уже
+/// известны; решения по дублям и корзине — те же кнопки.
 fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
-    let row_h = 44.0;
-    let thumb = egui::vec2(58.0, 40.0);
+    // Список масштабируется тем же ползунком, что плитка и ряды: высота строки,
+    // миниатюра 4:3 ростом `row − 8` и кегли имени и цифр растут вместе с ним.
+    let row_h = list_row_height(cs.tile);
+    let name_px = list_name_px(cs.tile);
+    let meta_px = list_meta_px(cs.tile);
+    let thumb_h = (row_h - 8.0).max(16.0);
+    let thumb = egui::vec2((thumb_h * 4.0 / 3.0).round(), thumb_h.round());
     for &f in files {
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), row_h),
@@ -8547,7 +8585,7 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             ui.painter().rect_filled(bar, 0.0, th.accent);
         }
         let tr = egui::Rect::from_min_size(
-            rect.left_top() + egui::vec2(6.0, 2.0),
+            rect.left_top() + egui::vec2(6.0, (row_h - thumb.y) / 2.0),
             thumb,
         );
         ui.painter().rect_filled(tr, 2.0, th.canvas);
@@ -8556,7 +8594,7 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
                 tr.center(),
                 egui::Align2::CENTER_CENTER,
                 "—",
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(meta_px),
                 th.text_dim,
             );
         }
@@ -8583,31 +8621,35 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             tr.right_top() + egui::vec2(8.0, 0.0),
             egui::pos2(rect.right() - right, rect.bottom()),
         );
+        // Две строки текста стоят блоком по центру строки: при любом кегле они
+        // не выходят за её границы и не прижимаются к краю.
+        let name_top = rect.center().y - name_px - 1.0;
+        let meta_top = name_top + name_px + 2.0;
         let painter = ui.painter().with_clip_rect(clip);
         painter.text(
-            egui::pos2(clip.left(), rect.top() + 6.0),
+            egui::pos2(clip.left(), name_top),
             egui::Align2::LEFT_TOP,
             &name,
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(name_px),
             if chosen { th.accent } else { th.text },
         );
         painter.text(
-            egui::pos2(clip.left(), rect.top() + 24.0),
+            egui::pos2(clip.left(), meta_top),
             egui::Align2::LEFT_TOP,
             &meta,
-            egui::FontId::monospace(10.0),
+            egui::FontId::monospace(meta_px),
             th.text_dim,
         );
         ui.painter().text(
-            egui::pos2(rect.right() - 8.0, rect.top() + 6.0),
+            egui::pos2(rect.right() - 8.0, name_top),
             egui::Align2::RIGHT_TOP,
             &kind,
-            egui::FontId::monospace(10.0),
+            egui::FontId::monospace(meta_px),
             th.text_med,
         );
         if cs.show_keep {
             let btn = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - 78.0, rect.top() + 12.0),
+                egui::pos2(rect.right() - 78.0, rect.center().y - 10.0),
                 egui::vec2(70.0, 20.0),
             );
             if ui
@@ -8619,7 +8661,7 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
         }
         if cs.trash_mode {
             let btn = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - 78.0, rect.top() + 12.0),
+                egui::pos2(rect.right() - 78.0, rect.center().y - 10.0),
                 egui::vec2(70.0, 20.0),
             );
             if ui
@@ -9526,8 +9568,10 @@ impl eframe::App for App {
                 ui.label(num(ui, count, 12.0).color(dim(ui)));
                 // PhotoPrism: размер плиток живёт в панели содержимого, а не в левой панели.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Размер относится к плиткам и строкам; списку он не нужен.
-                    if self.settings.cell_style != db::CellStyle::List {
+                    // Размер задаёт плитку, высоту строки или строку списка — но
+                    // ползунок виден всегда (M22.2a): шапка не прыгает при смене
+                    // вида, а у списка из 2000 строк есть что масштабировать.
+                    {
                         let size = ui.add(
                             egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
                                 .step_by(10.0)
@@ -9545,10 +9589,7 @@ impl eframe::App for App {
                             .size(11.0)
                             .color(dim(ui)),
                         )
-                        .on_hover_text(t(
-                            lang,
-                            "размер плитки (плитка — ширина кадра, строки — высота), 100–260 px",
-                        ));
+                        .on_hover_text(t(lang, tile_hint(self.settings.cell_style)));
                     }
                     // Вид ячейки (M22): плитка макета — основной, строки и список — вторые.
                     let mut style = self.settings.cell_style;
@@ -11112,8 +11153,9 @@ mod tests {
     use super::{
         App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick,
         SettingsTab, StorageAction, View, Viewer, clamp_pan, days_in_month, db, first_weekday_monday,
-        fit_rect, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
-        score_percentile, shift_month, shift_to_file_month,
+        fit_rect, list_meta_px, list_name_px, list_row_height, monday_of, month_groups,
+        nearest_file_month, parse_date, pick_kind, score_percentile, shift_month,
+        shift_to_file_month,
     };
     use crate::embed;
     use crate::i18n;
@@ -12631,6 +12673,107 @@ mod tests {
         );
         assert!(texts.iter().any(|t| t == "Select all (4)"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Clear selection"), "{texts:?}");
+    }
+
+    /// M22.2a: список масштабируется тем же ползунком «Плитки», что плитка и
+    /// ряды. Высота строки — 24 + 0.16 × значение, кегли 12–14 / 10–12 px.
+    #[test]
+    fn список_масштабируется_ползунком_плиток() {
+        assert!(
+            (list_row_height(100.0) - 40.0).abs() < 0.01,
+            "{}",
+            list_row_height(100.0)
+        );
+        assert!((list_row_height(180.0) - 52.8).abs() < 0.01);
+        assert!(
+            (list_row_height(260.0) - 65.6).abs() < 0.01,
+            "{}",
+            list_row_height(260.0)
+        );
+        // Кегли растут вместе со строкой и остаются в полосе 12–14 / 10–12.
+        assert_eq!(list_name_px(100.0), 12.0);
+        assert_eq!(list_name_px(260.0), 14.0);
+        assert_eq!(list_meta_px(100.0), 10.0);
+        assert_eq!(list_meta_px(260.0), 12.0);
+        // Одно значение ползунка на три вида: список его не сбрасывает.
+        let mut app = m17_app();
+        app.tile_size = 200.0;
+        app.settings.cell_style = db::CellStyle::List;
+        assert_eq!(app.tile_size, 200.0);
+    }
+
+    /// Рисует `draw_list` в кадре без окна и возвращает высоту, которую заняли
+    /// две строки: так проверяется масштаб списка на настоящем коде отрисовки.
+    fn list_frame_height(tile: f32) -> f32 {
+        let ctx = egui::Context::default();
+        let rows = m17_rows();
+        let files: Vec<&db::FileRow> = rows.iter().take(2).collect();
+        let picked = BTreeSet::new();
+        let mut textures = std::collections::HashMap::new();
+        let mut missing = std::collections::HashSet::new();
+        let mut cells = super::Cells {
+            bg: egui::Color32::BLACK,
+            cell_style: db::CellStyle::List,
+            textures: &mut textures,
+            missing: &mut missing,
+            thumbs_dir: std::path::Path::new("/nonexistent/thumbs"),
+            selected: None,
+            picked: &picked,
+            clicked: None,
+            open_clicked: None,
+            show_keep: false,
+            keep_clicked: None,
+            trash_mode: false,
+            restore_clicked: None,
+            tile,
+            lang: i18n::Lang::Ru,
+            budget: 4,
+        };
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let mut used = 0.0;
+        let out = ctx.run_ui(raw, |ui| {
+            let ctx = ui.ctx().clone();
+            super::draw_list(ui, &ctx, &mut cells, &files);
+            used = ui.min_rect().height();
+        });
+        out.drop_without_applying_deltas();
+        used
+    }
+
+    /// M22.2a: список масштабируется вместе с ползунком — две строки выше при 260,
+    /// чем при 100, и ни одна строка не обрезает текст по вертикали.
+    #[test]
+    fn список_рисует_строки_выше_с_большим_ползунком() {
+        let small = list_frame_height(100.0);
+        let big = list_frame_height(260.0);
+        // 40 px и 65.6 px на строку, плюс зазор под ними: важна разница, а не
+        // начальный отступ кадра.
+        assert!((small - 84.0).abs() < 8.0, "две строки по 40 px: {small}");
+        assert!((big - 135.2).abs() < 8.0, "две строки по 65.6 px: {big}");
+        assert!((big - small - 51.2).abs() < 0.5, "{small} → {big}");
+    }
+
+    /// M22.2a: ползунок размера виден в шапке во всех трёх видах ячейки —
+    /// в списке он тоже есть, поэтому шапка не прыгает при переключении.
+    #[test]
+    fn ползунок_размера_виден_во_всех_трёх_видах() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::Ru;
+        app.tile_size = 200.0;
+        for style in [db::CellStyle::Tiles, db::CellStyle::Rows, db::CellStyle::List] {
+            app.settings.cell_style = style;
+            let texts = window_frame(&mut app, &egui::Context::default());
+            assert!(
+                texts.iter().any(|t| t == "Плитки 200"),
+                "в виде {style:?} ползунок размера пропал: {texts:?}"
+            );
+        }
     }
 
     #[test]

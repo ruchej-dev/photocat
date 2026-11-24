@@ -400,6 +400,14 @@ const PAIRS: &[(&str, &str)] = &[
         "размер плитки (плитка — ширина кадра, строки — высота), 100–260 px",
         "tile size (a tile: frame width, rows: row height), 100–260 px",
     ),
+    (
+        "высота строки: ширина плитки следует пропорции кадра, 100–260 px",
+        "row height: the tile width follows the frame's proportion, 100–260 px",
+    ),
+    (
+        "размер строки списка: высота, миниатюра и кегль подписей, 100–260 px",
+        "list row size: height, thumbnail and caption size, 100–260 px",
+    ),
     ("Плитка", "Tile"),
     ("Ряды", "Rows"),
     ("Список", "List"),

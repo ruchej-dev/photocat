@@ -60,9 +60,12 @@ the interface rules at the end of the file.
   (no crop, no stretch), a 22 px caption band; the columns share the available width. **Rows** —
   the row height comes from the slider, the row fills the width, so a tile's width follows its
   frame's aspect and the preview fills the tile with no margins; a row is never lower than 70 % of
-  the slider and the last row keeps the target height. **List** — one row 44 px: a 58×40 thumbnail,
-  the name, the date and the size; the size slider is hidden. All three share one entry point
-  (`draw_files`) and the same click/selection/tooltip rules.
+  the slider and the last row keeps the target height. **List** — one row whose height comes from the
+  same slider (`24 + 0.16 × value`: 40 px at 100, 66 px at 260), a 4:3 thumbnail `row − 8` high, the
+  name at 12–14 px and the date · size in mono 10–12 px. The slider never disappears and the header
+  keeps its height, so switching the view does not make the right-hand group jump; the slider's
+  tooltip names what it scales in the current view. All three share one entry point (`draw_files`)
+  and the same click/selection/tooltip rules.
 - **The grid step is 10 px** (M22, the mock-up's `gap-2.5`), both between tiles in a row and between
   rows; the gap does not change `item_spacing` of other screens.
 - **A tile's aspect never stretches a snapshot** (M22): the frame is 4:3 in the tile view and equal to
@@ -226,10 +229,10 @@ a rare one.
 |---|---|---|
 | Cell view "Tile" (default) | one tile width from the "Tiles" slider (100–260 px, 150 by default), the columns share the available width; a 4:3 frame + a 22 px caption band; the preview fitted inside whole (no crop); a video gets a "▶ M:SS" bar at the bottom of the frame | `app.rs::draw_tiles`, `draw_cell` |
 | Cell view "Rows" | the row height comes from the slider and never falls below 70 % of it; the row fills the available width, so a tile's width follows its frame's aspect; the preview fills the tile (no crop, no margins) | `app.rs::draw_flow`, `row_fit` |
-| Cell view "List" | a row 44 px: a 58×40 thumbnail, the name at 12 px, the date · size in mono 10, the kind/duration on the right; the size slider is hidden | `app.rs::draw_list` |
+| Cell view "List" | the row height `24 + 0.16 × slider` (40 px at 100, 66 px at 260), a 4:3 thumbnail `row − 8` high, the name at 12–14 px, the date · size in mono 10–12, the kind/duration on the right in mono; the two text lines are centred as one block and never leave the row; gap 4 px | `app.rs::draw_list`, `list_row_height` |
 | Grid step | 10 px between tiles inside a row and between rows (the mock-up's `gap-2.5`); other screens live on the common `item_spacing` 8×6 | `app.rs::draw_tiles`, `draw_flow` |
 | Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group | `app.rs::month_header` |
-| Content panel | view title 18 px + facts 12 px; on the right "Tiles" 11 px and a 120 px slider; next to it the "By months / Flat" buttons and the "Sort" menu (11 px label); the chips row 26 px high | `ui()` → `draw_filter_chips` |
+| Content panel | view title 18 px + facts 12 px; on the right "Tiles" 11 px and a 120 px slider — present in all three cell views, its tooltip names what it scales (tile width, row height, list row); next to it the "By months / Flat" buttons and the "Sort" menu (11 px label); the chips row 26 px high | `ui()` → `draw_filter_chips` |
 | Navigation item | 28 px high, 14 px label on the left, 11 px number on the right; the selected one — accent fill 40/255 and accent text | `app.rs::nav_item` |
 | Details row | an 11 px label on the left in a 72 px column, a 12 px value with wrapping | `app.rs::meta_row` |
 | Face tile | 150×150 px + a 26 px caption; a 112×112 crop aligned by 5 points; a "not him" button top right, the date and the detection confidence under the frame | `app.rs::draw_face_cell` |

@@ -1014,6 +1014,10 @@ mock-up has no layout for.
 **Source of truth.** `plan/M22-ui-spec.md`: the token table, the layout metrics, the screen-to-mock-up
 map, the rules for an unsupported screen, the disputed questions and the full task list (M22.1–M22.11).
 
+**Done so far.** M22.1 (two themes, the token palette, ADR 0044), M22.2 (the main screen after the
+mock-up, three cell views) — 2026-11-24; M22.2a (the list view scales with the size slider, the slider
+is always visible) — 2026-11-24.
+
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
    (`dark | light | system`, key/value, `SCHEMA_VERSION` unchanged), "Settings → Interface → theme".
@@ -1031,8 +1035,8 @@ map, the rules for an unsupported screen, the disputed questions and the full ta
    functions (autostart, tray, GPU, updates, metadata backup) are not added.
 6. The sticky month heading (the former M13e) is closed in M22.4.
 7. The list view keeps the size slider and scales with it (row, thumbnail, name); the header never
-   jumps when the cell view changes. Trackpad and wheel scrolling is smooth and fast in every region
-   (M22.2a, M22.2b in the spec).
+   jumps when the cell view changes — M22.2a ✅. Trackpad and wheel scrolling is smooth and fast in
+   every region (M22.2b in the spec).
 8. Every task ends with a measurement or a look at the result, `cargo test`, `clippy`, `check.sh`;
    `docs/UI.md` § Layout, § Metrics and § "What the interface will not have" follow the code.
 

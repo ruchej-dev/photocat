@@ -108,7 +108,7 @@ reason is written in ADR 0044.
 
 | Screen | Mock-up | What is adopted | Task |
 |---|---|---|---|
-| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band | M22.2 ✅ |
+| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band | M22.2 ✅, M22.2a ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 |
@@ -219,7 +219,7 @@ in the same commit.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
 
-### M22.2a — the list view scales with the size slider
+### M22.2a — the list view scales with the size slider ✅ (this change)
 
 The owner's remark after the main screen: the size slider must **not disappear** in the list view.
 Hiding it made the panel header jump (the row layout changed on every switch) and the list has nothing
@@ -236,6 +236,18 @@ to scale — yet a list of 1976 rows wants a larger thumbnail and a larger name 
    tooltip of the slider says what it scales in the current view.
 5. `docs/UI.md` § Metrics and the list row follow; a headless frame checks the row height for two
    slider values.
+
+**Result.** `draw_list` takes its metrics from `list_row_height` / `list_name_px` / `list_meta_px`
+(one clamp 100–260 px, the same `settings.tile_size` as the other two views). At 100 a row is 40 px
+with a 42.7×32 thumbnail, the name at 12 px and the mono meta at 10 px; at 260 — 66 px, 76.8×57.6,
+14 px and 12 px. The two text lines are centred as one block (`name_top = centre − name − 1`, the
+meta 2 px below), the kind/duration sits on the name's top line and the keep/restore button is
+centred, so nothing is clipped at either end of the range. The header is one `<div>`-like block with
+a constant height: the slider, its label and the three view buttons are drawn in every view, and only
+the tooltip changes (`tile_hint` has one sentence per view). Two tests: `список_рисует_строки_выше_с_большим_ползунком`
+runs `draw_list` in a headless frame with two rows — 90 px at 100 and 141 px at 260 (the 6 px frame
+cursor is constant, the difference is exactly 2 × 25.6); `ползунок_размера_виден_во_всех_трёх_видах`
+asserts the label "Плитки 200" is drawn in the tile, rows and list views.
 
 **Files.** `src/app.rs` (`draw_list`, the header), `docs/UI.md`, `plan/STATUS.md`.
 

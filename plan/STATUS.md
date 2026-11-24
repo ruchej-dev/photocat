@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews) → next:M22.2a (the list view scales with the size slider and the slider never disappears), then M22.2b (trackpad and wheel scrolling), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears) → next:M22.2b (trackpad and wheel scrolling), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -1897,6 +1897,35 @@ the pointer table describe the drag.
 
 **Not done, deliberately.** No wheel zoom, no double-click "fit ↔ 100 %", no panning of the video
 frame: the video is fitted by design, and no gesture is promised that the code does not do.
+
+## M22.2a — the list view scales with the size slider (2026-11-24) ✅
+
+The owner's remark after the main screen: the slider must not disappear in the list view. Hiding it
+made the panel header jump on every switch, and a list of 1976 rows has as much to scale as a grid.
+
+**What changed.** The "Tiles" slider, its label and the three view buttons are now drawn in **every**
+cell view — one block of constant height, so the right-hand group of the header never shifts; only
+the tooltip follows the view (`tile_hint`: tile width / row height / list row size, three sentences
+in `i18n::PAIRS`). `draw_list` takes its metrics from the same `settings.tile_size` and a single
+clamp 100–260 px: the row is `24 + 0.16 × value` high (40 px at 100, 65.6 px at 260), the thumbnail
+`row − 8` high in 4:3 (42.7×32 → 76.8×57.6), the name 12 → 14 px and the mono date · size 10 → 12 px
+(`list_row_height`, `list_name_px`, `list_meta_px`). The two text lines are centred as one block, the
+kind/duration rides the name's top line and the keep/restore button is centred, so nothing is clipped
+at either end of the slider.
+
+**Numbers (headless frames, release, 2026-11-24).** Two rows of `draw_list`: 90 px at 100 and
+141 px at 260 — the 6 px frame cursor is constant, the difference is exactly 2 × 25.6. The header
+frame draws "Плитки 200" in the tile, rows and list views. No corpus pass: the change touches layout
+only, no decoding, no DB column and no file operation.
+
+**Checks.** `cargo test` — 225 passed, 6 `#[ignore]` (new: the list scales with the slider, its
+headless frame measures the row height, and the slider is visible in all three views); `cargo clippy --all-targets` — clean; `check.sh` — 52 checks, 0
+violations; `timeout 6 ./target/release/photocat gui` — the window lived to the timeout, no panic.
+`docs/UI.md` § Layout and § Metrics carry the new list row and the always-present slider.
+
+**Not done, deliberately.** The slider's minimum and maximum stay 100–260 px (a larger thumbnail is a
+separate decision on the corpus), the columns of the list are unchanged, and the trackpad/wheel
+smoothing is M22.2b.
 
 ## M22.1/M22.2 — two themes and the main screen after the mock-up (2026-11-24) ✅
 
