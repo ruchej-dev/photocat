@@ -137,8 +137,9 @@ of the projection. Vectors are f32 little-endian (2 KiB/photo): 1971 photos give
 save half but would need another dependency and lose precision on a small corpus.
 
 **Network.** The app downloads only model weights — by the owner's explicit consent (ADR 0015),
-nothing else. `scripts/fetch-model.sh` remains the manual fallback path; the sha256 is pinned in
-`src/embed.rs` and checked on download. On the first build `ort-sys` downloads ONNX Runtime itself
+nothing else. The binary is the only path to the weights (`models download`, the Settings button) and
+there is no shell script for it (M24.1: a cross-platform application is one binary); the sha256 is
+pinned in `src/embed.rs` and checked on download. On the first build `ort-sys` downloads ONNX Runtime itself
 (cache `~/.cache/ort.pyke.io`); that is a build step, not runtime. The model needs AVX2 (int8
 quantisation), otherwise the fp32 variant is required.
 **Forbids:** auto-download without consent, sending previews, paths and query texts outside, storing
@@ -163,8 +164,9 @@ OS-specific API without a fallback. Cache: `XDG_CACHE_HOME` → `LOCALAPPDATA` (
 External processes: `ffmpeg`/`ffprobe` are looked up in `PATH` (`Command` adds `.exe` on Windows
 itself), the console window is suppressed via `CREATE_NO_WINDOW`.
 
-**Boundary:** `scripts/fetch-model.sh` is bash, only for preparing a model on a Unix machine; at
-runtime the script is not needed. Non-UTF-8 file names (possible on Linux) are stored in the DB via
+**Boundary:** no shell script ships with the application: preparing a model is the binary's job, and
+a machine without `curl` copies the weights into the models folder by hand. Non-UTF-8 file names
+(possible on Linux) are stored in the DB via
 `to_string_lossy` — a known limitation, not an M4 goal.
 **Forbids:** `unsafe` workarounds, `#[cfg]` branches without a second implementation, a hardcoded
 home path in the UI.
@@ -230,7 +232,7 @@ the distribution (ADR 0010, 0016, 0018). Instead — one contract for all extern
 | `ffmpeg` | a video cover frame, dHash, previews | a video enters the index without a preview and dHash, the error is counted in `errors`; photos do not suffer |
 | `ffprobe` | video duration and resolution | a video without a duration `▶ M:SS`, the rest is indexed |
 | `tesseract` | text from documents and screenshots | OCR is off: the button is disabled, `ocr` says what to install; search, duplicates and CLIP work |
-| `curl` | downloading model weights (consent only) | the model can be put in place by hand via `scripts/fetch-model.sh`; local functions work |
+| `curl` | downloading model weights (consent only) | the weights have to be copied into the models folder by hand; local functions work |
 
 **Rules.**
 1. A program is started through `std::process::Command` (`.exe` is added by itself on Windows) by an

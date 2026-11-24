@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught) → next:M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone) → next:M22.3 (the left panel: years and tag chips), then M24.2 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -906,6 +906,10 @@ is changed under the same id, `--refresh` is needed.
 9. ~~The default name template~~ Decided: **`{n}_{orig}`**; the width of the number by the number of
    files.
 10. ~~One shot twice in one album~~ Decided: **once** (in different albums — allowed).
+11. **Downloading the weights without `curl`.** Today the binary shells out to `curl` (ADR 0016); a
+    machine without it has to copy the files by hand. An in-process HTTPS client (`ureq`/`rustls` and
+    the like, ~1 MiB with the TLS roots, a new dependency and an ADR) would make "one binary" strict.
+    The owner's call; the clean-install pass (M24.2) covers the `curl`-less path either way.
 
 All decisions on M17–M20 are taken and closed; the M20 measurements are in § M20 and
 `docs/ARCHITECTURE.md`.
@@ -2108,3 +2112,33 @@ default labels as data. No file of the archive was touched: the index wrote to t
 numbers are in the measurements table); the OCR text of the 154 newly proposed shots was computed here
 but not yet reviewed by the owner — the card shows it as soon as the pass runs on his DB; the `--all`
 path, the faces pass and the model downloads were not re-measured because M23 did not touch them.
+
+## M24.1 — the model download is the binary's business (2026-11-24) ✅
+
+The repository still carried `scripts/fetch-model.sh`, the manual fallback that curled four CLIP files
+into `<cache>/photocat/models/clip-vit-b32/`. It was the last piece of the model path that was not the
+application: bash, `sha256sum`, `du`, a Unix-only path — a cross-platform application has to be one
+binary, and the same four files with the same sha256 already arrive through `models download` and the
+"Download model" button, mirror (hf-mirror) and retry included.
+
+**What changed.** The script is deleted. The two messages that pointed at it name the two real ways
+instead: `embed::check_model_in` prints the folder and `photocat models download --id ID`, and the
+`curl` row of the external-programs table says "the weights have to be copied into the models folder
+by hand — a download needs curl" (both languages, `PAIRS` updated in the same commit). `README.md`
+and `.ru.md` install the model with the command instead of the script; `AGENTS.md` § 4 and 5, ADR 0013
+(network), ADR 0014 (cross-platform boundary) and the external-programs table in `docs/DECISIONS.md`
+say the same thing; `plan/I18N.md` records that the script is gone.
+
+**Why it is not a loss.** The script did nothing the binary cannot: same URLs, same pinned sha256,
+same two towers. What the script *could* do and the binary cannot is work on a machine without `curl`
+— but that machine also could not run the script, which called `curl` itself. So the honest fallback
+is unchanged: copy the four files into `<models_dir>/<id>/` by hand. Whether to drop `curl` as well,
+with an in-process HTTPS client, is the owner's open question (STATUS § Open questions, #11).
+
+**Checks.** `cargo build --release` and `cargo test` — 238 passed, 7 ignored; `check.sh` — 55 checks, 0
+violations (it fails on a `src/` file that deletes files, and on a missing licence note — neither
+applies); `rust-analyzer diagnostics` — 0 errors; a grep for `fetch-model` in the repository finds only
+the dated M23.5 records, which stay as written.
+
+**Not done, deliberately.** The clean install itself — M24.2, with an empty cache, no models and no
+external programs; replacing `curl` — an open question, not a decision.

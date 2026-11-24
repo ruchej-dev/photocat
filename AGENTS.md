@@ -107,8 +107,10 @@ The one-dependency rule: **a module depends only on lower layers**. Checked by
   (`models list`): two CLIP ViT-B/32 (multilingual 217.5 MiB — the default, English 148.6 MiB),
   SigLIP base 224 English (203.5) and SigLIP 2 base 224 multilingual (393.3 — needs the limit raised
   to 400). A model's tag weight is calibrated into the CLIP scale, so one threshold means the same
-  thing on every model. Downloading is consent-only and sha256-checked; `scripts/fetch-model.sh`
-  stays the manual fallback for CLIP.
+  thing on every model. Downloading is consent-only and sha256-checked, and the binary is the only
+  way to get weights: `models download --id ID --yes` or the "Download model" button. There is no
+  shell script for it — the repository ships none, and a cross-platform application is one binary
+  (M24.1). Without `curl` the weights have to be copied into the models folder by hand.
 - Cache for 2230 files: DB 1.3 MB, previews 29 MB; after CLIP + OCR + faces the DB is ~22 MB (CLIP
   vectors 4.4 MiB, faces 2498 × 2 KiB), face crops ~11 MB. An order-of-magnitude jump is a
   regression.
@@ -164,8 +166,7 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # layer bounds; the arch
 ./target/release/photocat models download --id ID --yes  # weights (network, consent only)
 ./target/release/photocat settings [--lang en|ru]        # model, path, limit, thresholds, language
 ./target/release/photocat gui                            # GUI (language comes from settings)
-# weights: the "Download model" button in Settings (with consent) or by hand:
-bash scripts/fetch-model.sh
+# weights: the "Download model" button in Settings (with consent) or `models download --id ID --yes`
 bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real corpus
 ```
 

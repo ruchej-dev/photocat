@@ -71,7 +71,9 @@ impl Tool {
                 }
                 Tool::Ffprobe => "videos without duration or resolution",
                 Tool::Tesseract => "OCR is off: the button is disabled, text search stays empty",
-                Tool::Curl => "the model weights will have to be placed by hand (scripts/fetch-model.sh)",
+                Tool::Curl => {
+                    "the weights have to be copied into the models folder by hand — a download needs curl"
+                }
             },
         )
     }

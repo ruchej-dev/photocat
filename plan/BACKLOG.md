@@ -1097,3 +1097,51 @@ M23.3 made the labels English and the lookup asked an empty `settings.model_id`)
 a third language; gettext/fluent; changing the language mechanism decided in ADR 0040.
 
 **Files.** `src/*.rs`, `tests/source_language.rs`, `docs/DECISIONS.md`, `plan/I18N.md`.
+
+---
+
+## M24 — a clean install and one binary 🔄 (M24.1 done)
+
+**Goal.** A person who has never had photocat: no DB, no previews, no models, no settings. Everything
+the app needs appears on its own or is asked for with a button, and the weights come only from the
+binary itself — the repository ships no shell scripts, because a cross-platform application is one
+file.
+
+**Acceptance criteria.**
+1. `scripts/` holds no downloader: `models download --id ID --yes` and the "Download model" button
+   are the only way to the weights, and the messages that used to point at `scripts/fetch-model.sh`
+   name the models folder and the command instead. ✅ (M24.1)
+2. A clean cache (`XDG_CACHE_HOME=$(mktemp -d) ./target/release/photocat gui`): the window opens,
+   `<cache>/photocat/photocat.db` and `thumbs/` are created, the language comes from the locale, the
+   screen says that no folder is indexed yet, the model block says "not downloaded", the faces and
+   text blocks are disabled with an explanation, and no pass starts by itself.
+3. The first folder: adding and indexing it from the window works with **no model at all** — stats,
+   duplicates, the calendar, the grid and the full screen work without CLIP; the tags and the search
+   say "download the model" instead of failing.
+4. The model: the consent tick plus "Download model" fetches 217.5 MiB with the sha256 matched, then
+   "Compute tags" works; with the network down the message says what failed and the rest keeps
+   working.
+5. Absent system programs: with no `ffmpeg`, `tesseract` and `curl` (the fields cleared and the names
+   out of `PATH`) the app still starts and indexes photos, and each block says what is lost — one
+   honest line, no crash, no dialog loop.
+6. One binary: `cargo build --release` gives `target/release/photocat`, `doctor` lists the external
+   programs as optional, and copying that file to another machine of the same OS is enough (the DB
+   and the models travel in the cache).
+7. The pass is recorded in `plan/STATUS.md` with numbers: what a clean start costs in bytes and
+   seconds, and what the first index of a 120-file folder takes.
+
+**Steps.** M24.1 — the shell script is gone, the messages name the binary (done 2026-11-24). M24.2 —
+the clean-install pass itself: an empty cache, no models, no external programs, then a model download
+with consent.
+
+**Not doing.** Bundling the weights into the binary (218–393 MiB, and they change independently of
+the code); bundling `ffmpeg`/`tesseract` (ADR 0023); a portable single-file package (AppImage and
+alike) — the target stays a release binary plus the cache.
+
+**Open question for the owner.** Dropping the external `curl` in favour of an in-process HTTPS client
+(a new dependency, ~1 MiB with TLS roots, an ADR) would make the download work on a machine with
+nothing installed — the strict reading of "one binary". Today `curl` is the only external program the
+network path needs.
+
+**Files.** `src/embed.rs`, `src/tools.rs`, `src/app.rs`, `README.md`, `docs/DECISIONS.md`,
+`plan/STATUS.md`.

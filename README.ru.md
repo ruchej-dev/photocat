@@ -49,7 +49,7 @@ cargo build --release      # первый раз ~3 минуты
 ./target/release/photocat organize --out ~/Фото-витрина --name '{date}_{camera}_{orig}'
 
 # 6. CLIP: смысловые теги и поиск (модель скачивается один раз, дальше всё локально)
-bash scripts/fetch-model.sh
+./target/release/photocat models download --id clip-vit-b32-multilingual --yes  # сеть, по согласию
 ./target/release/photocat embed                        # 2229 файлов ≈ 177 с на CPU (два кадра)
 ./target/release/photocat embed --refresh              # пересчитать векторы после смены входа
 ./target/release/photocat search "торт" --top 20
@@ -152,7 +152,8 @@ systemctl --user enable --now photocat-verify.timer
 * Превью: `~/.cache/photocat/thumbs/<2 симв.>/<sha256>.jpg`, 320 px по длинной стороне.
 * Модель CLIP: `~/.cache/photocat/models/clip-vit-b32/`, 218 МиБ; SigLIP — 203.5 МиБ,
   768 признаков. sha256 проверяется при загрузке; модели не смешиваются.
-  В сеть ходит только `scripts/fetch-model.sh`, запущенный вручную; GUI и CLI — никогда.
+  В сеть уходит только загрузка весов, которую владелец заказывает сам (кнопка в «Настройках» или
+  `models download`); больше ничего наружу не отправляется.
 * Ничего не удаляется и не переименовывается без явных флагов.
 
 ## Замеры на реальном архиве

@@ -622,9 +622,10 @@ pub fn check_model_in(models_dir: &Path, e: &ModelEntry) -> Result<()> {
         let path = dir.join(f.name);
         if !path.is_file() {
             bail!(
-                "no files of the model “{}”: {}\ndownload in the Settings or run: bash scripts/fetch-model.sh",
+                "no files of the model “{}” in {}\ndownload it in the Settings or with `photocat models download --id {}`",
                 e.title,
-                path.display()
+                dir.display(),
+                e.id
             );
         }
         let got = derive::sha256_file(&path)

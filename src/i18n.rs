@@ -1154,8 +1154,8 @@ const PAIRS: &[(&str, &str)] = &[
         "OCR выключен: кнопка погашена, поиск по тексту пуст",
     ),
     (
-        "the model weights will have to be placed by hand (scripts/fetch-model.sh)",
-        "веса модели придётся положить вручную (scripts/fetch-model.sh)",
+        "the weights have to be copied into the models folder by hand — a download needs curl",
+        "веса придётся положить в папку моделей вручную — для загрузки нужен curl",
     ),
 
     // --- the full screen, the player, the folder chooser, the cache (M21.5) -----

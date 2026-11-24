@@ -50,7 +50,7 @@ cargo build --release      # ~3 minutes from scratch
 ./target/release/photocat organize --out ~/Photo-showcase --name '{date}_{camera}_{orig}'
 
 # 6. CLIP: semantic tags and search (the model is downloaded once, then everything is local)
-bash scripts/fetch-model.sh
+./target/release/photocat models download --id clip-vit-b32-multilingual --yes  # network, consent
 ./target/release/photocat embed                        # 2229 files ≈ 177 s on CPU (two frames)
 ./target/release/photocat embed --refresh              # recompute vectors after the input changed
 ./target/release/photocat search "cake" --top 20
@@ -153,8 +153,8 @@ systemctl --user enable --now photocat-verify.timer
   never modified. Dupes decisions (`decision`) survive while the file keeps the same `sha256`.
 * Previews: `~/.cache/photocat/thumbs/<2 chars>/<sha256>.jpg`, 320 px on the long side.
 * CLIP model: `~/.cache/photocat/models/clip-vit-b32/`, 218 MiB; SigLIP — 203.5 MiB, 768 features.
-  sha256 is verified on download; models are never mixed. Only `scripts/fetch-model.sh`, run by
-  hand, goes to the network; the GUI and the CLI never do.
+  sha256 is verified on download; models are never mixed. The only network call is the weights
+  download the owner asks for (the Settings button or `models download`); nothing else goes out.
 * Nothing is deleted or renamed without explicit flags.
 
 ## Measurements on a real archive
