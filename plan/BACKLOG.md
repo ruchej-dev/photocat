@@ -517,6 +517,37 @@ the timer. Video opens ffplay: video and sound in a separate window.
 **Checked.** `cargo test` — 79 passed, 3 ignored, `clippy` — clean, `check.sh` — 38/0; the measurement
 of TurboJPEG on a 108 MP file.
 
+---
+
+## M13d — panning the zoomed frame in the full screen ✅ (done 2026-11-24)
+
+**Goal.** At a zoom above 100 % the owner looks at a detail — a face in a group photo, a line of a
+document, the number on a receipt — and not only at the centre of the frame.
+
+**Acceptance criteria.**
+1. With the left button pressed the zoomed frame moves under the cursor; the cursor is a hand
+   (`Grab`, `Grabbing` while dragging); the frame never leaves the area, so no empty background
+   shows at an edge.
+2. At 100 % ("Fit") there is nothing to drag: the frame stays centred and the hand cursor does not
+   appear. A side that is fitted stays centred even when the other one is zoomed.
+3. A new file and "Fit" reset the shift: another snapshot does not open cropped for no reason.
+4. The hint "drag to move the frame" goes through `i18n::t` and is visible only above 100 % — the
+   drag is discoverable without a tooltip.
+5. A video frame is not panned: a click on it still starts and pauses the video.
+6. `docs/UI.md` §Debt loses the item, the metric row and the pointer table describe the drag;
+   `cargo test` covers the clamp and the reset; `clippy` and `check.sh` green; a GUI smoke run.
+7. No new dependency, no DB change, the archive is untouched.
+
+**Done.** `Viewer::pan` and `clamp_pan` in `src/app.rs`; `draw_viewer_image` applies the drag delta
+of the left button, clamps the shift and paints the hand cursor (`Grab`/`Grabbing`) only while the
+frame is zoomed; `viewer_step` and "Fit" reset the shift. The hint "перетаскивание — сдвиг кадра" /
+"drag to move the frame" is new in `i18n::PAIRS` and appears only above 100 %. `docs/UI.md` debt item
+5 is gone, the rest are renumbered. `cargo test` — 219 passed, 6 `#[ignore]` (3 new); clippy clean;
+`check.sh` — 52/0; the GUI lives 6 s on a copy of the real DB, no crash. The numbers and the
+deliberate omissions are in `plan/STATUS.md` § M13d.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
 ## M14 — the built-in video player ✅
 
 **Goal.** Video plays in the app window, the same on all OSes, without external programs.

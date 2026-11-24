@@ -336,6 +336,9 @@ struct Viewer {
     ids: Vec<i64>,
     idx: usize,
     zoom: f32,
+    /// Сдвиг увеличенного кадра от центра, в точках экрана. При смене файла и
+    /// при масштабе «вписать» — ноль, кадр по центру (docs/UI.md).
+    pan: egui::Vec2,
     show_text: bool,
     slideshow: bool,
     interval_s: u64,
@@ -6226,6 +6229,7 @@ impl App {
             ids,
             idx,
             zoom: 1.0,
+            pan: egui::Vec2::ZERO,
             show_text: false,
             slideshow: false,
             interval_s: 3,
@@ -6245,6 +6249,9 @@ impl App {
         self.stop_video();
         v.idx = (v.idx as i64 + step as i64).rem_euclid(v.ids.len() as i64) as usize;
         v.last_advance = std::time::Instant::now();
+        // Новый кадр показывается с центра: чужой сдвиг на другом снимке
+        // выглядит как обрезанный кадр без причины.
+        v.pan = egui::Vec2::ZERO;
     }
 
     fn viewer_modal(&mut self, ctx: &egui::Context) {
@@ -6377,6 +6384,7 @@ impl App {
             .filter(|(t, _)| *t != id && f.kind != "video")
             .map(|(_, t)| t);
         let mut new_zoom = v.zoom;
+        let mut new_pan = v.pan;
         let mut new_text = v.show_text;
         let mut new_slideshow = v.slideshow;
         let mut new_interval = v.interval_s;
@@ -6547,6 +6555,13 @@ impl App {
                     .size(11.0)
                     .color(DIM),
                 );
+                if v.zoom > 1.0 {
+                    ui.label(
+                        egui::RichText::new(t(lang, "перетаскивание — сдвиг кадра"))
+                            .size(11.0)
+                            .color(DIM),
+                    );
+                }
                 if ui
                     .selectable_label(v.show_text, t(lang, "Текст на фото"))
                     .clicked()
@@ -6576,8 +6591,8 @@ impl App {
                             },
                             &f,
                             v.zoom,
-                            img_w,
-                            content_h,
+                            &mut new_pan,
+                            egui::vec2(img_w, content_h),
                             lang,
                         ));
                     });
@@ -6618,8 +6633,8 @@ impl App {
                     },
                     &f,
                     v.zoom,
-                    avail.x,
-                    content_h,
+                    &mut new_pan,
+                    egui::vec2(avail.x, content_h),
                     lang,
                 ));
             }
@@ -6636,6 +6651,7 @@ impl App {
             close = true;
         }
         v.zoom = new_zoom;
+        v.pan = new_pan;
         v.show_text = new_text;
         if v.slideshow != new_slideshow {
             v.last_advance = std::time::Instant::now();
@@ -7674,6 +7690,13 @@ fn fit_rect(bounds: egui::Rect, size: egui::Vec2) -> egui::Rect {
     egui::Rect::from_center_size(bounds.center(), size * scale)
 }
 
+/// Сдвиг увеличенного кадра: кадр не отрывается от краёв области, а когда он
+/// вписан (одна из сторон не больше области) — стоит по центру по этой стороне.
+fn clamp_pan(pan: egui::Vec2, image: egui::Vec2, area: egui::Rect) -> egui::Vec2 {
+    let room = ((image - area.size()) / 2.0).max(egui::Vec2::ZERO);
+    egui::vec2(pan.x.clamp(-room.x, room.x), pan.y.clamp(-room.y, room.y))
+}
+
 /// Один способ нарисовать превью: сетка, календарь и миниатюры дней используют его же.
 /// Возвращает `true`, если картинка нарисована.
 fn paint_thumb(
@@ -7968,19 +7991,20 @@ fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
 }
 
 /// Один способ нарисовать кадр в полноэкранном просмотре: 100% = вписать,
-/// больше — увеличить и обрезать по области (прокрутка колесом не листает файл).
+/// больше — увеличить; увеличенный кадр таскается мышью (`pan`), края области
+/// он не покидает (прокрутка колесом не листает файл).
 /// Возвращает отклик области кадра: клик по видео — пуск или пауза.
 fn draw_viewer_image(
     ui: &mut egui::Ui,
     tex: ViewerTextures<'_>,
     f: &FileRow,
     zoom: f32,
-    w: f32,
-    h: f32,
+    pan: &mut egui::Vec2,
+    size: egui::Vec2,
     lang: i18n::Lang,
 ) -> egui::Response {
-    let (area, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
-    let resp = if f.kind == "video" {
+    let (area, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    let mut resp = if f.kind == "video" {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
     } else {
         resp
@@ -8007,7 +8031,16 @@ fn draw_viewer_image(
         let ts = t.size_vec2();
         let fit = (area.width() / ts.x).min(area.height() / ts.y);
         let size = ts * (fit * zoom);
-        let img = egui::Rect::from_center_size(area.center(), size);
+        // Увеличенный кадр таскается левой кнопкой: без этого при масштабе больше
+        // 100 % был виден только центр и рассмотреть деталь было нельзя.
+        *pan = clamp_pan(*pan + resp.drag_delta(), size, area);
+        if size.x > area.width() + 0.5 || size.y > area.height() + 0.5 {
+            if resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+            resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
+        }
+        let img = egui::Rect::from_center_size(area.center() + *pan, size);
         let p = ui.painter().with_clip_rect(area.shrink(1.0));
         p.image(
             t.id(),
@@ -10397,7 +10430,7 @@ impl eframe::App for App {
 mod tests {
     use super::{
         App, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter, PickClick,
-        SettingsTab, StorageAction, View, Viewer, days_in_month, db, first_weekday_monday,
+        SettingsTab, StorageAction, View, Viewer, clamp_pan, days_in_month, db, first_weekday_monday,
         fit_rect, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
         score_percentile, shift_month, shift_to_file_month,
     };
@@ -10611,6 +10644,7 @@ mod tests {
             ids,
             idx,
             zoom: 1.0,
+            pan: egui::Vec2::ZERO,
             show_text: false,
             slideshow: false,
             interval_s: 3,
@@ -11430,6 +11464,61 @@ mod tests {
         let mut v = viewer_with(vec![7], 0);
         app.viewer_step(&mut v, 1);
         assert_eq!(v.idx, 0);
+    }
+
+    /// M13d: при масштабе больше 100 % кадр таскается мышью, а при «вписать»
+    /// сдвиг сбрасывается — иначе новый снимок открывался бы обрезанным.
+    #[test]
+    fn смена_файла_возвращает_кадр_в_центр() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        let mut v = viewer_with(vec![7, 8], 0);
+        v.pan = egui::vec2(40.0, -10.0);
+        app.viewer_step(&mut v, 1);
+        assert_eq!(v.pan, egui::Vec2::ZERO);
+    }
+
+    /// Сдвиг не отрывает кадр от краёв области; сторона, которая вписана,
+    /// стоит по центру.
+    #[test]
+    fn сдвиг_кадра_не_отрывает_его_от_краёв() {
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+        // Вписанный кадр: сдвигать нечего.
+        assert_eq!(
+            clamp_pan(egui::vec2(50.0, -20.0), egui::vec2(400.0, 300.0), area),
+            egui::Vec2::ZERO
+        );
+        // Вдвое больше области: по 200 px в стороны и по 150 px вверх-вниз.
+        assert_eq!(
+            clamp_pan(egui::vec2(999.0, -999.0), egui::vec2(800.0, 600.0), area),
+            egui::vec2(200.0, -150.0)
+        );
+        // Шире области, но ниже её: двигается только по горизонтали.
+        assert_eq!(
+            clamp_pan(egui::vec2(0.0, 80.0), egui::vec2(1000.0, 200.0), area),
+            egui::Vec2::ZERO
+        );
+    }
+
+    /// Подсказка о перетаскивании видна только тогда, когда есть что таскать:
+    /// при «вписать» она была бы обещанием, которого код не выполняет.
+    #[test]
+    fn подсказка_о_сдвиге_видна_только_при_увеличении() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.settings.lang = i18n::Lang::Ru;
+        app.open_viewer(1);
+        let ctx = egui::Context::default();
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            !texts.iter().any(|t| t.contains("перетаскивание")),
+            "при масштабе 100 % подсказки о сдвиге нет: {texts:?}"
+        );
+        app.viewer.as_mut().expect("просмотр открыт").zoom = 2.0;
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts.iter().any(|t| t.contains("перетаскивание — сдвиг кадра")),
+            "при масштабе 200 % нужна подсказка о сдвиге: {texts:?}"
+        );
     }
 
     fn bounds() -> egui::Rect {

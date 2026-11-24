@@ -5,7 +5,7 @@
 > С M21 этот файл пишется по-английски; записи M21 и новее остались на языке, на котором
 > писались. Русская документация — второй вариант (`*.ru.md`). См. `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043) → next:the owner's re-read of the M15.7 labels; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen) → next:M13e (pinning the month heading when scrolling, `docs/UI.md` §Debt item 7); the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -31,6 +31,8 @@ STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspect
 С M16 оболочка GUI перестроена по образцу PhotoPrism: боковая навигация двумя группами со
 счётчиками, поиск в верхней панели, панель содержимого с чипами фильтра и размером плиток, сетка
 группами по месяцам от свежих, инспектор с именем файла и строками «подпись — значение» (ADR 0033).
+С M13d увеличенный кадр в полном экране таскается мышью: при масштабе больше 100% видно деталь,
+а не центр снимка.
 
 `photocat` умеет: проиндексировать каталог (sha256 + dHash + резкость + EXIF + превью), найти
 точные копии и похожие снимки, показать их в GUI, предложить по группе лучший кадр, сохранить
@@ -1759,3 +1761,31 @@ fp16-текстовая башня **хуже** по документам (64.8 
 **Проверки.** Замерная БД воспроизводит все числа выше (`/tmp/m156/bench.db`, копия БД M15.7);
 `cargo test` — 216 прошло, 6 `#[ignore]`; `cargo clippy --all-targets` — чисто; `check.sh` — 52
 проверки, 0 нарушений, прогнан после отката. ADR 0043.
+
+## M13d — панорамирование увеличенного кадра в полном экране (2026-11-24) ✅
+
+Последний пункт долга просмотрщика: при масштабе больше 100% кадр центрировался и обрезался, и
+лицо на групповом снимке или строку документа рассмотреть было нельзя. Теперь кадр едет за курсором.
+
+**Что появилось.** `Viewer::pan` хранит сдвиг в точках экрана; `draw_viewer_image` принимает его и
+размер кадра, применяет дельту перетаскивания левой кнопкой и ограничивает результат новым
+`clamp_pan`: кадр не покидает область, а вписанная сторона остаётся по центру, даже когда другая
+увеличена. Курсор — рука (`Grab`, при перетаскивании `Grabbing`); при 100% таскать нечего, и рука
+не появляется. Смена файла (`viewer_step`) и «Вписать» сбрасывают сдвиг, поэтому другой снимок не
+открывается обрезанным. Подсказка «перетаскивание — сдвиг кадра» /
+«drag to move the frame» рисуется рядом с процентом масштаба только выше 100% и идёт через
+`i18n::t`; кадр видео сохраняет клик (пуск/пауза) и не таскается. `draw_viewer_image` теперь
+принимает область одним `Vec2` (семь аргументов), поэтому предупреждение clippy
+`too_many_arguments` не появляется.
+
+**Проверки.** `cargo test` — 219 прошло, 6 `#[ignore]` (новые: ограничение на вписанном, вдвое
+увеличенном и увеличенном по одной оси кадре; смена файла сбрасывает сдвиг; подсказка видна только
+выше 100%); `cargo clippy --all-targets` — чисто; `check.sh` — 52 проверки, 0 нарушений;
+`timeout 6 ./target/release/photocat gui --db /tmp/photocat-m13d.db` — код 124, окно дожило до
+таймаута, падений и вывода в логе нет. `docs/UI.ru.md` потерял пункт 5 долга (остальные
+перенумерованы, ссылка в навыке `ui-design` поправлена), а строка метрик, строка экрана и таблица
+указателя описывают перетаскивание.
+
+**Что осознанно не сделано.** Нет зума колесом, нет двойного клика «вписать ↔ 100%», нет
+перетаскивания кадра видео: видео вписывается по замыслу, и жестов, которых код не выполняет, не
+обещано.

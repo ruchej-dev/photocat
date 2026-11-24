@@ -1111,6 +1111,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("увеличить", "zoom in"),
     ("Вписать", "Fit"),
     ("масштаб", "zoom"),
+    ("перетаскивание — сдвиг кадра", "drag to move the frame"),
     ("В системном просмотрщике", "In the system viewer"),
     ("видео · нажмите ▶, чтобы смотреть", "video · press ▶ to play"),
     ("загрузка следующего кадра…", "loading the next frame…"),

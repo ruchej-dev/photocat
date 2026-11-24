@@ -198,7 +198,7 @@ a rare one.
 | Face tile | 150×150 px + a 26 px caption; a 112×112 crop aligned by 5 points; a "not him" button top right, the date and the detection confidence under the frame | `app.rs::draw_face_cell` |
 | Face crop in the cache | 112×112, JPEG, key `<sha256[..24]>-<number>` | `faces.rs` → `<cache>/faces/` |
 | Calendar cell | month: width `(panel−24)/7`, height 96 px, the day number, a counter, up to 3 thumbnails; year: 4×3 months of 92 px; week: 7 days, 2×3 thumbnails; day: the `draw_cell` grid; a double click on a month/day drills down a layer | `View::Calendar` |
-| Full-screen view | a modal window over the whole window; the 320 px thumbnail is not stretched; a 1920 px frame from the preload queue; 100% = fit; the playback row: icon buttons ⏮ ▶/⏸ ⏭ of 32 px, ←/→, "Slideshow" with a 3/5/10 s interval, "Text on the photo" next to it | `App::viewer_modal` |
+| Full-screen view | a modal window over the whole window; the 320 px thumbnail is not stretched; a 1920 px frame from the preload queue; 100% = fit; above 100% the frame is dragged with the left button (the cursor is a hand, the hint "drag to move the frame" sits next to the zoom percentage) and never leaves the area; a new file starts at the centre; the playback row: icon buttons ⏮ ▶/⏸ ⏭ of 32 px, ←/→, "Slideshow" with a 3/5/10 s interval, "Text on the photo" next to it | `App::viewer_modal`, `draw_viewer_image` |
 | Video in the full screen | a 320 px cover frame + a big ▶ button in the centre (a 76×76 plate, rounding 4, the label "video · press ▶ to play"); the built-in player plays it: ▶/⏸, seek, sound, "Stop the video"; the end of the file opens the next one | `App::viewer_modal`, `src/player.rs` |
 | Preview in the cache | 320 px on the long side, JPEG q≈80 | `index.rs` → `derive::analyze_image` |
 | Tooltip preview | up to 400 px on the long side, proportions kept | `draw_cell` |
@@ -229,7 +229,7 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
 | Trash (`View::Trash`) | the counter and size, "Restore all", "Empty the trash (N)" with confirmation, tiles marked "in trash" and a "restore" button | return a file or deliberately move it to the OS trash |
 | Integrity (`View::Integrity`) | the "Folder A (archive)", "Folder B (copy)", "Manifest file" fields; the "Show all paths" tick; the "Compare the copies", "Write the manifest" (with an existing file — "Overwrite the manifest" and "Cancel"), "Check against the manifest" buttons; the row "Remind me to check every [N] days" (0 — off), the date and result of the last pass, the report path `verify-last.txt` and "Copy the last report"; the verdict in words, a report in the same format as the CLI, and "Copy the report" | compare a backup or check the archive against the manifest without a terminal |
 | "Folders" (dialog) | the list of paths, "Remove from the index", "Add a folder…", the built-in folder picker, "Index all" | add several folders without typing paths by hand |
-| Full screen (modal) | the name and date, "N of M", "Close"; the playback row ⏮ ▶/⏸ ⏭ (on a snapshot ▶ starts the slideshow), "Slideshow", a 3/5/10 s interval; below — zoom, "Text on the photo", "In the system viewer"; the frame | look at a snapshot in full and come back to the same place |
+| Full screen (modal) | the name and date, "N of M", "Close"; the playback row ⏮ ▶/⏸ ⏭ (on a snapshot ▶ starts the slideshow), "Slideshow", a 3/5/10 s interval; below — zoom, "Text on the photo", "In the system viewer"; the frame, dragged with the mouse when zoomed | look at a snapshot in full, look at a detail at a zoom above 100 % and come back to the same place |
 | Video in the full screen (modal, the same screen) | a cover frame with a big ▶ button in the centre; after it starts the frame plays in the window, ▶/⏸, "0:12 / 0:22" with seek, the sound sign and a slider, the "no device" label, "Stop the video"; when finished — the next file opens itself | watch a video with sound without leaving the app |
 | Settings (dialog, `App::settings_modal`) | on the left the sections: "Interface" (the language — English or Русский, the choice is saved immediately; in English an untranslated label stays Russian — `plan/I18N.md`), "AI model", "Indexing and duplicates", "Tags", "Faces", "Storage", "External programs"; inside — the model from the catalogue with the number of features, the licence and a hint (CLIP 512, SigLIP 768), the state "Downloaded · verified", the model folder, the size limit, the consent and "Download model", "Verify the model", "Compute tags", the tag and duplicate thresholds (a 0–100% filter percentile per tag and a separate confident-tag threshold 0.22 + margin; next to it — how many files pass), the tag dictionary editor (a row per tag: enabled, label, minimum percentile, "Remove from the dictionary", 2–3 prompts per line — the tag weight is the best of them; below — the "new label" and "prompt" fields, "Add to the dictionary", "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults", the JSON file path), the thread count, the face model with consent and "Download the face model", the face merge threshold, the used space ("Compute the used space"), cleaning previews/faces/index, the DB/cache/model paths, the `ffmpeg`/`ffprobe`/`tesseract`/`curl` path fields with the version and a "without it" hint, "Verify and save the programs"; at the bottom "Changes are saved immediately" and "Close" | download/switch the model, set thresholds, the tag dictionary, faces, disk space and external programs |
 | File card (right panel) | a 4:3 preview, the path, the date with its source (EXIF / file name / file time), the camera, GPS, the dimensions `W×H` and the size, for a video — "▶ M:SS", sha256, the "AI tags" block: the line "tag: <name>" or "tag: not sure — the first weights are close", the weights with percentiles, the accent on a confident tag; when unsure the top-3 are visible and the rest are under "all tags (N)"; the "remove" button, "restore hidden tags (N)", the "Recognize text" / "Recognize again" button and the text block with the match highlighted | understand what this is and fix the tags |
@@ -455,6 +455,7 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
 | Calendar layers | a double click on a month in "Year", on a day in "Month" and in "Week" | — |
 | Paging in the full screen | ←/→, the icon buttons ⏮ ⏭, "Slideshow", a 3/5/10 s interval | on a snapshot space starts/stops the slideshow |
 | Video in the full screen | the big ▶ button in the centre of the frame, the icons ⏮ ▶/⏸ ⏭, seek, sound, "Stop the video" | on a video space pauses and resumes, a click on the frame does the same |
+| Moving the zoomed frame | drag with the left button (the cursor becomes a hand); ←/→ inside it pages the files | — |
 | Deletion | "To trash" in the card (DB only) | do not assign Delete: files are not deleted |
 
 Rule: no action is available **only** on hover and none **only** from the keyboard; the focus is
@@ -533,16 +534,14 @@ everywhere yet. An item is either fixed or gets an exception line here with a re
    is text only.
 4. The selected calendar day is reset when paging the month — left there on purpose: the month and
    the day change by one action, otherwise selecting a day in another month would be meaningless.
-5. The frame in the full screen at a zoom above 100% is centred and cropped: there is no dragging for
-   panning yet. This is the next step, not a hidden feature.
-6. My tags are manual: CLIP does not create them. A free semantic search ("furniture") remains the
+5. My tags are manual: CLIP does not create them. A free semantic search ("furniture") remains the
    way to find a thing that is not among the 14 hints.
-7. The end of a video on the last file does not page round: the view stays on the cover frame, so
+6. The end of a video on the last file does not page round: the view stays on the cover frame, so
    that watching does not start over from the first snapshot. On the other files the end of a video
    opens the next one — that is "change the file automatically".
-8. The month heading is not pinned when scrolling: `ScrollArea` in egui gives no sticky row without
+7. The month heading is not pinned when scrolling: `ScrollArea` in egui gives no sticky row without
    manual drawing over the area. The month is visible at the start of the group; pinning it is the
    next task.
-9. Duplicate decisions are made one tile at a time: the multi-selection (M18) works in the grid,
+8. Duplicate decisions are made one tile at a time: the multi-selection (M18) works in the grid,
    in albums and in the trash, but marking N snapshots of a group as "spare" at once is not possible
    — batch actions over duplicates are not promised, that is a separate task.

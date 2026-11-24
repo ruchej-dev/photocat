@@ -64,7 +64,7 @@ Checked against the code and `plan/STATUS.md`, not from memory:
 3. **A folder path error** is written into the status, but the field is not highlighted: the
    "error ↔ field" link is text only.
 4. **The month heading does not stick** while scrolling: `ScrollArea` in egui does not provide a
-   sticky row without manual drawing. Recorded in `docs/UI.md` §Debt, item 8.
+   sticky row without manual drawing. Recorded in `docs/UI.md` §Debt, item 7.
 5. **The calendar**: the selected day is reset when flipping the month — deliberately, stated in
    `docs/UI.md` §Debt, item 4.
 

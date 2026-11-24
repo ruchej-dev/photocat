@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043) → next:the owner's re-read of the M15.7 labels; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen) → next:M13e (pinning the month heading when scrolling, `docs/UI.md` §Debt item 7); the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Where we are
 
@@ -32,7 +32,8 @@ similar shots are searched above 20 thousand through a block index of dHash: on 
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
-(ADR 0033).
+(ADR 0033). Since M13d a zoomed frame in the full screen is dragged with the mouse: at a scale above
+100 % a detail is looked at, not the centre of the frame.
 
 `photocat` can: index a folder (sha256 + dHash + sharpness + EXIF + preview), find exact copies and
 similar shots, show them in the GUI, suggest the best frame per group, keep the decision
@@ -1862,3 +1863,30 @@ shows four entries and nothing new is downloaded by the app.
 **Checks.** The bench DB reproduces every number above (`/tmp/m156/bench.db`, a copy of the M15.7 DB);
 `cargo test` — 216 passed, 6 `#[ignore]`; `cargo clippy --all-targets` — clean; `check.sh` — 52 checks,
 0 violations, run after the revert. ADR 0043.
+
+## M13d — panning the zoomed frame in the full screen (2026-11-24) ✅
+
+The last item of the viewer debt: above 100 % the frame was centred and cropped, so a face in a
+group photo or a line of a document could not be looked at. Now the frame moves under the cursor.
+
+**What appeared.** `Viewer::pan` keeps the shift in screen points; `draw_viewer_image` takes it and
+the frame size, applies the drag delta of the left button and clamps the result with the new
+`clamp_pan`: the frame never leaves the area, and a side that is fitted stays centred even when the
+other one is zoomed. The cursor is a hand (`Grab`, `Grabbing` while dragging); at 100 % there is
+nothing to drag, so the hand does not appear. A new file (`viewer_step`) and "Fit" reset the shift,
+so another snapshot does not open cropped. The hint "перетаскивание — сдвиг кадра" /
+"drag to move the frame" is drawn next to the zoom percentage only above 100 % and goes through
+`i18n::t`; a video frame keeps its click (start/pause) and is not panned. `draw_viewer_image` now
+takes the area as one `Vec2` (seven arguments), so the clippy `too_many_arguments` warning stays
+away.
+
+**Checks.** `cargo test` — 219 passed, 6 `#[ignore]` (new: the clamp on a fitted, a doubled and a
+one-axis-zoomed frame; a file change resets the shift; the hint appears only above 100 %);
+`cargo clippy --all-targets` — clean; `check.sh` — 52 checks, 0 violations;
+`timeout 6 ./target/release/photocat gui --db /tmp/photocat-m13d.db` — code 124, the window lived
+to the timeout, no crash and no output in the log. `docs/UI.md` lost debt item 5 (the rest are
+renumbered, the reference in the `ui-design` skill follows), and the metric row, the screen row and
+the pointer table describe the drag.
+
+**Not done, deliberately.** No wheel zoom, no double-click "fit ↔ 100 %", no panning of the video
+frame: the video is fitted by design, and no gesture is promised that the code does not do.
