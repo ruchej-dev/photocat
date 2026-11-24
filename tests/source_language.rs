@@ -7,6 +7,11 @@
 //! `PENDING` is the honest list of modules that still hold Russian comments or strings; it shrinks
 //! with every step of the refactor and must end up empty. The list is checked in both directions:
 //! a module that still has Russian must be named, a module named while already clean fails too.
+//!
+//! Test *messages* are English too (M23.5): a Russian assertion message, `panic!` text, `expect`
+//! text or `#[ignore]` reason fails. What a test compares stays data — a Russian label the window
+//! must show, an album name, a tag — so the message check looks only at the message positions of
+//! the assertion macros.
 
 use std::fs;
 use std::path::Path;
@@ -30,6 +35,263 @@ const RUSSIAN_DATA: &[&str] = &[
 
 fn is_cyrillic(c: char) -> bool {
     matches!(c, '\u{0400}'..='\u{04FF}')
+}
+
+/// One token of a Rust source: an identifier, a string literal without its quotes, or one
+/// character of punctuation. Comments and whitespace are dropped.
+enum Tok {
+    Ident(String),
+    Str(String),
+    Punct(char),
+}
+
+/// The assertion macros with the number of required arguments: everything after them is a message.
+const MESSAGE_MACROS: &[(&str, usize)] = &[
+    ("assert", 1),
+    ("assert_eq", 2),
+    ("assert_ne", 2),
+    ("debug_assert", 1),
+    ("debug_assert_eq", 2),
+    ("debug_assert_ne", 2),
+    ("panic", 0),
+    ("anyhow", 0),
+    ("bail", 0),
+    ("format_err", 0),
+];
+
+/// The smallest tokenizer the message check needs. It knows strings, raw strings, char literals and
+/// comments, so a comma or a bracket inside a format string cannot be mistaken for syntax.
+fn tokens(src: &str) -> Vec<Tok> {
+    let b: Vec<char> = src.chars().collect();
+    let at = |i: usize| b.get(i).copied();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '/' && at(i + 1) == Some('/') {
+            while i < b.len() && b[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && at(i + 1) == Some('*') {
+            let mut depth = 0usize;
+            while i < b.len() {
+                if at(i) == Some('/') && at(i + 1) == Some('*') {
+                    depth += 1;
+                    i += 2;
+                } else if at(i) == Some('*') && at(i + 1) == Some('/') {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        // raw string: r"…", r#"…"#, br#"…"#
+        let raw_prefix = {
+            let rest: String = b[i..(i + 4).min(b.len())].iter().collect();
+            ["br", "r", "cr"]
+                .iter()
+                .find(|p| rest.starts_with(*p))
+                .map(|p| p.len())
+        };
+        if let Some(plen) = raw_prefix {
+            let mut j = i + plen;
+            let mut hashes = 0usize;
+            while at(j) == Some('#') {
+                hashes += 1;
+                j += 1;
+            }
+            if at(j) == Some('"') {
+                let start = j + 1;
+                j += 1;
+                loop {
+                    if j >= b.len() {
+                        break;
+                    }
+                    if at(j) == Some('"') {
+                        let mut k = j + 1;
+                        let mut seen = 0usize;
+                        while seen < hashes && at(k) == Some('#') {
+                            seen += 1;
+                            k += 1;
+                        }
+                        if seen == hashes {
+                            let text: String = b[start..j].iter().collect();
+                            out.push(Tok::Str(text));
+                            j = k;
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                i = j;
+                continue;
+            }
+        }
+        // plain, byte and C strings: "…", b"…", c"…"
+        let quote_at = if c == '"' {
+            Some(i)
+        } else if matches!(c, 'b' | 'c') && at(i + 1) == Some('"') {
+            Some(i + 1)
+        } else {
+            None
+        };
+        if let Some(q) = quote_at {
+            let mut j = q + 1;
+            let mut text = String::new();
+            while j < b.len() {
+                match b[j] {
+                    '\\' => {
+                        text.extend(&b[j..(j + 2).min(b.len())]);
+                        j += 2;
+                    }
+                    '"' => break,
+                    _ => {
+                        text.push(b[j]);
+                        j += 1;
+                    }
+                }
+            }
+            out.push(Tok::Str(text));
+            i = (j + 1).min(b.len());
+            continue;
+        }
+        // char literal or lifetime
+        if c == '\'' {
+            let mut j = i + 1;
+            if at(j) == Some('\\') {
+                j += 2;
+                while j < b.len() && b[j] != '\'' {
+                    j += 1;
+                }
+                j += 1;
+            } else {
+                j += 1;
+                if at(j) == Some('\'') {
+                    j += 1;
+                }
+            }
+            if b.get(j.wrapping_sub(1)) == Some(&'\'') && j > i + 1 {
+                out.push(Tok::Punct('\''));
+                i = j;
+                continue;
+            }
+        }
+        if c.is_alphanumeric() || c == '_' {
+            let start = i;
+            while i < b.len() && (b[i].is_alphanumeric() || b[i] == '_') {
+                i += 1;
+            }
+            out.push(Tok::Ident(b[start..i].iter().collect()));
+            continue;
+        }
+        out.push(Tok::Punct(c));
+        i += 1;
+    }
+    out
+}
+
+/// The index of the parenthesis that closes the one at `open`, counting all bracket kinds.
+fn matching(toks: &[Tok], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (k, tok) in toks.iter().enumerate().skip(open) {
+        if let Tok::Punct(c) = tok {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(k);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Top-level argument ranges between `open` and `close`.
+fn argument_ranges(toks: &[Tok], open: usize, close: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = open + 1;
+    for (offset, tok) in toks[open + 1..close].iter().enumerate() {
+        let k = open + 1 + offset;
+        if let Tok::Punct(c) = tok {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => {
+                    out.push((start, k));
+                    start = k + 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    if start < close {
+        out.push((start, close));
+    }
+    out
+}
+
+/// Russian string literals that sit in a message position: an assertion message, `panic!` text,
+/// `expect` text or the reason of `#[ignore = "…"]`.
+fn russian_messages(src: &str) -> Vec<String> {
+    let toks = tokens(src);
+    let mut bad = Vec::new();
+    for (i, tok) in toks.iter().enumerate() {
+        let name = match tok {
+            Tok::Ident(n) => n.as_str(),
+            _ => continue,
+        };
+        // The argument ranges that hold a message, per macro: everything after the required ones.
+        let args: Vec<(usize, usize)> = if let Some(&(_, required)) =
+            MESSAGE_MACROS.iter().find(|(m, _)| *m == name)
+        {
+            let is_call = matches!(toks.get(i + 1), Some(Tok::Punct('!')))
+                && matches!(toks.get(i + 2), Some(Tok::Punct('(')));
+            if !is_call {
+                continue;
+            }
+            match matching(&toks, i + 2) {
+                Some(close) => argument_ranges(&toks, i + 2, close)
+                    .into_iter()
+                    .skip(required)
+                    .collect(),
+                None => continue,
+            }
+        } else if name == "expect" && matches!(toks.get(i + 1), Some(Tok::Punct('('))) {
+            // `.expect("…")`
+            vec![(i + 2, i + 3)]
+        } else if name == "ignore" && matches!(toks.get(i + 1), Some(Tok::Punct('='))) {
+            // `#[ignore = "…"]`
+            vec![(i + 2, i + 3)]
+        } else {
+            continue;
+        };
+        for (start, end) in args {
+            for tok in toks.get(start.min(toks.len())..end.min(toks.len())).unwrap_or(&[]) {
+                if let Tok::Str(text) = tok
+                    && text.chars().any(is_cyrillic)
+                {
+                    bad.push(text.clone());
+                }
+            }
+        }
+    }
+    bad
 }
 
 /// Split a Rust source into code, comments and string literals. Raw strings (`r#"…"#`), byte and C
@@ -189,6 +451,13 @@ fn words(code: &str) -> Vec<&str> {
     out
 }
 
+fn test_part(src: &str) -> &str {
+    match src.split_once("#[cfg(test)]") {
+        Some((_, tail)) => tail,
+        None => "",
+    }
+}
+
 fn sources() -> Vec<(String, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut out = Vec::new();
@@ -262,5 +531,22 @@ fn converted_modules_hold_no_russian() {
     assert!(
         pending_honest.is_empty(),
         "these modules are already clean — drop them from PENDING: {pending_honest:?}"
+    );
+}
+
+/// A test message is read by a person when something breaks, so it is English like the rest of the
+/// code. What a test compares stays data: `assert_eq!(t(Lang::Ru, "Settings"), "Настройки")` is a
+/// translation the window must show, not a message.
+#[test]
+fn test_messages_are_english() {
+    let mut bad = Vec::new();
+    for (name, src) in sources() {
+        for text in russian_messages(test_part(&src)) {
+            bad.push(format!("{name}: {text}"));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "test messages must be English (AGENTS.md §6): {bad:?}"
     );
 }

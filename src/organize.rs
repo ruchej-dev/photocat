@@ -1727,7 +1727,7 @@ mod tests {
             ["Дача_2024", "Дача_2024/Май", "Дача_2024/Июнь"]
         );
         assert_eq!(plan.dirs[1].depth, 1);
-        assert_eq!(plan.dirs[2].files, 0, "пустой альбом остаётся в плане");
+        assert_eq!(plan.dirs[2].files, 0, "an empty album stays in the plan");
         assert_eq!(plan.files(), 3);
         assert!(plan.items.iter().any(|i| i.rel.ends_with("01_IMG_2.jpg")));
         assert!(plan.items.iter().any(|i| i.rel.ends_with("02_IMG_3.jpg")));
@@ -1852,7 +1852,7 @@ mod tests {
             assert_ne!(
                 std::fs::metadata(&src).unwrap().ino(),
                 std::fs::metadata(&dst).unwrap().ino(),
-                "выгрузка — копия, а не hardlink"
+                "the export is a copy, not a hardlink"
             );
         }
         let second = apply_export_in(&plan, Lang::default(), None, &dir.join("cache"));
@@ -1917,7 +1917,7 @@ mod tests {
         assert_eq!(report.stale, 2);
         assert_eq!(report.renamed, 0);
         let files = std::fs::read_dir(out.join("Порядок")).unwrap().count();
-        assert_eq!(files, 2, "дублей в цели не появилось");
+        assert_eq!(files, 2, "no duplicates appeared at the destination");
     }
 
     #[test]

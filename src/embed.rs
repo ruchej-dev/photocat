@@ -1825,9 +1825,9 @@ mod tests {
         assert!(ru[0].prompts[0].starts_with("фотография"));
         assert!(en[0].prompts[0].starts_with("a photo"));
         for d in &ru {
-            assert!(!d.prompts.is_empty(), "у тега «{}» нет промптов", d.label);
+            assert!(!d.prompts.is_empty(), "tag “{}” has no prompts", d.label);
             for bad in ["шкаф-купе", "гардероб", "чертёж", "комод"] {
-                assert!(!d.prompts.iter().any(|p| p.contains(bad)), "в дефолте «{bad}»");
+                assert!(!d.prompts.iter().any(|p| p.contains(bad)), "the default holds “{bad}”");
             }
         }
         // The order is kept, the id is a stable key.
@@ -2021,7 +2021,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "нужен PHOTOCAT_TAG_THUMB: путь к превью и веса модели"]
+    #[ignore = "needs PHOTOCAT_TAG_THUMB: a preview path and the model weights"]
     fn the_diagnostics_of_frames_and_the_ensemble() {
         let Some(path) = std::env::var_os("PHOTOCAT_TAG_THUMB").map(PathBuf::from) else {
             return;
@@ -2038,8 +2038,8 @@ mod tests {
         data.extend_from_slice(&whole);
         let values = m.run_vision(data, 2).unwrap();
         let shots = [
-            ("центр-кроп", &values[..dim]),
-            ("весь кадр", &values[dim..dim * 2]),
+            ("center crop", &values[..dim]),
+            ("whole frame", &values[dim..dim * 2]),
         ];
         for (name, v) in shots {
             let tags = m.tag_scores(v);
@@ -2048,18 +2048,18 @@ mod tests {
         }
         let avg = average_pairs(&values, 1, dim);
         let tags = m.tag_scores(&avg[0]);
-        println!("ансамбль: {}", tags.iter().take(4)
+        println!("ensemble: {}", tags.iter().take(4)
             .map(|(t, s)| format!("{t} {s:.3}")).collect::<Vec<_>>().join(" / "));
     }
 
     #[test]
-    #[ignore = "нужны веса модели и проиндексированный корпус"]
+    #[ignore = "needs the model weights and an indexed corpus"]
     fn model_roundtrip_on_real_photo() {
         let db_path = db::resolve_db(None).unwrap();
         let conn = db::open(&db_path).unwrap();
         let settings = db::load_settings(&conn);
         let rows = db::load_all(&conn).unwrap();
-        let r = rows.iter().find(|r| r.thumb.is_some()).expect("нет фото с превью");
+        let r = rows.iter().find(|r| r.thumb.is_some()).expect("no photo with a preview");
         let mut m = Model::load(&settings, 4).unwrap();
         let thumb = db::cache_dir().join("thumbs").join(r.thumb.as_ref().unwrap());
         let dim = m.entry.dim;
@@ -2068,10 +2068,10 @@ mod tests {
         assert_eq!(v[0].len(), dim);
         assert!((v[0].iter().map(|x| x * x).sum::<f32>() - 1.0).abs() < 1e-3);
         let tags = m.tag_scores(&v[0]);
-        println!("{}, теги: {:?}", r.path, tags);
+        println!("{}, tags: {:?}", r.path, tags);
         let t = m.encode_texts(&["пляж", "документ"]).unwrap();
         println!(
-            "косинус: пляж {:.3}, документ {:.3}",
+            "cosine: beach {:.3}, document {:.3}",
             cosine(&v[0], &t[0]),
             cosine(&v[0], &t[1])
         );
@@ -2080,7 +2080,7 @@ mod tests {
     /// M12: SigLIP is another architecture with 768 features. It checks the real weights
     /// and previews: `PHOTOCAT_SIGLIP_MODELS` (the models folder) and `PHOTOCAT_SIGLIP_THUMB`.
     #[test]
-    #[ignore = "нужны веса SigLIP и превью: PHOTOCAT_SIGLIP_MODELS, PHOTOCAT_SIGLIP_THUMB"]
+    #[ignore = "needs the SigLIP weights and a preview: PHOTOCAT_SIGLIP_MODELS, PHOTOCAT_SIGLIP_THUMB"]
     fn siglip_gives_768_features() {
         let (Some(dir), Some(thumb)) = (
             std::env::var_os("PHOTOCAT_SIGLIP_MODELS").map(PathBuf::from),
@@ -2108,7 +2108,7 @@ mod tests {
         assert_eq!(m.tag_count(), 14);
         let tags = m.tag_scores(&v[0]);
         println!(
-            "siglip: вектор 768, косинус cat {:.3}, document {:.3}; теги: {}",
+            "siglip: a 768-dim vector, cosine cat {:.3}, document {:.3}; tags: {}",
             cosine(&v[0], &t[0]),
             cosine(&v[0], &t[1]),
             tags.iter()
@@ -2127,23 +2127,23 @@ mod tests {
         let mut dirs = HashSet::new();
         let mut dims = HashSet::new();
         for e in catalog() {
-            assert!(ids.insert(e.id), "повтор id {}", e.id);
-            assert!(dirs.insert(e.dir), "повтор каталога {}", e.dir);
+            assert!(ids.insert(e.id), "repeated id {}", e.id);
+            assert!(dirs.insert(e.dir), "repeated folder {}", e.dir);
             dims.insert(e.dim);
             assert!(e.dim > 0);
             assert!(e.image_side >= 224);
             assert!(e.max_tokens > 0);
             assert!(!e.title.is_empty() && !e.note.is_empty());
-            assert!(!e.license.is_empty(), "у {} нет лицензии", e.id);
+            assert!(!e.license.is_empty(), "{} has no license", e.id);
             assert!(e.bytes() > 0 && !e.files.is_empty());
             assert!(e.files.iter().any(|f| f.name == "tokenizer.json"));
             for f in e.files {
-                assert_eq!(f.sha256.len(), 64, "{}: sha256 не 64 знака", f.name);
+                assert_eq!(f.sha256.len(), 64, "{}: sha256 is not 64 characters", f.name);
                 assert!(f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
                 assert!(f.bytes > 0);
             }
         }
-        assert!(dims.len() >= 2, "нужны модели разной размерности, а не одна: {dims:?}");
+        assert!(dims.len() >= 2, "the catalogue needs models of different dimensions, not one: {dims:?}");
         assert!(catalog().iter().any(|e| e.id == "siglip-base-224-en" && e.dim == 768));
         // A new model fits the default limit and does not fit the previous 160 MiB.
         let sig = entry("siglip-base-224-en").unwrap();
@@ -2153,20 +2153,20 @@ mod tests {
         // and `models download` says so until the owner raises the limit to 400.
         let multi = entry("siglip2-base-224-multi").unwrap();
         assert_eq!(multi.dim, 768);
-        assert!(!multi.fits(250), "393 МиБ не влезают в 250");
+        assert!(!multi.fits(250), "393 MiB do not fit into 250");
         assert!(multi.fits(400));
         // The calibration is described for every model: only CLIP has the identity one.
         for e in catalog() {
             let (scale, shift) = e.score_calib;
-            assert!(scale.is_finite() && scale > 0.0, "{}: масштаб {scale}", e.id);
+            assert!(scale.is_finite() && scale > 0.0, "{}: scale {scale}", e.id);
             assert!(shift.is_finite());
             assert!(e.score(0.3).is_finite());
-            assert!(e.score(0.3) > e.score(0.2), "{}: калибровка не растёт", e.id);
+            assert!(e.score(0.3) > e.score(0.2), "{}: the calibration does not grow", e.id);
             if e.kind == TextKind::Pooler {
-                assert_ne!(e.score_calib, (1.0, 0.0), "{}: шкала SigLIP не калибрована", e.id);
+                assert_ne!(e.score_calib, (1.0, 0.0), "{}: the SigLIP scale is not calibrated", e.id);
                 assert_eq!(e.score_version, 2);
             } else {
-                assert_eq!(e.score_version, 1, "{}: CLIP не менял шкалу", e.id);
+                assert_eq!(e.score_version, 1, "{}: CLIP never changed its scale", e.id);
             }
         }
         // An empty query means the first model; an unknown id — None, no panic.
@@ -2183,13 +2183,13 @@ mod tests {
             assert_ne!(
                 crate::i18n::t(ru, e.title),
                 e.title,
-                "у модели {} нет перевода названия",
+                "model {} has no translated name",
                 e.id
             );
             assert_ne!(
                 crate::i18n::t(ru, e.note),
                 e.note,
-                "у модели {} нет перевода описания",
+                "model {} has no translated description",
                 e.id
             );
         }
@@ -2201,18 +2201,18 @@ mod tests {
     #[test]
     fn the_tag_weight_calibration_equalises_the_scales() {
         let clip = entry(DEFAULT_MODEL).unwrap();
-        assert_eq!(clip.score(0.086), 0.086, "у CLIP калибровка тождественная");
+        assert_eq!(clip.score(0.086), 0.086, "the CLIP calibration is the identity");
         // Medians of top-1: CLIP 0.263, SigLIP 2 0.086, SigLIP 1 0.059.
         for (e, median, margin) in [
             (entry("siglip2-base-224-multi").unwrap(), 0.086_f32, 0.0083_f32),
             (entry("siglip-base-224-en").unwrap(), 0.059, 0.0216),
         ] {
             let s = e.score(median);
-            assert!((s - 0.263).abs() < 0.006, "{}: медиана {s}", e.id);
+            assert!((s - 0.263).abs() < 0.006, "{}: median {s}", e.id);
             // The margin of 0.01 in the settings is the median margin of CLIP (0.0118).
             let (scale, _) = e.score_calib;
             let m = margin * scale;
-            assert!((m - 0.0118).abs() < 0.002, "{}: отрыв {m}", e.id);
+            assert!((m - 0.0118).abs() < 0.002, "{}: lead {m}", e.id);
         }
         // Tag weights of different calibrations do not mix: the source is marked with the version.
         assert_eq!(tag_source(clip), "clip:clip-vit-b32-multilingual");
@@ -2235,7 +2235,7 @@ mod tests {
         assert_eq!(&ids[8..16], &[pad, pad, pad, pad, pad, pad, 7, eos]);
         assert_eq!(mask[7], 1);
         assert_eq!(mask[0], 0);
-        assert_eq!(ids.iter().filter(|&&v| v == eos).count(), 2, "в каждом ряду ровно один EOS");
+        assert_eq!(ids.iter().filter(|&&v| v == eos).count(), 2, "exactly one EOS per row");
         // On the right (CLIP, SigLIP 1) — as before: the row from the start, pads in the tail.
         let (ids, mask) = pad_rows(&rows, 8, pad, false);
         assert_eq!(&ids[0..8], &[5, 6, eos, pad, pad, pad, pad, pad]);
@@ -2251,7 +2251,7 @@ mod tests {
     fn a_dimension_error_names_the_numbers() {
         assert!(ensure_dim("text", 768, 768).is_ok());
         let e = ensure_dim("text", 512, 768).unwrap_err().to_string();
-        assert!(e.contains("512") && e.contains("768"), "нет чисел: {e}");
+        assert!(e.contains("512") && e.contains("768"), "no numbers: {e}");
         assert!(e.contains("do not mix"), "no hint: {e}");
     }
 
@@ -2260,7 +2260,7 @@ mod tests {
     fn a_download_without_consent_is_refused() {
         let settings = db::Settings::default();
         let res = download_model(&settings, "siglip-base-224-en", false, None);
-        assert!(res.is_err(), "без согласия скачивания нет");
+        assert!(res.is_err(), "no download without consent");
         let e = res.err().unwrap().to_string();
         assert!(e.contains("consent"), "{e}");
     }

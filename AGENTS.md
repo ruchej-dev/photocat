@@ -196,9 +196,11 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   `db::human_in(lang, n)` (`КиБ/МиБ` or `KiB/MiB`), CLI reports keep `db::human()`.
 - **The LSP is part of the check.** `rust-analyzer diagnostics .` (the same rust-analyzer that
   serves the editor) and `cargo clippy --all-targets` — not grep alone. `tests/source_language.rs`
-  bans non-English identifiers and, for the modules already converted, Russian comments and strings;
-  until M23 is closed its `PENDING` list names the modules still holding Russian. The list shrinks
-  and ends empty: adding a module to it is forbidden.
+  bans non-English identifiers, Russian comments and strings in the modules already converted, and
+  since M23.5 Russian *messages* inside test code (an assertion message, `panic!`, `expect` text, an
+  `#[ignore]` reason) — what a test compares stays data and may be Russian. Until M23 is closed its
+  `PENDING` list names the modules still holding Russian. The list shrinks and ends empty: adding a
+  module to it is forbidden.
 - A new view or panel follows the `add-view` skill. A new screen follows the `ui-design` skill.
 - Do not add a dependency until `docs/DECISIONS.md` records why it is there and what we would do
   without it, and that its license fits Apache-2.0.

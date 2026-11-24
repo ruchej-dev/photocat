@@ -1200,7 +1200,7 @@ mod tests {
         let a = scan_of(&[("x.jpg", "/a/x.jpg", 10, "")]);
         let b = scan_of(&[("x.jpg", "/b/x.jpg", 10, "")]);
         let r = compare(&a, &b, 1, Lang::default(), None, |p| {
-            anyhow::bail!("нет доступа: {}", p.display())
+            anyhow::bail!("no access: {}", p.display())
         });
         assert_eq!(r.read_errors.len(), 1);
         assert!(!r.identical());
@@ -1244,7 +1244,7 @@ mod tests {
         let hash = "a".repeat(64);
         let ok = parse_manifest(&format!("{hash} *file.jpg\n")).unwrap();
         assert_eq!(ok[0].rel, "file.jpg");
-        assert!(parse_manifest("не слепок\n").is_err());
+        assert!(parse_manifest("not a manifest\n").is_err());
         assert!(parse_manifest(&format!("{hash}  one\n{hash}  one\n")).is_err());
         assert!(parse_manifest(&format!("\\{hash}  bad\\q\n")).is_err());
         assert!(parse_manifest(&format!("{hash}  \n")).is_err());

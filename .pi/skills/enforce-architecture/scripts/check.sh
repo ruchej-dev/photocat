@@ -136,7 +136,7 @@ else
 fi
 if cargo test --quiet --test source_language >/tmp/photocat-source-language.txt 2>&1; then
   pass
-  note "ok" "identifiers are English; the converted modules hold no Russian"
+  note "ok" "identifiers, comments, strings and test messages are English"
 else
   err "tests/source_language.rs does not pass:"
   tail -12 /tmp/photocat-source-language.txt | sed 's/^/      /'

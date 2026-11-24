@@ -11304,7 +11304,7 @@ mod tests {
         // The gesture: 6 frames of 20 px — 1200 px/s, a usual short fling speed.
         for _ in 0..6 {
             let (wants, _) = scroll_frame(scroll, ctx, t, vec![trackpad_event(-20.0)]);
-            assert!(!wants, "во время жеста выбег не начинается");
+            assert!(!wants, "coasting does not start during a gesture");
             t += dt;
         }
         // The pause between the fingers lifting and the coast starting is not a scroll.
@@ -11317,7 +11317,7 @@ mod tests {
                 break;
             }
         }
-        assert!(waited < 20, "выбег не начался после отрыва пальцев");
+        assert!(waited < 20, "coasting did not start after the fingers lift");
         let mut coasted = 0.0;
         let mut frames = 0;
         loop {
@@ -11328,7 +11328,7 @@ mod tests {
             if !wants {
                 break;
             }
-            assert!(frames < 600, "выбег не кончается");
+            assert!(frames < 600, "coasting never ends");
         }
         (coasted, frames)
     }
@@ -11341,10 +11341,10 @@ mod tests {
         super::style(&ctx);
         let fallback_h = 840.0;
         let speed = ctx.options(|o| o.input_options.line_scroll_speed);
-        assert!((speed - WHEEL_NOTCH_PTS).abs() < 0.01, "щелчок не из профиля: {speed}");
+        assert!((speed - WHEEL_NOTCH_PTS).abs() < 0.01, "the notch is not from the profile: {speed}");
         assert!(
             (speed - fallback_h / 3.0).abs() < 0.01,
-            "щелчок {speed} — не треть окна {fallback_h}"
+            "the notch {speed} is not a third of the window {fallback_h}"
         );
         super::apply_theme(&ctx, db::ThemeMode::Light);
         assert_eq!(ctx.options(|o| o.input_options.line_scroll_speed), WHEEL_NOTCH_PTS);
@@ -11354,7 +11354,7 @@ mod tests {
             .scroll
             .kinetic
             .decay_time;
-        assert!((decay - COAST_DECAY_S).abs() < 1e-6, "выбег не из профиля: {decay}");
+        assert!((decay - COAST_DECAY_S).abs() < 1e-6, "the decay is not from the profile: {decay}");
     }
 
     /// The touchpad: after the fingers lift the gesture continues as a coast and stops by itself.
@@ -11367,9 +11367,9 @@ mod tests {
         let (coasted, frames) = swipe_and_coast(&mut scroll, &ctx);
         assert!(
             (200.0..=340.0).contains(&coasted),
-            "выбег короткого жеста {coasted} px — не 200–300"
+            "a short gesture coasts {coasted} px — not 200–300"
         );
-        assert!(frames > 5, "выбег оборвался за {frames} кадров");
+        assert!(frames > 5, "coasting broke off after {frames} frames");
     }
 
     /// An end-to-end check on a real window frame: the wheel and the touchpad move the grid itself.
@@ -11396,7 +11396,7 @@ mod tests {
         };
         window_frame_with(&mut app, &ctx, at_grid.clone());
         let top = window_frame_with(&mut app, &ctx, at_grid.clone());
-        assert_eq!(first_shown(&top), 0, "сетка не с начала: {:?}", top.len());
+        assert_eq!(first_shown(&top), 0, "the grid does not start at the top: {:?}", top.len());
 
         // The wheel: two notches (a third of the screen each) — the first tiles go up.
         let mut after_wheel = top.clone();
@@ -11407,7 +11407,7 @@ mod tests {
             after_wheel = window_frame_with(&mut app, &ctx, Vec::new());
         }
         let wheel_top = first_shown(&after_wheel);
-        assert!(wheel_top > 0, "колесо не подвинуло сетку");
+        assert!(wheel_top > 0, "the wheel did not move the grid");
 
         // The touchpad: a gesture, and after the fingers lift — frames without events.
         for _ in 0..6 {
@@ -11428,11 +11428,11 @@ mod tests {
                 break;
             }
         }
-        let coast_from = coast_from.expect("выбег не начался после отрыва пальцев");
-        let settled_at = settled_at.expect("выбег не затих за 300 кадров");
+        let coast_from = coast_from.expect("coasting did not start after the fingers lift");
+        let settled_at = settled_at.expect("coasting did not settle within 300 frames");
         assert!(
             settled_at > coast_from,
-            "выбег не двигает сетку: было {coast_from}, стало {settled_at}"
+            "coasting does not move the grid: was {coast_from}, became {settled_at}"
         );
         // At rest the profile is silent and the grid stands.
         let mut settled = Vec::new();
@@ -11442,7 +11442,7 @@ mod tests {
         assert_eq!(
             first_shown(&settled),
             settled_at,
-            "после выбега сетка продолжает ехать"
+            "the grid keeps moving after the coast"
         );
     }
 
@@ -11468,12 +11468,12 @@ mod tests {
                 break;
             }
         }
-        assert!(started, "выбег так и не начался");
+        assert!(started, "coasting never started");
         // The reverse gesture: in this frame the profile adds nothing — no jump; after that egui
         // itself drives the wheel.
         let (wants, added) = scroll_frame(&mut scroll, &ctx, t, vec![trackpad_event(30.0)]);
-        assert!(!wants, "выбег не прерван новым жестом");
-        assert_eq!(added, egui::Vec2::ZERO, "скачок на смене направления: {added:?}");
+        assert!(!wants, "a new gesture did not interrupt the coast");
+        assert_eq!(added, egui::Vec2::ZERO, "a jump on a change of direction: {added:?}");
     }
 
     /// The wheel and any other way of scrolling break the touchpad coast too.
@@ -11485,7 +11485,7 @@ mod tests {
         let (coasted, _) = swipe_and_coast(&mut scroll, &ctx);
         assert!(coasted > 0.0);
         let (wants, added) = scroll_frame(&mut scroll, &ctx, 10.0, vec![wheel_event(-1.0)]);
-        assert!(!wants, "колесо не отменило выбег");
+        assert!(!wants, "the wheel did not cancel the coast");
         assert_eq!(added, egui::Vec2::ZERO);
     }
 
@@ -11506,7 +11506,7 @@ mod tests {
                 egui::Modifiers::COMMAND,
             );
             assert!(!wants);
-            assert_eq!(added, egui::Vec2::ZERO, "жест масштаба подвинул сетку");
+            assert_eq!(added, egui::Vec2::ZERO, "a zoom gesture moved the grid");
             t += dt;
         }
         for i in 0..30 {
@@ -11517,7 +11517,7 @@ mod tests {
                 Vec::new(),
                 egui::Modifiers::NONE,
             );
-            assert!(!wants, "после жеста масштаба пошёл выбег");
+            assert!(!wants, "coasting started after a zoom gesture");
             assert_eq!(added, egui::Vec2::ZERO);
         }
     }
@@ -11530,7 +11530,7 @@ mod tests {
         let mut scroll = Scroll::default();
         for i in 0..30 {
             let (wants, added) = scroll_frame(&mut scroll, &ctx, i as f64 / 60.0, Vec::new());
-            assert!(!wants, "кадр запрошен без прокрутки");
+            assert!(!wants, "a frame was requested without scrolling");
             assert_eq!(added, egui::Vec2::ZERO);
         }
     }
@@ -11541,9 +11541,9 @@ mod tests {
     fn scroll_areas_do_not_set_their_own_multipliers() {
         let src = include_str!("app.rs");
         for needle in [concat!("wheel_scroll", "_multiplier"), concat!(".scroll_", "source(")] {
-            assert!(!src.contains(needle), "найдено своё правило прокрутки: {needle}");
+            assert!(!src.contains(needle), "a hand-rolled scroll rule was found: {needle}");
         }
-        assert!(src.contains("ScrollArea"), "в файле нет ни одной области прокрутки");
+        assert!(src.contains("ScrollArea"), "the file holds no scroll area at all");
     }
 
     /// The M22.2b measurement on the real corpus: grid frames while scrolling with the wheel and the touchpad.
@@ -11554,12 +11554,12 @@ mod tests {
     fn grid_scroll_measurement() {
         use std::time::Instant;
         let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
-            eprintln!("PHOTOCAT_BENCH_DB не задан — замер пропущен");
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
             return;
         };
         let mut app = App::new(std::path::PathBuf::from(path));
         let n = app.items.len();
-        assert!(n > 100, "в индексе {n} файлов — корпус не тот");
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
         let ctx = egui::Context::default();
         super::style(&ctx);
         let mut frame = eframe::Frame::_new_kittest();
@@ -11600,7 +11600,7 @@ mod tests {
         times.sort_by(|a, b| a.total_cmp(b));
         let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
         println!(
-            "корпус: {n} файлов; кадров: {}; p50 {:.2} ms ({:.0} fps), p95 {:.2} ms ({:.0} fps), p99 {:.2} ms",
+            "corpus: {n} files; frames: {}; p50 {:.2} ms ({:.0} fps), p95 {:.2} ms ({:.0} fps), p99 {:.2} ms",
             times.len(),
             p(0.50),
             1000.0 / p(0.50),
@@ -11647,13 +11647,13 @@ mod tests {
         let texts = card_frame(&mut app, &egui::Context::default());
         assert!(
             texts.iter().any(|t| t.contains("тег: не уверен")),
-            "нет честного «не уверен»: {texts:?}"
+            "no honest “not sure”: {texts:?}"
         );
         assert!(texts.iter().any(|t| t == "документ"));
         assert!(texts.iter().any(|t| t == "мебель"));
         assert!(
             !texts.iter().any(|t| t == "дети"),
-            "четвёртый тег спрятан под «все теги»: {texts:?}"
+            "the fourth tag is hidden under “all tags”: {texts:?}"
         );
     }
 
@@ -11708,16 +11708,16 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет «{needle}»: {texts:?}"
+                "missing “{needle}”: {texts:?}"
             );
         }
         assert!(
             texts.iter().any(|t| t.starts_with("tag: ")),
-            "тег без английской подписи: {texts:?}"
+            "a tag without an English label: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t.contains("file name")),
-            "источник даты не переведён: {texts:?}"
+            "the date source is not translated: {texts:?}"
         );
         for ru in [
             "Сведения о файле",
@@ -11728,7 +11728,7 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
     }
@@ -11745,7 +11745,7 @@ mod tests {
         b.sha256 = "same".into();
         app.items = vec![a, b];
         app.groups = crate::dupes::find_groups(&app.items, 6);
-        assert_eq!(app.groups.len(), 1, "одна группа точных копий");
+        assert_eq!(app.groups.len(), 1, "one group of exact copies");
         app.settings.lang = i18n::Lang::En;
         app.view = View::Dupes;
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -11757,16 +11757,16 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет «{needle}»: {texts:?}"
+                "missing “{needle}”: {texts:?}"
             );
         }
         assert!(
             texts.iter().any(|t| t.starts_with("#1 — ") && t.contains("2 files")),
-            "строка группы не переведена: {texts:?}"
+            "the group line is not translated: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t.contains("Similarity threshold: 6 bits")),
-            "порог не переведён: {texts:?}"
+            "the threshold is not translated: {texts:?}"
         );
         for ru in [
             "Найти группы",
@@ -11777,7 +11777,7 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
     }
@@ -11796,25 +11796,25 @@ mod tests {
         for needle in ["Year", "Month", "Week", "Day", "Today", "May 2024"] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет «{needle}»: {texts:?}"
+                "missing “{needle}”: {texts:?}"
             );
         }
         for needle in ["Mon", "Sun"] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет дня недели «{needle}»: {texts:?}"
+                "no weekday “{needle}”: {texts:?}"
             );
         }
         assert!(
             texts.iter().any(|t| t.contains("1 file this month")),
-            "итог месяца не переведён: {texts:?}"
+            "the month summary is not translated: {texts:?}"
         );
         for ru in [
             "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
     }
@@ -11871,7 +11871,7 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет «{needle}»: {texts:?}"
+                "missing “{needle}”: {texts:?}"
             );
         }
         for ru in [
@@ -11887,7 +11887,7 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
     }
@@ -11917,12 +11917,12 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет «{needle}»: {texts:?}"
+                "missing “{needle}”: {texts:?}"
             );
         }
         assert!(
             texts.iter().any(|t| t.contains("1 file · ")),
-            "счётчик корзины не переведён: {texts:?}"
+            "the trash counter is not translated: {texts:?}"
         );
         for ru in [
             "Корзина пуста.",
@@ -11936,7 +11936,7 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
     }
@@ -11990,7 +11990,7 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == want),
-                "нет «{want}»: {texts:?}"
+                "missing “{want}”: {texts:?}"
             );
         }
         for ru in [
@@ -12004,18 +12004,18 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
         // Since M21.6 the report text is the `verify` output in the same language: the report and
         // the screen no longer differ in words or units.
         assert!(
             texts.iter().any(|t| t.contains("verdict: the copies match")),
-            "отчёт рисуется на языке отчёта: {texts:?}"
+            "the report is drawn in the report's language: {texts:?}"
         );
         assert!(
             !texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
-            "русский отчёт остался в английском окне: {texts:?}"
+            "a Russian report is left in the English window: {texts:?}"
         );
     }
 
@@ -12049,7 +12049,7 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == want),
-                "нет «{want}»: {texts:?}"
+                "missing “{want}”: {texts:?}"
             );
         }
         for ru in [
@@ -12064,7 +12064,7 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась: {texts:?}"
+                "the Russian label “{ru}” is left: {texts:?}"
             );
         }
     }
@@ -12094,18 +12094,18 @@ mod tests {
         ] {
             assert!(
                 model.iter().any(|t| t == want),
-                "нет «{want}» в разделе модели: {model:?}"
+                "missing “{want}” in the model section: {model:?}"
             );
         }
         assert!(
             model.iter().any(|t| t.contains("dims")),
-            "единицы размерности не переведены: {model:?}"
+            "the size units are not translated: {model:?}"
         );
         let index = settings_frame(&mut app, &ctx, SettingsTab::Index);
         for want in ["Indexing threads", "Duplicate threshold", "bits out of 64"] {
             assert!(
                 index.iter().any(|t| t == want),
-                "нет «{want}» в разделе индексации: {index:?}"
+                "missing “{want}” in the indexing section: {index:?}"
             );
         }
         // An empty dictionary: otherwise the row of buttons under 14 labels goes beyond the tall frame.
@@ -12125,7 +12125,7 @@ mod tests {
         ] {
             assert!(
                 tags.iter().any(|t| t == want),
-                "нет «{want}» в разделе тегов: {tags:?}"
+                "missing “{want}” in the tags section: {tags:?}"
             );
         }
         let faces = settings_frame(&mut app, &ctx, SettingsTab::Faces);
@@ -12136,12 +12136,12 @@ mod tests {
         ] {
             assert!(
                 faces.iter().any(|t| t == want),
-                "нет «{want}» в разделе лиц: {faces:?}"
+                "missing “{want}” in the faces section: {faces:?}"
             );
         }
         assert!(
             faces.iter().any(|t| t.contains("not downloaded")),
-            "состояние модели лиц не переведено: {faces:?}"
+            "the face model state is not translated: {faces:?}"
         );
         let storage = settings_frame(&mut app, &ctx, SettingsTab::Storage);
         for want in [
@@ -12156,23 +12156,23 @@ mod tests {
         ] {
             assert!(
                 storage.iter().any(|t| t == want),
-                "нет «{want}» в разделе хранилища: {storage:?}"
+                "missing “{want}” in the storage section: {storage:?}"
             );
         }
         let tools = settings_frame(&mut app, &ctx, SettingsTab::Tools);
         assert!(
             tools.iter().any(|t| t == "Check and save the programs"),
-            "нет кнопки сохранения программ: {tools:?}"
+            "the save-programs button is missing: {tools:?}"
         );
         assert!(
             tools.iter().any(|t| t.starts_with("without it: ")),
-            "подпись «без неё» не переведена: {tools:?}"
+            "the “without it” label is not translated: {tools:?}"
         );
         assert!(
             tools
                 .iter()
                 .any(|t| t.contains("videos without duration or resolution")),
-            "описание ffprobe не переведено: {tools:?}"
+            "the ffprobe description is not translated: {tools:?}"
         );
         for (name, texts) in [
             ("model", &model),
@@ -12191,7 +12191,7 @@ mod tests {
             ] {
                 assert!(
                     !texts.iter().any(|t| t == ru),
-                    "русская подпись «{ru}» осталась в разделе {name}: {texts:?}"
+                    "the Russian label “{ru}” is left in the {name} section: {texts:?}"
                 );
             }
         }
@@ -12220,7 +12220,7 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == want || t.contains(want)),
-                "нет «{want}» на полном экране: {texts:?}"
+                "missing “{want}” on the full screen: {texts:?}"
             );
         }
         for ru in [
@@ -12236,7 +12236,7 @@ mod tests {
         ] {
             assert!(
                 !texts.iter().any(|t| t.contains(ru)),
-                "русская подпись «{ru}» осталась на полном экране: {texts:?}"
+                "the Russian label “{ru}” is left on the full screen: {texts:?}"
             );
         }
         // Video: the caption on the big ▶ button is translated too.
@@ -12245,11 +12245,11 @@ mod tests {
         let texts = viewer_frame(&mut app, &ctx, None);
         assert!(
             texts.iter().any(|t| t.contains("press ▶ to play")),
-            "подпись на видео не переведена: {texts:?}"
+            "the video label is not translated: {texts:?}"
         );
         assert!(
             !texts.iter().any(|t| t.contains("нажмите ▶")),
-            "русская подпись на видео осталась: {texts:?}"
+            "a Russian label is left on the video: {texts:?}"
         );
     }
 
@@ -12271,18 +12271,18 @@ mod tests {
         ] {
             assert!(
                 roots.iter().any(|t| t == want),
-                "нет «{want}» в списке каталогов: {roots:?}"
+                "missing “{want}” in the folder list: {roots:?}"
             );
         }
         for ru in ["Каталоги архива", "Добавить каталог", "Индексировать все", "Закрыть"] {
             assert!(
                 !roots.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась в каталогах: {roots:?}"
+                "the Russian label “{ru}” is left in the folders: {roots:?}"
             );
         }
         // An empty folder: a hint is visible instead of the list of subfolders.
         let empty = std::env::temp_dir().join("photocat-test-picker-empty");
-        std::fs::create_dir_all(&empty).expect("временный каталог");
+        std::fs::create_dir_all(&empty).expect("a temporary folder");
         app.roots_open = false;
         app.picker_open = true;
         app.picker_current = empty;
@@ -12298,13 +12298,13 @@ mod tests {
         ] {
             assert!(
                 picker.iter().any(|t| t == want),
-                "нет «{want}» в выборе папки: {picker:?}"
+                "missing “{want}” in the folder picker: {picker:?}"
             );
         }
         for ru in ["Добавить каталог", "Вверх", "Отмена", "Подкаталогов нет."] {
             assert!(
                 !picker.iter().any(|t| t == ru),
-                "русская подпись «{ru}» осталась в выборе папки: {picker:?}"
+                "the Russian label “{ru}” is left in the folder picker: {picker:?}"
             );
         }
         app.picker_open = false;
@@ -12326,13 +12326,13 @@ mod tests {
             for want in [title, button, "Cancel"] {
                 assert!(
                     texts.iter().any(|t| t == want),
-                    "нет «{want}» в подтверждении очистки: {texts:?}"
+                    "missing “{want}” in the cleanup confirmation: {texts:?}"
                 );
             }
             for ru in ["Очистить превью?", "Очистить кропы лиц?", "Сбросить индекс?", "Отмена"] {
                 assert!(
                     !texts.iter().any(|t| t == ru),
-                    "русская подпись «{ru}» осталась в подтверждении: {texts:?}"
+                    "the Russian label “{ru}” is left in the confirmation: {texts:?}"
                 );
             }
             // The frame is read only: the confirmation is cleared, nothing is deleted.
@@ -12349,7 +12349,7 @@ mod tests {
         app.viewer_step(&mut v, 1);
         assert_eq!(v.idx, 2);
         app.viewer_step(&mut v, 1);
-        assert_eq!(v.idx, 0, "последний файл уступает первому, как в слайд-шоу");
+        assert_eq!(v.idx, 0, "the last file gives way to the first, as in a slideshow");
         app.viewer_step(&mut v, -1);
         assert_eq!(v.idx, 2);
         assert!(v.last_advance.elapsed() < std::time::Duration::from_millis(100));
@@ -12384,17 +12384,17 @@ mod tests {
         let texts = viewer_frame(&mut app, &ctx, None);
         assert!(
             texts.iter().any(|t| t.contains("нажмите ▶")),
-            "на кадре видео должна быть большая кнопка ▶: {texts:?}"
+            "a big ▶ button must sit on the video frame: {texts:?}"
         );
         let texts = viewer_frame(&mut app, &ctx, Some(egui::Key::ArrowRight));
-        assert_eq!(app.viewer.as_ref().expect("просмотр открыт").idx, 2);
+        assert_eq!(app.viewer.as_ref().expect("the viewer is open").idx, 2);
         assert!(
             texts.iter().any(|t| t == "c.jpg"),
-            "в заголовке должен быть следующий файл: {texts:?}"
+            "the title must show the next file: {texts:?}"
         );
         assert!(
             !texts.iter().any(|t| t.contains("нажмите ▶")),
-            "на снимке нет кнопки ▶: {texts:?}"
+            "the photo has no ▶ button: {texts:?}"
         );
     }
 
@@ -12417,15 +12417,15 @@ mod tests {
         let texts = viewer_frame(&mut app, &ctx, Some(egui::Key::ArrowRight));
         assert!(
             texts.iter().any(|t| t == "b.mp4"),
-            "должен открыться следующий файл: {texts:?}"
+            "the next file must open: {texts:?}"
         );
         assert!(
             !texts.iter().any(|t| t.contains("загрузка следующего кадра")),
-            "кадр прошлого снимка не должен оставаться на видео: {texts:?}"
+            "the previous photo's frame must not stay on the video: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t.contains("нажмите ▶")),
-            "на видео должна быть кнопка ▶: {texts:?}"
+            "the video must hold a ▶ button: {texts:?}"
         );
     }
 
@@ -12482,13 +12482,13 @@ mod tests {
         let texts = viewer_frame(&mut app, &ctx, None);
         assert!(
             !texts.iter().any(|t| t.contains("перетаскивание")),
-            "при масштабе 100 % подсказки о сдвиге нет: {texts:?}"
+            "at 100 % zoom there is no panning hint: {texts:?}"
         );
-        app.viewer.as_mut().expect("просмотр открыт").zoom = 2.0;
+        app.viewer.as_mut().expect("the viewer is open").zoom = 2.0;
         let texts = viewer_frame(&mut app, &ctx, None);
         assert!(
             texts.iter().any(|t| t.contains("перетаскивание — сдвиг кадра")),
-            "при масштабе 200 % нужна подсказка о сдвиге: {texts:?}"
+            "at 200 % zoom a panning hint is needed: {texts:?}"
         );
     }
 
@@ -12601,7 +12601,7 @@ mod tests {
             .tag_labels()
             .iter()
             .position(|l| l == "мебель")
-            .expect("«мебель» есть в словаре по умолчанию");
+            .expect("the fixture tag is in the default dictionary");
         assert_eq!(app.tag_counts()[i], 120);
         // A small folder: the percentile is noisy, the raw threshold applies.
         app.tags.retain(|id, _| *id < 50);
@@ -12622,7 +12622,7 @@ mod tests {
                 .unwrap_or(0)
         ));
         let mut app = App::new(path);
-        assert!(app.tag_labels().iter().any(|l| l == "beach"), "дефолт засеян");
+        assert!(app.tag_labels().iter().any(|l| l == "beach"), "the default is seeded");
         app.tag_defs.push(db::TagDef {
             model: "m".into(),
             id: "custom-1".into(),
@@ -12652,9 +12652,9 @@ mod tests {
             d.min_percentile = 90;
         }
         let thr = app.tag_threshold("beach");
-        assert!(thr > 0.8, "порог 90% должен быть высоким, получено {thr}");
+        assert!(thr > 0.8, "a 90 % threshold must be high, got {thr}");
         app.tag_defs.retain(|d| d.label != "beach");
-        assert!(app.tag_threshold("beach").abs() < 1e-6, "без словаря — общий ползунок");
+        assert!(app.tag_threshold("beach").abs() < 1e-6, "no dictionary — a shared slider");
     }
 
     #[test]
@@ -12695,15 +12695,15 @@ mod tests {
             texts
                 .iter()
                 .position(|t| t == needle)
-                .unwrap_or_else(|| panic!("нет заголовка «{needle}»: {texts:?}"))
+                .unwrap_or_else(|| panic!("no heading “{needle}”: {texts:?}"))
         };
         let (may, april_pos, no_date) = (pos("May 2024"), pos("April 2024"), pos("No date"));
-        assert!(may < april_pos, "май свежее апреля: {texts:?}");
-        assert!(april_pos < no_date, "«No date» — последняя группа: {texts:?}");
+        assert!(may < april_pos, "May is newer than April: {texts:?}");
+        assert!(april_pos < no_date, "“No date” is the last group: {texts:?}");
         // Inside a month the tile captions go from the fresh ones to the old ones.
         let may_new = texts.iter().position(|t| t == "2024-05-09 10:00").unwrap();
         let may_old = texts.iter().position(|t| t == "2024-05-01 08:00").unwrap();
-        assert!(may_new < may_old, "внутри месяца свежие сверху: {texts:?}");
+        assert!(may_new < may_old, "inside a month the newest come first: {texts:?}");
     }
 
     /// Files for M17: two in May, one in April and a photo without a date.
@@ -12734,9 +12734,9 @@ mod tests {
         let mut app = m17_app();
         let visible: Vec<usize> = (0..app.items.len()).collect();
         app.settings.grid_sort = db::GridSort::DateDesc;
-        assert_eq!(app.ordered(&visible), vec![1, 0, 2, 3], "новые сверху, без даты в конце");
+        assert_eq!(app.ordered(&visible), vec![1, 0, 2, 3], "the newest first, the undated last");
         app.settings.grid_sort = db::GridSort::DateAsc;
-        assert_eq!(app.ordered(&visible), vec![2, 0, 1, 3], "старые сверху, без даты всё равно в конце");
+        assert_eq!(app.ordered(&visible), vec![2, 0, 1, 3], "the oldest first, the undated still last");
     }
 
     #[test]
@@ -12773,7 +12773,7 @@ mod tests {
         assert_eq!(
             app.ordered(&visible),
             vec![3, 1, 2, 0],
-            "крупные сверху: 40, 30, 20, 10"
+            "the big ones first: 40, 30, 20, 10"
         );
     }
 
@@ -12787,7 +12787,7 @@ mod tests {
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
             !texts.iter().any(|t| t == "май 2024"),
-            "при поиске месяцы не группируются: {texts:?}"
+            "a search does not group by month: {texts:?}"
         );
     }
 
@@ -12798,7 +12798,7 @@ mod tests {
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
             !texts.iter().any(|t| t == "май 2024"),
-            "в «Подряд» заголовков месяцев быть не должно: {texts:?}"
+            "the flat view must hold no month headings: {texts:?}"
         );
         assert!(texts.iter().any(|t| t.contains("2024-05-09")), "{texts:?}");
     }
@@ -12817,25 +12817,25 @@ mod tests {
     fn ctrl_and_shift_click_change_the_selection() {
         let mut app = m17_app();
         let order = m18_order(&app);
-        assert_eq!(order, vec![2, 1, 3, 4], "порядок: свежие сверху, без даты в конце");
+        assert_eq!(order, vec![2, 1, 3, 4], "the order: the newest first, the undated last");
 
         app.pick_clicked(2, PickClick::Plain, &order);
         assert_eq!(app.picked, BTreeSet::from([2]));
         assert_eq!(app.selected, Some(2));
 
         app.pick_clicked(3, PickClick::Toggle, &order);
-        assert_eq!(app.picked, BTreeSet::from([2, 3]), "Ctrl+клик добавляет");
+        assert_eq!(app.picked, BTreeSet::from([2, 3]), "Ctrl+click adds");
         app.pick_clicked(3, PickClick::Toggle, &order);
-        assert_eq!(app.picked, BTreeSet::from([2]), "повторный Ctrl+клик убирает");
+        assert_eq!(app.picked, BTreeSet::from([2]), "a second Ctrl+click removes");
 
         app.pick_anchor = Some(2);
         app.pick_clicked(3, PickClick::Range, &order);
         assert_eq!(
             app.picked,
             BTreeSet::from([2, 1, 3]),
-            "Shift+клик — диапазон по порядку сетки"
+            "Shift+click takes a range in grid order"
         );
-        assert_eq!(app.selected, Some(3), "последний кликнутый — в инспекторе");
+        assert_eq!(app.selected, Some(3), "the last clicked file is in the inspector");
 
         // The reverse range gives the same set, and the anchor does not move.
         app.pick_anchor = Some(3);
@@ -12864,8 +12864,8 @@ mod tests {
         app.items = vec![a, b, c];
         app.kind_filter = KindFilter::Images;
         app.pick_all();
-        assert_eq!(app.picked, BTreeSet::from([1, 3]), "видео скрыто фильтром");
-        assert_eq!(app.selected, Some(1), "в инспекторе — первый видимый");
+        assert_eq!(app.picked, BTreeSet::from([1, 3]), "the video is hidden by the filter");
+        assert_eq!(app.selected, Some(1), "the first visible file is in the inspector");
         assert!(app.status.starts_with("выбрано 2"), "{}", app.status);
     }
 
@@ -12877,7 +12877,7 @@ mod tests {
         assert_eq!(app.picked.len(), 4);
         let ctx = egui::Context::default();
         window_frame_with(&mut app, &ctx, vec![key_event(egui::Key::Escape)]);
-        assert!(app.picked.is_empty(), "Esc снимает выделение");
+        assert!(app.picked.is_empty(), "Esc drops the selection");
         assert_eq!(app.status, t(lang, "the selection is cleared"));
     }
 
@@ -12920,7 +12920,7 @@ mod tests {
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
             texts.iter().any(|t| t.starts_with("2 selected · ")),
-            "в строке чипов виден счёт и объём: {texts:?}"
+            "the chips row shows the count and the size: {texts:?}"
         );
         assert!(texts.iter().any(|t| t == "Select all (4)"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Clear selection"), "{texts:?}");
@@ -13005,8 +13005,8 @@ mod tests {
         let big = list_frame_height(260.0);
         // 40 px and 65.6 px per row, plus the gap under them: the difference matters, not the
         // initial frame offset.
-        assert!((small - 84.0).abs() < 8.0, "две строки по 40 px: {small}");
-        assert!((big - 135.2).abs() < 8.0, "две строки по 65.6 px: {big}");
+        assert!((small - 84.0).abs() < 8.0, "two rows of 40 px: {small}");
+        assert!((big - 135.2).abs() < 8.0, "two rows of 65.6 px: {big}");
         assert!((big - small - 51.2).abs() < 0.5, "{small} → {big}");
     }
 
@@ -13022,7 +13022,7 @@ mod tests {
             let texts = window_frame(&mut app, &egui::Context::default());
             assert!(
                 texts.iter().any(|t| t == "Плитки 200"),
-                "в виде {style:?} ползунок размера пропал: {texts:?}"
+                "the size slider is gone in the {style:?} view: {texts:?}"
             );
         }
     }
@@ -13036,7 +13036,7 @@ mod tests {
         let texts = card_frame(&mut app, &egui::Context::default());
         assert!(
             texts.iter().any(|t| t.starts_with("в выделении 2")),
-            "инспектор показывает размер выделения: {texts:?}"
+            "the inspector shows the selection size: {texts:?}"
         );
     }
     #[test]
@@ -13050,12 +13050,12 @@ mod tests {
         app.settings.grid_sort = db::GridSort::Album;
         let visible = app.filtered();
         assert_eq!(visible.len(), 3);
-        assert!(!visible.contains(&1), "файла 2 в альбоме нет");
-        assert_eq!(app.ordered(&visible), vec![2, 0, 3], "порядок берётся из альбома");
+        assert!(!visible.contains(&1), "file 2 is not in the album");
+        assert_eq!(app.ordered(&visible), vec![2, 0, 3], "the order comes from the album");
         // Outside an album "Album order" reads as the date ↓ instead of staying silent.
         app.view = View::Grid;
         app.album_selected = None;
-        assert_eq!(app.ordered(&visible), vec![0, 2, 3], "вне альбома — дата ↓");
+        assert_eq!(app.ordered(&visible), vec![0, 2, 3], "outside an album — date ↓");
         // "All files" inside an album is a temporary look: the contents are not narrowed.
         app.view = View::Albums;
         app.album_selected = Some(7);
@@ -13083,7 +13083,7 @@ mod tests {
         }];
         let chips = app.chips_snapshot();
         assert_eq!(chips.album.as_deref(), Some("Дача 2024"));
-        assert!(chips.pickable, "в открытом альбоме выделение работает");
+        assert!(chips.pickable, "the selection works inside an open album");
         // In "All files" there is no album chip: the grid there is not narrowed by the album.
         app.view = View::Grid;
         assert!(app.chips_snapshot().album.is_none());
@@ -13121,15 +13121,15 @@ mod tests {
         let texts = window_frame(&mut app, &ctx);
         assert!(
             texts.iter().any(|t| t.contains("Дача 2024")),
-            "дерево и выбранный альбом видны: {texts:?}"
+            "the tree and the picked album are visible: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t.contains("Добавить выбранные")),
-            "кнопка добавления на месте: {texts:?}"
+            "the add button is in place: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t.contains("Выгрузить на диск")),
-            "выгрузка (M20) обозначена: {texts:?}"
+            "the export (M20) is marked: {texts:?}"
         );
         // Nothing is created on disk: an album is DB rows only.
         assert!(!std::path::Path::new("/tmp/album.jpg").exists());
@@ -13162,14 +13162,14 @@ mod tests {
         app.export_dialog_open(album);
         app.export_out = out.to_string_lossy().to_string();
         app.export_name = "{n}_{orig}".into();
-        let plan = app.export_build().expect("план строится по строке БД");
+        let plan = app.export_build().expect("the plan is built from the DB row");
         assert_eq!(plan.files(), 1);
         assert!(
             plan.items[0].rel.ends_with("01_export.jpg"),
             "{:?}",
             plan.items[0].rel
         );
-        assert!(!out.join("На_печать").exists(), "план ничего не создаёт");
+        assert!(!out.join("На_печать").exists(), "the plan creates nothing");
 
         // A folder inside the archive is a refusal with a clear text, not an export into the originals.
         let archive = out.join("archive");
@@ -13199,7 +13199,7 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == want),
-                "нет «{want}»: {texts:?}"
+                "missing “{want}”: {texts:?}"
             );
         }
     }
@@ -13220,10 +13220,10 @@ mod tests {
         let err = app
             .integrity_plan(IntegrityJob::Verify)
             .err()
-            .expect("одинаковые пути — ошибка");
+            .expect("identical paths are an error");
         assert!(err.contains("один и тот же путь"), "{err}");
         app.integrity_start(IntegrityJob::Verify);
-        assert!(app.integrity_rx.is_none(), "проход не запускается");
+        assert!(app.integrity_rx.is_none(), "the pass does not start");
     }
 
     /// An existing manifest is not overwritten by the first press: a confirmation comes first, and
@@ -13242,10 +13242,10 @@ mod tests {
         app.integrity_a = dir.to_string_lossy().to_string();
         app.integrity_manifest = manifest.to_string_lossy().to_string();
         app.integrity_start(IntegrityJob::Manifest);
-        assert!(app.integrity_rx.is_none(), "без подтверждения не пишем");
-        assert!(app.integrity_overwrite, "ждём подтверждения");
+        assert!(app.integrity_rx.is_none(), "nothing is written without a confirmation");
+        assert!(app.integrity_overwrite, "a confirmation is expected");
         assert!(app.integrity_error.contains("уже есть"), "{}", app.integrity_error);
-        assert_eq!(std::fs::read(&manifest).unwrap(), b"old", "старый слепок цел");
+        assert_eq!(std::fs::read(&manifest).unwrap(), b"old", "the old manifest is intact");
         // The paths are parsed on the confirmation too: the plan is ready, the thread is not started yet.
         assert!(matches!(
             app.integrity_plan(IntegrityJob::Manifest),
@@ -13271,17 +13271,17 @@ mod tests {
         app.integrity_a = a.to_string_lossy().to_string();
         app.integrity_b = b.to_string_lossy().to_string();
         app.integrity_start(IntegrityJob::Verify);
-        let rx = app.integrity_rx.take().expect("проход запущен");
+        let rx = app.integrity_rx.take().expect("the pass is started");
         let (job, res) = rx
             .recv_timeout(std::time::Duration::from_secs(20))
-            .expect("проход вернул результат");
+            .expect("the pass returned a result");
         assert_eq!(job, IntegrityJob::Verify);
-        match res.expect("без ошибки") {
+        match res.expect("no error") {
             IntegrityOutcome::Verify { report, .. } => {
-                assert!(report.identical(), "копии одинаковые");
+                assert!(report.identical(), "the copies are identical");
                 assert_eq!(report.same, 1);
             }
-            _ => panic!("не тот вид отчёта"),
+            _ => panic!("not the expected report kind"),
         }
     }
 
@@ -13320,7 +13320,7 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Скопировать отчёт"), "{texts:?}");
         assert!(
             texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
-            "отчёт печатает ту же формулировку: {texts:?}"
+            "the report prints the same wording: {texts:?}"
         );
     }
 
@@ -13352,10 +13352,10 @@ mod tests {
         let mut app = App::new(path);
         assert!(
             matches!(app.verify_due, db::VerifyDue::Due { days_over: 1 }),
-            "должно быть просрочено на день: {:?}",
+            "must be a day overdue: {:?}",
             app.verify_due
         );
-        assert!(!app.settings.verify_manifest.is_empty(), "слепок потерян");
+        assert!(!app.settings.verify_manifest.is_empty(), "the manifest is lost");
         assert!(app.settings.verify_interval_days == 30);
         // The panel remembers its height from the previous frame: a banner added to it is visible
         // on the second frame (as the window on a 60 fps screen).
@@ -13366,11 +13366,11 @@ mod tests {
         let texts = window_frame(&mut app, &ctx);
         assert!(
             texts.iter().any(|t| t == "Пора проверить архив"),
-            "нет баннера: {texts:?}"
+            "no banner: {texts:?}"
         );
         assert!(texts.iter().any(|t| t == "Проверить"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Напомнить позже"), "{texts:?}");
-        assert!(app.integrity_rx.is_none(), "баннер не запускает проход сам");
+        assert!(app.integrity_rx.is_none(), "the banner does not start the pass itself");
         assert!(app.integrity_progress.is_none());
         // "Remind me later" is a session decision: the term stays the same, the banner is hidden.
         app.verify_banner_hidden = true;
@@ -13378,7 +13378,7 @@ mod tests {
         let texts = window_frame(&mut app, &ctx);
         assert!(
             !texts.iter().any(|t| t == "Пора проверить архив"),
-            "баннер скрыт до перезапуска: {texts:?}"
+            "the banner is hidden until a restart: {texts:?}"
         );
     }
 
@@ -13394,14 +13394,14 @@ mod tests {
         ] {
             assert!(
                 texts.iter().any(|t| t == needle),
-                "нет «{needle}»: {texts:?}"
+                "missing “{needle}”: {texts:?}"
             );
         }
         // The content of the screens (the view heading, the chips, the card) is translated by the
         // next M21 steps: here the shell is checked — the navigation, the top bar, the filter.
         assert!(
             texts.iter().any(|t| t == "family archive"),
-            "нет английского подзаголовка: {texts:?}"
+            "no English subtitle: {texts:?}"
         );
         app.settings.lang = i18n::Lang::Ru;
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -13417,8 +13417,8 @@ mod tests {
         // 10 frames of 4:3 in 700 px at a target height of 150: 4 in a row, height ~130.
         let a = [4.0 / 3.0; 10];
         let (n, h) = row_fit(&a, 700.0, 150.0, 2.0);
-        assert_eq!(n, 4, "в строке должно быть четыре кадра 4:3");
-        assert!((h - 130.0).abs() < 1.0, "высота строки {h}");
+        assert_eq!(n, 4, "a row must hold four 4:3 frames");
+        assert!((h - 130.0).abs() < 1.0, "the row height is {h}");
         // A lone panorama is not stretched above the target height (600 px of width).
         let (n, h) = row_fit(&[4.0], 700.0, 150.0, 2.0);
         assert_eq!(n, 1);
@@ -13430,7 +13430,7 @@ mod tests {
         // A narrow window: one 4:3 frame in the row, the height no more than the target.
         let (n, h) = row_fit(&[4.0 / 3.0, 4.0 / 3.0], 200.0, 150.0, 2.0);
         assert_eq!(n, 1);
-        assert!(h <= 150.0, "высота {h}");
+        assert!(h <= 150.0, "the height is {h}");
         // The proportion comes from the file size; a broken file gives 4:3.
         let mut f = file_row(1, "image", "a.jpg");
         assert!((frame_aspect(&f) - 4.0 / 3.0).abs() < 1e-6);
@@ -13439,7 +13439,7 @@ mod tests {
         assert!((frame_aspect(&f) - 4.0 / 3.0).abs() < 1e-6);
         f.width = 240;
         f.height = 320;
-        assert!(frame_aspect(&f) < 1.0, "портрет должен быть уже высоты");
+        assert!(frame_aspect(&f) < 1.0, "a portrait must be narrower than it is tall");
     }
 
     /// M22, ADR 0044: the two palettes of the mock-up and the choice in the settings. The theme is
@@ -13450,13 +13450,13 @@ mod tests {
         super::apply_theme(&ctx, db::ThemeMode::Light);
         assert_eq!(ctx.theme(), egui::Theme::Light);
         let light = ctx.style_of(egui::Theme::Light);
-        assert!(!light.visuals.dark_mode, "светлая палитра не применилась");
+        assert!(!light.visuals.dark_mode, "the light palette was not applied");
         assert_eq!(light.visuals.panel_fill, super::LIGHT.panel);
         assert_eq!(super::LIGHT.accent, egui::Color32::from_rgb(0xd9, 0x77, 0x06));
         super::apply_theme(&ctx, db::ThemeMode::Dark);
         assert_eq!(ctx.theme(), egui::Theme::Dark);
         let dark = ctx.style_of(egui::Theme::Dark);
-        assert!(dark.visuals.dark_mode, "тёмная палитра не применилась");
+        assert!(dark.visuals.dark_mode, "the dark palette was not applied");
         assert_eq!(dark.visuals.panel_fill, super::DARK.panel);
         // The radii of the mock-up: 4 for buttons and chips, 6 for menus, 8 for cards and dialogs.
         assert_eq!(
@@ -13513,7 +13513,7 @@ mod tests {
             db::save_settings(&c, &s).unwrap();
         }
         let app = App::new(path);
-        assert_eq!(app.settings.lang, i18n::Lang::Ru, "язык потерян при перезапуске");
+        assert_eq!(app.settings.lang, i18n::Lang::Ru, "the language is lost on a restart");
     }
 
     /// Runs a background pass to the result through window frames: that is how the writing of the
@@ -13527,7 +13527,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        panic!("проход не завершился за 3 с");
+        panic!("the pass did not finish within 3 s");
     }
 
     /// M10: a successful manifest and check write the date, the outcome and the report into the
@@ -13566,13 +13566,13 @@ mod tests {
         {
             let c = db::open(&db_path).unwrap();
             let s = db::load_settings(&c);
-            assert!(!s.verify_last_at.is_empty(), "дата прохода записана");
+            assert!(!s.verify_last_at.is_empty(), "the pass date is written");
             assert!(s.verify_last_ok);
             assert!(s.verify_last_report.contains("слепок"), "{}", s.verify_last_report);
         }
         assert!(
             matches!(app.verify_due, db::VerifyDue::NotYet { .. }),
-            "после записи слепка срок ещё не вышел: {:?}",
+            "the due date has not passed after writing a manifest: {:?}",
             app.verify_due
         );
         // A check against this manifest writes its own outcome and the same report file.
@@ -13588,7 +13588,7 @@ mod tests {
         );
         let file = db::cache_dir().join("verify-last.txt");
         let text = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(text, s.verify_last_report, "файл и настройки — один отчёт");
+        assert_eq!(text, s.verify_last_report, "the file and the settings hold one report");
         assert!(text.contains("совпал"), "{text}");
     }
 
@@ -13631,10 +13631,10 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert!(app.integrity_rx.is_none(), "проход завершился");
+        assert!(app.integrity_rx.is_none(), "the pass has finished");
         assert!(
             !app.integrity_error.is_empty(),
-            "битый слепок — ошибка в статусе"
+            "a broken manifest is an error in the status"
         );
         let c = db::open(&db_path).unwrap();
         let s = db::load_settings(&c);

@@ -35,7 +35,12 @@ explicitly: as a `lang` argument or as a `lang` field in a report struct; there 
 language variable.
 
 The boundary is checked by `.pi/skills/enforce-architecture/scripts/check.sh` (a grep over
-`use crate::`); it also forbids `fs::remove_*` and `fs::rename` calls in `src/`. There is one
+`use crate::`); it also forbids `fs::remove_*` and `fs::rename` calls in `src/`. The language rule is
+checked by `tests/source_language.rs`: no Cyrillic identifier anywhere, no Russian comment or
+production string in a converted module, and since M23.5 no Russian message inside `#[cfg(test)]` —
+the guard parses the assertion, `panic!`, `bail!`, `anyhow!`, `.expect("…")` and `#[ignore = "…"]`
+positions with a small tokenizer and leaves the arguments a test compares alone, because those are
+the Russian labels the window must show. There is one
 exception — `src/storage.rs`: it removes only inside `<cache>/photocat/` after checking the
 canonical path; it does not touch the archive or the models.
 
@@ -541,7 +546,9 @@ not with a different labelled set.
 | 2026-11-24 | the same DB and the same image vectors | temporary int8 vision + fp16 text, `embed --retag` | 8.3 s including the model load; 55.8 % confident, 64.8 % (94/145) documents caught, false “document” 12.7 % (232/1828); model 661.6 MiB |
 | 2026-11-24 | the same files, image vectors recomputed | temporary fp16 vision + fp16 text, `embed --refresh` | 528.7 s; 55.4 % confident, 49.0 % (71/145) documents caught, false “document” 3.6 % (65/1828); model 748.9 MiB |
 | 2026-11-24 | each of the three variants, the same DB | process-level `search "документ"` | 2.8–4.6 s int8, 4.2–5.1 s int8+fp16 text, 3.9–4.0 s fp16 — dominated by the sha256 of the weight files and the ONNX session load; the query itself is milliseconds |
-| 2026-11-24 | a copy of the real DB, 2232 files, 1240×840 headless frames (M22.2b) | 160 frames of continuous scrolling over the grid: 80 wheel notches and a 80-frame trackpad gesture with the coast (release, `cargo test --release -- --ignored замер_прокрутки`) | p50 6.4–6.7 ms (149–157 fps), p95 6.6–6.9 ms (145–152 fps), p99 6.7–7.4 ms over six runs — layout, culling and preview decoding stay far below the 16.7 ms of 60 fps; a wheel notch is 280 px (a third of the window), a short trackpad flick coasts 274 px in 81 frames |
+| 2026-11-24 | a copy of the real DB, 2232 files, 1240×840 headless frames (M22.2b) | 160 frames of continuous scrolling over the grid: 80 wheel notches and a 80-frame trackpad gesture with the coast (release, `PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored scroll_bench`) | p50 6.4–6.7 ms (149–157 fps), p95 6.6–6.9 ms (145–152 fps), p99 6.7–7.4 ms over six runs — layout, culling and preview decoding stay far below the 16.7 ms of 60 fps; a wheel notch is 280 px (a third of the window), a short trackpad flick coasts 274 px in 81 frames |
+
+| 2026-11-24 | `src/` — 17 modules, 205 Russian message strings in ten of them (M23.5) | `cargo test --test source_language` after the conversion | 0 Russian messages left in test code; both probes fail the new check — an `assert!(…, "…")` message and an `expect("…")` text — while the compared data (`assert_eq!(t(Lang::Ru, "Settings"), "Настройки")`) passes; `cargo test` 236 + 3 passed, `clippy` clean |
 
 Rule: numbers without a corpus and a date do not enter the table.
 

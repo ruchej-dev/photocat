@@ -3222,7 +3222,7 @@ mod tests {
         // is cleared; a video cover stays, no rows are lost.
         let rows = load_all(&c).unwrap();
         let image = rows.iter().find(|r| r.kind == "image").unwrap();
-        assert!(image.thumb.is_none(), "превью картинки должно быть пересчитано");
+        assert!(image.thumb.is_none(), "the image preview must be recomputed");
         let video = rows.iter().find(|r| r.kind == "video").unwrap();
         assert_eq!(video.thumb.as_deref(), Some("bb/old.jpg"));
         let album = create_album(&c, 0, "Старое", "").unwrap();

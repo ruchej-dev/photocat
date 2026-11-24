@@ -1625,7 +1625,7 @@ mod tests {
         let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited), 0).unwrap();
         assert_eq!((out.width, out.height), (4, 2));
         for px in out.rgba.chunks(4) {
-            assert!(px[0] <= 1 && px[1] <= 1 && px[2] <= 1, "не чёрный: {px:?}");
+            assert!(px[0] <= 1 && px[1] <= 1 && px[2] <= 1, "not black: {px:?}");
         }
     }
 
@@ -1634,7 +1634,7 @@ mod tests {
         let f = yuv420(4, 2, 235, 128, 128);
         let out = to_rgba(&f, &stream(4, 2, 1, ColorRange::Limited), 0).unwrap();
         for px in out.rgba.chunks(4) {
-            assert!(px[0] >= 254 && px[1] >= 254 && px[2] >= 254, "не белый: {px:?}");
+            assert!(px[0] >= 254 && px[1] >= 254 && px[2] >= 254, "not white: {px:?}");
         }
     }
 
@@ -1643,8 +1643,8 @@ mod tests {
         let f = yuv420(2, 2, 16, 128, 128);
         let limited = to_rgba(&f, &stream(2, 2, 1, ColorRange::Limited), 0).unwrap();
         let full = to_rgba(&f, &stream(2, 2, 1, ColorRange::Full), 0).unwrap();
-        assert!(limited.rgba[0] <= 1, "ограниченный Y=16 должен быть чёрным");
-        assert!(full.rgba[0] >= 14, "в полном диапазоне Y=16 — тёмно-серый");
+        assert!(limited.rgba[0] <= 1, "limited Y=16 must be black");
+        assert!(full.rgba[0] >= 14, "in the full range Y=16 is dark grey");
     }
 
     #[test]
@@ -1677,10 +1677,10 @@ mod tests {
     fn the_matrix_from_the_container_beats_the_size() {
         let hd = stream(1920, 1080, 2, ColorRange::Limited);
         let sd = stream(640, 480, 2, ColorRange::Limited);
-        assert_eq!(coefficients(&hd).rv, 459, "HD без метки — BT.709");
-        assert_eq!(coefficients(&sd).rv, 409, "SD без метки — BT.601");
+        assert_eq!(coefficients(&hd).rv, 459, "HD without a tag is BT.709");
+        assert_eq!(coefficients(&sd).rv, 409, "SD without a tag is BT.601");
         let tagged = stream(640, 480, 1, ColorRange::Limited);
-        assert_eq!(coefficients(&tagged).rv, 459, "метка 709 сильнее размера");
+        assert_eq!(coefficients(&tagged).rv, 459, "the 709 tag beats the size");
     }
 
     #[test]
@@ -1697,7 +1697,7 @@ mod tests {
         let mut out = Vec::new();
         r.push(&[0.0, 1.0, 0.0, 1.0], &mut out);
         // Roughly two output samples per input sample.
-        assert!((out.len() as i64 - 8).abs() <= 1, "получено {}", out.len());
+        assert!((out.len() as i64 - 8).abs() <= 1, "got {}", out.len());
     }
 
     #[test]
@@ -1753,14 +1753,14 @@ mod tests {
         w.pause();
         let p = w.position();
         std::thread::sleep(Duration::from_millis(20));
-        assert!((w.position() - p).abs() < 1e-6, "на паузе позиция не растёт");
+        assert!((w.position() - p).abs() < 1e-6, "the position does not grow on pause");
     }
 
     #[test]
     fn the_registry_knows_the_corpus_codecs() {
         let reg = codec_registry();
         for id in [CodecId::H264, CodecId::Hevc, CodecId::Aac] {
-            assert!(reg.find_decoder(id).is_ok(), "нет декодера {id:?}");
+            assert!(reg.find_decoder(id).is_ok(), "no decoder for {id:?}");
         }
     }
 

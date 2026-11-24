@@ -652,7 +652,7 @@ mod tests {
             for max_dist in [0, 1, 6, 10] {
                 let tree = partition(&find_groups_with(&rows, max_dist, 0));
                 let brute = partition(&find_groups_with(&rows, max_dist, usize::MAX));
-                assert_eq!(tree, brute, "max_dist {max_dist}, {} строк", rows.len());
+                assert_eq!(tree, brute, "max_dist {max_dist}, {} rows", rows.len());
             }
         }
         // Random sets: of different sizes and thresholds, with equal hashes too.
@@ -689,7 +689,7 @@ mod tests {
     /// M11: a measurement on synthetic data — 20 and 50 thousand hashes, `max_dist 6`. Run it
     /// in a release build: `cargo test --release --bin photocat synthetic -- --ignored --nocapture`.
     #[test]
-    #[ignore = "замер: 20k/50k синтетических хешей, нужен release"]
+    #[ignore = "benchmark: 20k/50k synthetic hashes, needs a release build"]
     fn the_index_is_measured_on_synthetic_data() {
         fn peak_rss() -> String {
             std::fs::read_to_string("/proc/self/status")
@@ -699,7 +699,7 @@ mod tests {
                         .find(|l| l.starts_with("VmHWM:"))
                         .map(str::to_string)
                 })
-                .unwrap_or_else(|| "VmHWM недоступен".into())
+                .unwrap_or_else(|| "VmHWM unavailable".into())
         }
         for n in [20_000usize, 50_000] {
             // Half the hashes are an almost copy of a neighbour: the set then holds groups,
@@ -714,12 +714,12 @@ mod tests {
             let elapsed = t.elapsed();
             let files: usize = groups.iter().map(|g| g.members.len()).sum();
             println!(
-                "{n} хешей: групп {}, файлов в них {files}, {:.3} с; {}",
+                "{n} hashes: {} groups, {files} files in them, {:.3} s; {}",
                 groups.len(),
                 elapsed.as_secs_f64(),
                 peak_rss()
             );
-            assert!(elapsed.as_secs_f64() < 5.0, "50k должны укладываться в 5 с");
+            assert!(elapsed.as_secs_f64() < 5.0, "50k must fit into 5 s");
         }
     }
 

@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks) → next:M23.5 (the test messages and `scripts/`), then M23.6 (the corpus pass), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions) → next:M23.6 (the corpus pass), then M22.3 (the left panel: years and tag chips); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set outside the repository is digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -25,9 +25,17 @@ prompts, the `labels.csv` keywords and the `--by` aliases stay exempt. Measured:
 passed, `cargo clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors; with the
 owner's database `photocat stats` prints Russian under `lang=ru` and English after
 `settings --lang en`, 2234 files either way.
-Next: M23.5 — the message strings inside `#[cfg(test)]` are still Russian (allowed by the guard,
-but the rule is English; the data stays), and `scripts/`; then M23.6 — the corpus pass and the
-numbers in `docs/ARCHITECTURE.md`.
+M23.5 finished the code: 205 Russian message strings inside `#[cfg(test)]` in ten modules became
+English (assertion messages, `expect` texts, four `#[ignore]` reasons, a bench `println!`) and
+`scripts/fetch-model.sh` speaks English, comments and all nine runtime messages; what a test compares
+stays data — the Russian label the window must show, album and tag names, OCR text, a query. The
+guard grew a third check, `test_messages_are_english`: a Russian literal in a message position of
+`assert!`/`assert_eq!`/`assert_ne!`/`debug_assert*!`/`panic!`/`bail!`/`anyhow!`, in `.expect("…")` or
+in `#[ignore = "…"]` fails; the arguments a test compares are not messages and are left alone.
+Measured: `cargo test` 236 + 3 guard tests passed (the same 236 as M23.4 — only messages changed),
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors; one
+injected Russian message and one injected Russian `expect` text were both caught.
+Next: M23.6 — the corpus pass and the numbers in `docs/ARCHITECTURE.md`.
 
 Since M17 the owner chooses how he looks at the archive: "By months" (as in PhotoPrism) or "Flat",
 and the order — date ↓ (default) / date ↑ / name / size. Both settings live in `settings`
@@ -1949,7 +1957,7 @@ and the profile is the same in both themes; a flick coasts 200–340 px and stop
 wheel notch cancel the coast without a jump; Ctrl/Cmd + gesture is a zoom and never coasts; nothing is
 requested in idle; no `ScrollArea` sets its own multiplier; an end-to-end frame test proves the grid
 itself moves — with the injection removed it fails, and with the default 40 px notch it fails too, so
-both halves are really checked; the `#[ignore]` `замер_прокрутки_сетки` reproduces the frame numbers
+both halves are really checked; the `#[ignore]` `grid_scroll_measurement` (then `замер_прокрутки_сетки`) reproduces the frame numbers
 from `PHOTOCAT_BENCH_DB`).
 `cargo clippy --all-targets` clean; `check.sh` — 52 checks, 0 violations; `timeout 6
 ./target/release/photocat gui --db /tmp/m222b.db` — code 124, no panic. `docs/UI.md` § Interaction

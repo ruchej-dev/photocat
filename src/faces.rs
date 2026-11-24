@@ -926,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "нужны скачанные веса CLIP и лиц"]
+    #[ignore = "needs the downloaded CLIP and face weights"]
     fn clip_and_faces_share_one_onnx_environment() {
         let settings = db::Settings::default();
         // ORT allows one environment per process: CLIP must not block the faces.

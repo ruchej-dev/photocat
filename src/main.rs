@@ -1986,7 +1986,7 @@ mod cli_i18n_tests {
         assert!(en.contains("default: GUI"));
         assert!(
             !en.chars().any(|c| c.is_alphabetic() && ('\u{0400}'..='\u{04ff}').contains(&c)),
-            "в английской справке осталась кириллица: {en}"
+            "the English help still holds Cyrillic: {en}"
         );
         let ru = i18n::t(Lang::Ru, i18n::USAGE.0);
         assert!(ru.starts_with("photocat — каталогизатор медиаархива"), "{ru}");
