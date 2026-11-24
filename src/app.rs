@@ -5,7 +5,7 @@ use crate::derive;
 use crate::dupes::{self, Group};
 use crate::embed;
 use crate::faces;
-use crate::i18n::{self, t};
+use crate::i18n::{self, t, Lang};
 use crate::index;
 use crate::ocr;
 use crate::organize;
@@ -372,13 +372,13 @@ enum AlbumDialog {
 }
 
 impl AlbumDialog {
-    fn title(self) -> &'static str {
+    fn title(self, lang: Lang) -> &'static str {
         match self {
-            AlbumDialog::New => "Новый альбом",
-            AlbumDialog::Sub => "Новый подальбом",
-            AlbumDialog::Rename => "Переименовать альбом",
-            AlbumDialog::Move => "Переместить альбом",
-            AlbumDialog::Delete => "Удалить альбом?",
+            AlbumDialog::New => t(lang, "New album"),
+            AlbumDialog::Sub => t(lang, "New sub-album"),
+            AlbumDialog::Rename => t(lang, "Rename the album"),
+            AlbumDialog::Move => t(lang, "Move the album"),
+            AlbumDialog::Delete => t(lang, "Delete the album?"),
         }
     }
 }
@@ -1049,11 +1049,11 @@ fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 /// The chip of an active filter: the word with "×"; a click removes only this filter (M16).
-fn filter_chip(ui: &mut egui::Ui, text: &str) -> bool {
+fn filter_chip(ui: &mut egui::Ui, text: &str, lang: Lang) -> bool {
     ui.add(
         egui::Button::new(egui::RichText::new(format!("{text} ×")).size(12.0)).small(),
     )
-    .on_hover_text("снять фильтр")
+    .on_hover_text(t(lang, "remove the filter"))
     .clicked()
 }
 
@@ -1107,37 +1107,34 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
         if !chips.query.is_empty() {
             any = true;
             let text = format!("{} {}", t(lang, "path/date:"), shorten(&chips.query, 24));
-            if filter_chip(ui, &text) {
+            if filter_chip(ui, &text, lang) {
                 clear.query = true;
             }
         }
         if let Some(tag) = &chips.tag {
             any = true;
             let text = format!("{} {}", t(lang, "tag:"), shorten(tag, 24));
-            if filter_chip(ui, &text) {
+            if filter_chip(ui, &text, lang) {
                 clear.tag = true;
             }
         }
         if let Some(album) = &chips.album {
             any = true;
             let name = shorten(album, 22);
-            let text = match lang {
-                i18n::Lang::En => format!("Album “{name}”"),
-                i18n::Lang::Ru => format!("Альбом «{name}»"),
-            };
-            if filter_chip(ui, &text) {
+            let text = i18n::fill(lang, "Album “{}”", &[name]);
+            if filter_chip(ui, &text, lang) {
                 clear.album = true;
             }
         }
         if let Some(label) = chips.kind.chip(chips.lang) {
             any = true;
-            if filter_chip(ui, label) {
+            if filter_chip(ui, label, lang) {
                 clear.kind = true;
             }
         }
         if let Some(n) = chips.hits {
             any = true;
-            if filter_chip(ui, &i18n::relevance(lang, n)) {
+            if filter_chip(ui, &i18n::relevance(lang, n), lang) {
                 clear.hits = true;
             }
         }
@@ -1187,10 +1184,11 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                 }
                 if chips.picked > 0 {
                     let size = db::human_in(lang, chips.picked_bytes);
-                    let text = match lang {
-                        i18n::Lang::En => format!("{} selected · {size}", chips.picked),
-                        i18n::Lang::Ru => format!("выбрано {} · {size}", chips.picked),
-                    };
+                    let text = i18n::fill(
+                        lang,
+                        "{} selected · {}",
+                        &[chips.picked.to_string(), size.to_string()],
+                    );
                     ui.label(egui::RichText::new(text).size(11.0).color(accent(ui)));
                 }
             }
@@ -1215,15 +1213,11 @@ fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i1
             _ => key.to_string(),
         }
     };
-    let summary = match lang {
-        // English puts the number before the word: "· 5 files · 1.2 MiB".
-        i18n::Lang::En => format!(
-            "· {} · {}",
-            i18n::count(lang, files,"file"),
-            db::human_in(lang, bytes)
-        ),
-        i18n::Lang::Ru => format!("· файлов {files} · {}", db::human_in(lang, bytes)),
-    };
+    let summary = i18n::fill(
+        lang,
+        "· {}, {}",
+        &[i18n::count(lang, files, "file"), db::human_in(lang, bytes)],
+    );
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(title).size(14.0).strong());
         ui.label(num(ui, summary, 11.0).color(dim(ui)));
@@ -1288,9 +1282,9 @@ fn draw_album_tree(
                 if ui
                     .add(egui::Button::new(if open { "▾" } else { "▸" }).small())
                     .on_hover_text(if open {
-                        "свернуть подальбомы"
+                        t(lang, "collapse the sub-albums")
                     } else {
-                        "раскрыть подальбомы"
+                        t(lang, "expand the sub-albums")
                     })
                     .clicked()
                 {
@@ -1308,22 +1302,25 @@ fn draw_album_tree(
             } else {
                 String::new()
             };
-            let text = format!(
-                "{} · файлов {}{} · подальбомов {} · {}",
-                node.name,
-                node.files,
-                trashed,
-                node.subalbums,
-                db::human_in(lang, node.bytes)
+            let text = i18n::fill(
+                lang,
+                "{} · {}{} · {} sub-albums · {}",
+                &[
+                    node.name.to_string(),
+                    i18n::count(lang, node.files as usize, "file"),
+                    trashed,
+                    node.subalbums.to_string(),
+                    db::human_in(lang, node.bytes).to_string(),
+                ],
             );
             if ui
                 .selectable_label(selected == Some(node.id), text)
                 .on_hover_text(if !node.note.trim().is_empty() {
                     node.note.clone()
                 } else if node.cover.is_some() {
-                    "открыть альбом; обложка — первый снимок в его порядке".to_string()
+                    t(lang, "open the album; the cover is the first photo in its order").to_string()
                 } else {
-                    "открыть альбом".to_string()
+                    t(lang, "open the album").to_string()
                 })
                 .clicked()
             {
@@ -1368,7 +1365,7 @@ fn draw_album_cell(
         ui.painter().text(
             egui::pos2(rect.left() + 10.0, rect.top() + 54.0),
             egui::Align2::LEFT_TOP,
-            format!("файлов {}", node.files),
+            i18n::fill(lang, "{}", &[i18n::count(lang, node.files as usize, "file")]),
             egui::FontId::proportional(11.0),
             dim(ui),
         );
@@ -1418,10 +1415,11 @@ fn progress_row(ui: &mut egui::Ui, name: &str, p: &Arc<Progress>, running: bool)
 
 pub fn run(explicit: Option<PathBuf>) -> Result<()> {
     let db_path = db::resolve_db(explicit.as_deref())?;
+    let lang = db::open(&db_path).map(|c| db::load_settings(&c).lang).unwrap_or_default();
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1240.0, 840.0])
-            .with_title("photocat — каталог медиаархива"),
+            .with_title(t(lang, "photocat — a media archive cataloguer")),
         ..Default::default()
     };
     eframe::run_native(
@@ -1811,6 +1809,7 @@ impl App {
     }
 
     fn reload(&mut self) {
+        let lang = self.settings.lang;
         self.textures.clear();
         self.missing.clear();
         self.photo_cache.clear();
@@ -1870,10 +1869,13 @@ impl App {
                 face_images,
                 face_todo,
             )) => {
-                self.status = format!(
-                    "в индексе {} файлов, {}",
-                    rows.len(),
-                    db::human_in(settings.lang, rows.iter().map(|r| r.size).sum())
+                self.status = i18n::fill(
+                    lang,
+                    "{} in the index, {}",
+                    &[
+                        i18n::count(lang, rows.len(), "file"),
+                        db::human_in(settings.lang, rows.iter().map(|r| r.size).sum()),
+                    ],
                 );
                 self.settings = settings;
                 self.tag_defs = embed::ensure_tag_defs(
@@ -1956,13 +1958,16 @@ impl App {
                 }
                 self.pick_scope = self.pick_scope_now();
             }
-            Err(e) => self.status = format!("ошибка чтения индекса: {e}"),
+            Err(e) => {
+                self.status = i18n::fill(lang, "index read error: {}", &[e.to_string()]);
+            }
         }
         self.refresh_albums();
     }
 
     /// The album tree and the files of the open node (M19). DB rows only.
     fn refresh_albums(&mut self) {
+        let lang = self.settings.lang;
         // The album contents changed — the "Albums" row in the card is read anew.
         self.file_albums_for = None;
         let loaded = db::open(&self.db_path).and_then(|c| {
@@ -1995,7 +2000,7 @@ impl App {
                     }
                 }
             }
-            Err(e) => self.status = format!("альбомы не прочитаны: {e}"),
+            Err(e) => self.status = i18n::fill(lang, "albums not read: {}", &[e.to_string()]),
         }
     }
 
@@ -2011,6 +2016,7 @@ impl App {
 
     /// Open an album: show its files in album order and apply that order.
     fn album_open(&mut self, id: i64) {
+        let lang = self.settings.lang;
         self.album_selected = Some(id);
         self.album_browse_all = false;
         // The parents are expanded, otherwise the selected node is not visible in the tree.
@@ -2038,16 +2044,16 @@ impl App {
                     .find(|n| n.id == id)
                     .map(|n| n.name.clone())
                     .unwrap_or_default();
-                self.status = format!(
-                    "альбом «{path}»: файлов {files}{} — порядок альбома",
-                    if trashed > 0 {
-                        format!(", в корзине {trashed}")
+                self.status = i18n::fill(
+                        lang,
+                        "album “{}”: {}{} — album order",
+                        &[path.to_string(), i18n::count(lang, files, "file"), if trashed > 0 {
+                        i18n::fill(lang, ", {} in the trash", &[trashed.to_string()])
                     } else {
                         String::new()
-                    }
-                );
+                    }.to_string()]);
             }
-            Err(e) => self.status = format!("альбом не открыт: {e}"),
+            Err(e) => self.status = i18n::fill(lang, "the album is not open: {}", &[e.to_string()]),
         }
     }
 
@@ -2092,11 +2098,12 @@ impl App {
     }
 
     fn album_open_dialog(&mut self, dialog: AlbumDialog) {
+        let lang = self.settings.lang;
         let id = match self.album_selected {
             Some(id) => id,
             None if dialog == AlbumDialog::New => 0,
             None => {
-                self.status = "сначала выберите альбом в дереве".into();
+                self.status = t(lang, "pick an album in the tree first").into();
                 return;
             }
         };
@@ -2115,22 +2122,18 @@ impl App {
             let subtree = self.album_subtree(id);
             let rows: i64 = subtree.iter().map(|n| n.files).sum();
             let names: Vec<&str> = subtree.iter().map(|n| n.name.as_str()).collect();
-            self.album_delete_text = format!(
-                "Будет удалено: {}. Альбомов {}, строк файлов {}. Файлы на диске останутся.",
-                names
+            self.album_delete_text = i18n::fill(lang, "Will be deleted: {}. Albums {}, file rows {}. The files stay on disk.", &[names
                     .iter()
                     .map(|n| format!("«{n}»"))
                     .collect::<Vec<_>>()
-                    .join(", "),
-                subtree.len(),
-                rows
-            );
+                    .join(", ").to_string(), subtree.len().to_string(), rows.to_string()]);
         }
         self.album_dialog = Some(dialog);
     }
 
     /// The confirmed action of the dialog. Every operation is DB rows, not files.
     fn album_commit_dialog(&mut self, dialog: AlbumDialog) {
+        let lang = self.settings.lang;
         let selected = self.album_selected;
         let result: Result<String> = (|| {
             let conn = db::open(&self.db_path)?;
@@ -2148,13 +2151,10 @@ impl App {
                         "",
                     )?;
                     self.album_selected = Some(id);
-                    Ok(format!(
-                        "альбом создан: {}",
-                        db::album_path(&conn, id)?
-                    ))
+                    Ok(i18n::fill(lang, "album created: {}", &[db::album_path(&conn, id)?.to_string()]))
                 }
                 AlbumDialog::Rename => {
-                    let id = selected.context("альбом не выбран")?;
+                    let id = selected.context(t(lang, "no album picked"))?;
                     db::rename_album(&conn, id, &self.album_name_input)?;
                     Ok(format!(
                         "album renamed: {}",
@@ -2162,7 +2162,7 @@ impl App {
                     ))
                 }
                 AlbumDialog::Move => {
-                    let id = selected.context("альбом не выбран")?;
+                    let id = selected.context(t(lang, "no album picked"))?;
                     db::move_album(&conn, id, self.album_move_parent, None)?;
                     Ok(format!(
                         "album moved: {}",
@@ -2170,9 +2170,13 @@ impl App {
                     ))
                 }
                 AlbumDialog::Delete => {
-                    let id = selected.context("альбом не выбран")?;
+                    let id = selected.context(t(lang, "no album picked"))?;
                     let albums = db::delete_album(&conn, id)?;
-                    Ok(format!("удалено альбомов {albums}; файлы на диске не тронуты"))
+                    Ok(i18n::fill(
+                        lang,
+                        "{} albums deleted; the files on disk are untouched",
+                        &[albums.to_string()],
+                    ))
                 }
             }
         })();
@@ -2190,7 +2194,7 @@ impl App {
                 }
                 self.status = msg;
             }
-            Err(e) => self.status = format!("альбом не изменён: {e}"),
+            Err(e) => self.status = i18n::fill(lang, "the album is not changed: {}", &[e.to_string()]),
         }
     }
 
@@ -2210,10 +2214,11 @@ impl App {
 
     /// Build the plan from the current fields. DB reads and a `--out` check only.
     fn export_build(&self) -> Result<organize::ExportPlan> {
-        let album = self.export_album.context("альбом не выбран")?;
+        let lang = self.settings.lang;
+        let album = self.export_album.context(t(lang, "no album picked"))?;
         let out = self.export_out.trim();
         if out.is_empty() {
-            anyhow::bail!("укажите каталог назначения — он должен уже существовать");
+            anyhow::bail!(t(lang, "give the target folder — it must exist already"));
         }
         let out = PathBuf::from(out);
         organize::check_out_dir(&out, &self.settings.roots)?;
@@ -2266,6 +2271,7 @@ impl App {
 
     /// Start the copying: the plan is rebuilt if the fields changed after it.
     fn export_start(&mut self) {
+        let lang = self.settings.lang;
         if self.export_rx.is_some() {
             return;
         }
@@ -2275,7 +2281,7 @@ impl App {
         }
         let Some(plan) = self.export_plan.clone() else {
             if self.export_error.is_empty() {
-                self.export_error = "сначала постройте план".into();
+                self.export_error = t(lang, "build the plan first").into();
             }
             return;
         };
@@ -2291,7 +2297,7 @@ impl App {
         self.export_rx = Some(rx);
         self.export_report = None;
         self.export_error.clear();
-        self.status = "выгрузка альбома идёт в фоне".into();
+        self.status = t(lang, "the album export runs in the background").into();
     }
 
     /// Check the fields of the "Integrity" screen and parse the paths. Read only: not a single
@@ -2388,10 +2394,10 @@ impl App {
                          it whole, or “Cancel”.",
                         path.display()
                     ),
-                    i18n::Lang::Ru => format!(
-                        "файл слепка уже есть: {}. Нажмите «Перезаписать слепок», чтобы заменить \
-                         его целиком, или «Отмена».",
-                        path.display()
+                    i18n::Lang::Ru => i18n::fill(
+                        lang,
+                        "the manifest file exists already: {}. Press “Overwrite the manifest” to replace it whole, or “Cancel”.",
+                        &[path.display().to_string()]
                     ),
                 };
                 self.status =
@@ -2525,7 +2531,7 @@ impl App {
                 a_changed |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.integrity_a)
-                            .hint_text("/home/…/Фотографии с телефона")
+                            .hint_text(t(lang, "/home/…/Photos from the phone"))
                             .desired_width(460.0),
                     )
                     .changed();
@@ -2533,7 +2539,7 @@ impl App {
                 ui.label(format!("{}:", t(lang, "Folder B (copy)")));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.integrity_b)
-                        .hint_text("/mnt/backup/Фотографии с телефона")
+                        .hint_text(t(lang, "/mnt/backup/Photos from the phone"))
                         .desired_width(460.0),
                 );
                 ui.end_row();
@@ -2541,7 +2547,7 @@ impl App {
                 manifest_changed |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.integrity_manifest)
-                            .hint_text("<кэш>/photocat/manifest.sha256")
+                            .hint_text(t(lang, "<cache>/photocat/manifest.sha256"))
                             .desired_width(460.0),
                     )
                     .changed();
@@ -2663,10 +2669,7 @@ impl App {
                     "there were differences"
                 },
             );
-            match lang {
-                i18n::Lang::En => format!("last pass: {when} · {outcome}"),
-                i18n::Lang::Ru => format!("последний проход: {when} · {outcome}"),
-            }
+            i18n::fill(lang, "the last pass: {} · {}", &[when.to_string(), outcome.to_string()])
         } else {
             t(lang, "the date of the last pass is unclear — we will remind on launch").to_string()
         };
@@ -2801,6 +2804,7 @@ impl App {
 
     /// The actions of the "Albums" panel. Errors go to the status bar, no data is lost.
     fn album_apply(&mut self, action: AlbumAction) {
+        let lang = self.settings.lang;
         let Some(id) = self.album_selected else {
             return;
         };
@@ -2812,24 +2816,29 @@ impl App {
                     Ok(String::new())
                 }
                 AlbumAction::Up | AlbumAction::Down => {
-                    let node = self.album_node(id).cloned().context("альбома нет")?;
+                    let node = self.album_node(id).cloned().context(t(lang, "there is no album"))?;
                     let position = if action == AlbumAction::Up {
                         (node.position - 1).max(0)
                     } else {
                         node.position + 1
                     };
                     db::move_album(&conn, id, node.parent_id, Some(position))?;
-                    Ok(format!("альбом сдвинут: {}", db::album_path(&conn, id)?))
+                    Ok(i18n::fill(lang, "album moved: {}", &[db::album_path(&conn, id)?.to_string()]))
                 }
                 AlbumAction::AddPicked => {
                     let ids: Vec<i64> = self.picked.iter().copied().collect();
                     if ids.is_empty() {
-                        return Ok("ничего не выбрано".into());
+                        return Ok(t(lang, "nothing is picked").into());
                     }
                     let (added, already) = db::add_to_album(&conn, id, &ids)?;
-                    Ok(format!(
-                        "в альбом добавлено {added}, уже было {already}; теперь файлов {}",
-                        db::album_items(&conn, id)?.len()
+                    Ok(i18n::fill(
+                        lang,
+                        "{} added to the album, {} were there already; {} files now",
+                        &[
+                            added.to_string(),
+                            already.to_string(),
+                            db::album_items(&conn, id)?.len().to_string(),
+                        ],
                     ))
                 }
                 AlbumAction::RemovePicked => {
@@ -2840,24 +2849,28 @@ impl App {
                         .filter(|file| self.album_set.contains(file))
                         .collect();
                     if ids.is_empty() {
-                        return Ok("в альбоме нечего убирать".into());
+                        return Ok(t(lang, "there is nothing to remove from the album").into());
                     }
                     let removed = db::remove_from_album(&conn, id, &ids)?;
-                    Ok(format!(
-                        "из альбома убрано {removed}; осталось {}",
-                        db::album_items(&conn, id)?.len()
+                    Ok(i18n::fill(
+                        lang,
+                        "{} removed from the album; {} left",
+                        &[
+                            removed.to_string(),
+                            db::album_items(&conn, id)?.len().to_string(),
+                        ],
                     ))
                 }
                 AlbumAction::FileUp | AlbumAction::FileDown => {
                     let Some(file) = self.selected else {
-                        return Ok("сначала выберите снимок в сетке".into());
+                        return Ok(t(lang, "pick a photo in the grid first").into());
                     };
                     let delta = if action == AlbumAction::FileUp { -1 } else { 1 };
                     let moved = db::move_in_album(&conn, id, file, delta)?;
                     Ok(if moved {
-                        "порядок в альбоме изменён".into()
+                        t(lang, "the album order is changed").into()
                     } else {
-                        "файл уже на краю".into()
+                        t(lang, "the file is at the edge already").into()
                     })
                 }
             }
@@ -2869,7 +2882,7 @@ impl App {
                 }
                 self.refresh_albums();
             }
-            Err(e) => self.status = format!("альбом не изменён: {e}"),
+            Err(e) => self.status = i18n::fill(lang, "the album is not changed: {}", &[e.to_string()]),
         }
     }
 
@@ -3287,6 +3300,7 @@ impl App {
     /// The album dialog (M19): the name, the parent choice or the delete confirmation.
     /// Not a single button here opens or changes files on disk.
     fn album_modal(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.lang;
         let Some(dialog) = self.album_dialog else {
             return;
         };
@@ -3299,7 +3313,7 @@ impl App {
         let banned: HashSet<i64> = selected
             .map(|id| self.album_subtree(id).iter().map(|n| n.id).collect())
             .unwrap_or_default();
-        let parents: Vec<(i64, String)> = std::iter::once((0i64, "Корень".to_string()))
+        let parents: Vec<(i64, String)> = std::iter::once((0i64, t(lang, "Root").to_string()))
             .chain(
                 self.albums
                     .iter()
@@ -3310,7 +3324,7 @@ impl App {
         let delete_text = self.album_delete_text.clone();
         let resp = egui::Modal::new(egui::Id::unique("photocat-album")).show(ctx, |ui| {
             ui.set_min_width(480.0);
-            ui.label(egui::RichText::new(dialog.title()).size(16.0));
+            ui.label(egui::RichText::new(dialog.title(lang)).size(16.0));
             ui.add_space(6.0);
             match dialog {
                 AlbumDialog::Delete => {
@@ -3318,13 +3332,13 @@ impl App {
                 }
                 AlbumDialog::Move => {
                     ui.label(
-                        "Новый родитель. Свои подальбомы в списке недоступны — иначе получился бы цикл.",
+                        t(lang, "A new parent. Own sub-albums are unavailable in the list — otherwise there would be a cycle."),
                     );
                     let current = parents
                         .iter()
                         .find(|(id, _)| *id == parent)
                         .map(|(_, label)| label.as_str())
-                        .unwrap_or("Корень");
+                        .unwrap_or(t(lang, "Root"));
                     egui::ComboBox::from_id_salt("album-parent")
                         .selected_text(current)
                         .width(360.0)
@@ -3335,10 +3349,10 @@ impl App {
                         });
                 }
                 _ => {
-                    ui.label("Имя альбома: до 80 символов, уникально среди соседей без учёта регистра.");
+                    ui.label(t(lang, "The album name: up to 80 characters, unique among siblings regardless of case."));
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut name)
-                            .hint_text("Дача 2024, Май, На печать")
+                            .hint_text(t(lang, "Dacha 2024, May, For printing"))
                             .desired_width(360.0),
                     );
                     field.request_focus();
@@ -3347,10 +3361,10 @@ impl App {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 let label = match dialog {
-                    AlbumDialog::New | AlbumDialog::Sub => "Создать",
-                    AlbumDialog::Rename => "Сохранить",
-                    AlbumDialog::Move => "Переместить",
-                    AlbumDialog::Delete => "Удалить альбом",
+                    AlbumDialog::New | AlbumDialog::Sub => t(lang, "Create"),
+                    AlbumDialog::Rename => t(lang, "Save"),
+                    AlbumDialog::Move => t(lang, "Move"),
+                    AlbumDialog::Delete => t(lang, "Delete the album"),
                 };
                 let b = primary_button(ui, label);
                 if ui.add(b).clicked() {
@@ -3377,6 +3391,7 @@ impl App {
     /// The album export dialog (M20): the folder, the template, the plan tree and the report.
     /// Closing the window does not cancel a pass already started — "Stop" is in the top bar.
     fn export_modal(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.lang;
         if !self.export_open {
             return;
         }
@@ -3389,7 +3404,7 @@ impl App {
         let title = self
             .export_album
             .map(|id| album_label(&self.albums, id))
-            .unwrap_or_else(|| "альбом не выбран".into());
+            .unwrap_or_else(|| t(lang, "no album picked").into());
         let plan = self.export_plan.clone();
         let report_text = self
             .export_report
@@ -3403,24 +3418,24 @@ impl App {
             .unwrap_or_default();
         let running = self.export_rx.is_some();
         let progress_text = self.export_progress.as_ref().map(|p| {
-            let (d, t) = (p.done(), p.total());
-            if t > 0 {
-                format!("выгрузка: {d}/{t}")
+            let (d, total) = (p.done(), p.total());
+            if total > 0 {
+                i18n::fill(lang, "export: {}/{}", &[d.to_string(), total.to_string()])
             } else {
-                "выгрузка…".to_string()
+                t(lang, "exporting…").to_string()
             }
         });
         let error = self.export_error.clone();
         let files = plan.as_ref().map(|p| p.files()).unwrap_or(0);
         let resp = egui::Modal::new(egui::Id::unique("photocat-export")).show(ctx, |ui| {
             ui.set_min_width(640.0);
-            ui.label(egui::RichText::new("Выгрузить альбом на диск").size(16.0));
-            ui.label(format!("Альбом «{title}»"));
+            ui.label(egui::RichText::new(t(lang, "Export the album to disk")).size(16.0));
+            ui.label(i18n::fill(lang, "Album “{}”", std::slice::from_ref(&title)));
             ui.label(
-                egui::RichText::new(
-                    "Копии файлов: структура и порядок повторяют альбом. Оригиналы и каталог \
-                     архива не меняются; в цели ничего не перезаписывается и не удаляется.",
-                )
+                egui::RichText::new(t(
+                    lang,
+                    "File copies: the structure and the order repeat the album. The originals and the archive folder do not change; nothing in the target is overwritten or deleted.",
+                ))
                 .size(11.0)
                 .color(dim(ui)),
             );
@@ -3429,14 +3444,14 @@ impl App {
                 .num_columns(2)
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
-                    ui.label("Каталог:");
+                    ui.label(t(lang, "Folder:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut out)
-                            .hint_text("/mnt/disk/выгрузка — каталог уже существует")
+                            .hint_text(t(lang, "/mnt/disk/export — the folder exists already"))
                             .desired_width(440.0),
                     );
                     ui.end_row();
-                    ui.label("Имя файла:");
+                    ui.label(t(lang, "File name:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut name)
                             .hint_text(organize::EXPORT_TEMPLATE)
@@ -3445,24 +3460,24 @@ impl App {
                     ui.end_row();
                 });
             ui.label(
-                egui::RichText::new(
-                    "Подстановки: {n} {date} {time} {camera} {tag} {orig} {ext} {hash8}. \
-                     {n} — позиция в альбоме; каталоги подальбомов без номеров.",
-                )
+                egui::RichText::new(t(
+                    lang,
+                    "Placeholders: {n} {date} {time} {camera} {tag} {orig} {ext} {hash8}. {n} is the position in the album; sub-album folders carry no numbers.",
+                ))
                 .size(11.0)
                 .color(dim(ui)),
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button("Показать план").clicked() {
+                if ui.button(t(lang, "Show the plan")).clicked() {
                     show_plan = true;
                 }
                 if ui
                     .add_enabled(
                         !running,
-                        egui::Button::new(format!("Выгрузить {files} файлов")),
+                        egui::Button::new(i18n::fill(lang, "Export {} files", &[files.to_string()])),
                     )
-                    .on_hover_text("копии, не ссылки; повторный прогон ничего не дублирует")
+                    .on_hover_text(t(lang, "copies, not links; a repeated pass duplicates nothing"))
                     .clicked()
                 {
                     start = true;
@@ -3525,7 +3540,7 @@ impl App {
         }
         if copy {
             ctx.copy_text(report_text.clone());
-            self.status = "отчёт выгрузки скопирован в буфер обмена".into();
+            self.status = t(lang, "the export report is copied to the clipboard").into();
         }
         if close {
             self.export_open = false;
@@ -3546,16 +3561,13 @@ impl App {
             ui.set_min_width(460.0);
             ui.label(egui::RichText::new(t(lang, "Empty the trash?")).size(16.0));
             ui.add_space(4.0);
-            let count = i18n::count(lang, n,"file");
-            ui.label(match lang {
-                i18n::Lang::En => format!(
-                    "Moved to the OS trash: {count}, {}.",
-                    db::human_in(lang, bytes)
-                ),
-                i18n::Lang::Ru => {
-                    format!("Будет перенесено в системную корзину ОС: файлов {n}, {}.", db::human_in(lang, bytes))
-                }
-            });
+            ui.label({
+                    i18n::fill(
+                        lang,
+                        "Will be moved to the OS trash: {} files, {}.",
+                        &[n.to_string(), db::human_in(lang, bytes)],
+                    )
+                });
             ui.label(
                 egui::RichText::new(t(
                     lang,
@@ -3607,16 +3619,7 @@ impl App {
         let (tx, rx) = mpsc::channel();
         self.trash_rx = Some(rx);
         let lang = self.settings.lang;
-        self.status = match lang {
-            i18n::Lang::En => format!(
-                "trash: moving {} to the OS trash…",
-                i18n::count(lang, items.len(),"file")
-            ),
-            i18n::Lang::Ru => format!(
-                "корзина: переношу {} файлов в системную корзину…",
-                items.len()
-            ),
-        };
+        self.status = i18n::fill(lang, "trash: moving {} files to the OS trash…", &[items.len().to_string()]);
         std::thread::spawn(move || {
             let r = recycle::empty(&db_path, &items, lang, Some(progress));
             let _ = tx.send(r);
@@ -3779,16 +3782,7 @@ impl App {
         if ui.button(t(lang, "Check the model")).clicked() {
             match embed::check_model(&self.settings) {
                 Ok(()) => {
-                    self.status = match lang {
-                        i18n::Lang::En => format!(
-                            "model {} checked: sha256 matched",
-                            t(lang, embed::active_entry(&self.settings).title)
-                        ),
-                        i18n::Lang::Ru => format!(
-                            "модель {} проверена: sha256 совпал",
-                            t(lang, embed::active_entry(&self.settings).title)
-                        ),
-                    }
+                    self.status = i18n::fill(lang, "the model {} is verified: the sha256 matches", &[t(lang, embed::active_entry(&self.settings).title).to_string()])
                 }
                 Err(e) => self.status = format!("{}: {e:#}", t(lang, "the model is not ready")),
             }
@@ -3834,10 +3828,7 @@ impl App {
         ui.horizontal(|ui| {
             let r = ui.add(
                 egui::Slider::new(&mut self.settings.max_model_mb, 50..=2000)
-                    .suffix(match lang {
-                        i18n::Lang::En => " MiB",
-                        i18n::Lang::Ru => " МиБ",
-                    })
+                    .suffix(t(lang, " MiB"))
                     .step_by(10.0),
             );
             if r.drag_stopped() || r.lost_focus() {
@@ -4023,10 +4014,10 @@ impl App {
                      computed per tag",
                     self.tags.len()
                 ),
-                i18n::Lang::Ru => format!(
-                    "выше порога: файлов {hits} из {} с тегами; процентиль считается отдельно \
-                     по каждому тегу",
-                    self.tags.len()
+                i18n::Lang::Ru => i18n::fill(
+                    lang,
+                    "above the threshold: {} of {} files with tags; the percentile is counted per tag",
+                    &[self.tags.len().to_string()]
                 ),
             }
         };
@@ -4278,10 +4269,7 @@ impl App {
         match r {
             Ok(()) => {
                 self.tag_dict_dirty = true;
-                self.status = match lang {
-                    i18n::Lang::En => format!("dictionary: “{}” saved", d.label),
-                    i18n::Lang::Ru => format!("словарь: «{}» сохранён", d.label),
-                };
+                self.status = i18n::fill(lang, "dictionary: “{}” saved", std::slice::from_ref(&d.label));
             }
             Err(e) => {
                 // The label may have collided with a taken one: show the dictionary from the DB, not our copy.
@@ -4291,7 +4279,7 @@ impl App {
                 {
                     self.tag_defs = defs;
                 }
-                self.status = format!("словарь не сохранён: {e}");
+                self.status = i18n::fill(lang, "the dictionary is not saved: {}", &[e.to_string()]);
             }
         }
     }
@@ -4303,10 +4291,7 @@ impl App {
             return;
         }
         if self.tag_defs.iter().any(|d| d.label == label) {
-            self.status = match lang {
-                i18n::Lang::En => format!("the tag “{label}” is already in the dictionary"),
-                i18n::Lang::Ru => format!("тег «{label}» уже есть в словаре"),
-            };
+            self.status = i18n::fill(lang, "the tag “{}” is in the dictionary already", std::slice::from_ref(&label));
             return;
         }
         let n = self
@@ -4339,16 +4324,11 @@ impl App {
                 self.tag_new_prompts.clear();
                 self.tag_defs.push(d.clone());
                 self.tag_dict_dirty = true;
-                self.status = match lang {
-                    i18n::Lang::En => format!(
-                        "tag “{}” added — press “Recompute tags”",
-                        d.label
-                    ),
-                    i18n::Lang::Ru => format!(
-                        "тег «{}» добавлен — нажмите «Пересчитать теги»",
-                        d.label
-                    ),
-                };
+                self.status = i18n::fill(
+                    lang,
+                    "the tag “{}” is added — press “Recompute the tags”",
+                    std::slice::from_ref(&d.label),
+                );
             }
             Err(e) => self.status = format!("{}: {e}", t(lang, "tag not added")),
         }
@@ -4449,18 +4429,7 @@ impl App {
                 self.tag_json_path = path.to_string_lossy().to_string();
                 self.tag_defs = defs;
                 self.tag_dict_dirty = true;
-                self.status = match lang {
-                    i18n::Lang::En => format!(
-                        "dictionary loaded: {} — press “Recompute tags”",
-                        i18n::count(
-                            lang,
-                            self.tag_defs.len(),"tag")
-                    ),
-                    i18n::Lang::Ru => format!(
-                        "словарь загружен: {} тегов — нажмите «Пересчитать теги»",
-                        self.tag_defs.len()
-                    ),
-                };
+                self.status = i18n::fill(lang, "the dictionary is loaded: {} tags — press “Recompute the tags”", &[self.tag_defs.len().to_string()]);
             }
             Err(e) => self.status = format!("{}: {e}", t(lang, "dictionary not loaded")),
         }
@@ -4578,20 +4547,17 @@ impl App {
 
     fn settings_storage(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
-        let n = self.items.len();
         let bytes: i64 = self.items.iter().map(|r| r.size).sum();
         let trashed = self.trash_items.len();
-        let index = match lang {
-            i18n::Lang::En => format!(
-                "{} · {} · {trashed} in the trash",
+        let index = i18n::fill(
+            lang,
+            "{}, {} · {} in the trash",
+            &[
+                i18n::count(lang, self.items.len(), "file"),
                 db::human_in(lang, bytes),
-                i18n::count(lang, n,"file")
-            ),
-            i18n::Lang::Ru => format!(
-                "файлов {n}, {} · в корзине {trashed}",
-                db::human_in(lang, bytes)
-            ),
-        };
+                trashed.to_string(),
+            ],
+        );
         meta_row(ui, t(lang, "Index"), &index);
         meta_row(ui, t(lang, "DB"), &self.db_path.display().to_string());
         meta_row(ui, t(lang, "Cache"), &db::cache_dir().display().to_string());
@@ -4719,12 +4685,13 @@ impl App {
     }
 
     fn reset_filters(&mut self) {
+        let lang = self.settings.lang;
         self.query.clear();
         self.kind_filter = KindFilter::All;
         self.tag_filter = None;
         self.semantic_hits = None;
         self.ocr_snippets.clear();
-        self.status = "фильтры сброшены".into();
+        self.status = t(lang, "the filters are reset").into();
     }
 
     /// The 32 px top bar: the mark, the search, the state and the way into "Settings".
@@ -4754,14 +4721,14 @@ impl App {
             let mut text_mode = self.search_ocr;
             if ui
                 .selectable_label(!text_mode, egui::RichText::new(t(lang, "Semantic")).size(11.0))
-                .on_hover_text(t(lang, "поиск по содержимому снимков"))
+                .on_hover_text(t(lang, t(lang, "search by the content of the photos")))
                 .clicked()
             {
                 text_mode = false;
             }
             if ui
                 .selectable_label(text_mode, egui::RichText::new(t(lang, "By text")).size(11.0))
-                .on_hover_text(t(lang, "поиск по распознанному тексту"))
+                .on_hover_text(t(lang, t(lang, "search the recognized text")))
                 .clicked()
             {
                 text_mode = true;
@@ -4852,24 +4819,10 @@ impl App {
                     self.roots_open = true;
                 }
                 if wide {
-                    let facts = match lang {
-                        i18n::Lang::En => format!(
-                            "{} files · {} with EXIF · synced",
-                            self.items.len(),
-                            self.items
+                    let facts = i18n::fill(lang, "{} files · {} with EXIF · synced", &[self.items.len().to_string(), self.items
                                 .iter()
                                 .filter(|r| r.taken_src == "exif")
-                                .count()
-                        ),
-                        i18n::Lang::Ru => format!(
-                            "{} файлов · {} с EXIF · синхронизировано",
-                            self.items.len(),
-                            self.items
-                                .iter()
-                                .filter(|r| r.taken_src == "exif")
-                                .count()
-                        ),
-                    };
+                                .count().to_string()]);
                     ui.label(num(ui, facts, 10.0).color(dim(ui)));
                 }
             });
@@ -4953,11 +4906,13 @@ impl App {
                     .color(accent(ui)),
             );
             let fact = match last {
-                Some(date) if days_over > 0 => format!(
-                    "слепок {manifest} · прошлый проход {date} · срок вышел {days_over} дн. назад"
+                Some(date) if days_over > 0 => i18n::fill(
+                    lang,
+                    "manifest {} · the last pass {} · due {} days ago",
+                    &[manifest.to_string(), date.to_string(), days_over.to_string()],
                 ),
-                Some(date) => format!("слепок {manifest} · прошлый проход {date} · срок вышел"),
-                None => format!("слепок {manifest} · прохода ещё не было"),
+                Some(date) => i18n::fill(lang, "manifest {} · the last pass {} · the term is over", &[manifest.to_string(), date.to_string()]),
+                None => i18n::fill(lang, "manifest {} · there has been no pass yet", std::slice::from_ref(&manifest)),
             };
             ui.label(egui::RichText::new(fact).size(11.0).color(dim(ui)));
             if ui
@@ -5027,22 +4982,19 @@ impl App {
                     let text = if self.picked.len() > 1 {
                         format!(
                             "{} {} · {} · {date}",
-                            t(lang, "Выбрано"),
+                            t(lang, t(lang, "Picked")),
                             self.picked.len(),
                             file_name(&f.path)
                         )
                     } else {
-                        format!("{}: {} · {date}", t(lang, "Выбрано"), file_name(&f.path))
+                        format!("{}: {} · {date}", t(lang, t(lang, "Picked")), file_name(&f.path))
                     };
                     ui.label(num(ui, text, 10.0).color(th.text_med));
                     let (bar, _) =
                         ui.allocate_exact_size(egui::vec2(1.0, 14.0), egui::Sense::hover());
                     ui.painter().rect_filled(bar, 0.0, th.border_strong);
                 }
-                let total = match lang {
-                    i18n::Lang::En => format!("{} files", self.items.len()),
-                    i18n::Lang::Ru => format!("{} файлов", self.items.len()),
-                };
+                let total = i18n::fill(lang, "{}", &[i18n::count(lang, self.items.len(), "file")]);
                 ui.label(num(ui, total, 10.0).color(th.text_dim));
             });
         });
@@ -5239,10 +5191,7 @@ impl App {
                     .color(dim(ui)),
             );
             ui.add_space(4.0);
-            let threshold = match lang {
-                i18n::Lang::En => format!("Similarity threshold: {} bits out of 64", self.max_dist),
-                i18n::Lang::Ru => format!("Порог похожести: {} бит из 64", self.max_dist),
-            };
+            let threshold = i18n::fill(lang, "Similarity threshold: {} bits out of 64", &[self.max_dist.to_string()]);
             ui.label(egui::RichText::new(threshold));
             let resp = ui.add(egui::Slider::new(&mut self.max_dist, 0..=16));
             if resp.changed() {
@@ -5257,38 +5206,10 @@ impl App {
                 let t0 = std::time::Instant::now();
                 self.groups = dupes::find_groups(&self.items, self.max_dist);
                 let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
-                self.status = match lang {
-                    i18n::Lang::En => format!(
-                        "{} · {} wasted · {:.1} s",
-                        i18n::count(
-                            lang,
-                            self.groups.len(),"group"),
-                        db::human_in(lang, waste),
-                        t0.elapsed().as_secs_f32()
-                    ),
-                    i18n::Lang::Ru => format!(
-                        "групп: {}, дублей на {}, за {:.1} с",
-                        self.groups.len(),
-                        db::human_in(lang, waste),
-                        t0.elapsed().as_secs_f32()
-                    ),
-                };
+                self.status = i18n::fill(lang, "{} groups, {} duplicates, in {} s", &[self.groups.len().to_string(), db::human_in(lang, waste).to_string(), format!("{:.1}", t0.elapsed().as_secs_f32())]);
             }
             let sum = dupes::summary(&self.items, &self.groups);
-            let summary = match lang {
-                i18n::Lang::En => format!(
-                    "{} in groups, {} marked spare, {} to free",
-                    i18n::count(lang, sum.groups,"file"),
-                    sum.marked_drop,
-                    db::human_in(lang, sum.freed)
-                ),
-                i18n::Lang::Ru => format!(
-                    "в группах {}, помечено лишними {}, освободится {}",
-                    sum.groups,
-                    sum.marked_drop,
-                    db::human_in(lang, sum.freed)
-                ),
-            };
+            let summary = i18n::fill(lang, "{} in the groups, {} marked spare, {} will be freed", &[sum.groups.to_string(), sum.marked_drop.to_string(), db::human_in(lang, sum.freed).to_string()]);
             ui.label(egui::RichText::new(summary).size(11.0).color(dim(ui)));
             let has_groups = !self.groups.is_empty();
             ui.add_space(4.0);
@@ -5305,14 +5226,13 @@ impl App {
                 let rows = csv.lines().count().saturating_sub(1);
                 match std::fs::write(&path, &csv) {
                     Ok(()) => {
-                        self.status = match lang {
-                            i18n::Lang::En => {
-                                format!("plan written: {} ({rows} rows)", path.display())
+                        self.status = {
+                                i18n::fill(
+                                    lang,
+                                    "the plan is written: {} ({} rows)",
+                                    &[path.display().to_string(), rows.to_string()],
+                                )
                             }
-                            i18n::Lang::Ru => {
-                                format!("план записан: {} (строк {rows})", path.display())
-                            }
-                        }
                     }
                     Err(e) => {
                         self.status = format!("{}: {e}", t(lang, "plan not written"));
@@ -5350,15 +5270,13 @@ impl App {
                 .filter(|r| r.kind == "image" && r.sharpness.is_none())
                 .count();
             if no_sharp > 0 {
-                let note = match lang {
-                    i18n::Lang::En => format!(
-                        "sharpness not measured on {} — index the folder",
-                        i18n::count(lang, no_sharp,"shot")
-                    ),
-                    i18n::Lang::Ru => {
-                        format!("резкость не посчитана у {no_sharp} снимков — проиндексируйте каталог")
-                    }
-                };
+                let note = {
+                        i18n::fill(
+                            lang,
+                            "the sharpness is not computed for {} photos — index the folder",
+                            &[no_sharp.to_string()],
+                        )
+                    };
                 ui.label(egui::RichText::new(note).size(11.0).color(dim(ui)));
             }
         });
@@ -5397,29 +5315,11 @@ impl App {
                     self.settings_tab = SettingsTab::Faces;
                 }
             }
-            let people = i18n::count(lang, self.face_faces as usize,"person");
-            let photos = i18n::count(lang, self.face_photos as usize,"shot");
-            let groups = i18n::count(lang, self.face_clusters.len(),"group");
-            let found = match lang {
-                i18n::Lang::En => format!("{people} on {photos}, {groups}"),
-                i18n::Lang::Ru => format!(
-                    "лиц: {} на {} снимках, групп: {}",
-                    self.face_faces,
-                    self.face_photos,
-                    self.face_clusters.len()
-                ),
-            };
+            let found = i18n::fill(lang, "{} faces in {} photos, {} groups", &[self.face_faces.to_string(), self.face_photos.to_string(), self.face_clusters.len().to_string()]);
             ui.label(egui::RichText::new(found).size(11.0).color(dim(ui)));
-            let todo = match lang {
-                i18n::Lang::En => format!(
-                    "no faces yet: {} of {}",
-                    self.face_todo,
-                    i18n::count(lang, self.face_images,"shot")
-                ),
-                i18n::Lang::Ru => {
-                    format!("ещё без лиц: {} из {} снимков", self.face_todo, self.face_images)
-                }
-            };
+            let todo = {
+                    i18n::fill(lang, "{} of {} photos have no faces yet", &[self.face_todo.to_string(), self.face_images.to_string()])
+                };
             ui.label(egui::RichText::new(todo).size(11.0).color(dim(ui)));
             ui.add_space(4.0);
             if self.face_rx.is_some() {
@@ -5579,9 +5479,10 @@ impl App {
                          look for a specific thing with free-word semantic search; \
                          nothing is sent anywhere"
                     ),
-                    i18n::Lang::Ru => format!(
-                        "локально прогнать CLIP по превью: {defs} приблизительных категорий; \
-                         нужный предмет ищите смысловым поиском словами; ничего не отправляется"
+                    i18n::Lang::Ru => i18n::fill(
+                        lang,
+                        "run CLIP locally over the previews: {} approximate categories; look for the thing you need with a word search; nothing is sent anywhere",
+                        &[self.tag_defs.iter().filter(|d| d.enabled).count().to_string()],
                     ),
                 };
                 if ui
@@ -5616,14 +5517,11 @@ impl App {
                     .size(11.0)
                     .color(dim(ui)),
                 );
-                let free = match lang {
-                    i18n::Lang::En => format!(
-                        "free-word semantic search understands any words, not only these {defs} tags"
-                    ),
-                    i18n::Lang::Ru => format!(
-                        "свободный смысловой поиск понимает любые слова, не только {defs} тегов"
-                    ),
-                };
+                let free = i18n::fill(
+                    lang,
+                    "a free word search understands any words, not only the {} tags",
+                    &[defs.to_string()],
+                );
                 ui.label(
                     egui::RichText::new(free).size(11.0).color(dim(ui)),
                 );
@@ -5744,25 +5642,13 @@ impl App {
                 );
             }
             let images = self.items.iter().filter(|r| r.kind == "image").count();
-            let with_text = match lang {
-                i18n::Lang::En => format!(
-                    "with text: {} of {images} {}",
-                    self.ocr_files,
-                    if images == 1 { "photo" } else { "photos" }
-                ),
-                i18n::Lang::Ru => format!("с текстом: {} из {images} снимков", self.ocr_files),
-            };
+            let with_text = i18n::fill(
+                lang,
+                "with text: {} of {} photos",
+                &[self.ocr_files.to_string(), images.to_string()],
+            );
             ui.label(egui::RichText::new(with_text).size(11.0).color(dim(ui)));
-            let candidates = match lang {
-                i18n::Lang::En => format!(
-                    "candidates: {}, left: {}",
-                    self.ocr_candidates, self.ocr_remaining
-                ),
-                i18n::Lang::Ru => format!(
-                    "кандидатов: {}, осталось {}",
-                    self.ocr_candidates, self.ocr_remaining
-                ),
-            };
+            let candidates = i18n::fill(lang, "{} candidates, {} left", &[self.ocr_candidates.to_string(), self.ocr_remaining.to_string()]);
             ui.label(egui::RichText::new(candidates).size(11.0).color(dim(ui)));
             ui.add_space(4.0);
             if self.ocr_rx.is_some() {
@@ -6249,6 +6135,7 @@ impl App {
     /// Going from a face to the photo: not into the common grid but into the calendar day it lies in.
     /// Without a date — the common grid with this file selected.
     fn open_from_faces(&mut self, file_id: i64) {
+        let lang = self.settings.lang;
         // The old search and filter must not hide the photo inside a calendar day.
         self.reset_filters();
         self.select_one(file_id);
@@ -6268,11 +6155,11 @@ impl App {
                 self.cal_week = monday_of(d);
                 self.cal_scale = CalScale::Month;
                 self.view = View::Calendar;
-                self.status = format!("снимок открыт в календаре: {}", d.format("%Y-%m-%d"));
+                self.status = i18n::fill(lang, "the photo is open in the calendar: {}", &[d.format("%Y-%m-%d").to_string()]);
             }
             None => {
                 self.view = View::Grid;
-                self.status = "у снимка нет даты — открыт в общих файлах с выделением".into();
+                self.status = t(lang, "the photo has no date — it is open in all files, selected").into();
             }
         }
     }
@@ -7172,6 +7059,7 @@ impl App {
     }
 
     fn start_download(&mut self) {
+        let lang = self.settings.lang;
         if self.download_rx.is_some() || !self.download_consent {
             return;
         }
@@ -7181,7 +7069,7 @@ impl App {
         self.download_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.download_rx = Some(rx);
-        self.status = "скачивание модели: только веса, без пользовательских данных".into();
+        self.status = t(lang, "downloading a model: weights only, no user data").into();
         std::thread::spawn(move || {
             let r = embed::download_model(&settings, &requested, true, Some(progress));
             let _ = tx.send(r);
@@ -7273,33 +7161,34 @@ impl App {
     /// A change of the view, filter, query, search or order clears the selection: an action
     /// must not touch files that are no longer on the screen. The status bar says why (M18).
     fn sync_pick_scope(&mut self) {
+        let lang = self.settings.lang;
         let now = self.pick_scope_now();
         if now == self.pick_scope {
             return;
         }
         let reason = if now.view != self.pick_scope.view {
-            "изменился вид"
+            t(lang, "the view changed")
         } else if now.query != self.pick_scope.query {
-            "изменился фильтр по пути/дате"
+            t(lang, "the folder and date filter changed")
         } else if now.kind != self.pick_scope.kind {
-            "изменился фильтр фото/видео"
+            t(lang, "the photo and video filter changed")
         } else if now.tag != self.pick_scope.tag {
-            "изменился фильтр по тегу"
+            t(lang, "the tag filter changed")
         } else if now.hits != self.pick_scope.hits {
-            "изменился поиск"
+            t(lang, "the search changed")
         } else if now.album != self.pick_scope.album {
             if now.album.is_none() {
-                "закрыт альбом"
+                t(lang, "the album was closed")
             } else {
-                "открыт другой альбом"
+                t(lang, "another album was opened")
             }
         } else if now.browse_all != self.pick_scope.browse_all {
-            "изменился состав сетки альбома"
+            t(lang, "the grid of the album changed")
         } else {
-            "изменился порядок"
+            t(lang, "the order changed")
         };
         self.pick_scope = now;
-        self.clear_picked(&format!("выделение снято: {reason}"));
+        self.clear_picked(&i18n::fill(lang, "the selection is cleared: {}", &[reason.to_string()]));
     }
 
     /// Clear the selection. The fact goes to the status bar only if there was something to
@@ -7324,6 +7213,7 @@ impl App {
     /// A click on a tile: a plain one selects one, Ctrl adds or removes, Shift takes a range
     /// in the current grid order (`order` — the ids in the order of `App::ordered`).
     fn pick_clicked(&mut self, id: i64, click: PickClick, order: &[i64]) {
+        let lang = self.settings.lang;
         match click {
             PickClick::Plain => self.select_one(id),
             PickClick::Toggle => {
@@ -7333,7 +7223,7 @@ impl App {
                 self.pick_anchor = Some(id);
                 if self.picked.is_empty() {
                     self.selected = None;
-                    self.status = "выделение снято".into();
+                    self.status = t(lang, "the selection is cleared").into();
                 } else {
                     // A removed tile is no longer "the last selected": take one of the remaining.
                     self.selected = if self.picked.contains(&id) {
@@ -7383,16 +7273,21 @@ impl App {
         if !self.selected.is_some_and(|id| self.picked.contains(&id)) {
             self.selected = Some(first);
         }
-        self.status = format!(
-            "выбрано {} · {}",
-            self.picked.len(),
-            db::human_in(self.settings.lang, bytes)
+        let lang = self.settings.lang;
+        self.status = i18n::fill(
+            lang,
+            "{} selected · {}",
+            &[
+                self.picked.len().to_string(),
+                db::human_in(self.settings.lang, bytes),
+            ],
         );
     }
 
     /// Esc clears the selection, Ctrl+A takes what was found — only in the grid, when the
     /// keyboard is not taken by an input field and no dialog or full screen is open.
     fn pick_keys(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.lang;
         let modal = self.viewer.is_some()
             || self.settings_open
             || self.roots_open
@@ -7405,7 +7300,7 @@ impl App {
             return;
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.clear_picked("выделение снято");
+            self.clear_picked(t(lang, "the selection is cleared"));
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
             self.pick_all();
@@ -7486,18 +7381,7 @@ impl App {
             self.save_settings();
         }
         if self.tags.len() < 100 {
-            let few = match lang {
-                i18n::Lang::En => format!(
-                    "few tags ({} files) — the percentile is noisy, the raw threshold {:.2} is used",
-                    self.tags.len(),
-                    self.settings.tag_show
-                ),
-                i18n::Lang::Ru => format!(
-                    "мало тегов ({} файлов) — процентиль шумный, берётся сырой порог {:.2}",
-                    self.tags.len(),
-                    self.settings.tag_show
-                ),
-            };
+            let few = i18n::fill(lang, "few tags ({} files) — the percentile is noisy, the raw threshold {} is used", &[self.tags.len().to_string(), format!("{:.2}", self.settings.tag_show)]);
             ui.label(egui::RichText::new(few).size(11.0).color(dim(ui)));
         }
     }
@@ -7578,6 +7462,7 @@ impl App {
     }
 
     fn start_embed(&mut self) {
+        let lang = self.settings.lang;
         if self.embed_rx.is_some() {
             return;
         }
@@ -7586,7 +7471,7 @@ impl App {
         self.embed_progress = Some(progress.clone());
         let (tx, rx) = mpsc::channel();
         self.embed_rx = Some(rx);
-        self.status = "CLIP: считаю эмбеддинги и теги…".into();
+        self.status = t(lang, "CLIP: computing the embeddings and the tags…").into();
         std::thread::spawn(move || {
             let r = embed::embed_and_retag(&db_path, 8, 8, Some(progress));
             let _ = tx.send(r);
@@ -7597,6 +7482,7 @@ impl App {
 
     /// `Some(id)` — this photo only (the main action), `None` — a batch pass over the candidates.
     fn start_ocr(&mut self, file: Option<i64>) {
+        let lang = self.settings.lang;
         if self.ocr_rx.is_some() || self.tesseract.is_none() {
             return;
         }
@@ -7617,13 +7503,10 @@ impl App {
                             .and_then(|s| s.to_str())
                             .map(str::to_string)
                     })
-                    .unwrap_or_else(|| "выбранного снимка".into());
-                format!("OCR: распознаю текст с {name}…")
+                    .unwrap_or_else(|| t(lang, "the selected photo").into());
+                i18n::fill(lang, "OCR: recognizing the text of {}…", &[name])
             }
-            None => format!(
-                "OCR: пакетный проход по {} кандидатам…",
-                self.ocr_candidates
-            ),
+            None => i18n::fill(lang, "OCR: a batch pass over {} candidates…", &[self.ocr_candidates.to_string()]),
         };
         std::thread::spawn(move || {
             let r = match file {
@@ -7641,6 +7524,7 @@ impl App {
     }
 
     fn start_search(&mut self) {
+        let lang = self.settings.lang;
         let q = self.semantic_query.trim().to_string();
         if q.is_empty() {
             self.semantic_hits = None;
@@ -7653,34 +7537,26 @@ impl App {
             let res = db::open(&self.db_path).and_then(|c| db::search_ocr(&c, &q, 200));
             match res {
                 Ok(hits) => {
-                    self.status = format!(
-                        "поиск по тексту «{q}»: файлов {} за {} мс",
-                        hits.len(),
-                        t.elapsed().as_millis()
-                    );
+                    self.status = i18n::fill(lang, "text search “{}”: {} files in {} ms", &[q.to_string(), hits.len().to_string(), t.elapsed().as_millis().to_string()]);
                     self.ocr_snippets = hits.iter().cloned().collect();
                     self.semantic_hits = Some(hits.into_iter().map(|(id, _)| id).collect());
                 }
-                Err(e) => self.status = format!("поиск по тексту не удался: {e}"),
+                Err(e) => self.status = i18n::fill(lang, "the text search failed: {}", &[e.to_string()]),
             }
             return;
         }
         if !embed::model_present(&self.settings) {
-            self.status = "смысловой поиск недоступен: модель не скачана (см. «Настройки»)".into();
+            self.status = t(lang, "the word search is unavailable: the model is not downloaded (see the Settings)").into();
             return;
         }
         if let Some(model) = self.ml_model.as_mut() {
             let t = std::time::Instant::now();
             match embed::search(&self.db_path, model, &q, 200) {
                 Ok(hits) => {
-                    self.status = format!(
-                        "смысловой поиск «{q}»: {} файлов за {} мс",
-                        hits.len(),
-                        t.elapsed().as_millis()
-                    );
+                    self.status = i18n::fill(lang, "word search “{}”: {} files in {} ms", &[q.to_string(), hits.len().to_string(), t.elapsed().as_millis().to_string()]);
                     self.semantic_hits = Some(hits.into_iter().map(|(id, _)| id).collect());
                 }
-                Err(e) => self.status = format!("поиск не удался: {e}"),
+                Err(e) => self.status = i18n::fill(lang, "the search failed: {}", &[e.to_string()]),
             }
             return;
         }
@@ -7691,7 +7567,7 @@ impl App {
         let settings = self.settings.clone();
         let (tx, rx) = mpsc::channel();
         self.search_rx = Some(rx);
-        self.status = format!("CLIP: загружаю модель для запроса «{q}»…");
+        self.status = i18n::fill(lang, "CLIP: loading the model for the query “{}”…", std::slice::from_ref(&q));
         std::thread::spawn(move || {
             let t = std::time::Instant::now();
             let res = embed::Model::load(&settings, 8).and_then(|mut model| {
@@ -7714,12 +7590,11 @@ impl App {
         let (tx, rx) = mpsc::channel();
         self.face_rx = Some(rx);
         let lang = self.settings.lang;
-        self.status = match lang {
-            i18n::Lang::En => {
-                format!("people: model {}, threshold {threshold:.2}…", faces::MODEL_ID)
-            }
-            i18n::Lang::Ru => format!("лица: моделей {}, порог {threshold:.2}…", faces::MODEL_ID),
-        };
+        self.status = i18n::fill(
+            lang,
+            "faces: {} models, the threshold {}…",
+            &[faces::MODEL_ID.to_string(), format!("{threshold:.2}")],
+        );
         std::thread::spawn(move || {
             let jobs = std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -7766,6 +7641,7 @@ impl App {
     }
 
     fn start_index(&mut self) {
+        let lang = self.settings.lang;
         let mut roots: Vec<PathBuf> = self.roots.iter().map(PathBuf::from).collect();
         let typed = self.path_input.trim();
         if !typed.is_empty() && !roots.iter().any(|r| r == Path::new(typed)) {
@@ -7773,7 +7649,7 @@ impl App {
         }
         if roots.is_empty() {
             self.status =
-                "укажите каталог в верхней панели или добавьте его кнопкой «Каталоги»".into();
+                t(lang, "give a folder in the top bar or add one with the “Folders” button").into();
             return;
         }
         let missing: Vec<String> = roots
@@ -7783,7 +7659,7 @@ impl App {
             .collect();
         roots.retain(|r| r.is_dir());
         if roots.is_empty() {
-            self.status = format!("не каталог: {}", missing.join(", "));
+            self.status = i18n::fill(lang, "not a folder: {}", &[missing.join(", ").to_string()]);
             return;
         }
         let db_path = self.db_path.clone();
@@ -7795,12 +7671,12 @@ impl App {
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
         self.status = if roots.len() == 1 {
-            format!("индексация {}…", roots[0].display())
+            i18n::fill(lang, "indexing {}…", &[roots[0].display().to_string()])
         } else {
-            format!("индексация {} каталогов…", roots.len())
+            i18n::fill(lang, "indexing {} folders…", &[roots.len().to_string()])
         };
         if !missing.is_empty() {
-            self.status.push_str(&format!(" (пропущено: {})", missing.join(", ")));
+            self.status.push_str(&i18n::fill(lang, " (skipped: {})", &[missing.join(", ").to_string()]));
         }
         std::thread::spawn(move || {
             let t0 = std::time::Instant::now();
@@ -7826,7 +7702,14 @@ impl App {
                     }
                     Err(e) => {
                         errors += 1;
-                        eprintln!("индексация {}: {e}", root.display());
+                        eprintln!(
+                            "{}",
+                            i18n::fill(
+                                lang,
+                                "indexing {}: {}",
+                                &[root.display().to_string(), e.to_string()],
+                            )
+                        );
                     }
                 }
             }
@@ -8041,7 +7924,7 @@ fn tag_row(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .small_button(t(lang, "remove"))
-                .on_hover_text(t(lang, "убрать тег у этого фото; оригинал не меняется"))
+                .on_hover_text(t(lang, t(lang, "remove the tag from this photo; the original does not change")))
                 .clicked()
             {
                 *hide = Some(tag.to_string());
@@ -9026,6 +8909,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let lang = self.settings.lang;
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
         // M22: the palette is applied before the first shape of the frame and only on a theme change.
@@ -9057,7 +8941,7 @@ impl eframe::App for App {
                             s.lang = self.settings.lang;
                             s.to_string()
                         }
-                        Err(e) => format!("индексация не удалась: {e}"),
+                        Err(e) => i18n::fill(lang, "the indexing failed: {}", &[e.to_string()]),
                     };
                     self.rx = None;
                     self.progress = None;
@@ -9085,7 +8969,7 @@ impl eframe::App for App {
                             tags.lang = self.settings.lang;
                             self.status = format!("{embed}; {tags}");
                         }
-                        Err(e) => self.status = format!("CLIP не посчитан: {e}"),
+                        Err(e) => self.status = i18n::fill(lang, "CLIP is not computed: {}", &[e.to_string()]),
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9110,7 +8994,7 @@ impl eframe::App for App {
                             stats.lang = self.settings.lang;
                             self.status = stats.to_string();
                         }
-                        Err(e) => self.status = format!("теги не пересчитаны: {e}"),
+                        Err(e) => self.status = i18n::fill(lang, "the tags are not recomputed: {}", &[e.to_string()]),
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9131,10 +9015,14 @@ impl eframe::App for App {
                         Ok((model, hits, ms)) => {
                             self.ml_model = Some(model);
                             self.status =
-                                format!("смысловой поиск: {} файлов за {ms:.0} мс", hits.len());
+                                i18n::fill(
+                                    lang,
+                                    "word search: {} files in {} ms",
+                                    &[hits.len().to_string(), ms.to_string()],
+                                );
                             self.semantic_hits = Some(hits.into_iter().map(|(id, _)| id).collect());
                         }
-                        Err(e) => self.status = format!("поиск не удался: {e}"),
+                        Err(e) => self.status = i18n::fill(lang, "the search failed: {}", &[e.to_string()]),
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9161,7 +9049,7 @@ impl eframe::App for App {
                             report.lang = self.settings.lang;
                             self.status = report.to_string();
                         }
-                        Err(e) => self.status = format!("модель не скачана: {e}"),
+                        Err(e) => self.status = i18n::fill(lang, "the model is not downloaded: {}", &[e.to_string()]),
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9187,15 +9075,15 @@ impl eframe::App for App {
                                 stats.to_string()
                             } else if stats.candidates == 1 {
                                 if stats.chars > 0 {
-                                    format!("текст распознан: знаков {}", stats.chars)
+                                    i18n::fill(lang, "the text is recognized: {} characters", &[stats.chars.to_string()])
                                 } else {
-                                    "на этом снимке текста не найдено".into()
+                                    t(lang, "no text is found on this photo").into()
                                 }
                             } else {
                                 stats.to_string()
                             };
                         }
-                        Err(e) => self.status = format!("текст не распознан: {e:#}"),
+                        Err(e) => self.status = i18n::fill(lang, "the text is not recognized: {}", &[format!("{:#}", e)]),
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
@@ -9314,7 +9202,7 @@ impl eframe::App for App {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.export_rx = None;
                     self.export_progress = None;
-                    self.status = "выгрузка прервана без отчёта".into();
+                    self.status = t(lang, "the export was interrupted without a report").into();
                 }
             }
         }
@@ -9359,7 +9247,7 @@ impl eframe::App for App {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.integrity_rx = None;
                     self.integrity_progress = None;
-                    self.status = "проверка прервана без отчёта".into();
+                    self.status = t(lang, "the check was interrupted without a report").into();
                 }
             }
         }
@@ -9498,14 +9386,9 @@ impl eframe::App for App {
                 if visible.len() == items.len() {
                     files_n(items.len())
                 } else {
-                    match lang {
-                        i18n::Lang::En => {
-                            format!("{} of {} files", visible.len(), items.len())
+                    {
+                            i18n::fill(lang, "{} of {} files", &[visible.len().to_string(), items.len().to_string()])
                         }
-                        i18n::Lang::Ru => {
-                            format!("файлов {} из {}", visible.len(), items.len())
-                        }
-                    }
                 },
             ),
             View::Albums => {
@@ -9515,10 +9398,7 @@ impl eframe::App for App {
                 match node {
                     Some(node) => {
                         let size = db::human_in(lang, node.bytes);
-                        let title = match lang {
-                            i18n::Lang::En => format!("Album “{}”", node.name),
-                            i18n::Lang::Ru => format!("Альбом «{}»", node.name),
-                        };
+                        let title = i18n::fill(lang, "Album “{}”", std::slice::from_ref(&node.name));
                         let count = match lang {
                             i18n::Lang::En => {
                                 let mut s = format!(
@@ -9557,16 +9437,9 @@ impl eframe::App for App {
                 let waste: i64 = groups.iter().map(|g| g.waste).sum();
                 (
                     t(lang, "Duplicates & series").to_string(),
-                    match lang {
-                        i18n::Lang::En => format!(
-                            "{} · {} wasted",
-                            i18n::count(lang, groups.len(),"group"),
-                            db::human_in(lang, waste)
-                        ),
-                        i18n::Lang::Ru => {
-                            format!("групп {}, зря {}", groups.len(), db::human_in(lang, waste))
-                        }
-                    },
+                    {
+                            i18n::fill(lang, "{} groups, {} spare", &[groups.len().to_string(), db::human_in(lang, waste).to_string()])
+                        },
                 )
             }
             View::Calendar => (
@@ -9575,34 +9448,13 @@ impl eframe::App for App {
             ),
             View::Faces => (
                 t(lang, "People").to_string(),
-                match lang {
-                    i18n::Lang::En => format!(
-                        "{} on {}",
-                        i18n::count(lang, face_total as usize,"person"),
-                        i18n::count(lang, face_photos as usize,"shot")
-                    ),
-                    i18n::Lang::Ru => {
-                        format!("лиц {} на {} снимках", face_total, face_photos)
-                    }
-                },
+                {
+                        i18n::fill(lang, "{} faces in {} photos", &[face_total.to_string(), face_photos.to_string()])
+                    },
             ),
             View::Trash => (
                 t(lang, "Trash").to_string(),
-                match lang {
-                    i18n::Lang::En => format!(
-                        "{} · {}",
-                        files_n(self.trash_items.len()),
-                        db::human_in(
-                            lang,
-                            self.trash_items.iter().map(|r| r.size).sum()
-                        )
-                    ),
-                    i18n::Lang::Ru => format!(
-                        "файлов {}, {}",
-                        self.trash_items.len(),
-                        db::human_in(lang, self.trash_items.iter().map(|r| r.size).sum())
-                    ),
-                },
+                i18n::fill(lang, "{} files, {}", &[self.trash_items.len().to_string(), db::human_in(lang, self.trash_items.iter().map(|r| r.size).sum()).to_string()]),
             ),
             // The "Integrity" screen is drawn before the grid (see `ui`); the branch is needed only
             // for the enum match to be complete.
@@ -9761,14 +9613,18 @@ impl eframe::App for App {
                 if visible.is_empty() {
                     ui.add_space(12.0);
                     match &tag_filter_now {
-                        Some(tag) => ui.label(format!(
-                            "нет снимков с тегом «{tag}» выше порога {}% ({tag_filter_raw:.2}) — \
-                             опустите ползунок порога в левой панели",
-                            self.settings.tag_show_pct
+                        Some(tag) => ui.label(i18n::fill(
+                            lang,
+                            "no photos with the tag “{}” above the threshold {}% ({}) — lower the threshold slider in the left panel",
+                            &[
+                                tag.clone(),
+                                self.settings.tag_show_pct.to_string(),
+                                format!("{tag_filter_raw:.2}"),
+                            ]
                         )),
                         None => ui.label(t(lang, "nothing found")),
                     };
-                    if ui.button("Сбросить фильтр").clicked() {
+                    if ui.button(t(lang, "Reset the filter")).clicked() {
                         reset = true;
                     }
                     return;
@@ -9813,15 +9669,15 @@ impl eframe::App for App {
                 // The tree (M19): indents and collapsing. A click opens an album, the triangle expands
                 // the sub-albums without changing the selection.
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("+ Новый альбом").clicked() {
+                    if ui.button(t(lang, "+ New album")).clicked() {
                         album_dialog_request = Some(AlbumDialog::New);
                     }
                     if albums.is_empty() {
                         ui.label(
-                            egui::RichText::new(
-                                "Альбом — это набор снимков с порядком и подальбомами. \
-                                 Только данные: файлы на диске не меняются.",
-                            )
+                            egui::RichText::new(t(
+                                lang,
+                                "An album is a set of photos with an order and sub-albums. Data only: the files on disk do not change.",
+                            ))
                             .size(11.0)
                             .color(dim(ui)),
                         );
@@ -9845,25 +9701,27 @@ impl eframe::App for App {
                 let Some(node) = chosen else {
                     ui.add_space(8.0);
                     ui.label(
-                        "Выберите альбом в дереве или создайте новый. Внутри — подальбомы \
-                         и снимки в том порядке, в котором они лягут на диск.",
+                        t(
+                            lang,
+                            "Pick an album in the tree or create a new one. Inside are the sub-albums and the photos in the order they will lie on disk.",
+                        ),
                     );
                     return;
                 };
                 let node = node.clone();
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("+ Подальбом").clicked() {
+                    if ui.button(t(lang, "+ Sub-album")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Sub);
                     }
-                    if ui.button("Переименовать").clicked() {
+                    if ui.button(t(lang, "Rename")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Rename);
                     }
-                    if ui.button("Переместить в…").clicked() {
+                    if ui.button(t(lang, "Move to…")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Move);
                     }
                     if ui
-                        .add_enabled(node.position > 0, egui::Button::new("Выше"))
-                        .on_hover_text("поднять альбом среди соседей")
+                        .add_enabled(node.position > 0, egui::Button::new(t(lang, "Up")))
+                        .on_hover_text(t(lang, "move the album up among its siblings"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::Up);
@@ -9871,16 +9729,16 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             node.position + 1 < albums.iter().filter(|n| n.parent_id == node.parent_id).count() as i64,
-                            egui::Button::new("Ниже"),
+                            egui::Button::new(t(lang, "Down")),
                         )
-                        .on_hover_text("опустить альбом среди соседей")
+                        .on_hover_text(t(lang, "move the album down among its siblings"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::Down);
                     }
                     if ui
-                        .button("Удалить альбом")
-                        .on_hover_text("удалить строки альбома и подальбомов; файлы на диске останутся")
+                        .button(t(lang, "Delete the album"))
+                        .on_hover_text(t(lang, "delete the rows of the album and its sub-albums; the files on disk stay"))
                         .clicked()
                     {
                         album_dialog_request = Some(AlbumDialog::Delete);
@@ -9893,7 +9751,7 @@ impl eframe::App for App {
                     .collect();
                 if !children.is_empty() {
                     ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Подальбомы").size(11.0).color(dim(ui)));
+                    ui.label(egui::RichText::new(t(lang, "Sub-albums")).size(11.0).color(dim(ui)));
                     ui.horizontal_wrapped(|ui| {
                         for child in &children {
                             if draw_album_cell(ui, child, self.tile_size, lang) {
@@ -9908,8 +9766,8 @@ impl eframe::App for App {
                     // "All files" inside an album — a temporary look to gather photos into an album:
                     // otherwise the selection lives only in that grid (M18).
                     if ui
-                        .selectable_label(!album_browse, "В альбоме")
-                        .on_hover_text("снимки этого альбома в его порядке")
+                        .selectable_label(!album_browse, t(lang, "In the album"))
+                        .on_hover_text(t(lang, "the photos of this album in its order"))
                         .clicked()
                     {
                         album_browse = false;
@@ -9917,8 +9775,10 @@ impl eframe::App for App {
                     if ui
                         .selectable_label(album_browse, "All files")
                         .on_hover_text(
-                            "временный взгляд на весь архив: выберите снимки и нажмите \
-                             «Добавить выбранные»",
+                            t(
+                                lang,
+                                "a temporary look at the whole archive: pick photos and press “Add the picked ones”",
+                            ),
                         )
                         .clicked()
                     {
@@ -9929,9 +9789,9 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             picked_now > 0,
-                            egui::Button::new(format!("Добавить выбранные ({picked_now})")),
+                            egui::Button::new(i18n::fill(lang, "Add the picked ones ({})", &[picked_now.to_string()])),
                         )
-                        .on_hover_text("добавить отмеченные снимки в конец альбома; повтор не плодит строк")
+                        .on_hover_text(t(lang, "add the marked photos to the end of the album; a repeat does not duplicate rows"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::AddPicked);
@@ -9944,9 +9804,9 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             in_album > 0,
-                            egui::Button::new(format!("Убрать из альбома ({in_album})")),
+                            egui::Button::new(i18n::fill(lang, "Remove from the album ({})", &[in_album.to_string()])),
                         )
-                        .on_hover_text("строки альбома уйдут; файлы на диске не меняются")
+                        .on_hover_text(t(lang, "the album rows go away; the files on disk do not change"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::RemovePicked);
@@ -9954,24 +9814,26 @@ impl eframe::App for App {
                     let file_in_album =
                         self.selected.is_some_and(|id| self.album_set.contains(&id));
                     if ui
-                        .add_enabled(file_in_album, egui::Button::new("Файл выше"))
-                        .on_hover_text("сдвинуть выбранный снимок вверх в порядке альбома")
+                        .add_enabled(file_in_album, egui::Button::new(t(lang, "File up")))
+                        .on_hover_text(t(lang, "move the selected photo up in the album order"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::FileUp);
                     }
                     if ui
-                        .add_enabled(file_in_album, egui::Button::new("Файл ниже"))
-                        .on_hover_text("сдвинуть выбранный снимок вниз в порядке альбома")
+                        .add_enabled(file_in_album, egui::Button::new(t(lang, "File down")))
+                        .on_hover_text(t(lang, "move the selected photo down in the album order"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::FileDown);
                     }
                     if ui
-                        .button("Выгрузить на диск…")
+                        .button(t(lang, "Export to disk…"))
                         .on_hover_text(
-                            "копии файлов в каталог: структура и порядок как в альбоме; \
-                             в цели ничего не перезаписывается",
+                            t(
+                                lang,
+                                "file copies into a folder: the structure and order as in the album; nothing in the target is overwritten",
+                            ),
                         )
                         .clicked()
                     {
@@ -9981,8 +9843,10 @@ impl eframe::App for App {
                 if album_browse {
                     ui.label(
                         egui::RichText::new(
-                            "Временный взгляд: сетка показывает весь архив. Выделите снимки и \
-                             нажмите «Добавить выбранные».",
+                            t(
+                                lang,
+                                "A temporary look: the grid shows the whole archive. Pick photos and press “Add the picked ones”.",
+                            ),
                         )
                         .size(11.0)
                         .color(dim(ui)),
@@ -9992,12 +9856,14 @@ impl eframe::App for App {
                 if visible.is_empty() {
                     ui.add_space(8.0);
                     ui.label(if album_browse {
-                        "В архиве нет снимков под текущим фильтром."
+                        t(lang, "The archive has no photos under the current filter.")
                     } else if node.files == 0 {
-                        "В альбоме пока нет файлов — переключитесь на «Все файлы», выберите \
-                         снимки и нажмите «Добавить выбранные»."
+                        t(
+                            lang,
+                            "The album has no files yet — switch to “All files”, pick photos and press “Add the picked ones”.",
+                        )
                     } else {
-                        "Все файлы альбома в корзине приложения — верните их или уберите строки."
+                        t(lang, "Every file of the album is in the app trash — restore them or remove the rows.")
                     });
                     return;
                 }
@@ -10028,22 +9894,7 @@ impl eframe::App for App {
                             ui.group(|ui| {
                                 let reason = g.reason.label(lang);
                                 let advice_text = g.advice.label(lang);
-                                let head = match lang {
-                                    i18n::Lang::En => format!(
-                                        "#{} — {} · {} · {} wasted",
-                                        n + 1,
-                                        reason,
-                                        files_n(g.members.len()),
-                                        db::human_in(lang, g.waste)
-                                    ),
-                                    i18n::Lang::Ru => format!(
-                                        "#{} — {} · файлов {} · зря {}",
-                                        n + 1,
-                                        reason,
-                                        g.members.len(),
-                                        db::human_in(lang, g.waste)
-                                    ),
-                                };
+                                let head = i18n::fill(lang, "#{} — {} · {} files · {} spare", &[(n + 1).to_string(), reason.to_string(), g.members.len().to_string(), db::human_in(lang, g.waste).to_string()]);
                                 ui.label(head);
                                 let keep = dupes::keep_of(&items, g);
                                 let name = Path::new(&items[keep].path)
@@ -10054,21 +9905,7 @@ impl eframe::App for App {
                                     .members
                                     .iter()
                                     .any(|&i| items[i].decision.as_deref() == Some("keep"));
-                                let advice = match lang {
-                                    i18n::Lang::En => format!(
-                                        "{}: keep {name} — {}",
-                                        t(
-                                            lang,
-                                            if decided { "decision" } else { "advice" }
-                                        ),
-                                        advice_text
-                                    ),
-                                    i18n::Lang::Ru => format!(
-                                        "{}: оставить {name} — {}",
-                                        if decided { "decision" } else { "advice" },
-                                        advice_text
-                                    ),
-                                };
+                                let advice = i18n::fill(lang, "{}: keep {} — {}", &[if decided { "decision" } else { "advice" }.to_string(), name.to_string(), advice_text.to_string()]);
                                 ui.label(advice);
                                 let row: Vec<&FileRow> =
                                     g.members.iter().map(|&i| &items[i]).collect();
@@ -10370,17 +10207,14 @@ impl eframe::App for App {
                                     .flat_map(|(_, v)| v.iter())
                                     .map(|&i| items[i].size)
                                     .sum();
-                                ui.label(match lang {
-                                    i18n::Lang::En => format!(
-                                        "{} this month, {}",
-                                        files_n(month_n),
-                                        db::human_in(lang, month_bytes)
-                                    ),
-                                    i18n::Lang::Ru => format!(
-                                        "{month_n} файлов за месяц, {}",
-                                        db::human_in(lang, month_bytes)
-                                    ),
-                                });
+                                ui.label(i18n::fill(
+                                    lang,
+                                    "{} this month, {}",
+                                    &[
+                                        i18n::count(lang, month_n, "file"),
+                                        db::human_in(lang, month_bytes),
+                                    ],
+                                ));
                                 if month_n == 0 {
                                     ui.add_space(12.0);
                                     ui.label(t(lang, "No files in this month."));
@@ -10703,18 +10537,15 @@ impl eframe::App for App {
                                     Some(idxs) => {
                                         let bytes: i64 =
                                             idxs.iter().map(|&i| items[i].size).sum();
-                                        ui.heading(match lang {
-                                            i18n::Lang::En => format!(
-                                                "{day} — {}, {}",
-                                                files_n(idxs.len()),
-                                                db::human_in(lang, bytes)
-                                            ),
-                                            i18n::Lang::Ru => format!(
-                                                "{day} — {} файлов, {}",
-                                                idxs.len(),
-                                                db::human_in(lang, bytes)
-                                            ),
-                                        });
+                                        ui.heading(i18n::fill(
+                                            lang,
+                                            "{} — {} files, {}",
+                                            &[
+                                                day.to_string(),
+                                                idxs.len().to_string(),
+                                                db::human_in(lang, bytes),
+                                            ],
+                                        ));
                                         let row: Vec<&FileRow> =
                                             idxs.iter().map(|&i| &items[i]).collect();
                                         draw_files(ui, ctx, &mut cells, &row);
@@ -10732,12 +10563,7 @@ impl eframe::App for App {
                         }
                         if let Some(idxs) = by_day.get("no date") {
                             ui.separator();
-                            egui::CollapsingHeader::new(match lang {
-                                i18n::Lang::En => {
-                                    format!("{} — {}", t(lang, "No date"), files_n(idxs.len()))
-                                }
-                                i18n::Lang::Ru => format!("Без даты — {} файлов", idxs.len()),
-                            })
+                            egui::CollapsingHeader::new(i18n::fill(lang, "No date — {} files", &[idxs.len().to_string()]))
                             .id_salt("no-date")
                             .show(ui, |ui| {
                                 let row: Vec<&FileRow> =
@@ -10787,12 +10613,7 @@ impl eframe::App for App {
                                 .color(dim(ui)),
                         );
                     });
-                    let found = match lang {
-                        i18n::Lang::En => {
-                            format!("{}: {}", t(lang, "photos"), files_n(ids.len()))
-                        }
-                        i18n::Lang::Ru => format!("снимков: {}", ids.len()),
-                    };
+                    let found = i18n::fill(lang, "photos: {}", &[ids.len().to_string()]);
                     ui.label(found);
                     if ids.is_empty() {
                         ui.label(t(
@@ -11030,7 +10851,7 @@ impl eframe::App for App {
         if clear_chips.pick_all {
             self.pick_all();
         } else if clear_chips.clear_pick {
-            self.clear_picked("выделение снято");
+            self.clear_picked(t(lang, "the selection is cleared"));
         }
         if let Some(id) = cell_open {
             self.open_viewer(id);
@@ -11039,7 +10860,7 @@ impl eframe::App for App {
             self.prefetch_photo(id);
         }
         if empty_click && cell_click.is_none() {
-            self.clear_picked("выделение снято");
+            self.clear_picked(t(lang, "the selection is cleared"));
         }
         if let Some(file_id) = face_viewer {
             self.open_viewer(file_id);
@@ -11093,14 +10914,14 @@ impl eframe::App for App {
                     .iter()
                     .find(|r| r.id == keep_id)
                     .and_then(|r| Path::new(&r.path).file_name().and_then(|s| s.to_str()))
-                    .unwrap_or("файл")
+                    .unwrap_or(t(lang, "file"))
                     .to_string();
                 match db::mark_keep(&self.db_path, keep_id, &drops) {
                     Ok(()) => {
                         self.status = match self.settings.lang {
                             i18n::Lang::En => format!("kept {name}, {} marked spare", drops.len()),
                             i18n::Lang::Ru => {
-                                format!("оставлен {name}, помечено лишними {}", drops.len())
+                                i18n::fill(lang, "kept {}, {} marked spare", &[name.to_string(), drops.len().to_string()])
                             }
                         }
                     }
@@ -11120,10 +10941,7 @@ impl eframe::App for App {
                     self.status = if label.is_empty() {
                         t(lang, "group name removed").into()
                     } else {
-                        match lang {
-                            i18n::Lang::En => format!("group named: “{label}”"),
-                            i18n::Lang::Ru => format!("группа подписана: «{label}»"),
-                        }
+                        i18n::fill(lang, "the group is named: “{}”", std::slice::from_ref(&label))
                     };
                     self.reload();
                 }
@@ -11157,29 +10975,14 @@ impl eframe::App for App {
                         self.face_selected_cluster = Some(cid);
                         self.face_picked.clear();
                         self.reload();
-                        let people = i18n::count(
-                            lang,
-                            ids.len(),"person",
-                        );
                         self.status = if label.trim().is_empty() {
-                            match lang {
-                                i18n::Lang::En => {
-                                    format!("{people} gathered into a new group; give it a name")
+                            {
+                                    i18n::fill(lang, "{} faces are gathered into a new group; give it a name", &[ids.len().to_string()])
                                 }
-                                i18n::Lang::Ru => {
-                                    format!("{} лиц собраны в новую группу; дайте ей имя", ids.len())
-                                }
-                            }
                         } else {
-                            match lang {
-                                i18n::Lang::En => {
-                                    let label = label.trim();
-                                    format!("{people} assigned to the group “{label}”")
+                            {
+                                    i18n::fill(lang, "{} faces are assigned to the group “{}”", &[ids.len().to_string(), label.trim().to_string()])
                                 }
-                                i18n::Lang::Ru => {
-                                    format!("{} лиц назначены группе «{}»", ids.len(), label.trim())
-                                }
-                            }
                         };
                     }
                     Err(e) => self.status = format!("{}: {e:#}", t(lang, "faces not assigned")),
@@ -11206,7 +11009,7 @@ mod tests {
         score_percentile, shift_month, shift_to_file_month,
     };
     use crate::embed;
-    use crate::i18n;
+    use crate::i18n::{self, t};
     use std::collections::BTreeSet;
 
     fn file_row(id: i64, kind: &str, name: &str) -> db::FileRow {
@@ -12233,7 +12036,7 @@ mod tests {
             "model not downloaded",
             "Model settings",
             "Text on the photo",
-            "candidates: 0, left: 0",
+            "0 candidates, 0 left",
             "Summary",
             "Files:",
             "Size:",
@@ -13047,6 +12850,7 @@ mod tests {
     #[test]
     fn select_all_takes_only_what_is_visible() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-m18.db"));
+        app.settings.lang = i18n::Lang::Ru;
         let mut a = file_row(1, "image", "a.jpg");
         a.size = 10;
         let mut b = file_row(2, "video", "b.mp4");
@@ -13064,23 +12868,25 @@ mod tests {
     #[test]
     fn esc_drops_the_selection_and_writes_to_the_status() {
         let mut app = m17_app();
+        let lang = app.settings.lang;
         app.pick_all();
         assert_eq!(app.picked.len(), 4);
         let ctx = egui::Context::default();
         window_frame_with(&mut app, &ctx, vec![key_event(egui::Key::Escape)]);
         assert!(app.picked.is_empty(), "Esc снимает выделение");
-        assert_eq!(app.status, "выделение снято");
+        assert_eq!(app.status, t(lang, "the selection is cleared"));
     }
 
     #[test]
     fn a_new_filter_or_order_drops_the_selection_with_a_reason() {
         let mut app = m17_app();
+        let lang = app.settings.lang;
         app.pick_all();
         app.query = "мая".into();
         app.sync_pick_scope();
         assert!(app.picked.is_empty());
         assert!(
-            app.status.contains("изменился фильтр по пути/дате"),
+            app.status.contains(t(lang, "the folder and date filter changed")),
             "{}",
             app.status
         );
@@ -13092,14 +12898,14 @@ mod tests {
         app.settings.grid_sort = db::GridSort::Name;
         app.sync_pick_scope();
         assert!(app.picked.is_empty());
-        assert!(app.status.contains("изменился порядок"), "{}", app.status);
+        assert!(app.status.contains(t(lang, "the order changed")), "{}", app.status);
 
         // A change of the view is another set of files too.
         app.pick_all();
         app.view = super::View::Dupes;
         app.sync_pick_scope();
         assert!(app.picked.is_empty());
-        assert!(app.status.contains("изменился вид"), "{}", app.status);
+        assert!(app.status.contains(t(lang, "the view changed")), "{}", app.status);
     }
 
     #[test]
@@ -13304,6 +13110,7 @@ mod tests {
             db::add_to_album(&conn, album, &[file]).unwrap();
         }
         let mut app = App::new(path.clone());
+        app.settings.lang = i18n::Lang::Ru;
         app.view = View::Albums;
         app.album_open(album);
         let ctx = egui::Context::default();
