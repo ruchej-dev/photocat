@@ -84,7 +84,7 @@ PhotoPrism; всё остальное на месте. Компромисс: п�
 | 10. За секунду | нет | да (фильтр и сброс над сеткой) | частично |
 | 12. Ничего не прыгает | да | да (заголовок и чипы всегда на месте) | нет |
 
-Выбран **B**. Запись: `docs/DECISIONS.md` ADR 0033, правила — `docs/UI.ru.md`.
+Выбран **B**. Запись: `docs/DECISIONS.ru.md` ADR 0033, правила — `docs/UI.ru.md`.
 
 ## 5. Границы работы
 
@@ -109,7 +109,7 @@ PhotoPrism; всё остальное на месте. Компромисс: п�
 7. `cargo clippy --all-targets` чисто, `enforce-architecture` без нарушений, `cargo test` зелёный,
    `timeout 6 photocat gui --db <копия реальной БД>` не падает (с предупреждением владельцу).
 8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `.pi/skills/ui-design/references/verstka.md`,
-   `docs/DECISIONS.md` 0033, `plan/STATUS.md`, `plan/BACKLOG.md`.
+   `docs/DECISIONS.ru.md` 0033, `plan/STATUS.md`, `plan/BACKLOG.md`.
 
 ## 7. Что осталось за границей (честно)
 

@@ -3,7 +3,7 @@
 > From M21 on this file is written in English. Entries above are Russian history, kept as is;
 > the Russian documentation is the second variant (`*.ru.md`). See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document) → next:M21.7c (`docs/DECISIONS.md`), then M21.8 (`plan/`), M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log) → next:M21.8 (`plan/`), then M21.9 (`.pi/`), M15.6/M15.7. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Где мы
 
@@ -292,7 +292,7 @@ OCR и лица.
 тегами и кнопкой распознавания; вид «Дубли и серии» (103 группы, 214.1 МиБ); диалог «Настройки»
 с разделами; режим без правой панели. `cargo clippy --all-targets` — без замечаний,
 `enforce-architecture` — 33 проверки ок. Замеров логики не требуется: раскладка не меняет
-индексацию, дубли, CLIP и OCR. Решение записано в `docs/DECISIONS.md` 0024, правила — в
+индексацию, дубли, CLIP и OCR. Решение записано в `docs/DECISIONS.ru.md` 0024, правила — в
 `docs/UI.ru.md`.
 
 Хвосты: в макете «Настройки» открывались шестерёнкой — оставлено слово «Настройки», иконка без
@@ -1448,3 +1448,25 @@ grid, in albums and in the trash, and batch actions over duplicate groups are a 
 same 67 table rows; no code was touched.
 
 **Next.** M21.7c: `docs/DECISIONS.md`.
+
+## M21.7c — the decisions log in English (2026-11-24)
+
+`docs/DECISIONS.md` is now English; the Russian original is `docs/DECISIONS.ru.md`, both files link
+to each other. All **40 ADRs** are there with the same ids, the same "forbids" lines, the same tables
+(0001 frameworks, 0019 programs, 0031 player crates) and the same measurements (0027, 0030, 0034,
+0035, 0036, 0038, 0039).
+
+**Two things changed beyond translation.** 0009 ("Russian UI, English identifiers") carries a
+"Superseded" note pointing at 0040: the window has been bilingual since M21, the identifiers stay
+English and `db::human` is joined by `db::human_in(lang, n)` for the GUI — the note is in both
+variants, because the old wording alone now contradicts `docs/UI.md`. Inside the Russian variant the
+cross-references point at `docs/UI.ru.md` §Метрики and `docs/ARCHITECTURE.ru.md` §Замеры, so a Russian
+section name never points into an English file; `AGENTS.ru.md` was retargeted the same way.
+
+**Checks.** Both files have 40 `## NNNN.` headings, one `### ` subheading (0001), and the ADR ids
+match one to one. `check.sh` greps `docs/DECISIONS.md` and `docs/ARCHITECTURE.md` for every Cargo
+dependency; the English files keep every crate name (`rff-*`, `rusty_h264`, `cpal`, `ort`,
+`turbojpeg`, `trash`), so the dependency check still finds its evidence. No code was touched.
+
+**Next.** M21.8: `plan/STATUS.md`, `plan/BACKLOG.md` and the remaining `plan/*.md`; then M21.9
+(`.pi/skills`, `.pi/prompts`), then M15.6/M15.7.

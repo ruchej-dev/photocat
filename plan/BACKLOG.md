@@ -194,7 +194,7 @@ label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--j
 `--apply` (hardlink) — 2230 ссылок за 0.065 с, 0 ошибок, 0 байт; `--exclude-dup` на копии БД —
 135 исключено. 13 новых тестов, `cargo test` — 64, `check.sh` — 0 нарушений. ADR 0022.
 
-**Файлы.** `src/organize.rs`, `src/main.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.md`.
+**Файлы.** `src/organize.rs`, `src/main.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
 
 ---
 
@@ -233,7 +233,7 @@ label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--j
 слепку — за 8.9 с (изменено 2, нет 1, лишний 1). 10 новых тестов, `cargo test` — 74, `check.sh` —
 33 проверки, 0 нарушений. ADR 0023.
 
-**Файлы.** `src/verify.rs`, `src/main.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.md`.
+**Файлы.** `src/verify.rs`, `src/main.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
 
 ---
 
@@ -302,7 +302,7 @@ label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--j
 
 **Файлы.** `src/app.rs`, `src/db.rs`, `src/embed.rs`, `src/faces.rs`, `src/index.rs`,
 `src/tools.rs`, `src/recycle.rs`, `src/storage.rs`, `Cargo.toml`, `check.sh`, `docs/UI.ru.md`,
-`docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.md` (0025, 0026, 0027).
+`docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md` (0025, 0026, 0027).
 
 ---
 
@@ -403,7 +403,7 @@ label|split]`. На корпусе: 1971/1972 снимков за 630.2 с (`--j
 оба пути на одних данных; публичный `find_groups` выбирает по порогу. Для радиуса 8–64 остаётся
 перебор: у восьми блоков нет гарантии, а такие пороги и так дают почти всё в одной группе.
 
-**Файлы.** `src/dupes.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.md`.
+**Файлы.** `src/dupes.rs`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
 
 ---
 
@@ -442,7 +442,7 @@ Xenova SigLIP base patch16-224, 768 признаков, Apache-2.0, 203.5 МиБ
 `docs/ARCHITECTURE.ru.md` § «Каталог моделей», решение — ADR 0039.
 
 **Файлы.** `src/embed.rs`, `src/derive.rs`, `src/db.rs`, `src/app.rs`, `src/main.rs`,
-`docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.md`.
+`docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`.
 
 
 ## M13c — гладкое листание и слайд-шоу ✅
@@ -529,7 +529,7 @@ clippy и границы зелёные.
 
 **Файлы.** `src/derive.rs`, `src/embed.rs`, `src/db.rs`, `src/app.rs`, `src/ocr.rs`,
 `src/organize.rs`, `plan/M15-tags.md`, `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`,
-`docs/DECISIONS.md`.
+`docs/DECISIONS.ru.md`.
 
 ---
 
@@ -553,10 +553,10 @@ clippy и границы зелёные.
 6. Секции панелей и карточки без `Frame::group`; один стиль на весь GUI.
 7. `cargo clippy --all-targets` чисто, `enforce-architecture` без нарушений, `cargo test` зелёный,
    `timeout 6 photocat gui --db <копия реальной БД>` не падает.
-8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `docs/DECISIONS.md` 0033,
+8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `docs/DECISIONS.ru.md` 0033,
    `.pi/skills/ui-design/references/verstka.md`, `plan/STATUS.md`.
 
-**Файлы.** `src/app.rs`, `docs/UI.ru.md`, `docs/DECISIONS.md`, `plan/M16-interface.md`,
+**Файлы.** `src/app.rs`, `docs/UI.ru.md`, `docs/DECISIONS.ru.md`, `plan/M16-interface.md`,
 `plan/STATUS.md`, `plan/BACKLOG.md`, `.pi/skills/ui-design/references/verstka.md`.
 
 **Не делать.** Светлую тему, иконки без подписей, избранное, карту; менять
@@ -671,7 +671,7 @@ GPS/тегам/камере, запись порядка в БД.
     `plan/STATUS.md`.
 
 **Файлы.** `src/db.rs`, `src/app.rs`, `src/main.rs`, `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`,
-`docs/DECISIONS.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
+`docs/DECISIONS.ru.md`, `plan/M19-albums.md`, `plan/STATUS.md`.
 
 **Не делать.** Файлы на диске, копии, «умные» альбомы по фильтру, обложку руками, синхронизацию с
 папками; называть альбом «каталогом» — «Каталоги (N)» уже про папки архива.

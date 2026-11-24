@@ -1,858 +1,890 @@
-# Решения (короткие ADR)
+# Decisions (short ADRs)
 
-Формат: что решили, почему, что это запрещает. Дописывать сюда, а не в чат. Решение, которое
-необратимо (схема БД, формат файлов витрины, модель ML), без записи здесь не принимается.
+*Русская версия: [DECISIONS.ru.md](DECISIONS.ru.md).*
+
+Format: what we decided, why, what it forbids. Append here, not to the chat. A decision that is
+irreversible (DB schema, showcase file format, ML model) is not taken without a record here.
 
 ---
 
-## 0001. GUI на egui/eframe, а не GTK/Qt
+## 0001. GUI on egui/eframe, not GTK/Qt
 
-Владелец на Arch + Wayland (niri); GTK тянет системные зависимости и «чужой» вид, Qt — тяжёлый
-рантайм. egui — чистый Rust, GPU-рендер, один бинарник, быстрый цикл правок.
-**Запрещает:** webview, Tauri, Electron, JS.
+The owner is on Arch + Wayland (niri); GTK drags in system dependencies and a "foreign" look, Qt is a
+heavy runtime. egui is pure Rust, GPU rendering, one binary, a fast edit cycle.
+**Forbids:** webview, Tauri, Electron, JS.
 
-### Почему не gpui и не остальные Rust-фреймворки
+### Why not gpui and the other Rust frameworks
 
-- **gpui** (Zed) — фреймворк под задачи Zed: API меняется без обещаний стабильности, документации
-  вне редактора мало, виджеты ввода/IME, drag&drop и HiDPI-края пришлось бы доделывать самим, а
-  зависимость пришлось бы держать на git-ревизии. Выигрыш — анимации, которых интерфейс по
-  `ui-design` не использует (тени, градиенты, скелетоны запрещены). Цена — переписать `app.rs`
-  (5.6 тыс. строк) и риск поломок при каждом обновлении.
-- **iced** — единственный серьёзный конкурент: чистый Rust, ретейн, стабильнее API. Минус —
-  слабее показ тысяч текстур и ввод текста; для нашей тонкой отрисовки поверх `db::` выигрыша нет.
-- **slint** — свой DSL и лицензионные вопросы для десктопа; DSL противоречит «один язык, без
-  шагов сборки».
-- **fltk-rs** — C++ под капотом, слабый HiDPI и вид. **makepad / dioxus-blitz** — сырые.
+- **gpui** (Zed) — a framework for Zed's tasks: the API changes without stability promises, there is
+  little documentation outside the editor, and input/IME widgets, drag&drop and HiDPI edges would
+  have to be finished by us, while the dependency would have to be pinned to a git revision. The gain
+  is animation, which the interface does not use under `ui-design` (shadows, gradients, skeletons are
+  forbidden). The price is rewriting `app.rs` (5.6k lines) and the risk of breakage on every update.
+- **iced** — the only serious competitor: pure Rust, retained mode, a more stable API. The minus is
+  weaker display of thousands of textures and text input; for our thin drawing over `db::` there is
+  no gain.
+- **slint** — its own DSL and licensing questions for the desktop; a DSL contradicts "one language,
+  no build steps".
+- **fltk-rs** — C++ underneath, weak HiDPI and look. **makepad / dioxus-blitz** — raw.
 
-Чего egui не даёт и что мы признаём: ввод текста и IME слабее нативных, системного меню и трея
-нет, immediate mode пересчитывает лейаут каждый кадр. Это принято: корпус — 2230 файлов, тяжёлое
-(декод, хеши, инференс) и так в фоне по AGENTS.md §«Дорогое — в фон», а сетка грузит текстуру
-только при `ui.is_rect_visible`.
+What egui does not give and we accept: text input and IME are weaker than native, there is no system
+menu or tray, and immediate mode recomputes the layout every frame. That is accepted: the corpus is
+2230 files, the heavy work (decoding, hashes, inference) is in the background anyway per AGENTS.md
+§"Expensive work goes to the background", and the grid loads a texture only when
+`ui.is_rect_visible`.
 
-**Когда пересматривать:** прокрутка перестанет держать кадр на десятках тысяч файлов (сначала
-лечится виртуализацией, а не сменой фреймворка); понадобится нативная интеграция, которой в egui
-нет (трей, системные диалоги, несколько окон) — решается точечным крейтом, а не сменой стека;
-или egui окончательно встанет.
+**When to revisit:** scrolling stops holding the frame on tens of thousands of files (that is cured
+by virtualisation first, not by a framework change); a native integration is needed that egui does
+not have (tray, system dialogs, several windows) — that is solved by a targeted crate, not by a stack
+change; or egui finally stalls.
 
-Связано: ADR 0008 (GUI без логики), ADR 0024 (три колонки), `docs/UI.md`.
+Related: ADR 0008 (GUI without logic), ADR 0024 (three columns), `docs/UI.md`.
 
-## 0002. Состояние в SQLite в кэше, а не в каталоге архива
+## 0002. State in SQLite in the cache, not in the archive folder
 
-Индекс — производное: его можно пересоздать за 65 с. В каталоге фото не появляется ни одного
-служебного файла (кроме витрины по явной команде).
-**Запрещает:** писать `.json`/`.xmp` рядом с оригиналами без отдельного решения.
+The index is derivative: it can be recreated in 65 s. Not a single service file appears in the photo
+folder (except the showcase on an explicit command).
+**Forbids:** writing `.json`/`.xmp` next to originals without a separate decision.
 
-## 0003. dHash (gradient, 8×8) вместо pHash и CLIP на первом этапе
+## 0003. dHash (gradient, 8×8) instead of pHash and CLIP at the first stage
 
-64 бита, сравнение — `count_ones` на XOR: 2.3 млн сравнений за 0.03 с, никаких зависимостей и
-моделей. Для «серия/пересланная копия» этого достаточно; смысловые теги — отдельный этап (M3).
-**Запрещает:** считать dHash единственным основанием удалять файл — порог даёт ложные срабатывания.
+64 bits, the comparison is `count_ones` on XOR: 2.3 M comparisons in 0.03 s, no dependencies and no
+models. For "series/forwarded copy" that is enough; semantic tags are a separate stage (M3).
+**Forbids:** treating dHash as the only ground for deleting a file — the threshold produces false
+positives.
 
-## 0004. Кластеризация union-find по порогу Хэмминга
+## 0004. Union-find clustering by the Hamming threshold
 
-Транзитивное замыкание: если A похож на B, а B на C, все трое в одной группе. Просто, предсказуемо,
-не требует числа кластеров заранее.
-**Цена:** цепочка «похожих по чуть-чуть» может склеить разное; лечится интерфейсом M2 (решение
-принимает человек).
+Transitive closure: if A resembles B and B resembles C, all three are in one group. Simple,
+predictable, does not need the number of clusters up front.
+**Price:** a chain of "slightly similar" can glue different things; cured by the M2 interface (a
+human makes the decision).
 
-## 0005. Ничего не удаляем и не переименовываем
+## 0005. We delete and rename nothing
 
-Витрина строится жёсткими ссылками (`ln`, 0 байт) или копиями. Оригинал остаётся там, где лежал,
-облачные синхронизации и бэкапы не ломаются.
-**Запрещает:** `fs::remove_*` и `fs::rename` в `src/` — проверяется скриптом границ.
+The showcase is built with hardlinks (`ln`, 0 bytes) or copies. The original stays where it lay, cloud
+syncs and backups do not break.
+**Forbids:** `fs::remove_*` and `fs::rename` in `src/` — checked by the boundary script.
 
-**Проверено владельцем (2026-11-23).** Владелец попросил переименование файлов на диске (одного,
-выбранных, по маске), затем рассмотрел последствия и **убрал задачу**: массовая правка имён ломает
-слепки `sha256sum`, внешние бэкапы и витрину, а отменить её после сбоя можно только вручную. Правило
-остаётся без исключений; `fs::rename` в `src/` нет, `check.sh` новых исключений не получает.
-Переименование оригиналов живёт в файловом менеджере владельца, а не в photocat.
+**Checked by the owner (2026-11-23).** The owner asked for renaming files on disk (one, the selected
+ones, by a mask), then looked at the consequences and **withdrew the task**: a mass rename breaks
+`sha256sum` manifests, external backups and the showcase, and after a failure it can only be undone
+by hand. The rule stays without exceptions; there is no `fs::rename` in `src/`, and `check.sh` gets
+no new exceptions. Renaming originals lives in the owner's file manager, not in photocat.
 
-## 0006. Дата: EXIF → имя файла → mtime, с записью источника
+## 0006. Date: EXIF → file name → mtime, with the source recorded
 
-EXIF есть у 92% корпуса; у остальных имя `IMG_20240517_144243` надёжнее mtime (копирование меняет
-mtime). Источник хранится в `taken_src`, чтобы интерфейс мог сказать «дата из имени». Преобразование
-`mtime` в строку и разбор дат — через `chrono`; своей арифметики дат в проекте нет.
-**Запрещает:** молча подменять дату догадкой без пометки.
+EXIF is present for 92% of the corpus; for the rest the name `IMG_20240517_144243` is more reliable
+than mtime (copying changes mtime). The source is stored in `taken_src`, so the interface can say
+"the date comes from the name". Converting `mtime` to a string and parsing dates goes through
+`chrono`; the project has no date arithmetic of its own.
+**Forbids:** silently substituting a guess for the date without a note.
 
-## 0007. Превью 320 px, ключ — sha256
+## 0007. A 320 px preview, keyed by sha256
 
-Одни и те же файлы (включая точные копии) делят одно превью; 2230 файлов → 29 МБ, страница сетки
-не грузит оригиналы.
-**Запрещает:** грузить полноразмерные фото в GUI-сетку.
+The same files (including exact copies) share one preview; 2230 files → 29 MB, a page of the grid
+does not load originals.
+**Forbids:** loading full-size photos into the GUI grid.
 
-## 0008. Модули по слоям, `egui` только в `app.rs`
+## 0008. Modules by layer, `egui` only in `app.rs`
 
-Ядро (derive/db/index/dupes/organize) тестируется и меряется без графики; GUI нельзя запустить в
-headless-проверке, поэтому он не должен содержать логику.
-**Проверка:** `.pi/skills/enforce-architecture/scripts/check.sh`.
+The core (derive/db/index/dupes/organize) is tested and measured without graphics; the GUI cannot be
+run in a headless check, so it must not contain logic.
+**Check:** `.pi/skills/enforce-architecture/scripts/check.sh`.
 
-## 0009. Русский UI, английские идентификаторы
+## 0009. Russian UI, English identifiers
 
-Владелец русскоязычный; имена в коде — английские, чтобы не спорить с экосистемой. Даты и объёмы
-форматируются одним местом (`db::human`).
+The owner is Russian-speaking; the names in the code are English, so as not to argue with the
+ecosystem. Dates and sizes are formatted in one place (`db::human`).
 
-## 0010. Видео — через `ffmpeg`-процесс, а не Rust-декодер
+> Superseded for the interface language by 0040 (M21): the window is bilingual, English first. The
+> identifiers stay English, and `db::human` is joined by `db::human_in(lang, n)` for the GUI.
 
-`ffmpeg` уже стоит, тянет все кодеки; тащить в проект декодеры видео — сотни зависимостей.
-**Следствие:** M4 появляется только при наличии `ffmpeg` в PATH; без него — файл без превью и
-ошибка в счётчике, а не падение индексации.
+## 0010. Video through an `ffmpeg` process, not a Rust decoder
 
-## 0011. ML только локально, модели — файлами в кэше
+`ffmpeg` is already installed and pulls in all codecs; dragging video decoders into the project means
+hundreds of dependencies.
+**Consequence:** M4 appears only when `ffmpeg` is in `PATH`; without it — a file without a preview and
+an error in the counter, not a failed indexing.
 
-Семейный архив (документы, дети) не уходит в облако ни при каких условиях. Модель скачивается один
-раз в `~/.cache/photocat/models/` с проверкой sha256.
-**Запрещает:** любые HTTP-вызовы к API моделей из кода приложения.
+## 0011. ML only locally, models as files in the cache
 
-## 0012. Решение по дублям живёт в `files.decision`, а не в файле рядом с оригиналом
+A family archive (documents, children) does not go to the cloud under any conditions. The model is
+downloaded once into `~/.cache/photocat/models/` with a sha256 check.
+**Forbids:** any HTTP calls to model APIs from the application code.
 
-Владелец разбирает 103 группы глазами; вернуть это решение некуда, если держать его только в
-памяти GUI. Отдельный файл рядом с фото запрещён ADR 0002, а переименование и удаление — ADR 0005.
-Поэтому `keep`/`drop` — колонка в БД: переживает перезапуск, не меняет архив, экспортируется планом
-CSV. Советы («резче остальных») в БД не пишутся — они производные от `sharpness` и пересчитываются.
+## 0012. A duplicate decision lives in `files.decision`, not in a file next to the original
 
-**Цена:** решение привязано к пути и `sha256`; при подмене файла тем же путём оно сбрасывается
-(иначе «лишним» мог бы оказаться другой снимок).
-**Запрещает:** трактовать `decision` как разрешение удалять: план — отчёт, не команда.
+The owner goes through 103 groups by eye; there is nowhere to put that decision back if it is kept
+only in the GUI memory. A separate file next to the photo is forbidden by ADR 0002, and renaming and
+deletion by ADR 0005. So `keep`/`drop` is a DB column: it survives a restart, does not change the
+archive and is exported by the CSV plan. Advice ("sharper than the rest") is not written to the DB —
+it is derived from `sharpness` and recomputed.
 
-## 0013. CLIP: ONNX через `ort`, две башни, веса файлами в кэше
+**Price:** the decision is tied to the path and the `sha256`; when a file is replaced under the same
+path it is reset (otherwise a different snapshot could end up "spare").
+**Forbids:** treating `decision` as permission to delete: the plan is a report, not a command.
 
-Зрительная часть — **CLIP ViT-B/32** (`Xenova/clip-vit-base-patch32`, int8 ONNX, 85 МиБ), текстовая —
-**multilingual DistilBERT + Dense 768→512** (`sentence-transformers/clip-ViT-B-32-multilingual-v1`,
-int8 ONNX, 130 МиБ + 1.6 МиБ проекции). Одна англоязычная CLIP не понимает «торт» и «документ»;
-мультиязычный текстовый энкодер переводит русский запрос в то же 512-мерное пространство, что и
-зрительная башня. Инференс — CPU через `ort` (API ONNX Runtime 1.31), токенизация — `tokenizers`;
-`serde_json` читает safetensors-заголовок проекции. Векторы — f32 little-endian (2 КиБ/фото): 1971
-фото дают 3.85 МиБ, f16 сэкономил бы половину, но потребовал бы ещё одну зависимость и потерю
-точности на маленьком корпусе.
+## 0013. CLIP: ONNX through `ort`, two towers, weights as files in the cache
 
-**Сеть.** Приложение скачивает только веса моделей — по явному согласию владельца (ADR 0015),
-больше ничего. `scripts/fetch-model.sh` остаётся ручным запасным путём; sha256 закреплён в
-`src/embed.rs` и проверяется при загрузке. `ort-sys` при первой сборке скачивает сам ONNX Runtime
-(кеш `~/.cache/ort.pyke.io`); это шаг сборки, не рантайма. Модель требует AVX2 (int8-квантование),
-иначе нужен fp32-вариант.
-**Запрещает:** автоскачивание без согласия, отправку превью, путей и текстов запросов наружу,
-хранение весов в репозитории.
+The visual part is **CLIP ViT-B/32** (`Xenova/clip-vit-base-patch32`, int8 ONNX, 85 MiB), the text part
+is **multilingual DistilBERT + Dense 768→512**
+(`sentence-transformers/clip-ViT-B-32-multilingual-v1`, int8 ONNX, 130 MiB + 1.6 MiB projection). An
+English-only CLIP does not understand "торт" and "документ"; a multilingual text encoder maps a
+Russian query into the same 512-dimensional space as the visual tower. Inference is CPU through `ort`
+(ONNX Runtime 1.31 API), tokenisation through `tokenizers`; `serde_json` reads the safetensors header
+of the projection. Vectors are f32 little-endian (2 KiB/photo): 1971 photos give 3.85 MiB, f16 would
+save half but would need another dependency and lose precision on a small corpus.
 
-**Теги.** Хранятся все 14 весов; уверенным считается только первый, если он ≥ 0.22 и опережает
-второй на 0.01. Это порог уверенности (`settings.tag_show`), его же берут OCR и витрина.
-Фильтр по тегу задаётся отдельно — процентилем 0–100 по каждому тегу (M15.2, ADR 0032): 100% —
-самый сильный снимок этого тега, 0% — все, 70% — верхние 30%. На 100% у любого тега остаётся
-хотя бы один снимок, и меньший максимум другого тега не обнуляет его. На каталоге меньше 100
-файлов процентиль шумный, поэтому действует сырой порог уверенности.
-Ложные теги дешевле пропустить, чем показать («тег: не уверен» — честный ответ).
-**Запрещает:** автоматически удалять или переименовывать файл по CLIP-тегу.
+**Network.** The app downloads only model weights — by the owner's explicit consent (ADR 0015),
+nothing else. `scripts/fetch-model.sh` remains the manual fallback path; the sha256 is pinned in
+`src/embed.rs` and checked on download. On the first build `ort-sys` downloads ONNX Runtime itself
+(cache `~/.cache/ort.pyke.io`); that is a build step, not runtime. The model needs AVX2 (int8
+quantisation), otherwise the fp32 variant is required.
+**Forbids:** auto-download without consent, sending previews, paths and query texts outside, storing
+weights in the repository.
 
-## 0014. Кросс-платформенность: Linux — цель, код без платформенных тупиков
+**Tags.** All 14 weights are stored; only the first is considered confident, if it is ≥ 0.22 and
+leads the second by 0.01. That is the confidence threshold (`settings.tag_show`), which OCR and the
+showcase also use. The tag filter is set separately — by a 0–100 percentile per tag (M15.2,
+ADR 0032): 100% is the strongest snapshot of that tag, 0% is all, 70% is the top 30%. At 100% any tag
+keeps at least one snapshot, and a lower maximum of another tag does not zero it. On a folder of
+fewer than 100 files the percentile is noisy, so the raw confidence threshold applies. False tags are
+cheaper to let through than to show ("tag: not sure" is an honest answer).
+**Forbids:** automatically deleting or renaming a file by a CLIP tag.
 
-Целевая среда — Linux (Arch + Wayland), но стек (`egui/eframe`, `rusqlite` с bundled SQLite,
-`image`, `rayon`, `ort`) переносим, и ни одна функция ядра не должна требовать ОС-специфичного API
-без запасного пути. Кэш: `XDG_CACHE_HOME` → `LOCALAPPDATA` (Windows) → `HOME/.cache` → временный
-каталог; символические ссылки — `std::os::unix::fs::symlink` на Unix и `symlink_file` на Windows
-(там нужен режим разработчика; ошибка считается в счётчике, а не роняет план). Внешние процессы:
-`ffmpeg`/`ffprobe` ищутся в `PATH` (`Command` сам добавляет `.exe` на Windows), окно консоли
-подавляется через `CREATE_NO_WINDOW`.
+## 0014. Cross-platform: Linux is the target, the code has no platform dead ends
 
-**Граница:** `scripts/fetch-model.sh` — bash, только для подготовки модели на Unix-машине; в
-рантайме скрипт не нужен. Не-UTF-8 имена файлов (возможны на Linux) хранятся в БД через
-`to_string_lossy` — известное ограничение, а не цель M4.
-**Запрещает:** `unsafe`-обходы, `#[cfg]`-ветки без второй реализации, хардкод домашнего пути в UI.
+The target environment is Linux (Arch + Wayland), but the stack (`egui/eframe`, `rusqlite` with
+bundled SQLite, `image`, `rayon`, `ort`) is portable, and no core function may require an
+OS-specific API without a fallback. Cache: `XDG_CACHE_HOME` → `LOCALAPPDATA` (Windows) →
+`HOME/.cache` → a temporary directory; symbolic links — `std::os::unix::fs::symlink` on Unix and
+`symlink_file` on Windows (which needs developer mode; an error is counted, not fatal to the plan).
+External processes: `ffmpeg`/`ffprobe` are looked up in `PATH` (`Command` adds `.exe` on Windows
+itself), the console window is suppressed via `CREATE_NO_WINDOW`.
 
+**Boundary:** `scripts/fetch-model.sh` is bash, only for preparing a model on a Unix machine; at
+runtime the script is not needed. Non-UTF-8 file names (possible on Linux) are stored in the DB via
+`to_string_lossy` — a known limitation, not an M4 goal.
+**Forbids:** `unsafe` workarounds, `#[cfg]` branches without a second implementation, a hardcoded
+home path in the UI.
 
-## 0015. Скачивание моделей приложением: согласие, лимит, sha256
+## 0015. Model downloads by the app: consent, limit, sha256
 
-Владельцу нужен выбор модели и путь загрузки без ручного скрипта. Приложение ходит в сеть **только**
-за файлами моделей из встроенного каталога и **только** после явного нажатия «Скачать» с галочкой
-согласия. Наружу уходит единственный запрос — HTTPS GET по адресу веса; ни фото, ни пути, ни
-запросы, ни теги не отправляются. Ответ пишется на диск, sha256 сверяется с закреплённым в
-каталоге; при несовпадении файл не считается моделью.
-**Лимит.** В настройках есть максимальный размер модели; каталог фильтруется по нему, загрузка
-сверх лимита отклоняется. Если выбранная модель недоступна (404/сеть/проверка), загрузчик
-перебирает зеркала, затем совместимые варианты каталога в пределах лимита и сообщает, что выбрал.
-**Запрещает:** фоновую загрузку без действия человека, любые POST/PUT, отправку пользовательских
-данных, модели без sha256.
+The owner needs a choice of model and download path without a manual script. The app goes to the
+network **only** for model files from the built-in catalogue and **only** after an explicit
+"Download" press with a consent tick. The only request that goes out is an HTTPS GET to the weight
+address; neither photos, nor paths, nor queries, nor tags are sent. The response is written to disk
+and the sha256 is compared with the one pinned in the catalogue; on a mismatch the file is not
+considered a model.
+**Limit.** The settings hold a maximum model size; the catalogue is filtered by it and a download over
+the limit is refused. If the selected model is unavailable (404/network/check), the downloader tries
+the mirrors, then compatible catalogue variants within the limit, and reports what it chose.
+**Forbids:** a background download without a human action, any POST/PUT, sending user data, models
+without a sha256.
 
-## 0016. Загрузчик весов — процесс `curl`, а не HTTP-клиент в зависимостях
+## 0016. The weight downloader is the `curl` process, not an HTTP client in the dependencies
 
-Как `ffmpeg` для видео (ADR 0010): `curl` есть на Linux/macOS и в Windows 10+, умеет TLS, редиректы,
-повторы и докачку. Своя HTTP-зависимость (`ureq`/`reqwest`) — это TLS, корневые сертификаты и
-сетевой код в проекте ради одной операции.
-**Следствие:** без `curl` в `PATH` скачивание из приложения недоступно (ручной скрипт тоже требует
-`curl`), остальной функционал работает. Проверка границ следит, что `curl` вызывается только в
-`src/embed.rs` и без флагов отправки (`-F`, `--data`, `-T`).
-**Запрещает:** второй способ скачивания и сетевые вызовы вне каталога моделей.
+Like `ffmpeg` for video (ADR 0010): `curl` is present on Linux/macOS and in Windows 10+, knows TLS,
+redirects, retries and resumption. An own HTTP dependency (`ureq`/`reqwest`) means TLS, root
+certificates and network code in the project for one operation.
+**Consequence:** without `curl` in `PATH` a download from the app is unavailable (the manual script
+needs `curl` too), the rest of the functionality works. The boundary check watches that `curl` is
+called only in `src/embed.rs` and without sending flags (`-F`, `--data`, `-T`).
+**Forbids:** a second way to download and network calls outside the model catalogue.
 
-## 0017. Скрытые теги — в БД, а не в файле и не в модели
+## 0017. Hidden tags in the DB, not in a file and not in the model
 
-Тег CLIP — догадка. Владелец видит ошибки («документ» на детском рисунке) и должен поправить
-классификацию, не трогая оригинал. Решение «у этого фото такого тега нет» лежит в
-`tag_hidden(file_id, tag)`: оно переживает переиндексацию и пересчёт тегов, не зависит от модели,
-скрывает тег из карточки, фильтра и счётчиков. При подмене содержимого файла (сменился `sha256`)
-триггер стирает решение — иначе оно применилось бы к другому снимку.
-**Запрещает:** править EXIF/XMP рядом с фото, удалять теги из общей таблицы, строить «обучение» на
-пользовательских правках без отдельного решения.
+A CLIP tag is a guess. The owner sees mistakes ("документ" on a child's drawing) and must fix the
+classification without touching the original. The decision "this photo has no such tag" lives in
+`tag_hidden(file_id, tag)`: it survives re-indexing and tag recomputation, does not depend on the
+model, and hides the tag from the card, the filter and the counters. When the file content is
+replaced (`sha256` changed) a trigger wipes the decision — otherwise it would apply to a different
+snapshot.
+**Forbids:** editing EXIF/XMP next to a photo, deleting tags from the shared table, building
+"learning" on user edits without a separate decision.
 
-## 0018. OCR — внешний `tesseract`, текст — только в БД
+## 0018. OCR is an external `tesseract`, the text lives only in the DB
 
-Документы и скриншоты нужно искать по словам, а не глазами. OCR в Rust-зависимостях (leptess,
-tesseract-rs) тянет C/C++ сборку leptonica и tesseract, а ONNX-модель распознавания — это ещё
-скачивание весов и своя реализация CTC-декодера. Как `ffmpeg` для видео (ADR 0010), OCR остаётся
-внешним процессом: `tesseract stdin stdout -l rus+eng`. Веса языков лежат в системных пакетах и
-не скачиваются приложением.
-**Следствие.** Без `tesseract` в `PATH` OCR недоступен (кнопка погашена, `ocr` сообщает об этом),
-остальное работает. Сеть для OCR не нужна вообще. Кадр готовим сами: применяем EXIF-поворот и
-ограничиваем длинную сторону 2000 px — `tesseract` иначе читает телефонный снимок боком, а PNG
-через stdin не оставляет временных файлов рядом с архивом.
-**Текст — только в БД** (`ocr` + FTS5 `ocr_fts`): рядом с оригиналом не появляется ни файла, ни
-метаданных. Индекс FTS синхронизируют триггеры, подмена содержимого (`sha256`) стирает текст.
-**Запрещает:** писать `*.txt` рядом с фото, менять EXIF/XMP, отправлять картинку в облачный OCR,
-скачивать что-либо для OCR без согласия по ADR 0015.
+Documents and screenshots have to be searched by words, not by eye. OCR in Rust dependencies
+(leptess, tesseract-rs) drags in a C/C++ build of leptonica and tesseract, and an ONNX recognition
+model means more weight downloads and an own CTC decoder implementation. Like `ffmpeg` for video
+(ADR 0010), OCR stays an external process: `tesseract stdin stdout -l rus+eng`. The language weights
+live in system packages and are not downloaded by the app.
+**Consequence.** Without `tesseract` in `PATH` OCR is unavailable (the button is disabled, `ocr` says
+so), the rest works. No network is needed for OCR at all. We prepare the frame ourselves: we apply
+the EXIF rotation and limit the long side to 2000 px — otherwise `tesseract` reads a phone snapshot
+sideways, and a PNG through stdin leaves no temporary files next to the archive.
+**Text only in the DB** (`ocr` + FTS5 `ocr_fts`): neither a file nor metadata appears next to the
+original. The FTS index is kept in sync by triggers, replacing the content (`sha256`) wipes the text.
+**Forbids:** writing `*.txt` next to a photo, changing EXIF/XMP, sending the image to a cloud OCR,
+downloading anything for OCR without consent per ADR 0015.
 
-## 0019. Внешние программы: PATH, мягкая деградация и `doctor`
+## 0019. External programs: PATH, soft degradation and `doctor`
 
-Приложение не тащит в себя ffmpeg, tesseract и curl: сборка C/C++ и десятки мегабайт в дистрибутиве
-(ADR 0010, 0016, 0018). Вместо этого — один контракт для всех внешних программ:
+The app does not pull ffmpeg, tesseract and curl into itself: a C/C++ build and dozens of megabytes in
+the distribution (ADR 0010, 0016, 0018). Instead — one contract for all external programs:
 
-| Программа | Зачем | Без неё |
+| Program | Why | Without it |
 |---|---|---|
-| `ffmpeg` | кадр-обложка видео, dHash, превью | видео попадает в индекс без превью и dHash, ошибка считается в `errors`; фото не страдают |
-| `ffprobe` | длительность и разрешение видео | видео без длительности `▶ М:СС`, остальное индексируется |
-| `tesseract` | текст с документов и скриншотов | OCR выключен: кнопка погашена, `ocr` сообщает, что нужно установить; поиск, дубли, CLIP работают |
-| `curl` | скачивание весов модели (только по согласию) | модель можно положить вручную по `scripts/fetch-model.sh`; локальные функции работают |
+| `ffmpeg` | a video cover frame, dHash, previews | a video enters the index without a preview and dHash, the error is counted in `errors`; photos do not suffer |
+| `ffprobe` | video duration and resolution | a video without a duration `▶ M:SS`, the rest is indexed |
+| `tesseract` | text from documents and screenshots | OCR is off: the button is disabled, `ocr` says what to install; search, duplicates and CLIP work |
+| `curl` | downloading model weights (consent only) | the model can be put in place by hand via `scripts/fetch-model.sh`; local functions work |
 
-**Правила.**
-1. Программа запускается через `std::process::Command` (на Windows `.exe` подставляется сам) по
-   явному пути из настроек, а если поле пустое — по имени из `PATH` (ADR 0020).
-   Аргументы — массивом, без `sh -c`: ввод пользователя в командную строку не попадает.
-2. Отсутствие программы — не падение, а состояние: `tool_version`/`tesseract_langs` возвращают
-   `None`, работа своего вида отключается, остальное работает. Ошибка одного файла — счётчик, а не
-   остановка прогона.
-3. Консольное окно на Windows подавлено (`CREATE_NO_WINDOW`); данные в программу передаются через
-   stdin/stdout (OCR), временных файлов рядом с архивом нет.
-4. Где искать — показывает `photocat doctor`: версии ffmpeg/ffprobe/tesseract/curl, языки
-   tesseract против `ocr_lang`, наличие модели и размер БД. Один экран вместо догадок.
-5. Сам запуск всех четырёх программ живёт в `src/tools.rs`; `ffmpeg`/`ffprobe`/`tesseract`
-   вызывает `src/derive.rs`, `curl` — только `src/embed.rs`. Проверка границ это стережёт.
-**Запрещает:** бандлить бинарники в репозиторий, вызывать `sh`/`cmd`, сеть для OCR, скачивание
-пакетов ОС из приложения. Запасной контракт — `PATH`; явные пути — ADR 0020.
+**Rules.**
+1. A program is started through `std::process::Command` (`.exe` is added by itself on Windows) by an
+   explicit path from the settings, or, if the field is empty, by the name from `PATH` (ADR 0020).
+   Arguments are an array, without `sh -c`: user input never reaches a command line.
+2. A missing program is not a crash but a state: `tool_version`/`tesseract_langs` return `None`, that
+   kind of work is disabled, the rest works. An error in one file is a counter, not a stop of the run.
+3. The console window on Windows is suppressed (`CREATE_NO_WINDOW`); data is passed to the program
+   through stdin/stdout (OCR), and there are no temporary files next to the archive.
+4. Where to look is shown by `photocat doctor`: the versions of ffmpeg/ffprobe/tesseract/curl, the
+   tesseract languages against `ocr_lang`, the presence of the model and the DB size. One screen
+   instead of guesses.
+5. The launching of all four programs lives in `src/tools.rs`; `ffmpeg`/`ffprobe`/`tesseract` are
+   called by `src/derive.rs`, `curl` only by `src/embed.rs`. The boundary check guards this.
+**Forbids:** bundling binaries in the repository, calling `sh`/`cmd`, the network for OCR, downloading
+OS packages from the app. The fallback contract is `PATH`; explicit paths are ADR 0020.
 
-## 0020. Путь к внешней программе — настройка, а не только `PATH`
+## 0020. The path to an external program is a setting, not only `PATH`
 
-На Arch пакеты tesseract называются `tesseract-data-eng`/`-rus`, а на Windows и macOS ffmpeg и
-tesseract часто не в `PATH` вообще. Заставлять владельца править окружение или пересобирать
-приложение из-за одного пути — неправильно. Поэтому `settings.tool_ffmpeg`, `tool_ffprobe`,
-`tool_tesseract`, `tool_curl`: пусто — имя ищется в `PATH` (прежнее поведение ADR 0019), непусто —
-запускается указанный файл.
+On Arch the tesseract packages are called `tesseract-data-eng`/`-rus`, while on Windows and macOS
+ffmpeg and tesseract are often not in `PATH` at all. Forcing the owner to fix the environment or
+rebuild the app because of one path is wrong. Hence `settings.tool_ffmpeg`, `tool_ffprobe`,
+`tool_tesseract`, `tool_curl`: empty — the name is looked up in `PATH` (the former behaviour of ADR
+0019), non-empty — the given file is started.
 
-**Правила.**
-1. Путь проверяется до сохранения запуском с флагом версии; ошибка показывается в статус-строке
-   GUI или в сообщении CLI, а не в консоли/логе. Неработающий путь не сохраняется.
-2. `photocat doctor` — единственное место, где видно, откуда взята каждая программа и что
-   сломается без неё; `settings` печатает то же списком.
-3. Пути хранятся в таблице `settings` рядом с индексом (ADR 0002), переживают перезапуск и смену
-   модели; рядом с архивом не появляется ни одного файла.
-4. Пути не меняют `PATH` процесса и не подменяют системные программы: только выбор, что запускать.
-**Запрещает:** бандлить бинарники, скачивать пакеты ОС из приложения, молча сохранять
-неработающий путь, искать программу в текущем каталоге вместо `PATH`.
+**Rules.**
+1. A path is checked before saving by starting the program with its version flag; an error is shown
+   in the GUI status line or in a CLI message, not in the console/log. A non-working path is not
+   saved.
+2. `photocat doctor` is the only place where it is visible where each program comes from and what
+   breaks without it; `settings` prints the same as a list.
+3. Paths are stored in the `settings` table next to the index (ADR 0002), survive a restart and a
+   model change; not a single file appears next to the archive.
+4. Paths do not change the process `PATH` and do not substitute system programs: they only choose
+   what to launch.
+**Forbids:** bundling binaries, downloading OS packages from the app, silently saving a non-working
+path, looking for a program in the current directory instead of `PATH`.
 
-## 0021. Лица — локальные SCRFD + ArcFace, группы и подписи в БД
+## 0021. Faces — local SCRFD + ArcFace, groups and names in the DB
 
-«Покажи все фото с Лизой» — следующий вопрос владельца после дублей, дат, смысла и текста. Детекция
-и эмбеддинг лиц — две ONNX-модели из `immich-app/buffalo_l`: SCRFD (16.9 МиБ) и ArcFace
-(174.4 МиБ). Обе работают через `ort` на CPU, веса скачиваются только по согласию и проверяются по
-sha256 (ADR 0015). Пайплайн: EXIF-поворот → детекция 640×640 → NMS → выравнивание по 5 точкам в
-112×112 → ArcFace 512 f32 → нормализация.
+"Show me all photos with Lisa" is the owner's next question after duplicates, dates, meaning and
+text. Face detection and embedding are two ONNX models from `immich-app/buffalo_l`: SCRFD (16.9 MiB)
+and ArcFace (174.4 MiB). Both run through `ort` on the CPU, the weights are downloaded only with
+consent and checked by sha256 (ADR 0015). The pipeline: EXIF rotation → 640×640 detection → NMS →
+alignment by 5 points into 112×112 → ArcFace 512 f32 → normalisation.
 
-**Почему так.** Отдельные детектор и распознаватель дают рамки и точки для выравнивания; ArcFace
-сравнивает выровненные лица, а не «примерно тот же участок фото». Косинус по нормализованным
-векторам даёт простой порог и union-find — как у дублей (ADR 0004), без обучения на архиве.
+**Why so.** Separate detector and recogniser give boxes and points for alignment; ArcFace compares
+aligned faces, not "roughly the same area of the photo". The cosine over normalised vectors gives a
+simple threshold and union-find — like duplicates (ADR 0004), without training on the archive.
 
-**Данные.** Лица, векторы и кропы — производное: `faces`, `face_clusters`, `face_scans`, файлы в
-`~/.cache/photocat/faces/`. Подпись группы и разъединение («не он») живут в БД. Группа с подписью
-или ручным лицом закреплена и переживает пересборку по порогу; пустые безымянные удаляются при
-следующей пересборке. Подмена `files.sha256` стирает лица и отметку прохода, но не трогает
-оригиналы.
+**Data.** Faces, vectors and crops are derivative: `faces`, `face_clusters`, `face_scans`, files in
+`~/.cache/photocat/faces/`. A group's name and a split ("not him") live in the DB. A group with a name
+or a manual face is pinned and survives a rebuild by threshold; empty unnamed ones are deleted on the
+next rebuild. Replacing `files.sha256` wipes the faces and the pass mark, but does not touch the
+originals.
 
-**Порог.** `settings.face_threshold`, по умолчанию 0.45. Ниже — больше ложных склеек, выше — один
-человек дробится на группы; владелец видит результат плитками и разъединяет кнопкой. Автоматически
-удалять или «обучаться» по правкам запрещено.
+**Threshold.** `settings.face_threshold`, 0.45 by default. Lower — more false merges, higher — one
+person splits into groups; the owner sees the result as tiles and splits with a button. Deleting
+automatically or "learning" from the edits is forbidden.
 
-**Запрещает:** отправлять лица, кропы, эмбеддинги, пути или запросы наружу; писать лица и разметку
-рядом с оригиналом; удалять/переименовывать фото; считать ложную склейку приговором без возможности
-разъединить.
+**Forbids:** sending faces, crops, embeddings, paths or queries outside; writing faces and labels next
+to the original; deleting/renaming photos; treating a false merge as a sentence without a way to split.
 
-## 0022. Витрина `organize`: выбор глубины и шаблон имени, оригиналы не меняются
+## 0022. The `organize` showcase: choice of depth and name template, originals do not change
 
-Раскладка по датам перестала быть одной жёсткой схемой. Владелец выбирает глубину
-(`--by day` по умолчанию, `--by month`, `--by event`) и, если хочет, собирает имя из
-подстановок (`{date}`, `{time}`, `{camera}`, `{tag}`, `{orig}`, `{ext}`) или коротким
-`--rename`. Файлы витрины — только новые: hardlink (по умолчанию), копия или симлинк в отдельном
-каталоге; ни один оригинал не переименовывается и не удаляется (ADR 0005).
+Arranging by date stopped being one rigid scheme. The owner chooses the depth (`--by day` by default,
+`--by month`, `--by event`) and, if he wants, builds the name from substitutions (`{date}`, `{time}`,
+`{camera}`, `{tag}`, `{orig}`, `{ext}`) or a short `--rename`. Showcase files are only new: hardlink
+(by default), a copy or a symlink in a separate folder; not a single original is renamed or deleted
+(ADR 0005).
 
-**Почему так.** Открытый вопрос владельца из STATUS — «по дням или по месяцам, оригинальные имена
-или из даты». Ответ не один на всех: смотреть весь архив удобнее месяцами, а один снимок искать —
-по имени с датой. Поэтому выбор параметром, а не третьей схемой по умолчанию. `--exclude-dup`
-связывает витрину с решением по дублям (ADR 0012): «лишний» не попадает в раскладку, но остаётся на
-диске.
+**Why so.** An open question of the owner from STATUS — "by days or by months, original names or from
+the date". There is no single answer for everyone: browsing the whole archive is more convenient by
+months, while finding one snapshot is easier by a name with the date. Hence a parameter instead of a
+third default scheme. `--exclude-dup` links the showcase with the duplicate decision (ADR 0012): a
+"spare" file does not enter the layout but stays on disk.
 
-**Событие.** Снимок без GPS остаётся в каталоге дня; снимок с координатами получает подкаталог
-`<ШШ.ШШN_ДД.ДДE>` — ячейка ~1 км. Обратного геокодинга («улица, город») нет намеренно: это сеть,
-а сеть в проекте разрешена только за весами моделей (ADR 0011, 0015). Имя из координат честнее
-выдуманного «отпуск» и позволяет узнать место поиском в файловом менеджере.
+**Event.** A snapshot without GPS stays in the day folder; a snapshot with coordinates gets a
+`<DD.DDDN_EEE.EEEE>` subfolder — a cell of ~1 km. There is deliberately no reverse geocoding
+("street, city"): that is the network, and the network is allowed in the project only for model
+weights (ADR 0011, 0015). A name from coordinates is more honest than an invented "vacation" and lets
+you find the place by searching in a file manager.
 
-**Имя.** Пробелы становятся `_`, недопустимые символы выбрасываются, повторы разделителей и хвосты
-`_`/`-` убираются, длина ограничена 120 знаками; пустая подстановка не оставляет мусора. Коллизии
-в каталоге получают `-2`, `-3`. Неизвестная подстановка и неизвестное `--by` — отказ с кодом 2 и
-списком допустимых: опечатка в шаблоне не должна молча испортить витрину.
+**Name.** Spaces become `_`, forbidden characters are dropped, repeated separators and trailing
+`_`/`-` are trimmed, the length is capped at 120 characters; an empty substitution leaves no rubbish.
+Collisions in a folder get `-2`, `-3`. An unknown substitution and an unknown `--by` are a refusal
+with code 2 and a list of the allowed ones: a typo in a template must not silently spoil the showcase.
 
-**Запрещает:** переименовывать или перемещать оригиналы; писать витрину без `--apply`; обращаться
-к сети за названиями мест; молча подменять неизвестную подстановку пустой строкой.
+**Forbids:** renaming or moving originals; writing the showcase without `--apply`; going to the
+network for place names; silently substituting an unknown placeholder with an empty string.
 
-## 0023. Сверка копий и слепок — только чтение, размер раньше sha256
+## 0023. Copy comparison and manifest — read only, size before sha256
 
-Проверить, что архив на втором диске совпадает с первым, раньше можно было только `cmp` по
-каталогам или глазами. `photocat verify <a> <b>` сравнивает два дерева по относительным путям:
-сначала размер, и только при совпадении размера считается sha256. Файл другого размера читать
-незачем — расхождение уже известно. Слепок (`manifest --out file.sha256`) фиксирует состояние
-архива на будущее в формате GNU `sha256sum`.
+Checking that the archive on the second disk matches the first used to be possible only with `cmp`
+over folders or by eye. `photocat verify <a> <b>` compares two trees by relative paths: size first,
+and only on a matching size is the sha256 computed. There is no point reading a file of a different
+size — the difference is already known. The manifest (`manifest --out file.sha256`) records the state
+of the archive for the future in the GNU `sha256sum` format.
 
-**Почему без БД.** Сверка должна работать, даже если архив не проиндексирован или индекс устарел;
-sha256 в БД — снимок прошлой индексации, а не текущее содержимое диска. Поэтому `verify` и
-`manifest` не открывают БД и не зависят от модели, тегов и решений.
+**Why without a DB.** The comparison has to work even if the archive is not indexed or the index is
+stale; the sha256 in the DB is a snapshot of a past indexing, not the current content of the disk. So
+`verify` and `manifest` do not open the DB and do not depend on the model, tags or decisions.
 
-**Формат слепка.** `<sha256>  <относительный путь>`, пути с `/` на любой ОС; имена с обратным
-слэшем, переводом строки и возвратом каретки экранируются как у `sha256sum`. Такой файл можно
-проверить и штатной утилитой (`sha256sum -c`), и самим `photocat verify --manifest`, а переносить
-его между Linux и Windows не мешает разделитель. Неполный слепок не пишется: если файл не
-прочитался или проход отменили, проверка позже объявила бы пропущенные файлы «лишними».
-В разборе слепка допустимы только относительные пути без `..`: подсунутый файл не должен увести
-чтение за пределы проверяемого каталога.
+**Manifest format.** `<sha256>  <relative path>`, paths with `/` on any OS; names with a backslash, a
+line feed and a carriage return are escaped as in `sha256sum`. Such a file can be checked both by the
+standard utility (`sha256sum -c`) and by `photocat verify --manifest` itself, and transferring it
+between Linux and Windows is not hindered by the separator. An incomplete manifest is not written: if
+a file could not be read or the pass was cancelled, a later check would declare the skipped files
+"extra". In manifest parsing only relative paths without `..` are allowed: a planted file must not
+lead the reading outside the folder being checked.
 
-**Коды и отмена.** 0 — копии/слепок совпадают, 1 — расхождения, ошибки чтения или отмена, 2 —
-ошибка аргументов. Прогресс идёт в stderr, `--jobs N` задаёт потоки; в CLI прерывание — `Ctrl-C`
-(команда ничего не пишет), `Progress::cancel` готов для будущей кнопки в GUI.
+**Codes and cancellation.** 0 — the copies/manifest match, 1 — differences, read errors or a cancel,
+2 — an argument error. Progress goes to stderr, `--jobs N` sets the threads; in the CLI an
+interruption is `Ctrl-C` (the command writes nothing), `Progress::cancel` is ready for a future GUI
+button.
 
-**Запрещает:** удалять, переименовывать или изменять файлы архива; писать что-либо, кроме слепка
-по явному `--out`; отправлять хеши, пути или список файлов в сеть; писать неполный слепок;
-считать файлы разного размера совпавшими без чтения.
+**Forbids:** deleting, renaming or changing archive files; writing anything except the manifest by an
+explicit `--out`; sending hashes, paths or the file list to the network; writing an incomplete
+manifest; counting files of different sizes as matching without reading.
 
-## 0024. Три колонки: сетка в центре, сведения справа, настройки в диалоге
+## 0024. Three columns: the grid in the centre, details on the right, settings in a dialog
 
-Раньше весь интерфейс был двухколоночным: слева навигация, действия вида и карточка выбранного
-файла вперемешку, в центре — сетка. На 840 px карточка уезжала вниз и обрезалась, а «Настройки»
-занимали целый вид: чтобы поменять один порог, владелец уходил с сетки и возвращался обратно.
+Before, the whole interface was two-column: navigation on the left, the view actions and the card of
+the selected file mixed in, the grid in the centre. At 840 px the card slid down and was cut off, and
+"Settings" took up a whole view: to change one threshold the owner left the grid and came back.
 
-Стало четыре региона: верхняя панель (каталог, индексация, поиск), слева — карта приложения
-(виды, фильтр, контекст вида, модель, текст, сводка), в центре — сетка, справа — сведения о
-выбранном файле с превью. «Настройки» — диалог поверх экрана с разделами слева (модель,
-индексация, теги, лица, хранилище, программы) и кнопкой «Закрыть».
+Now there are four regions: the top bar (folder, indexing, search), on the left the app map (views,
+filter, view context, model, text, summary), in the centre the grid, on the right the details of the
+selected file with a preview. "Settings" is a dialog over the screen with sections on the left (model,
+indexing, tags, faces, storage, programs) and a "Close" button.
 
-**Почему правая панель, а не карточка снизу слева.** Снимок и его метаданные читаются вместе;
-справа они не отнимают место у навигации и не прыгают под курсором при выборе плитки. Сетка и
-карточка не перекрываются, а выделение остаётся на месте.
+**Why a right panel and not a card below on the left.** The snapshot and its metadata are read
+together; on the right they take no space from navigation and do not jump under the cursor when a
+tile is selected. The grid and the card do not overlap, and the selection stays in place.
 
-**Почему «Настройки» — диалог, а не вид.** Настройка — редкое действие (порог, путь, модель);
-держать его отдельным видом значит каждый раз терять место в сетке. Диалог открывается одним
-кликом с верхней панели и закрывается Esc или кликом мимо; изменения применяются и сохраняются
-сразу, кнопки «Отмена» нет, потому что отменять нечего — оригиналы не меняются.
+**Why "Settings" is a dialog and not a view.** A setting is a rare action (a threshold, a path, a
+model); keeping it as a separate view means losing space in the grid every time. The dialog opens with
+one click from the top bar and closes with Esc or a click outside; changes are applied and saved
+immediately, there is no "Cancel" button, because there is nothing to cancel — the originals do not
+change.
 
-**Узкое окно.** Сетка обязана сохранять 4 колонки при 1000×700 (см. `docs/UI.md` §Метрики).
-260 + 280 px панелей оставляют в центре меньше места, поэтому правая панель рисуется только при
-окне от 1200 px, а ниже карточка переезжает в левую панель и её «Сводка» уходит в общую прокрутку.
-Одна функция `App::file_card` рисует карточку в обоих местах — второго экземпляра нет.
+**Narrow window.** The grid must keep 4 columns at 1000×700 (see `docs/UI.md` §Metrics). 260 + 280 px
+of panels leave too little in the centre, so the right panel is drawn only at a window of 1200 px and
+above, and below that the card moves into the left panel and its "Summary" joins the common scroll.
+One function `App::file_card` draws the card in both places — there is no second instance.
 
-**Почему «Настройки» — слово, а не шестерёнка.** Иконка без подписи как единственный путь
-запрещена (`.pi/skills/ui-design/references/nayti-za-sekundu.md` §8); кнопка подписана словом.
+**Why "Settings" is a word and not a gear.** An icon without a label as the only path is forbidden
+(`.pi/skills/ui-design/references/nayti-za-sekundu.md` §8); the button is labelled with a word.
 
-**Запрещает:** прятать основное действие вида в диалог; дублировать настройки в двух местах;
-рисовать карточку вторым набором виджетов; заливать акцентом больше одной кнопки на экран;
-показывать прогресс в строке управления, сдвигая кнопки.
+**Forbids:** hiding the main action of a view in a dialog; duplicating settings in two places; drawing
+the card with a second set of widgets; flooding more than one button per screen with the accent;
+showing progress in the controls row while shifting the buttons.
 
-## 0025. Корзина и очистка кэша: исключение из «ничего не удаляем»
+## 0025. The trash and cache cleaning: an exception to "we delete nothing"
 
-Владелец попросил «удалить» так, чтобы случайно не потерять семейный архив. Поэтому появились два
-разных механизма, и оба не удаляют безвозвратно:
+The owner asked to "delete" in a way that does not accidentally lose the family archive. Hence two
+different mechanisms, and neither deletes permanently:
 
-- **Корзина приложения.** `files.trashed_at` — только строка БД: файл на диске не меняется, из
-  обычных видов он скрыт, «Вернуть» обнуляет поле. Физического удаления нет.
-- **Очистка корзины.** Только после подтверждения, с числом и объёмом. Каждый файл уходит в
-  **системную** корзину ОС через крейт `trash` (`src/recycle.rs`); приложение не вызывает
-  `remove_file` и не перезаписывает файл. Строка индекса удаляется только после успешного переноса.
-- **Кэш.** «Настройки → Хранилище» удаляет только `<кэш>/photocat/thumbs` и `faces`, а также
-  строки индекса. `src/storage.rs` канонизирует путь и отказывает всему, что вне кэша. Архив и
-  модели этот код не трогает.
+- **The app trash.** `files.trashed_at` — a DB row only: the file on disk does not change, it is
+  hidden from ordinary views, "Restore" clears the field. There is no physical deletion.
+- **Emptying the trash.** Only after confirmation, with the count and the size. Every file goes to the
+  **OS** trash through the `trash` crate (`src/recycle.rs`); the app does not call `remove_file` and
+  does not overwrite the file. The index row is deleted only after a successful move.
+- **The cache.** "Settings → Storage" removes only `<cache>/photocat/thumbs` and `faces`, as well as
+  index rows. `src/storage.rs` canonicalises the path and refuses anything outside the cache. This
+  code does not touch the archive or the models.
 
-**Почему зависимость `trash`.** Своя реализация системной корзины на Linux/macOS/Windows — это
-три разных протокола и риск «удалить насовсем» при ошибке. `trash` делает ровно одну вещь:
-переносит файл в корзину ОС; безвозвратное удаление остаётся за владельцем и системным файловым
-менеджером. Сеть крейт не использует.
+**Why the `trash` dependency.** An own implementation of the system trash on Linux/macOS/Windows is
+three different protocols and a risk of "deleting for good" on an error. `trash` does exactly one
+thing: it moves a file to the OS trash; permanent deletion stays with the owner and the system file
+manager. The crate uses no network.
 
-**Почему не «удалить сразу».** Семейный архив невосстановим, а решение «этот кадр лишний» часто
-ошибочно. Двухшаговое «в корзину → очистить корзину» даёт паузу, в которую можно вернуть файл.
+**Why not "delete immediately".** A family archive is unrecoverable, and the decision "this frame is
+spare" is often wrong. The two-step "to trash → empty the trash" gives a pause in which a file can be
+returned.
 
-**Запрещает:** удалять файл из архива без подтверждения; обходить системную корзину; удалять
-что-либо из кэша, не проверив путь; трогать модели при очистке превью; писать «удалено», если файл
-только помечен.
+**Forbids:** deleting a file from the archive without confirmation; bypassing the OS trash; deleting
+anything from the cache without checking the path; touching the models when cleaning previews; writing
+"deleted" when a file is only marked.
 
-## 0026. Полноэкранный просмотр: кадр в фоне, возврат в тот же вид
+## 0026. The full-screen view: the frame in the background, return to the same view
 
-> Уточнение 0027: кадр уменьшается до 1920 px, сразу показывается 320 px превью; видео теперь
-> играет внешний ffplay (0029).
+> Refined by 0027: the frame is downscaled to 1920 px and a 320 px preview is shown immediately;
+> video is now played by the external ffplay (0029).
 
-Двойной клик по плитке открывает модальное окно поверх интерфейса. Оно не меняет `View`, фильтр,
-выделение и месяц календаря: закрытие возвращает ровно туда, откуда пришли. Листание идёт по
-списку текущего вида (день календаря, группа лиц, результаты поиска), а не по всей БД.
+A double click on a tile opens a modal window over the interface. It does not change the `View`, the
+filter, the selection or the calendar month: closing returns exactly where we came from. Paging goes
+through the list of the current view (a calendar day, a face group, search results), not through the
+whole DB.
 
-Кадр декодируется в фоновом потоке `derive::load_oriented`, уменьшается до 1920 px и только потом
-загружается текстурой в UI-поток: полноразмерный JPEG иначе замораживает окно. Предпросмотр в
-сетке (320 px) для полного экрана не годится — он мыльный.
+The frame is decoded in a background thread by `derive::load_oriented`, downscaled to 1920 px and only
+then loaded as a texture on the UI thread: a full-size JPEG would otherwise freeze the window. The
+grid preview (320 px) is not good enough for the full screen — it is blurry.
 
-Видео открывается внешним `ffplay` (см. 0029); ручной поток кадров и отдельный звук удалены.
-Текст OCR показывается рядом с кадром целиком, без обрезки в 400 знаков.
+Video is opened by the external `ffplay` (see 0029); the manual frame stream and the separate sound
+were removed. OCR text is shown next to the frame in full, without a 400-character cut.
 
-**Запрещает:** декодировать полноразмерный кадр в UI-потоке; менять вид при закрытии; листать
-чужой список (всю БД вместо выбранной группы).
+**Forbids:** decoding a full-size frame on the UI thread; changing the view on close; paging through
+someone else's list (the whole DB instead of the selected group).
 
-## 0027. Повторная индексация пропускает неизменённые файлы; видео играет потоком
+## 0027. Re-indexing skips unchanged files; video plays as a stream
 
-После первого прохода владелец снова нажал «Индексировать» и ждал минуты: приложение заново
-читало sha256, декодировало JPEG и гоняло ffmpeg по каждому файлу, хотя ничего не изменилось.
+After the first pass the owner pressed "Index" again and waited minutes: the app re-read the sha256,
+decoded JPEGs and ran ffmpeg over every file, although nothing had changed.
 
-**Инкрементально.** Ключ — путь + размер + mtime. Если в БД уже есть строка с тем же ключом,
-непустым sha256, нужным видом и превью, файл не читается. Видео без обложки или длительности —
-исключение: это старый индекс, его надо дозаполнить. На корпусе 2230 файлов старую БД догоняют
-259 файлов за 10.2 с; повторный проход — 0.024 с. Пропущенные считаются отдельно (`Stats.skipped`)
-и видны в статусе, чтобы «0 проиндексировано» не пугало. Риск: файл изменился, но размер и mtime
-совпали (редко); тогда содержимое не пересчитается — это цена скорости, и она записана здесь.
+**Incrementally.** The key is path + size + mtime. If the DB already has a row with the same key, a
+non-empty sha256, the right kind and a preview, the file is not read. A video without a cover or a
+duration is the exception: that is an old index and has to be filled in. On a corpus of 2230 files an
+old DB is caught up by 259 files in 10.2 s; a repeated pass — 0.024 s. Skipped files are counted
+separately (`Stats.skipped`) and visible in the status, so that "0 indexed" does not scare. Risk: a
+file changed but the size and mtime matched (rare); then the content is not recomputed — that is the
+price of speed, and it is recorded here.
 
-**Почему не пересчитывать sha всегда.** sha256 — половина стоимости прохода на 65 ГБ; повторное
-чтение всех файлов ради неизменных данных противоречит смыслу инкрементального индекса.
+**Why not always recompute sha.** sha256 is half the cost of a pass over 65 GB; re-reading all files
+for unchanged data contradicts the meaning of an incremental index.
 
-**Видео в окне.** `ffmpeg` отдаёт rawvideo RGBA 720×480 при 15 к/с, канал ограничен двумя кадрами,
-UI показывает последний. Звук добавлен отдельным решением — ADR 0028. Позже заменено на ffplay
-(ADR 0029): ручной поток кадров и звук удалены.
+**Video in the window.** `ffmpeg` returns rawvideo RGBA 720×480 at 15 fps, the channel is limited to
+two frames, the UI shows the latest. Sound was added by a separate decision — ADR 0028. Later replaced
+by ffplay (ADR 0029): the manual frame stream and the sound were removed.
 
-**Запрещает:** перечитывать неизменённые файлы «на всякий случай»; считать пропуск ошибкой;
-запускать видео в UI-потоке; держать неограниченный буфер кадров; обещать звук в окне.
+**Forbids:** re-reading unchanged files "just in case"; counting a skip as an error; starting video on
+the UI thread; keeping an unbounded frame buffer; promising sound in the window.
 
-## 0028. Звук видео: ffmpeg отдаёт PCM, rodio играет
+## 0028. Video sound: ffmpeg gives PCM, rodio plays it
 
-> Уточнение 0029: этот путь удалён. Видео и звук теперь играет ffplay; rodio и второй ffmpeg
-> больше не нужны.
+> Refined by 0029: this path was removed. Video and sound are now played by ffplay; rodio and the
+> second ffmpeg are no longer needed.
 
-Владелец справедливо заметил: если уже запускаем `ffmpeg`, глупо показывать видео без звука.
-`tools::audio_stream` запускает второй процесс `ffmpeg -vn -ac 2 -ar 44100 -f s16le -`; поток
-читает чанки по 0.5 с, переводит i16 в f32 и кладёт в `rodio::Player`, созданный на default-устройстве
-(`DeviceSinkBuilder::open_default_sink`). Очередь ограничена тремя чанками: декодер не убегает
-вперёд и не занимает память. Остановка — атомарный флаг в `VideoState`; `Player::stop` и
-`child.kill` завершают звук.
+The owner rightly noted: if we are already launching `ffmpeg`, it is silly to show video without
+sound. `tools::audio_stream` starts a second `ffmpeg -vn -ac 2 -ar 44100 -f s16le -` process; the
+stream reads chunks of 0.5 s, converts i16 to f32 and puts them into a `rodio::Player` created on the
+default device (`DeviceSinkBuilder::open_default_sink`). The queue is limited to three chunks: the
+decoder does not run ahead and does not eat memory. Stopping is an atomic flag in `VideoState`;
+`Player::stop` and `child.kill` end the sound.
 
-**Почему rodio, а не symphonia+cpal вручную.** `rodio` — тонкая обёртка над `cpal`, умеет играть
-`SamplesBuffer` без файла и декодеров; нам не нужны mp3/flac-фичи. Берём только `playback`, чтобы
-не тянуть кодеки. Linux-зависимость — системная ALSA, на Windows/macOS — штатные бэкенды.
+**Why rodio and not symphonia+cpal by hand.** `rodio` is a thin wrapper over `cpal` and can play a
+`SamplesBuffer` without a file and without decoders; we do not need the mp3/flac features. We take only
+`playback`, so as not to drag in codecs. The Linux dependency is system ALSA, on Windows/macOS there
+are standard backends.
 
-**Честное ограничение.** Видео и звук — два независимых процесса, оба стартуют с нуля. Перемотки
-нет, при длинном ролике возможен небольшой дрейф; для точного просмотра остаётся «Со звуком в
-системе» с полноценным плеером. Это лучше, чем молчание, и не требует видеокодека в egui.
+**Honest limitation.** Video and sound are two independent processes, both start from zero. There is
+no seeking, and with a long clip a slight drift is possible; for exact viewing there remains "With
+sound in the system" with a full player. This is better than silence and needs no video codec in egui.
 
-**Почему TurboJPEG для фото.** 108 МП JPEG (12032×9024, 36 МБ) полностью декодируется ~0.8 с,
-плюс ресайз и RGBA — 1.3 с. imv быстрый потому, что использует libturbojpeg с DCT-масштабом:
-декод сразу в 1/4 (3008 px) занимает ~0.52 с. На Linux `derive::fast_view` делает то же; на
-других ОС остаётся `image`-путь, чтобы не тащить нативную сборку. `turbojpeg` линкуется через
-pkg-config только на Linux и не влияет на остальные платформы.
+**Why TurboJPEG for photos.** A 108 MP JPEG (12032×9024, 36 MB) decodes fully in ~0.8 s, plus a resize
+and RGBA — 1.3 s. imv is fast because it uses libturbojpeg with DCT scaling: decoding straight to 1/4
+(3008 px) takes ~0.52 s. On Linux `derive::fast_view` does the same; on other OSes the `image` path
+remains, so as not to drag in a native build. `turbojpeg` links through pkg-config on Linux only and
+does not affect the other platforms.
 
-**Запрещает:** держать неограниченную очередь аудио; запускать звук в UI-потоке; обещать перемотку,
-которой нет; отправлять звук или пути в сеть.
+**Forbids:** keeping an unbounded audio queue; starting sound on the UI thread; promising a seek that
+does not exist; sending sound or paths to the network.
 
-## 0029. Видео — ffplay, без ручного потока кадров
+## 0029. Video — ffplay, without a manual frame stream
 
-Владелец потребовал использовать `ffplay`, а не собирать видео из кадров и отдельно подмешивать
-звук. Это правильнее: ffplay — часть ffmpeg, сам декодирует видео и звук, умеет все кодеки,
-перемотку, паузу и синхронизацию. Приложению не нужны `rodio`, второй ffmpeg-процесс, очередь
-PCM и ручная синхронизация.
+The owner demanded using `ffplay` instead of assembling video from frames and mixing in sound
+separately. That is more correct: ffplay is part of ffmpeg, decodes video and sound itself, knows all
+codecs, seeking, pause and synchronisation. The app needs neither `rodio`, nor a second ffmpeg process,
+nor a PCM queue, nor manual synchronisation.
 
-`tools::ffplay` ищет `ffplay` рядом с настроенным `ffmpeg`, иначе в `PATH`, и запускает
-`ffplay -autoexit -loglevel error -window_title photocat <файл>`. Процесс хранится в `App`;
-«Стоп видео» и закрытие полного экрана убивают его. Если ffplay не запустился — запасной путь
+`tools::ffplay` looks for `ffplay` next to the configured `ffmpeg`, otherwise in `PATH`, and runs
+`ffplay -autoexit -loglevel error -window_title photocat <file>`. The process is kept in `App`;
+"Stop the video" and closing the full screen kill it. If ffplay did not start — the fallback path
 `tools::open_path`.
 
-**Честное ограничение.** Это отдельное окно, а не модальное окно внутри egui. Встроенного
-видеоплеера в egui нет: он потребовал бы видеодекодер, аудиовыход и синхронизацию — то есть
-фактически второй ffplay. Отдельное окно с полноценным ffplay лучше, чем немое слайд-шоу.
+**Honest limitation.** This is a separate window, not a modal window inside egui. There is no
+built-in video player in egui: it would require a video decoder, an audio output and synchronisation —
+that is, effectively a second ffplay. A separate window with a full ffplay is better than a mute
+slideshow.
 
-**Запрещает:** собирать видео из кадров и звука вручную; тащить rodio/cpal; обещать встроенный
-плеер; оставлять ffplay-процесс после закрытия просмотра.
+**Forbids:** assembling video from frames and sound by hand; dragging in rodio/cpal; promising a
+built-in player; leaving an ffplay process behind after the view is closed.
 
-## 0030. Встроенный плеер на чистом Rust; ADR 0029 отменяется
+## 0030. A built-in player in pure Rust; ADR 0029 is cancelled
 
-Владелец потребовал встроенный плеер в окне приложения, кросс-платформенный и без внешних
-зависимостей. Это отменяет пункт ADR 0029 «запрещает обещать встроенный плеер»: он был верен
-для сборки из процессов, но не для чистого Rust.
+The owner demanded a built-in player in the app window, cross-platform and without external
+dependencies. This cancels the ADR 0029 item "forbids promising a built-in player": it was true for a
+build out of processes, but not for pure Rust.
 
-Декодеры и демультиплексор — семейство `rff` (`rff-format-mp4`, `rff-format-mkv`,
-`rff-codec-h264` поверх `rusty_h264`, `rff-codec-hevc` поверх `rusty_h265`, `rff-codec-aac`),
-звук выводит `cpal` (ALSA/PipeWire, WASAPI, CoreAudio — это API операционной системы, а не
-пакет, который надо ставить). Ни `ffmpeg`, ни `ffplay`, ни `mpv`, ни GStreamer в воспроизведении
-не участвуют, C в дереве зависимостей нет.
+The decoders and the demultiplexer are the `rff` family (`rff-format-mp4`, `rff-format-mkv`,
+`rff-codec-h264` over `rusty_h264`, `rff-codec-hevc` over `rusty_h265`, `rff-codec-aac`), the sound is
+output by `cpal` (ALSA/PipeWire, WASAPI, CoreAudio — an operating system API, not a package to
+install). Neither `ffmpeg`, nor `ffplay`, nor `mpv`, nor GStreamer take part in playback, and there is
+no C in the dependency tree.
 
-Почему не «кодеки из системы»: ABI `libav*` нестабилен между мажорами (60/61/62/63 — это
-ffmpeg 6.1/7/8/9), на Windows и macOS системных `libav*` нет вовсе, а Media Foundation и
-VideoToolbox дают только декодер без демуксера. Три платформенные ветки — это три разных
-поведения, то есть отказ от «одинаково везде». Один и тот же кодек в бинаре — единственный
-способ получить идентичность.
+Why not "codecs from the system": the `libav*` ABI is unstable between majors (60/61/62/63 are ffmpeg
+6.1/7/8/9), on Windows and macOS there are no system `libav*` at all, and Media Foundation and
+VideoToolbox give only a decoder without a demuxer. Three platform branches mean three different
+behaviours, that is, a refusal of "the same everywhere". The same codec in the binary is the only way
+to get identity.
 
-**Проверено на корпусе (2026-11-23).** H.264 High 2520×1080 — 667 кадров, md5 плоскостей Y/U/V
-совпал с декодом ffmpeg (bit-exact), 29–35 к/с; 1280×720 — 90 к/с; HEVC Main 1080×2520 — 47 к/с,
-тоже bit-exact; AAC 48 кГц — 1 068 032 сэмпла, ровно 22.250667 с как у ffmpeg; поворот из MP4
-(`rotation`) читается и применяется к кадру.
+**Verified on the corpus (2026-11-23).** H.264 High 2520×1080 — 667 frames, the md5 of the Y/U/V
+planes matched the ffmpeg decode (bit-exact), 29–35 fps; 1280×720 — 90 fps; HEVC Main 1080×2520 —
+47 fps, also bit-exact; AAC 48 kHz — 1 068 032 samples, exactly 22.250667 s as in ffmpeg; the MP4
+rotation (`rotation`) is read and applied to the frame.
 
-**Честное ограничение.** Декод в 4–5 раз медленнее многопоточного ffmpeg: 4K H.264 пойдёт ~14 к/с,
-то есть не пойдёт. Для таких файлов остаётся «Открыть во внешнем плеере» (`ffplay` уже нужен
-индексатору). Крейты pre-1.0; проверены H.264 Baseline/High, HEVC Main 8 бит, AAC-LC. Форматы
-кадров кроме 4:2:0 8/10 бит плеер отвергает по имени и уступает внешнему плееру.
+**Honest limitation.** The decode is 4–5 times slower than a multithreaded ffmpeg: 4K H.264 will go at
+~14 fps, that is, it will not go. For such files there remains "Open in the external player" (`ffplay`
+is needed by the indexer anyway). The crates are pre-1.0; H.264 Baseline/High, HEVC Main 8 bit and
+AAC-LC are verified. Frame formats other than 4:2:0 8/10 bit are rejected by name and yield to the
+external player.
 
-**Запрещает:** тянуть в плеер `ffmpeg`/`ffplay`/`mpv`/GStreamer как обязательную зависимость;
-обещать 4K; хранить в памяти больше одного-двух кадров вперёд; декодировать в UI-потоке;
-удалять или переименовывать файлы (воспроизведение только читает).
+**Forbids:** pulling `ffmpeg`/`ffplay`/`mpv`/GStreamer into the player as a mandatory dependency;
+promising 4K; keeping more than one or two frames ahead in memory; decoding on the UI thread; deleting
+or renaming files (playback only reads).
 
-## 0031. Зависимости плеера: `rff-*`, `rusty_h264`, `rusty_h265`, `cpal`
+## 0031. Player dependencies: `rff-*`, `rusty_h264`, `rusty_h265`, `cpal`
 
-| Крейт | Лицензия | Зачем | Без него |
+| Crate | Licence | Why | Without it |
 |---|---|---|---|
-| `rff-core`, `rff-format`, `rff-format-mp4`, `rff-format-mkv` | Apache-2.0 | демукс MP4/MOV и Matroska, пакеты с PTS, индекс сэмплов для seek | свой парсер MP4/MKV — месяцы работы |
-| `rff-codec` | Apache-2.0 | общий трейт `Decoder` и реестр кодеков: плеер не знает про кодеки | отдельный цикл декода на каждый кодек |
-| `rff-codec-h264` → `rusty_h264` | Apache-2.0 / BSD-2-Clause | H.264 (весь корпус: 258/258 файлов) | видео не играет |
-| `rff-codec-hevc` → `rusty_h265` | Apache-2.0 | HEVC (iPhone по умолчанию) | HEVC уходит во внешний плеер |
-| `rff-codec-aac` | Apache-2.0 | AAC-LC | видео без звука |
-| `cpal` | Apache-2.0 | вывод PCM: ALSA/PipeWire, WASAPI, CoreAudio | своего аудиовыхода нет; ADR 0028 уже пробовал и удалил |
+| `rff-core`, `rff-format`, `rff-format-mp4`, `rff-format-mkv` | Apache-2.0 | MP4/MOV and Matroska demux, packets with PTS, a sample index for seek | an own MP4/MKV parser — months of work |
+| `rff-codec` | Apache-2.0 | the shared `Decoder` trait and the codec registry: the player knows nothing about codecs | a separate decode loop per codec |
+| `rff-codec-h264` → `rusty_h264` | Apache-2.0 / BSD-2-Clause | H.264 (the whole corpus: 258/258 files) | video does not play |
+| `rff-codec-hevc` → `rusty_h265` | Apache-2.0 | HEVC (the iPhone default) | HEVC goes to the external player |
+| `rff-codec-aac` | Apache-2.0 | AAC-LC | video without sound |
+| `cpal` | Apache-2.0 | PCM output: ALSA/PipeWire, WASAPI, CoreAudio | we have no audio output of our own; ADR 0028 already tried and removed it |
 
-Проверка на реальных данных: см. 0030. Все лицензии разрешительные, копилефта в дереве нет.
-`cargo tree` не содержит C-крейтов с `cc`-сборкой: `rusty_h264`/`rusty_h265` — чистый Rust с
-`#![forbid(unsafe_code)]` в ядре.
+The check on real data: see 0030. All licences are permissive, there is no copyleft in the tree.
+`cargo tree` contains no C crates with a `cc` build: `rusty_h264`/`rusty_h265` are pure Rust with
+`#![forbid(unsafe_code)]` in the core.
 
-**Запрещает:** добавлять второй аудиовыход или второй декодер «на всякий случай»; включать
-`ffmpeg`-фолбэк по умолчанию вместо явной кнопки.
+**Forbids:** adding a second audio output or a second decoder "just in case"; enabling the `ffmpeg`
+fallback by default instead of an explicit button.
 
-## 0032. Теги: общий словарь и калибровка по каталогу, а не подгонка промптов
+## 0032. Tags: a common dictionary and calibration by folder, not tuning the prompts
 
-Один архив нельзя превращать в эталон: промпты, подкрученные под «Фотографии с телефона», будут
-плохо работать у другого владельца. При этом на текущем корпусе видна систематика: у 337 из 717
-снимков с «мебелью» документ/скриншот выше, и почти всегда мебель вторая. Причина не только в
-промптах — центральный кроп 224×224 отрезает контекст у вертикальных кадров (см.
-`docs/ARCHITECTURE.md` § Замеры, `8.jpg`).
+One archive cannot be turned into a reference: prompts tuned to "Фотографии с телефона" will work
+badly for another owner. At the same time a pattern is visible on the current corpus: in 337 of the
+717 snapshots with "furniture", document/screenshot is higher, and furniture is almost always second.
+The cause is not only the prompts — the central 224×224 crop cuts off the context of vertical frames
+(see `docs/ARCHITECTURE.md` § Measurements, `8.jpg`).
 
-**Решение.** Дефолтный набор тегов и промптов — общий, без слов из конкретного архива. Вход
-модели — ансамбль кадров (центр + весь кадр с полями). Порог фильтра — процентиль по каждому тегу
-(100 % = самый сильный снимок этого тега), а не сырой косинус и не глобальный максимум. Метки и
-промпты хранятся в БД на модель (`tag_defs`), правятся владельцем и пересчитываются по уже
-сохранённым векторам картинок, без повторного CLIP по фото. Уверенность — по отрыву первого тега
-от второго, иначе в карточке «не уверен». Модель крупнее (SigLIP 2 multilingual, CLIP ViT-L/14)
-добавляется только после M12 (динамическая размерность) и с замером CPU.
+**Decision.** The default set of tags and prompts is common, without words from a particular archive.
+The model input is an ensemble of frames (centre + the whole frame with margins). The filter threshold
+is a percentile per tag (100% = the strongest snapshot of that tag), not a raw cosine and not a global
+maximum. Labels and prompts are stored in the DB per model (`tag_defs`), edited by the owner and
+recomputed from the already stored image vectors, without a repeated CLIP over the photos. Confidence
+comes from the gap between the first tag and the second, otherwise the card says "not sure". A larger
+model (SigLIP 2 multilingual, CLIP ViT-L/14) is added only after M12 (dynamic dimension) and with a
+CPU measurement.
 
-**Следствия.** Нужны миграция схемы, замена `TAG_LABELS`/`PROMPTS_*` на загружаемый словарь,
-правки в `ocr.rs`/`organize.rs`, пересчёт тегов и проверка на двух независимых каталогах. На
-маленьком каталоге (< 100 файлов) процентили шумные — запасной сырой порог и предупреждение.
+**Consequences.** A schema migration is needed, `TAG_LABELS`/`PROMPTS_*` must be replaced by a loaded
+dictionary, `ocr.rs`/`organize.rs` need edits, the tags need a recomputation and a check on two
+independent folders. On a small folder (< 100 files) the percentiles are noisy — a fallback raw
+threshold and a warning.
 
-**Проверка реализации (M15.3).** Карточка не выдаёт первый вес за ответ: при отрыве меньше 0.01
-пишет «тег: не уверен», показывает топ-3 с весом и процентилем, ничего не подсвечивает; при
-уверенном теге строка «тег: <имя>» с акцентом. На `8.jpg` (документ 0.271 / интерьер 0.270,
-отрыв 0.001) — «не уверен», а не «документ». Тесты без окна через `egui::Context::run_ui`.
+**Implementation check (M15.3).** The card does not pass the first weight off as an answer: with a gap
+below 0.01 it writes "tag: not sure", shows the top-3 with weight and percentile and highlights
+nothing; with a confident tag the line is "tag: <name>" with the accent. On `8.jpg` (document 0.271 /
+interior 0.270, gap 0.001) — "not sure", not "document". Tests without a window through
+`egui::Context::run_ui`.
 
-**Проверка реализации (M15.2).** Порог фильтра — процентиль по каждому тегу: на 100% у «мебели»
-порог 0.298 и 1 снимок, у «документа» — 0.327 и 1, у «детей» — 0.280 и 1; на 0% — все 2229
-файлов; на 70% у каждого тега 669 снимков (пороги 0.229–0.248), хоть один тег проходит у 2129
-из 2229. Старый `tag_show` мигрирует: уверенность возвращается к 0.22, фильтр — к 70%; каталог
-меньше 100 файлов откатывается на сырой порог с предупреждением в интерфейсе.
+**Implementation check (M15.2).** The filter threshold is a percentile per tag: at 100% "furniture" has
+the threshold 0.298 and 1 snapshot, "document" — 0.327 and 1, "children" — 0.280 and 1; at 0% — all
+2229 files; at 70% every tag has 669 snapshots (thresholds 0.229–0.248), at least one tag passes for
+2129 of 2229. The old `tag_show` migrates: confidence returns to 0.22, the filter to 70%; a folder of
+fewer than 100 files falls back to the raw threshold with a warning in the interface.
 
-**Проверка реализации (M15.1).** Ансамбль кадров сделан: центр-кроп + весь кадр, усреднение
-векторов, `embed --refresh`. Замер на `8.jpg` (полный кадр): центр — скриншот 0.278 / документ
-0.275 / интерьер 0.271 / мебель 0.257; весь — интерьер 0.274 / мебель 0.262 / скриншот 0.261 /
-документ 0.257. Кроп действительно убирает «документ» из лидеров, но «мебель» первой не делает:
-вперёд выходит «интерьер». Значит, кроп — необходимое, но не достаточное условие; обещание
-«мебель первая» из одного кропа было бы подгонкой. Остаются процентильный порог (M15.2), явное
-«не уверен» (M15.3) и общие промпты (M15.5).
+**Implementation check (M15.1).** The frame ensemble is done: centre crop + the whole frame, averaging
+of the vectors, `embed --refresh`. Measurement on `8.jpg` (full frame): centre — screenshot 0.278 /
+document 0.275 / interior 0.271 / furniture 0.257; whole — interior 0.274 / furniture 0.262 /
+screenshot 0.261 / document 0.257. The crop really does remove "document" from the leaders, but does
+not make "furniture" first: "interior" comes forward. Hence the crop is a necessary but not a
+sufficient condition; the promise "furniture first" from a crop alone would be tuning. What remains is
+the percentile threshold (M15.2), the explicit "not sure" (M15.3) and the common prompts (M15.5).
 
-**Запрещает:** хардкодить промпты или пороги под один каталог; автоподгонку под содержимое
-архива; отправлять промпты, фото и пути в сеть; обещать детектор объектов вместо подсказок.
-Реализация — M15, план `plan/M15-tags.md`.
+**Forbids:** hardcoding prompts or thresholds for one folder; auto-tuning to the content of the
+archive; sending prompts, photos and paths to the network; promising an object detector instead of
+hints. The implementation is M15, plan `plan/M15-tags.md`.
 
-## 0033. Оболочка по образцу PhotoPrism: группы по месяцам, чипы фильтра, плоские секции
+## 0033. A PhotoPrism-shaped shell: month groups, filter chips, flat sections
 
-Интерфейс умеет всё, что нужно (индексация, дубли, лица, OCR, корзина, просмотр), но устроен как
-набор панелей: три колонки, заголовок вида одной строкой с телом, плоская лента из 2230 плиток,
-фильтры в трёх местах, каждый блок в рамке. Владелец смотрит на это ежедневно; образец,
-который он знает, — PhotoPrism.
+The interface can do everything needed (indexing, duplicates, faces, OCR, trash, viewing), but is
+arranged as a set of panels: three columns, the view heading on one line with the body, a flat ribbon
+of 2230 tiles, filters in three places, every block in a frame. The owner looks at this every day; the
+example he knows is PhotoPrism.
 
-**Решение.** Берём структуру PhotoPrism, а не оформление:
+**Decision.** We take the structure of PhotoPrism, not its look:
 
-- боковая навигация двумя группами («Библиотека», «Инструменты»), у пункта число справа;
-- плоские секции вместо `Frame::group` в панелях и карточке;
-- панель содержимого: название вида 18 px, факты рядом, «Плитки» справа, ниже чипы активных
-  фильтров с «×» и «найдено N из M»;
-- сетка сгруппирована по месяцам от свежих к старым, шаг плиток 2 px, наведение даёт обводку;
-- инспектор: превью, имя файла 14 px, путь 11 px, действия, затем строки «подпись — значение»;
-- один стиль на всё GUI: шаг 8×6, кнопка 26 px, радиус 4 px, палитра из `visuals()` и один акцент.
+- side navigation in two groups ("Library", "Tools"), with a number on the right of an item;
+- flat sections instead of `Frame::group` in the panels and the card;
+- a content panel: the view title at 18 px, the facts next to it, "Tiles" on the right, below the
+  chips of active filters with "×" and "found N of M";
+- the grid grouped by month from newest to oldest, a tile step of 2 px, hover gives an outline;
+- an inspector: a preview, the file name at 14 px, the path at 11 px, the actions, then
+  "label — value" rows;
+- one style for the whole GUI: step 8×6, button 26 px, radius 4 px, the palette from `visuals()` and
+  one accent.
 
-**Почему не копия.** Светлая тема, иконки без подписей, избранное, мультивыбор и карта требуют
-новых данных, новых зависимостей и нарушают §Вёрстка (`docs/UI.md`): иконка не может быть
-единственным путём, своих цветов нет, оригиналы не меняются. Альбомы (M19, `plan/M19-albums.md`)
-— не перенос чужой модели: это свои данные в БД, без копий файлов и без фотошопных «альбомов»
-PhotoPrism; их делаем отдельно. Структура переносится, чужая модель
-архива — нет.
+**Why not a copy.** The light theme, icons without labels, favourites, multi-select and the map need
+new data, new dependencies and violate §Layout (`docs/UI.md`): an icon cannot be the only path, there
+are no colours of our own, the originals do not change. Albums (M19, `plan/M19-albums.md`) are not a
+transfer of someone else's model: they are our own data in the DB, without file copies and without
+PhotoPrism's photoshopped "albums"; they are made separately. The structure is transferred, the
+foreign archive model is not.
 
-**Следствия.** Меняется только `src/app.rs` и документы: схема БД, индексация, дубли, CLIP, OCR,
-лица, плеер, корзина и сеть не трогаются. Порядок «свежие сверху» и заголовки месяцев меняют
-привычку, но не данные: `filtered()` по-прежнему отдаёт индексы строк, сортировка живёт в отрисовке.
-Метрики записаны в `docs/UI.md` §Метрики, правила — в `.pi/skills/ui-design/references/verstka.md`.
+**Consequences.** Only `src/app.rs` and the documents change: the DB schema, indexing, duplicates,
+CLIP, OCR, faces, the player, the trash and the network are untouched. The "newest first" order and
+the month headings change a habit, but not the data: `filtered()` still returns row indices, the sort
+lives in the drawing. The metrics are in `docs/UI.md` §Metrics, the rules — in
+`.pi/skills/ui-design/references/verstka.md`.
 
-**Проверка.** `cargo clippy --all-targets`, `cargo test`, `enforce-architecture`, короткий запуск GUI
-на копии реальной БД (2230 файлов, 25 МБ) с предупреждением владельцу; 4 колонки при 1240 px и при
-1000 px с закрытой правой панелью. Разбор и варианты — `plan/M16-interface.md`.
+**Check.** `cargo clippy --all-targets`, `cargo test`, `enforce-architecture`, a short GUI run on a
+copy of the real DB (2230 files, 25 MB) with a warning to the owner; 4 columns at 1240 px and at
+1000 px with the right panel closed. The reasoning and the options — `plan/M16-interface.md`.
 
-**Запрещает:** второй набор стилей или цветов; иконку вместо слова в навигации; появление
-«настроек вида» в диалоге там, где их место — панель содержимого; удаление, переименование или
-перемещение файлов архива ради раскладки.
+**Forbids:** a second set of styles or colours; an icon instead of a word in navigation; "view
+settings" appearing in a dialog where their place is the content panel; deleting, renaming or moving
+archive files for the sake of the layout.
 
-## 0034. Альбомы в БД: дерево и порядок, отдельно от каталогов на диске
+## 0034. Albums in the DB: a tree and an order, separate from folders on disk
 
-Владелец собирает семейный архив годами и хочет получать из него готовые наборы: «Дача 2024 →
-Май, Июнь», «Лиза → 1 год», «На печать». Каталоги на диске для этого не годятся: папка архива —
-это место, где лежат файлы, а альбом — решение человека, какие снимки и в каком порядке должны
-стоять рядом. Если альбомы станут папками, любое переименование или перенос затронет оригиналы,
-а §1 AGENTS.md этого запрещает. Кроме того, один снимок уместен и в «Дача 2024», и в «На печать» —
-файловая система такого не умеет без копий.
+The owner has been collecting the family archive for years and wants ready-made sets out of it:
+"Дача 2024 → Май, Июнь", "Лиза → 1 год", "На печать". Folders on disk are not good for this: an
+archive folder is the place where files lie, while an album is a human decision about which snapshots
+should stand next to each other and in which order. If albums became folders, any rename or move would
+affect the originals, and §1 AGENTS.md forbids that. Besides, one snapshot is appropriate both in
+"Дача 2024" and in "На печать" — a file system cannot do that without copies.
 
-**Решение.** Альбомы — только данные в SQLite (схема 5):
+**Decision.** Albums are data in SQLite only (schema 5):
 
-- `albums(id, parent_id, position, name, name_key, note, created_at, updated_at)`, `parent_id = 0`
-  — корень; имя уникально **среди соседей** без учёта регистра (`parent_id, name_key`), а не
-  глобально;
-- `album_files(album_id, file_id, position, added_at)`, `PRIMARY KEY(album_id, file_id)`: один
-  снимок — одна строка в альбоме, но в разных альбомах он может быть сколько угодно раз;
-- `position` — плотный 0..n−1 и у файлов, и у подальбомов; `db` перенумеровывает его после
-  вставки, перемещения и удаления, поэтому «выше/ниже» — это данные, а не вид;
-- все операции (`create`, `rename`, `move`, `add`, `remove`, `move_in_album`, `delete`) —
-  `INSERT/UPDATE/DELETE` в `db.rs`; `delete_album` рекурсивно чистит поддерево. Каскадов нет:
-  `PRAGMA foreign_keys` в `open` не включён, поэтому удаление строк `files` явно чистит
-  `album_files` и сжимает порядок;
-- цикл запрещён: `move_album` отказывает, если новый родитель — сам альбом или его потомок;
-- CLI `photocat albums …` работает без графики; `PATH` — ключ `files.path`, файлы не
-  открываются; коды 0 — сделано, 1 — ошибка данных, 2 — неверные аргументы или отказ без `--yes`.
+- `albums(id, parent_id, position, name, name_key, note, created_at, updated_at)`, `parent_id = 0` is
+  the root; a name is unique **among siblings** case-insensitively (`parent_id, name_key`), not
+  globally;
+- `album_files(album_id, file_id, position, added_at)`, `PRIMARY KEY(album_id, file_id)`: one snapshot
+  is one row in an album, but it may be in different albums as many times as needed;
+- `position` is dense 0..n−1 for files and for subalbums; `db` renumbers it after an insert, a move
+  and a delete, so "up/down" is data, not a view;
+- all operations (`create`, `rename`, `move`, `add`, `remove`, `move_in_album`, `delete`) are
+  `INSERT/UPDATE/DELETE` in `db.rs`; `delete_album` recursively clears the subtree. There are no
+  cascades: `PRAGMA foreign_keys` is not enabled in `open`, so deleting `files` rows explicitly clears
+  `album_files` and compacts the order;
+- a cycle is forbidden: `move_album` refuses if the new parent is the album itself or its descendant;
+- the CLI `photocat albums …` works without graphics; `PATH` is the key `files.path`, the files are
+  not opened; codes 0 — done, 1 — a data error, 2 — wrong arguments or a refusal without `--yes`.
 
-**Следствия.** Появляется вид «Альбомы» (дерево, подальбомы, сетка в порядке альбома) и вариант
-сортировки «Порядок альбома», доступный только внутри альбома. Альбом не хранит обложку: ею
-считается превью первого неудалённого файла по `position`. Файл в корзине приложения остаётся
-строкой альбома, но скрыт в сетке (счётчик «в корзине N»); файл, пропавший из индекса, теряет
-строку альбома — «висячих» ссылок нет. Выгрузка на диск — отдельная задача M20
-(`plan/M19-albums.md` §6): копии файлов, структура повторяет дерево, `--out` не перезаписывается.
+**Consequences.** An "Albums" view appears (tree, subalbums, a grid in album order) and the sort option
+"Album order", available only inside an album. An album stores no cover: the preview of the first
+non-trashed file by `position` serves as one. A file in the app trash stays an album row but is hidden
+in the grid (the counter "N in the trash"); a file that disappeared from the index loses the album
+row — there are no "dangling" references. Export to disk is a separate task M20
+(`plan/M19-albums.md` §6): file copies, the structure repeats the tree, `--out` is not overwritten.
 
-**Запрещает:** создавать, переименовывать или перемещать файлы архива ради альбома; делать альбом
-папкой на диске; хранить альбомы в файле настроек вместо БД; разрешать одинаковые имена у соседей;
-добавлять один снимок дважды в один альбом; удалять файлы при удалении альбома; называть альбом
-«каталогом» в интерфейсе — «Каталоги (N)» уже про папки архива.
+**Forbids:** creating, renaming or moving archive files for an album; making an album a folder on
+disk; storing albums in a settings file instead of the DB; allowing identical names among siblings;
+adding one snapshot twice to one album; deleting files when an album is deleted; calling an album a
+"folder" in the interface — "Folders (N)" is already about archive folders.
 
-**Проверка (M19).** Миграция копии реальной БД 4 → 5: 2230 файлов целы, БД +8 КиБ. Дерево
-3 уровней, `albums add` 500 файлов — 25 мс, повтор — 19 мс и «добавлено 0, уже было 500»;
-БД +28 КиБ, порядок 0..499. `cargo test` — тесты дерева, порядка, уникальности среди соседей,
-цикла, рекурсивного удаления, идемпотентности, корзины и миграции. `cargo clippy --all-targets`,
-`enforce-architecture` — чисто; GUI на копии реальной БД — без падений.
+**Check (M19).** Migration of a copy of the real DB 4 → 5: 2230 files intact, DB +8 KiB. A 3-level
+tree, `albums add` of 500 files — 25 ms, a repeat — 19 ms and "0 added, already had 500"; DB +28 KiB,
+order 0..499. `cargo test` — tests of the tree, the order, uniqueness among siblings, the cycle,
+recursive deletion, idempotence, the trash and the migration. `cargo clippy --all-targets`,
+`enforce-architecture` — clean; the GUI on a copy of the real DB — no crashes.
 
-## 0035. Выгрузка альбома: структура альбома, копии файлов, ничего не перезаписывается
+## 0035. Album export: the album structure, file copies, nothing overwritten
 
-Владелец собирает альбомы в приложении (ADR 0034), но «альбом» бесполезен, пока из него нельзя
-получить настоящий каталог: отдать на печать, залить в облако или открыть без photocat. Ссылки
-(hardlink/symlink) для этого не годятся — получатель должен увезти копию. Порядок в файловой
-системе не хранится, поэтому его приходится кодировать в имени файла.
+The owner builds albums in the app (ADR 0034), but an "album" is useless until a real folder can be
+made out of it: to send for printing, to upload to the cloud or to open without photocat. Links
+(hardlink/symlink) do not work for that — the recipient has to take away a copy. The order is not
+stored in the file system, so it has to be encoded in the file name.
 
-**Решение.** `photocat export --album N --out DIR [--name ШАБЛОН] [--apply]`:
+**Decision.** `photocat export --album N --out DIR [--name TEMPLATE] [--apply]`:
 
-- структура один в один повторяет дерево альбомов: `--out/<альбом>/<подальбом>/…`; каждый каталог
-  получает свои файлы. Каталоги подальбомов **без номеров** — на диске они идут по алфавиту,
-  порядок дерева остаётся в приложении. Пустой альбом даёт пустой каталог;
-- файлы — **копии**, а не ссылки: `std::fs::copy`, inode отличается, содержимое совпадает по
-  `sha256`. Опции `--mode` у `export` нет; ссылки остаются у `organize` (витрина);
-- имя по умолчанию `{n}_{orig}`: `{n}` — позиция в своём альбоме (2 знака до 99, 3 до 999),
-  доступны `{date} {time} {camera} {tag} {orig} {ext} {hash8}`. Санитайзер имён общий с витриной;
-- **ничего не перезаписывается и не удаляется**: занятое другим содержимым имя получает `-2`;
-  файл с тем же `sha256` пропускается (идемпотентный повтор); тот же снимок под старым номером —
-  «порядок в цели устарел N». Переупорядочивание не переименовывает уже выгруженное — файловая
-  система не обязана, а §1 AGENTS.md запрещает трогать файлы; лечится ручной перевыгрузкой;
-- `--out` должен существовать, быть каталогом и не лежать внутри `settings.roots`; без `--apply`
-  не создаётся ничего, даже каталог. В `--out` не пишутся служебные файлы: кэш «что выгружено»
-  (`sha256`, размер, mtime, относительный путь) лежит в `<кэш>/photocat/exports/`;
-- сверка существующих файлов — по размеру, затем по `sha256` (чтение, не запись); кэш ускоряет
-  повтор, если размер и mtime файла в цели не менялись;
-- CLI коды: 0 — план/успех, 1 — были ошибки копирования, 2 — аргументы, отсутствующий `--out`,
-  `--out` внутри архива. GUI: «Выгрузить на диск…» → поля, план-дерево, «Выгрузить N файлов»,
-  прогресс и «Стоп» в верхней панели, отчёт и «Скопировать отчёт».
+- the structure repeats the album tree one to one: `--out/<album>/<subalbum>/…`; every folder gets its
+  own files. Subalbum folders are **without numbers** — on disk they go alphabetically, the tree order
+  stays in the app. An empty album gives an empty folder;
+- the files are **copies**, not links: `std::fs::copy`, the inode differs, the content matches by
+  `sha256`. `export` has no `--mode` option; links remain with `organize` (the showcase);
+- the default name is `{n}_{orig}`: `{n}` is the position in its own album (2 digits up to 99, 3 up to
+  999), available are `{date} {time} {camera} {tag} {orig} {ext} {hash8}`. The name sanitiser is shared
+  with the showcase;
+- **nothing is overwritten or deleted**: a name taken by other content gets `-2`; a file with the same
+  `sha256` is skipped (an idempotent repeat); the same snapshot under an old number — "N stale in the
+  target". Reordering does not rename what is already exported — the file system is not obliged to,
+  and §1 AGENTS.md forbids touching files; the remedy is a manual re-export;
+- `--out` must exist, be a folder and not lie inside `settings.roots`; without `--apply` nothing is
+  created, not even the folder. No service files are written into `--out`: the cache "what has been
+  exported" (`sha256`, size, mtime, relative path) lives in `<cache>/photocat/exports/`;
+- existing files are compared by size, then by `sha256` (reading, not writing); the cache speeds up a
+  repeat if the size and mtime of the target file have not changed;
+- CLI codes: 0 — plan/success, 1 — there were copy errors, 2 — arguments, a missing `--out`, an
+  `--out` inside the archive. GUI: "Export to disk…" → fields, plan tree, "Export N files", progress
+  and "Stop" in the top bar, a report and "Copy the report".
 
-**Следствия.** `organize.rs` получает `plan_album`/`apply_export` и единственное разрешённое
-исключение: копирование в пользовательский каталог по явному `--apply`. `db::album_export_data`
-отдаёт поддерево и файлы в порядке альбома. `organize` теперь использует `derive::sha256_file`
-(L0), поэтому карта слоёв в `check.sh` разрешает `derive` для `organize`; удаления и переименования
-в `src/` по-прежнему нет.
+**Consequences.** `organize.rs` gets `plan_album`/`apply_export` and the only allowed exception:
+copying into a user folder by an explicit `--apply`. `db::album_export_data` returns the subtree and
+the files in album order. `organize` now uses `derive::sha256_file` (L0), so the layer map in
+`check.sh` allows `derive` for `organize`; there is still no deletion or renaming in `src/`.
 
-**Запрещает:** выгружать ссылками и добавлять `--mode` в `export`; удалять, переименовывать или
-«синхронизировать» что-либо в `--out`; писать в `--out` манифесты и `.photocat/`; выгружать
-автоматически по расписанию, при старте или при изменении альбома; индексировать `--out` без
-спроса; трогать оригиналы архива.
+**Forbids:** exporting with links and adding `--mode` to `export`; deleting, renaming or
+"synchronising" anything in `--out`; writing manifests and `.photocat/` into `--out`; exporting
+automatically on a schedule, at start or when an album changes; indexing `--out` without asking;
+touching the archive originals.
 
-**Проверка (M20).** Дерево 3 уровней, 500 файлов (2.4 ГиБ): dry-run 14 мс, `--apply` 2045 мс,
-повтор 20 мс и «пропущено 500». 2230 файлов (21.2 ГиБ): dry-run 21 мс, `--apply` 111 мс (ФС
-отдала `copy_file_range`), повтор 45 мс и «пропущено 2230»; 5 проверенных копий — `sha256` совпал,
-inode другой. `cargo test` — 16 новых тестов выгрузки (дерево, номер позиции, чистка имён,
-коллизии, идемпотентность, копия не ссылка, пустой альбом, устаревший порядок, отсутствующий
-файл, отмена, отказ `--out` в корне); `clippy`, `check.sh` — чисто; GUI на копии реальной БД —
-без падений.
+**Check (M20).** A 3-level tree, 500 files (2.4 GiB): dry run 14 ms, `--apply` 2045 ms, a repeat 20 ms
+and "500 skipped". 2230 files (21.2 GiB): dry run 21 ms, `--apply` 111 ms (the FS gave
+`copy_file_range`), a repeat 45 ms and "2230 skipped"; 5 checked copies — `sha256` matched, the inode
+differs. `cargo test` — 16 new export tests (tree, position number, name cleaning, collisions,
+idempotence, a copy is not a link, an empty album, a stale order, a missing file, cancellation, refusal
+of `--out` inside the root); `clippy`, `check.sh` — clean; the GUI on a copy of the real DB — no
+crashes.
 
-## 0036. Словарь тегов в БД: дефолт засевается один раз, пересчёт по сохранённым векторам
+## 0036. The tag dictionary in the DB: the default is seeded once, recomputation from the stored vectors
 
-Промпты и метки были константами в коде (`TAG_LABELS`, `PROMPTS_RU/EN`): любой новый тег — правка
-Rust и пересборка, а владелец архива не программист. При этом `ADR 0032` уже требовал словарь на
-модель и пересчёт без повторного CLIP по фото: векторы картинок от промптов не зависят.
+Prompts and labels used to be constants in the code (`TAG_LABELS`, `PROMPTS_RU/EN`): every new tag
+meant a Rust edit and a rebuild, and the archive owner is not a programmer. At the same time ADR 0032
+already required a dictionary per model and a recomputation without a repeated CLIP over photos: image
+vectors do not depend on the prompts.
 
-**Решение.** Таблица `tag_defs(model, tag_id, label, prompts, enabled, position, min_pct)`
-(схема 6). `label` — русская подпись и одновременно ключ `tags.tag`, уникальна внутри модели.
-`prompts` — по строке на шаблон; несколько шаблонов дают один тег, и его вес — **лучший** из
-шаблонов, а не среднее: описание может совпасть только с одной формулировкой, среднее такую
-догадку размывает. Дефолт — `embed::DEFAULT_TAGS`, 14 общих меток по 2–3 шаблона, без слов из
-конкретного архива; промпты выбираются по языку модели (`Projected` → русские, `Direct` →
-английские). Засев — только если у модели нет ни одной строки. Версия дефолта
-(`settings.tag_defs_version`) поднимается вместе с набором, а `settings.tag_defs_sig` — отпечаток
-засеянного словаря: новый дефолт заменяет прежний только если отпечаток совпал (никто не правил);
-правки владельца и импорт (версия 0) автообновление не трогает.
-`ensure_tag_defs` — единственный вход; `Model::set_tag_defs` считает векторы включённых промптов.
-Правка словаря пересчитывается `embed --retag`: текстовая башня один раз, затем `replace_tags`
-по каждому сохранённому `embeddings` (2229 файлов за 1.0–1.2 с), фото не декодируются. Выключенный
-тег не считается и не попадает в фильтр; удалённый исчезает из `tags` при пересчёте. `min_pct`
-поднимает процентильный порог отдельного тега, общий ползунок остаётся главным.
-Обмен — JSON (`{id,label,prompts,enabled,position,min_percentile}`), без путей и фото; импорт
-заменяет словарь модели целиком. CLI: `photocat tags [--list|--add|--enable|--disable|--rm|
---export|--import|--reset]`; GUI: редактор в «Настройках → Теги», кнопки «Пересчитать теги»,
-«Экспорт JSON», «Импорт JSON», «Вернуть стандартные».
+**Decision.** The table `tag_defs(model, tag_id, label, prompts, enabled, position, min_pct)`
+(schema 6). `label` is the Russian caption and at the same time the `tags.tag` key, unique within the
+model. `prompts` is one template per line; several templates give one tag, and its weight is the
+**best** of the templates, not the average: a description may match only one wording, and the average
+blurs such a guess. The default is `embed::DEFAULT_TAGS`, 14 common labels with 2–3 templates each,
+without words from a particular archive; prompts are chosen by the model language (`Projected` →
+Russian, `Direct` → English). Seeding happens only if the model has no rows at all. The default
+version (`settings.tag_defs_version`) is bumped together with the set, and `settings.tag_defs_sig` is
+the fingerprint of the seeded dictionary: a new default replaces the old one only if the fingerprint
+matches (nobody edited it); the owner's edits and an import (version 0) are not touched by the
+auto-update. `ensure_tag_defs` is the only entrance; `Model::set_tag_defs` computes the vectors of the
+enabled prompts. A dictionary edit is recomputed by `embed --retag`: the text tower once, then
+`replace_tags` over every stored `embeddings` (2229 files in 1.0–1.2 s), photos are not decoded. A
+disabled tag is neither computed nor put into the filter; a removed one disappears from `tags` on
+recomputation. `min_pct` raises the percentile threshold of a single tag, the common slider stays the
+main one. Exchange is via JSON (`{id,label,prompts,enabled,position,min_percentile}`), without paths
+and photos; an import replaces the model's dictionary entirely. CLI: `photocat tags [--list|--add|
+--enable|--disable|--rm|--export|--import|--reset]`; GUI: the editor in "Settings → Tags", the
+"Recompute tags", "Export JSON", "Import JSON", "Restore the defaults" buttons.
 
-**Следствия.** `SCHEMA_VERSION` 5 → 6; `TAG_LABELS`/`PROMPTS_*` удалены из кода, `ocr.rs` и
-`organize.rs` продолжают читать метки из `tags` и ничего не меняют. `--reset` («Вернуть
-стандартные») по-прежнему возвращает стандарт явно; автообновление срабатывает только на
-нетронутом словаре. Экспорт словаря — явное действие владельца (как
-`manifest --out`), по умолчанию пишет `<кэш>/photocat/tags.json`, архив не трогает.
+**Consequences.** `SCHEMA_VERSION` 5 → 6; `TAG_LABELS`/`PROMPTS_*` removed from the code, `ocr.rs` and
+`organize.rs` keep reading the labels from `tags` and change nothing. `--reset` ("Restore the
+defaults") still returns the standard explicitly; the auto-update fires only on an untouched
+dictionary. Exporting the dictionary is an explicit owner action (like `manifest --out`), it writes
+`<cache>/photocat/tags.json` by default and does not touch the archive.
 
-**Запрещает:** хардкодить метки и промпты в UI или в ядре после засева; перезаписывать словарь
-владельца при обновлении; пересчитывать эмбеддинги фото при правке промптов; отправлять словарь
-в сеть; удалять/переименовывать файлы архива.
+**Forbids:** hardcoding labels and prompts in the UI or in the core after the seeding; overwriting the
+owner's dictionary on an update; recomputing photo embeddings when the prompts change; sending the
+dictionary to the network; deleting/renaming archive files.
 
-**Проверка (M15.5).** Промпты v1 (один на метку) заменены на 2–3 общих шаблона, вес метки —
-лучший из шаблонов, версия набора 2. Корпус телефона (2229 файлов): уверенных 1285 → 1242,
-top-1 тот же у 83.2%, «документ» в top-3 804 → 534, ложный «документ/скриншот» на фото с камерой
-270/1655 → 225/1655 (16.3% → 13.6%), у снимков с распознанным текстом 123/145 — без потерь.
-Второй каталог «день рожденья» (110 файлов): уверенных 66 → 69, top-1 тот же у 86.4%,
-«документ» в top-3 38 → 21. `8.jpg`: документ 0.274 / мебель 0.273 — «не уверен». Среднее по
-шаблонам проигрывало максимуму по всем четырём метрикам (уверенных 1175, ложных 245, документы
-120/145) — поэтому максимум. «Чертёж/схема» в дефолт не добавлен: это ниша, а не общая категория;
-владелец добавит её через словарь.
+**Check (M15.5).** Prompts v1 (one per label) replaced by 2–3 common templates, the label weight is the
+best of the templates, set version 2. Phone corpus (2229 files): confident 1285 → 1242, top-1 the same
+for 83.2%, "document" in top-3 804 → 534, a false "document/screenshot" on photos with a camera
+270/1655 → 225/1655 (16.3% → 13.6%), on snapshots with recognized text 123/145 — no losses. A second
+folder "день рожденья" (110 files): confident 66 → 69, top-1 the same for 86.4%, "document" in top-3
+38 → 21. `8.jpg`: document 0.274 / furniture 0.273 — "not sure". The average over templates lost to the
+maximum on all four metrics (confident 1175, false 245, documents 120/145) — hence the maximum.
+"Чертёж/схема" was not added to the default: it is a niche, not a common category; the owner will add
+it through the dictionary.
 
-**Проверка (M15.4).** Копия реальной БД (2230 файлов): `tags` засеял 14 тегов, `--add «Шкаф»`
-с двумя промптами → `embed --retag` 2229/2229 за 1.0–1.2 с; «Шкаф» 0.187–0.292, top-1 у 218 снимков,
-на 70-м процентиле порог 0.2454 и 669 снимков — столько же, сколько у остальных тегов. Правка
-пережила перезапуск (три отдельных процесса), `--export` → `--reset` → `--import` вернул
-15 тегов. `cargo test` — roundtrip JSON, засев один раз, уникальность метки, миграция 5 → 6;
-`clippy`, `check.sh` (41/0), GUI на копии БД — без падений.
+**Check (M15.4).** A copy of the real DB (2230 files): `tags` seeded 14 tags, `--add "Шкаф"` with two
+prompts → `embed --retag` 2229/2229 in 1.0–1.2 s; "Шкаф" 0.187–0.292, top-1 for 218 snapshots, at the
+70th percentile the threshold 0.2454 and 669 snapshots — as many as the other tags. The edit survived
+a restart (three separate processes), `--export` → `--reset` → `--import` returned 15 tags.
+`cargo test` — JSON roundtrip, seeding once, label uniqueness, migration 5 → 6; `clippy`, `check.sh`
+(41/0), the GUI on a copy of the DB — no crashes.
 
-## 0037. Напоминание о проверке целостности: срок в настройках, запуск — только нажатием
+## 0037. An integrity check reminder: the deadline in the settings, the run only by a press
 
-Проверка бэкапа «когда вспомнил» не работает: у семейного архива нет администратора, а слепок
-уже есть (M8/M9). Нужен срок, но приложение не должно само читать 21 ГиБ в фоне и не должно
-ставить системных таймеров.
+Checking a backup "when I remembered" does not work: a family archive has no administrator, and the
+manifest already exists (M8/M9). A deadline is needed, but the app must not read 21 GiB in the
+background by itself and must not set system timers.
 
-**Решение.** В `settings` живут `verify_root`, `verify_manifest`, `verify_interval_days`
-(по умолчанию 30, 0 — выключено), `verify_last_at` (RFC3339 UTC), `verify_last_ok` и
-`verify_last_report`. `db::verify_due(настройки, now)` — одна функция с явным `now`: баннер и
-тесты считают одно и то же. «Пора» — слепок задан, интервал больше нуля и с последнего прохода
-прошло не меньше срока; пустая или испорченная дата — пора; дата в будущем (часы перевели
-назад) — не пора, без паники. При запуске GUI при сроке показывает баннер «Пора проверить
-архив» с «Проверить» и «Напомнить позже»; «Напомнить позже» — только на текущий запуск, в БД не
-пишется. «Проверить» открывает экран «Целостность» и запускает ту же фоновую проверку по слепку
-с прогрессом и «Стоп»; автоматического запуска нет.
+**Decision.** `settings` holds `verify_root`, `verify_manifest`, `verify_interval_days` (30 by default,
+0 — off), `verify_last_at` (RFC3339 UTC), `verify_last_ok` and `verify_last_report`.
+`db::verify_due(settings, now)` is one function with an explicit `now`: the banner and the tests count
+the same thing. "Due" means a manifest is set, the interval is above zero and at least the interval has
+passed since the last pass; an empty or broken date is "due"; a date in the future (the clock was set
+back) is not "due", without a panic. On start, when due, the GUI shows the banner "Time to check the
+archive" with "Check" and "Remind later"; "Remind later" is for the current run only and is not written
+to the DB. "Check" opens the "Integrity" screen and starts the same background check against the
+manifest with progress and "Stop"; there is no automatic start.
 
-**Итог прохода.** Записанный слепок и завершённая проверка пишут дату, «ок» и полный отчёт в
-настройки и в `<кэш>/photocat/verify-last.txt`; в каталог архива — ничего. Отмена и ошибка
-прохода (битый слепок, нет файла) не трогают прошлый успешный отчёт и дату: иначе напоминание
-«съедало» бы последнее хорошее состояние. Запись слепка тоже ставит дату: архив только что
-прочитан целиком, и проверять его в ту же минуту незачем.
+**The result of a pass.** A written manifest and a finished check write the date, "ok" and the full
+report into the settings and into `<cache>/photocat/verify-last.txt`; nothing into the archive folder.
+A cancel or a failed pass (a broken manifest, a missing file) does not touch the previous successful
+report and date: otherwise the reminder would "eat" the last good state. Writing a manifest also sets
+the date: the archive has just been read in full, and there is no reason to check it in the same
+minute.
 
-**Запрещает:** автозапуск проверки по таймеру в приложении; запись отчёта в каталог архива;
-считать отменённый или упавший проход успешным; терять прошлый отчёт из-за ошибки.
+**Forbids:** auto-starting a check by a timer in the app; writing the report into the archive folder;
+counting a cancelled or failed pass as successful; losing the previous report because of an error.
 
-**Проверка (M10).** `cargo test` — расчёт «пора/не пора» (нет слепка, интервал 0, ровно срок,
-просрочено, ещё рано, часы назад), roundtrip настроек, баннер виден и не запускает проход,
-«напомнить позже» скрывает до перезапуска, битый слепок не стирает прошлый отчёт. GUI на копии
-реальной БД — короткий запуск без падений. CLI-путь `verify --manifest` не менялся (коды 0/1),
-пример systemd-таймера — в README.
+**Check (M10).** `cargo test` — the "due/not due" calculation (no manifest, interval 0, exactly due,
+overdue, too early, the clock went back), a settings roundtrip, the banner visible and starting no
+pass, "remind later" hiding it until a restart, a broken manifest not wiping the previous report. The
+GUI on a copy of the real DB — a short run without crashes. The CLI path `verify --manifest` is
+unchanged (codes 0/1), a systemd timer example is in the README.
 
-## 0038. Похожие снимки: индекс по 8-битным блокам вместо голого BK-tree
+## 0038. Similar snapshots: an index of 8-bit blocks instead of a bare BK-tree
 
-Попарное сравнение dHash — O(n²): на корпусе 2230 файлов это 0.025–0.03 с, а на 50 тыс. уже
-1.25 млрд проверок. Нужен точный поиск всех пар с расстоянием Хэмминга ≤ `max_dist`, без
-новых зависимостей и без изменения групп, union-find и совета по кадру.
+Pairwise dHash comparison is O(n²): on a corpus of 2230 files that is 0.025–0.03 s, but at 50k it is
+already 1.25 billion checks. What is needed is an exact search of all pairs with a Hamming distance ≤
+`max_dist`, without new dependencies and without changing the groups, union-find and the frame advice.
 
-**Что не сработало.** BK-tree (и любое метрическое дерево с неравенством треугольника) на
-64-битных хешах при радиусе 6 вырождается: почти все случайные значения лежат на расстоянии
-~32, поэтому для запроса с `d ≈ 32` разрешённая полоса детей `[d−6, d+6]` накрывает основную
-массу узлов. Замер release: 20 тыс. хешей — 2.58 с, 50 тыс. — 17.2 с (пик RSS теста 45.7 МБ);
-цель — 50 тыс. за 5 с. Дерево остаётся верным, но не быстрым, поэтому его роль в задаче
-выполняет другой точный индекс.
+**What did not work.** A BK-tree (and any metric tree with the triangle inequality) degenerates on
+64-bit hashes at radius 6: almost all random values lie at a distance of ~32, so for a query with
+`d ≈ 32` the allowed child band `[d−6, d+6]` covers the bulk of the nodes. Release measurement: 20k
+hashes — 2.58 s, 50k — 17.2 s (test peak RSS 45.7 MB); the goal is 50k in 5 s. The tree stays correct,
+but not fast, so its role in the task is played by another exact index.
 
-**Решение.** Выше `INDEX_MIN = 20_000` хешей строится восемь бакетов по 8 бит dHash. Если
-расстояние между двумя значениями ≤ 7, хотя бы один из восьми байтов совпадает целиком
-(принцип ящиков); для `max_dist ≤ 7` кандидаты берутся из восьми бакетов, дубликаты отсекаются
-меткой на запрос, и полное расстояние Хэмминга по `u64` проверяется перед `union`. Ниже порога
-остаётся прежний попарный перебор — он дешевле по памяти. Для радиуса 8–64 гарантии нет,
-поэтому там тоже перебор: такие пороги и так склеивают почти всё. `find_groups_with` принимает
-порог явно, чтобы тест на одних и тех же случайных наборах сравнил индекс и перебор.
+**Decision.** Above `INDEX_MIN = 20_000` hashes eight buckets of 8 dHash bits are built. If the distance
+between two values is ≤ 7, at least one of the eight bytes matches entirely (pigeonhole); for
+`max_dist ≤ 7` the candidates come from the eight buckets, duplicates are cut off by a per-query mark,
+and the full Hamming distance over `u64` is checked before `union`. Below the threshold the previous
+pairwise pass remains — it is cheaper in memory. For a radius of 8–64 there is no guarantee, so the
+pairwise pass is used there too: such thresholds glue almost everything anyway. `find_groups_with`
+takes the threshold explicitly, so that a test on the same random sets compares the index and the
+pairwise pass.
 
-**Запрещает:** менять состав групп, совет по кадру и `plan_csv`; хранить индекс в БД или
-пересчитывать его на каждый кадр GUI; добавлять зависимость для хеширования или индекса;
-использовать индекс для радиуса > 7, где он не даёт гарантии.
+**Forbids:** changing the group composition, the frame advice and `plan_csv`; storing the index in the
+DB or recomputing it every GUI frame; adding a dependency for hashing or the index; using the index for
+a radius > 7, where it gives no guarantee.
 
-**Проверка (M11).** Корпус 2230 файлов: `dupes --max-dist 6`, release — 0.017–0.025 с, те же 103
-группы, 238 файлов, 214.1 МиБ. Синтетика (пары «хеш и хеш с одним изменённым битом»): 20 тыс. —
-0.082 с, 50 тыс. — 0.446 с при `max_dist 6`; пик RSS процесса теста 27.1 и 48.2 МБ. Тест
-«индекс и перебор совпадают» — случайные наборы 8/40/80/160, `max_dist` 0–10, плюс пусто,
-один элемент, все одинаковые, все далёкие; точные копии по sha256 склеиваются на обоих путях.
+**Check (M11).** Corpus of 2230 files: `dupes --max-dist 6`, release — 0.017–0.025 s, the same 103
+groups, 238 files, 214.1 MiB. Synthetic data (pairs "a hash and a hash with one bit changed"): 20k —
+0.082 s, 50k — 0.446 s at `max_dist 6`; the test process peak RSS 27.1 and 48.2 MB. The test "the index
+and the pairwise pass agree" — random sets 8/40/80/160, `max_dist` 0–10, plus empty, one element, all
+identical, all far apart; exact copies by sha256 glue on both paths.
 
-## 0039. Каталог CLIP-моделей: размерность в данных, SigLIP 768 как третья модель
+## 0039. The CLIP model catalogue: the dimension in the data, SigLIP 768 as a third model
 
-`DIM = 512` был зашит в `embed.rs`: любая новая модель с другим вектором требовала правки кода,
-а `tags` имела первичный ключ `(file_id, tag)` — две модели с меткой «пляж» физически не могли
-жить рядом. M12 требует каталог данных и отсутствие смешивания.
+`DIM = 512` was hardcoded in `embed.rs`: any new model with a different vector required a code edit,
+and `tags` had the primary key `(file_id, tag)` — two models with the label "пляж" physically could not
+live side by side. M12 requires a catalogue of data and no mixing.
 
-**Решение.** `ModelEntry` хранит всё, что отличает модель: `dim`, сторону кадра, максимум
-токенов, pad-токен, нормализацию (`derive::ImageNorm`), число кадров и имена выходов ONNX.
-`TextKind` — способ чтения текстовой башни: `Projected` (hidden + dense), `Direct` (CLIP
-`text_embeds`), `Pooler` (SigLIP `pooler_output`). Размерность проверяется по метаданным ONNX
-при загрузке и по фактическому выходу на прогоне; ошибка называет оба числа. Схема 7:
-`tags` — `PRIMARY KEY(file_id,tag,source)`, миграция перестраивает таблицу и пересоздаёт
-триггер, который при смене sha256 снимает CLIP-теги **всех** моделей. Векторы уже были
-разделены ключом `(file_id,model)`.
+**Decision.** `ModelEntry` holds everything that distinguishes a model: `dim`, the frame side, the
+token maximum, the pad token, the normalisation (`derive::ImageNorm`), the number of frames and the
+ONNX output names. `TextKind` is the way to read the text tower: `Projected` (hidden + dense), `Direct`
+(CLIP `text_embeds`), `Pooler` (SigLIP `pooler_output`). The dimension is checked against the ONNX
+metadata at load time and against the actual output on a run; an error names both numbers. Schema 7:
+`tags` — `PRIMARY KEY(file_id,tag,source)`, the migration rebuilds the table and recreates the trigger
+that removes the CLIP tags of **all** models when sha256 changes. The vectors were already separated by
+the key `(file_id,model)`.
 
-Третья модель — SigLIP base patch16-224 (`Xenova/siglip-base-patch16-224`, Apache-2.0, 203.5 МиБ,
-768 признаков). Это другая архитектура и другая предобработка: mean/std 0.5, bicubic, весь кадр
-растягивается в 224×224 (без центр-кропа), текст паддится до 64 токенов `</s>`. Поэтому в
-`ModelEntry` появились `norm`, `frames` и `pad_token`, а не ветка «если SigLIP» в трёх местах.
-CLIP-модели остались с прежним ансамблем из двух кадров, чтобы не пересчитывать 2229 векторов.
+The third model is SigLIP base patch16-224 (`Xenova/siglip-base-patch16-224`, Apache-2.0, 203.5 MiB,
+768 features). It is a different architecture and a different preprocessing: mean/std 0.5, bicubic, the
+whole frame is stretched to 224×224 (without a centre crop), the text is padded to 64 `</s>` tokens.
+That is why `norm`, `frames` and `pad_token` appeared in `ModelEntry`, instead of an "if SigLIP" branch
+in three places. The CLIP models kept the previous ensemble of two frames, so as not to recompute 2229
+vectors.
 
-**Следствия и ограничения.** SigLIP отвечает на английские запросы; русские поисковые слова для
-него не работают. Шкала косинуса SigLIP ниже CLIP: уверенный тег 0.22 срабатывает почти никогда,
-поэтому теги видны через процентильный фильтр или после снижения порога; это не повод смешивать
-векторы. `tag_hidden` по-прежнему про метку, а не про модель — скрытие «пляжа» скрывает его во
-всех моделях у этого снимка. Переключение модели не удаляет старые векторы и словари; `--retag`
-пересчитывает только активную модель.
+**Consequences and limitations.** SigLIP answers English queries; Russian search words do not work for
+it. SigLIP's cosine scale is lower than CLIP's: a confident tag at 0.22 almost never fires, so tags are
+visible through the percentile filter or after lowering the threshold; that is no reason to mix
+vectors. `tag_hidden` is still about a label, not about a model — hiding "пляж" hides it in all models
+for that snapshot. Switching the model does not delete the old vectors and dictionaries; `--retag`
+recomputes only the active model.
 
-**Проверка (M12).** Скачивание: 36.7 с, 3 файла, 203.5 МиБ, sha256 совпал. Корпус 2227 файлов
-(2 в корзине): `embed --refresh` SigLIP — 418.2 с (0.188 с/файл, один кадр), 0 ошибок, векторы
-6.8 МиБ; `embed --retag` — 2.4 с; поиск по 2227 векторам — 35–40 мс; `clusters --k 30` — 1.5 с.
-Контрольные красный/синий квадраты: правильный порядок с отрывом. `cargo test` — каталог,
-ошибка размерности, отказ без согласия, миграция 6→7 и сохранение тегов двух моделей; старые
-CLIP-векторы и теги остались на месте, `user_version` 7.
+**Check (M12).** Download: 36.7 s, 3 files, 203.5 MiB, sha256 matched. Corpus of 2227 files (2 in the
+trash): `embed --refresh` SigLIP — 418.2 s (0.188 s/file, one frame), 0 errors, vectors 6.8 MiB;
+`embed --retag` — 2.4 s; search over 2227 vectors — 35–40 ms; `clusters --k 30` — 1.5 s. Control red/blue
+squares: the right order with a gap. `cargo test` — the catalogue, a dimension error, a refusal without
+consent, the migration 6→7 and the preservation of the tags of two models; the old CLIP vectors and tags
+stayed in place, `user_version` 7.
 
 ## 0040. Language of the project: English first, Russian second; UI translated by lookup
 
@@ -888,7 +920,7 @@ result is stored once. The window and the CLI both call it before printing anyth
 
 **CLI reports** follow the same language, but without a process-wide variable: the report structs of
 `verify`, `organize`, `embed`, `faces`, `ocr` get a `lang` field filled from `settings.lang`, and
-their `Display` impls go through `t(lang, …)`. Until that lands (M21.6) CLI text stays Russian.
+their `Display` impls go through `t(lang, …)`. Since M21.6 every report speaks that language.
 
 **Consequences.** `t()` takes `&'static str`, so dynamic fragments are translated as parts, and
 screens with numbers are translated piecewise. `db::human_in(lang, n)` carries the units
