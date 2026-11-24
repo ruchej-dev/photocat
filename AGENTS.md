@@ -70,6 +70,7 @@ source of truth (see `plan/I18N.md` for the order).
 | `src/index.rs` | L2 | `walkdir` traversal, rayon parallelism, writer thread | egui |
 | `src/dupes.rs` | L2 | union-find, exact and similar duplicates, CSV | egui |
 | `src/embed.rs` | L2 | CLIP embeddings, tags, cosine search, k-means | egui, DB rows |
+| `src/eval.rs` | L2 | the labelled check: a reproducible sample, `labels.csv`, contact sheets, top-1/top-3 and the confident-tag accuracy | egui, raw SQL strings |
 | `src/ocr.rs` | L2 | text candidates, the `tesseract` pass, writing text to the DB | egui, image decoding |
 | `src/faces.rs` | L2 | SCRFD detection, alignment, ArcFace embeddings, face clusters | egui, raw SQL strings |
 | `src/organize.rs` | L2 | date plan, hardlink/copy/symlink, album export | egui |
@@ -155,6 +156,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # layer bounds; the arch
 ./target/release/photocat search "receipt" --text        # search recognized text
 ./target/release/photocat doctor                         # what is present: ffmpeg, tesseract, langs, model
 ./target/release/photocat clusters --k 30                # clusters → plan/M3-clusters.md
+./target/release/photocat eval --folder DIR --out DIR     # labelled check: sample, labels.csv, sheets
+./target/release/photocat eval --labels DIR/labels.csv    # top-1/top-3, confidence, percentiles
 ./target/release/photocat models list                    # model catalogue and what is downloaded
 ./target/release/photocat models download --id ID --yes  # weights (network, consent only)
 ./target/release/photocat settings [--lang en|ru]        # model, path, limit, thresholds, language

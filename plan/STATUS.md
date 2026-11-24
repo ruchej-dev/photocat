@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight) → next:M15.7 (a labelled check on two folders), then the open tail of M15.6 (an fp16 text tower against int8) if the owner wants SigLIP 2 at all. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042) → next:the open tail of M15.6 (an fp16 text tower against int8) if the owner wants SigLIP 2 at all, then the owner's review of the M15.7 labels. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 ## Where we are
 
@@ -1103,9 +1103,8 @@ of the prompts, the 5 → 6 migration. `cargo test` — 156 tests, 152 passed, 4
 /tmp/photocat-m154.db` — code 124, no crashes.
 
 **Left:** the prompts are still one per label — common templates (2–3 per label) and
-the decision about "Drawing/scheme" — M15.5; a check on a second independent folder — M15.7. The
-owner reviews the pixels
-of the editor: a headless build does not show how it looks.
+the decision about "Drawing/scheme" — M15.5; a check on a second independent folder — M15.7 (done).
+The owner reviews the pixels of the editor: a headless build does not show how it looks.
 
 ## M15.5 — common prompt templates (2026-11-23)
 
@@ -1140,7 +1139,7 @@ an untouched dictionary catches up with the version, an edit and an import — d
 clean; `check.sh` — 41/0;
 `timeout 6 gui --db /tmp/m155-a-final.db` — code 124, no crashes. There is still no labelled sample
 of ≥ 100
-shots: the accuracy of top-1/top-3 on it — M15.7; here the stability of top-1 was measured
+shots: the accuracy of top-1/top-3 on it — M15.7 (done); here the stability of top-1 was measured
 and the behaviour on a weak label (there is recognized text / a photo with a camera and no text).
 
 ## M21 — language policy, Apache-2.0 license, UI language switch (2026-11-24)
@@ -1729,7 +1728,7 @@ are confident (815 files) their labels agree in 629 cases (77.2 %). The vectors 
 
 **Not done, deliberately.** A comparison with CLIP ViT-L/14 (over 500 MiB, over any sane limit); the
 fp16 SigLIP 2 text tower (538.7 MiB) to separate int8 damage from the model itself — it is an open
-question, not a bug; M15.7 (a labelled sample of ≥100 shots on two folders) stays the next task.
+question, not a bug. (The labelled check these numbers were waiting for was done in M15.7 below.)
 
 **Checks.** `cargo test` — 207 passed, 6 `#[ignore]` (new: the catalogue of four models with unique
 ids/folders, sha256, licence and identity-only-for-CLIP calibration; the calibration puts both SigLIP
@@ -1737,3 +1736,79 @@ medians onto CLIP's; `tags.source` carries `@v2`; the padding test keeps the EOS
 the right padding for CLIP); `cargo clippy --all-targets` — clean; `check.sh` — 52 checks, 0
 violations; `embed --retag` on the bench DB reproduces the measured numbers; `models list` shows four
 models with sizes, licences and the limit.
+
+## M15.7 — a blind labelled check of the tags on two folders (2026-11-24) ✅
+
+The tag work of M15.1–M15.6 was argued with proxies: the share of confident tags, the leading label
+on `8.jpg`, the agreement of two models, OCR text as ground truth for documents. All of them can
+rise while the tags get worse. This task replaced the proxies with a sample a human labelled, scored
+by code, on two independent folders fixed before the labelling.
+
+**What appeared.** A new L2 module `src/eval.rs` and the `photocat eval` command, no DB change, no
+new dependency, no touching the archive:
+
+```
+photocat eval --folder DIR --out OUT [--sample 120]   # sample, labels.csv, guesses.csv, sheets
+photocat eval --labels OUT/labels.csv                 # the numbers
+```
+
+- **The sample is reproducible and blind.** The folder's files (preview + tags, not in the trash)
+  are sorted by `sha256` and every k-th is taken — content, not names or dates. `labels.csv` holds
+  only `n,path,label`; the model's top-3 go to a separate `guesses.csv`, so nothing in the tile
+  being labelled shows the prediction.
+- **Contact sheets** (`sheet-NN.png`, 16 tiles of 320 px, the number burned in with a 3×5 bitmap
+  font — no font dependency) are built from the previews already in the cache; re-running the export
+  keeps the labels already filled in.
+- **The labels** are dictionary ids (`furniture`, `children`, …), `other` (no dictionary label is
+  the subject — an adult portrait, a household detail), `skip` (cannot judge), or two ids joined by
+  `|` when both are equally fair for a boundary shot. Unknown ids stop the scoring with the list of
+  valid ones.
+- **The report** counts top-1/top-3 over the shots a dictionary label fits, the coverage itself, the
+  accuracy of a *confident* tag (the same `tag_show` + `tag_margin` rule the card uses for
+  "not sure"), the "confidently wrong on `other`" count, a per-tag table, and the furniture recall at
+  the 100 %/70 % percentile filter.
+
+**The numbers** (CLIP ViT-B/32 multilingual, the default; 120 shots per folder, 21.2 GiB + 49 MiB,
+`/tmp` DBs, release, 2026-11-24). Folder A — `Фотографии с телефона` (2230 files, 1969 with tags);
+folder B — `фото с Wats app от Лизы` (289 files):
+
+| | A | B |
+|---|---|---|
+| labelled / `other` / skipped | 82 / 38 / 0 | 86 / 34 / 0 |
+| dictionary covers | 68.3 % | 71.7 % (a second label allowed on 22 shots) |
+| top-1 | 70 (85.4 %) | 71 (82.6 %) |
+| top-3 | 80 (97.6 %) | 84 (97.7 %) |
+| confident tag right | 55 of 69 (79.7 %) | 49 of 62 (79.0 %) |
+| confidently wrong on `other` | 14 of 38 (36.8 %) | 13 of 34 (38.2 %) |
+| furniture at 70 % / 100 % | 13 of 13 / 0 of 13 | — (no furniture in the sample) |
+| `embed --refresh` | 126.1 s for 2231 files (56.5 ms/file) | 16.7 s for 289 (57.8 ms/file) |
+| indexing | 84.7 s (the corpus-bench baseline of M4) | 1.8 s for 289 files |
+| DB after CLIP | 30 MB (with OCR and faces) | 2.3 MB |
+
+Renders and screenshots are in both samples: 3 documents + 1 screenshot on A, 2 documents + 3
+screenshots on B, plus the watermarked furniture renders that make up most of A's furniture and
+interior shots. The furniture percentile row at 100 % is a sanity check and reads 0 of 13 by
+construction — the threshold is the single strongest shot of the whole index (0.306); at 70 %
+(0.235) the filter shows 676 shots of 2229 and keeps all 13 labelled furniture shots.
+
+**The honest costs.** A third of both samples is `other`: 14 common labels cannot name an adult
+portrait or a household detail. On a third of those the model is not unsure but **confidently
+wrong** — the card highlights a wrong label, which is exactly what the "not sure" rule (M15.3) was
+meant to limit; the rule fires when the lead is small, not when the model is confidently off. The
+per-tag table shows where the weight sits: "children" 29 of 32 on A and 42 of 45 on B, "animals" 19
+of 19 on A, while "furniture" is 8 of 13 top-1 (12 of 13 top-3) — the renders are still the weak
+spot from §3.
+
+**Not done, deliberately.** The labels are one reviewer's reading of 320 px previews, so the owner's
+re-read is the next honest step; the precision of the furniture filter needs a labelled top-N of the
+tag (a sample chosen by the model's own weights is not random) and was not attempted.
+
+**Checks.** `cargo test` — 216 passed, 6 `#[ignore]` (new: the sample stride is even and repeatable,
+a path with a comma and a quote survives the CSV roundtrip, label parsing of `other`/`skip`/`a|b`,
+the metrics of a synthetic set including the confident-wrong count and the per-tag table, an unknown
+label stops with the list of valid ones, the percentile recall on a known distribution, the digit
+printer stays inside the sheet); `cargo clippy --all-targets` — clean; `check.sh` — 52 checks, 0
+violations; the same labels re-scored after `embed --refresh` reproduce the table.
+
+**Next.** `plan/SESSION.md` — the queue: the owner's re-read of the labels, then the open tail of
+M15.6 (fp16 text tower) if SigLIP 2 is wanted at all.

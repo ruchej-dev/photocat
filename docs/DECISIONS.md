@@ -994,3 +994,41 @@ of a calibrated model carries `@v2`, and the padding test keeps the EOS last for
 reproduces right padding for CLIP. `embed --retag` on the bench DB reproduces the measured numbers;
 `models download` refuses SigLIP 2 at the 250 MiB limit and downloads 393.3 MiB at 400 with a sha256
 match. Full numbers — `docs/ARCHITECTURE.md` § Measurements, `plan/STATUS.md` § M15.6.
+
+## 0042. Tag quality is measured on a blind labelled sample, not on one folder's habits
+
+Every tag change so far was argued with a proxy: the share of confident tags, the leading label on
+`8.jpg`, the agreement of two models, OCR text as ground truth for documents. Those numbers can rise
+while the tags get worse — "confident" says nothing about right, and a proxy measured on the phone
+corpus invites tuning to it.
+
+**Decision.** The tags are scored by the `photocat eval` command against a sample a human labelled.
+The sample is taken from a folder by `sha256` order with a fixed stride — content, not names or
+dates — and every shot gets one of the dictionary ids, `other` (no dictionary label fits) or `skip`;
+up to two ids joined by `|` when two labels are equally fair. The predictions are written to a
+separate file, so the labels are **blind**: the model's guess is never next to the tile being
+labelled. Contact sheets with numbers, CSV for the labels, `--labels` to score. Two independent
+folders are fixed **before** the experiment; a change is accepted only if it helps on both.
+
+The report is: top-1, top-3 (over the shots a dictionary label fits), the coverage itself, the
+accuracy of a *confident* tag (the same `tag_show` + `tag_margin` rule the card uses to say
+"not sure"), and how often the model is confidently wrong on `other`. The percentile filter is
+checked as recall of a labelled tag at 70 % and 100 %, with the 100 % row understood as a sanity
+check (by construction it keeps one shot of the whole index).
+
+**Why blind and why by content.** A label written while the prediction is visible measures
+agreement with the model, not truth. A sample ordered by file name clusters by day and by device; one
+ordered by `sha256` scatters content and is reproducible without a random seed.
+
+**What it forbids.** Reporting "top-1 accuracy" from a sample with no `other` option (it would count a
+wrong label as right); tuning prompts to the labelled sample; calling a metric "precision" when the
+sample was chosen by the model's own tags (a top-N of a tag is not a random sample); comparing
+numbers from different labelled sets between releases.
+
+**Consequences.** A third of the sample lands in `other` (the dictionary has 14 common labels, and
+the phone corpus is full of household details and adult portraits) — that is a fact about the
+dictionary, not a defect, and it is reported first. The labels are one reviewer's reading of 320 px
+previews, so the numbers are comparable between models and between runs of the same protocol, never
+with someone else's labelled set. The first run (M15.7) gives top-1 85.4 % / 82.6 %, top-3 97.6 % /
+97.7 %, confident-tag accuracy 79.7 % / 79.0 % on the two folders; the numbers are in
+`docs/ARCHITECTURE.md` § Measurements and § "Labelled check of the tags".

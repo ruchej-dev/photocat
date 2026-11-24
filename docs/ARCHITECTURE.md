@@ -6,7 +6,8 @@
 
 ```
 L3  main.rs ── app.rs            CLI and GUI
-L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   ocr.rs   faces.rs   recycle.rs   player.rs
+L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
+    recycle.rs   player.rs
 L1  db.rs   storage.rs
 L0  i18n.rs   derive.rs   tools.rs
 ```
@@ -19,6 +20,7 @@ L0  i18n.rs   derive.rs   tools.rs
 | L1 `db` | `rusqlite`, `anyhow`, `tools` (the settings type), `i18n` (the language type) | decoding, egui |
 | L2 `index` / `dupes` / `organize` / `verify` | L0/L1 + `rayon`, `walkdir`, `tools` | egui |
 | L2 `embed` | L0/L1 + `ort`, `tokenizers`, `serde_json`, `tools` | egui, SQL strings |
+| L2 `eval` | L0/L1 + `image`; the labelled sample, CSV and contact sheets | egui, onnx, the network |
 | L2 `ocr` | L0/L1 + `rayon`, `tools`; the `tesseract` process | egui, SQL strings |
 | L2 `faces` | L0/L1 + `ort`, `rayon`, `image`; ONNX SCRFD and ArcFace | egui, SQL strings |
 | L1 `storage` | `db` for the DB paths, `walkdir`; removes only `<cache>/photocat/` | archive, egui |
@@ -368,6 +370,52 @@ older calibration are never mixed into the new distribution; ADR 0041.
 270 MiB is the 256k-token Gemma text tower), it is 2.7× slower than CLIP on the same CPU, and on
 the owner's archive it is **worse** than CLIP on the document category (see § Measurements).
 
+## Labelled check of the tags (M15.7)
+
+Tags are hints, so the only honest way to tell whether a change helped is a sample labelled by a
+human and scored by code. `src/eval.rs` (L2: `db`, `embed`, the `image` crate) does the mechanical
+half:
+
+```bash
+photocat eval --db D --folder DIR --out OUT [--sample 120]   # the sample, labels.csv, sheets
+photocat eval --db D --labels OUT/labels.csv                 # the numbers
+```
+
+The default output is `<cache>/photocat/eval/`: `labels.csv` carries archive paths, so it stays out
+of the repository, like the cluster report of M3.
+
+**The sample is reproducible and blind.** Files of the folder that have a preview and tags are
+sorted by `sha256` (content, not name or date) and every k-th is taken, so the same folder always
+gives the same sample and the choice does not depend on what the model likes. `labels.csv` has only
+`n,path,label`; the model's top-3 go to a separate `guesses.csv`, so a label can be filled in
+without seeing the prediction. Contact sheets (`sheet-NN.png`, 16 tiles of 320 px with the number
+burned in) make labelling possible without opening 120 files one by one; the tiles come from the
+previews in the cache, the archive is only read. Re-running the export keeps labels already filled.
+
+**Labels are tag ids, not free text:** one of the dictionary ids (`furniture`, `children`, …),
+`other` — no dictionary label fits (an adult portrait, a household detail, a document form), or
+`skip` — the shot cannot be judged. Two ids joined by `|` mean both are equally acceptable
+(`children|city`); that is honest for a boundary shot and is counted as one more column in the
+report. Labels are never tuned to one folder and never derived from the predictions.
+
+**The metrics** (all over the shots with a dictionary label, `N`):
+
+- **top-1 / top-3** — the label appears in the first one / in the first three weights of the file.
+- **coverage** — the share of the sample a dictionary label fits at all; it bounds everything else.
+- **confident tag accuracy** — of the shots where the model was confident (weight ≥ `tag_show`,
+  lead ≥ `tag_margin` — the same rule the card uses for "not sure"), the share where the first tag
+  is right.
+- **confidently wrong** — the `other` shots that still got a confident tag. This is the number that
+  hurts the owner: the card highlights a wrong label instead of saying "not sure".
+- **a tag at the percentile filter** — how many labelled shots of a tag the filter keeps at 70 % and
+  100 %; the 100 % threshold keeps the single strongest shot of the whole index by construction, so
+  it is a sanity check, not a quality measure.
+
+**Limits.** The labels are one reviewer's reading of a 320 px preview; a coarse dictionary cannot
+name every shot (a third of the sample is `other`); 120 shots give about ±10 percentage points at
+95 % confidence. The numbers are comparable between models and between runs of the same protocol,
+not with a different labelled set.
+
 ## Measurements
 
 | Date | Corpus | Operation | Result |
@@ -472,6 +520,11 @@ the owner's archive it is **worse** than CLIP on the document category (see § M
 | 2026-11-24 | the same files, both directories separately | the same metrics split by folder | the picture repeats in each folder: CLIP 55.4%/61.3% confident, SigLIP 2 54.8%/64.0% — the calibration does not depend on one folder |
 | 2026-11-24 | 142 shots with recognized text, all three models | agreement of the confident label | CLIP and SigLIP 2 are both confident on 815 files and agree on 629 (77.2%) |
 | 2026-11-24 | weights of SigLIP 2 (`onnx-community/siglip2-base-patch16-224-ONNX`) | download over HTTPS with sha256 | 412 354 647 B = 393.3 MiB in 83 s (vision 90.2 MiB, text 270.3 MiB, tokenizer 32.8 MiB) |
+| 2026-11-24 | 120 shots of `Фотографии с телефона` (of 1969 eligible), labelled blind by the reviewer | `eval --labels`, CLIP ViT-B/32 multilingual, two frames | dictionary fits 68.3 % of the shots; top-1 70/82 = 85.4 %, top-3 80/82 = 97.6 %; confident tag right in 55/69 = 79.7 %; confidently wrong on “other” 14 of 38 (with a second acceptable label on 14 shots) |
+| 2026-11-24 | 120 shots of `фото с Wats app от Лизы` (of 289 eligible), the same protocol | `eval --labels` | dictionary fits 71.7 %; top-1 71/86 = 82.6 %, top-3 84/86 = 97.7 %; confident tag right in 49/62 = 79.0 %; confidently wrong on “other” 13 of 34 (a second label allowed on 22 shots) |
+| 2026-11-24 | 13 labelled “furniture” shots of the phone corpus (of 120) | percentile filter of the tag, whole index 2229 files | 70 %: found 13/13, threshold 0.235, the filter shows 676 of 2229 shots; 100 %: found 0/13, threshold 0.306 — by construction it keeps the single strongest shot of the tag |
+| 2026-11-24 | phone corpus 2231 files | `embed --refresh --jobs 8 --batch 8`, release, CLIP multilingual | 126.1 s (56.5 ms/file, two frames), 0 errors, DB 30 MB together with OCR and faces |
+| 2026-11-24 | `фото с Wats app от Лизы`, 289 files, 49.1 MiB | `index --jobs 16` + `embed --refresh` | indexing 1.8 s, embedding 16.7 s (57.8 ms/file), DB 2.3 MB, previews in the cache |
 
 Rule: numbers without a corpus and a date do not enter the table.
 

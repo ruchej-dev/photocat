@@ -3,10 +3,9 @@
 *Русская версия: [M15-tags.ru.md](M15-tags.ru.md).*
 
 **Status:** M15.1 (the frame ensemble), M15.2 (the percentile threshold), M15.3 ("not sure" in the
-card),
-M15.4 (the dictionary of tags and prompts in the DB) and M15.5 (common prompt templates) are done;
-next — M9,
-then M15.6 (only after M12) and M15.7 (a labelled sample).
+card), M15.4 (the dictionary of tags and prompts in the DB), M15.5 (common prompt templates),
+M15.6 (the model catalogue and the calibration) and **M15.7 (a blind labelled check on two folders)**
+are done. M15 is closed.
 Read together with `plan/STATUS.md` (what is already done), `plan/BACKLOG.md` § M15
 (the criteria) and `docs/ARCHITECTURE.md` § "Tags".
 
@@ -148,9 +147,8 @@ interior 0.271 / furniture 0.257; the whole frame — interior 0.274 / furniture
 document 0.257; the ensemble — interior 0.278 / screenshot 0.275 / document 0.272 / furniture 0.265.
 "Furniture" does not become first. The criterion "furniture first" from one crop is unreachable
 without tuning
-the prompts, so it is moved: top-1 and "not sure" — M15.3, the prompts — M15.5. A labelled
-sample of ≥ 100 shots does not exist yet — that is M15.7; instead the stability of top-1 was
-measured on the corpus.
+the prompts, so it is moved: top-1 and "not sure" — M15.3, the prompts — M15.5. The labelled check
+of top-1 was done later, in M15.7; here the stability of top-1 was measured on the corpus.
 
 ### M15.2 — a percentile per tag instead of a global maximum ✅ (2026-11-23)
 
@@ -262,7 +260,53 @@ files — `plan/STATUS.md` § M15.6, ADR 0041.
 are not mixed: `embeddings` is keyed by `(file_id, model)`, `tags` by `(file_id, tag, source)`, and
 the calibration version is part of the source.
 
-### M15.7 — a check on two independent folders
+### M15.7 — a check on two independent folders ✅ (2026-11-24)
+
+**Done.** A new command and a fixed protocol replace "by eye on one photo":
+
+```bash
+photocat eval --folder DIR --out OUT [--sample 120]   # sample, labels.csv, guesses.csv, sheets
+photocat eval --labels OUT/labels.csv                 # top-1/top-3, confidence, percentiles
+```
+
+The sample is the folder's files sorted by `sha256` with an even stride — content, not names or
+dates, reproducible without a seed. `labels.csv` holds only `n,path,label`; the model's top-3 go to
+`guesses.csv`, so **the labels are blind**. Contact sheets (`sheet-NN.png`, 16 tiles of 320 px with
+the number burned in) come from the previews in the cache. Labels: a dictionary id, `other` (no
+label fits), `skip` (cannot judge), or two ids joined by `|` when both are fair to a boundary shot.
+The two folders were fixed before the labeling: the phone corpus and `фото с Wats app от Лизы`.
+
+**The numbers** (CLIP ViT-B/32 multilingual, the default, 120 shots per folder):
+
+| | phone corpus (1969 eligible) | WhatsApp folder (289) |
+|---|---|---|
+| labelled / `other` | 82 / 38 | 86 / 34 |
+| dictionary covers | 68.3 % | 71.7 % (22 shots allow a second label) |
+| top-1 | 70 (85.4 %) | 71 (82.6 %) |
+| top-3 | 80 (97.6 %) | 84 (97.7 %) |
+| confident tag right | 55 of 69 (79.7 %) | 49 of 62 (79.0 %) |
+| confidently wrong on `other` | 14 of 38 (36.8 %) | 13 of 34 (38.2 %) |
+| furniture at the 70 % filter | 13 of 13 (threshold 0.235, 676 shots of the index) | — (no furniture in the sample) |
+| furniture at the 100 % filter | 0 of 13 (threshold 0.306, one shot of the index) | — |
+| `embed --refresh` | 126.1 s for 2231 files (56.5 ms/file) | 16.7 s for 289 (57.8 ms/file) |
+| DB after CLIP | 30 MB (with OCR and faces) | 2.3 MB |
+
+Renders and screenshots are in both samples (4 and 5 shots labelled document/screenshot, plus the
+watermarked furniture renders of the phone corpus), so the blind spot is covered rather than
+avoided. The honest costs: a third of the shots get `other` — 14 common labels cannot name an adult
+portrait or a household detail — and the model is **confidently wrong on a third of those**, not
+unsure. The 100 % percentile row is a sanity check: it keeps the single strongest shot of the whole
+index by construction.
+
+**What it forbids.** Counting a wrong label as right by dropping `other` from the sample; tuning the
+prompts to the labelled set; calling "precision" a number from a sample chosen by the model's own
+tags. ADR 0042; the mechanism in `docs/ARCHITECTURE.md` § "Labelled check of the tags".
+
+**Left open.** An owner re-read of the labels (the labels are one reviewer's reading of 320 px
+previews); a labelled set for `furniture` precision (a top-N of the tag must be labelled separately,
+it is not a random sample).
+
+The original criteria:
 
 - Do not tune the prompts to `Фотографии с телефона`. The second folder — any other (another
   folder of the owner, a public set), fixed before the experiments.
@@ -270,8 +314,7 @@ the calibration version is part of the source.
   how many "furniture" shots are found at the 100% / 70% percentile, the embedding time, the DB
   size.
 - **Acceptance:** the numbers in `docs/ARCHITECTURE.md` § Measurements with the date, the folder and
-  the model;
-  an improvement on both, not only on ours.
+  the model; an improvement on both, not only on ours.
 
 ### M15.8 — documents and the interface
 

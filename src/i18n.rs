@@ -274,6 +274,8 @@ pub const USAGE: (&str, &str) = (
                                             текст с документов и скриншотов (tesseract)
   search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
   clusters [--k N] [--out FILE]             кластеры CLIP → отчёт с примерами
+  eval --folder DIR --out DIR [--sample N]  выборка для разметки: labels.csv и листы
+  eval --labels FILE                        метрики по размеченной выборке (top-1/top-3)
   albums list [--tree] | new --name ИМЯ [--parent ID] [--note ТЕКСТ]
          | rename --id N --name ИМЯ | move --id N --parent ID [--position K]
          | add|remove --id N PATH... | delete --id N [--yes] | show --id N [--tree]
@@ -316,6 +318,8 @@ subcommands:
                                             text from documents and screenshots (tesseract)
   search <query> [--top N] [--text]        semantic search or search in the text on photos
   clusters [--k N] [--out FILE]             CLIP clusters → report with examples
+  eval --folder DIR --out DIR [--sample N]  labelled check: labels.csv and contact sheets
+  eval --labels FILE                        metrics of a labelled sample (top-1/top-3)
   albums list [--tree] | new --name NAME [--parent ID] [--note TEXT]
          | rename --id N --name NAME | move --id N --parent ID [--position K]
          | add|remove --id N PATH... | delete --id N [--yes] | show --id N [--tree]
@@ -1242,6 +1246,19 @@ const PAIRS: &[(&str, &str)] = &[
     ("загрузка модели CLIP…", "loading the CLIP model…"),
     ("CLIP: {}/{} файлов, ошибок {} — {}", "CLIP: {}/{} files, {} errors — {}"),
     ("кластеров: {} на {} фото, за {} с → {}", "clusters: {} over {} photos, {} s → {}"),
+    // --- M15.7: размеченная проверка тегов ---------------------------------------
+    ("разметки нет: заполните {} и повторите", "no labels yet: fill in {} and run again"),
+    ("строк в разметке: {} · размечено {} · «другое» {} · пропущено {} · не размечено {} · нет в индексе {}", "rows in the labels: {} · labelled {} · “other” {} · skipped {} · not labelled {} · missing from the index {}"),
+    ("словарь покрывает {} % снимков; у {} допустима не одна метка", "a dictionary label fits {} % of the shots; {} of them allow a second label"),
+    ("top-1: {} из {} = {} % · top-3: {} из {} = {} %", "top-1: {} of {} = {} % · top-3: {} of {} = {} %"),
+    ("уверенный тег: {} снимков, точность {} %; уверенно мимо («другое») {}", "confident tag: {} shots, accuracy {} %; confidently wrong (“other”) {}"),
+    ("мебель: при {} % найдено {} из {} (порог {})", "furniture: at {} % found {} of {} (threshold {})"),
+    ("проверка {} · модель {}", "check {} · model {}"),
+    ("нужен каталог: photocat eval --folder DIR --out DIR", "a folder is needed: photocat eval --folder DIR --out DIR"),
+    ("в {} нет снимков с тегами: проиндексируйте каталог и посчитайте теги", "no shots with tags in {}: index the folder and compute the tags"),
+    ("выборка: {} снимков из {} годных в {} · метки: {} · подсказки: {} · листов: {}", "sample: {} shots of {} eligible in {} · labels: {} · guesses: {} · sheets: {}"),
+    ("заполните столбец label в {} (other / skip / метки через |) и повторите с --labels", "fill the label column in {} (other / skip / labels joined by |) and run again with --labels"),
+    ("модель {} · {}", "model {} · {}"),
     ("# Кластеры CLIP (M3)\n\n", "# CLIP clusters (M3)\n\n"),
     ("Модель `{}`, файлов с эмбеддингами: {}, кластеров: {}, k={}.", "Model `{}`, files with embeddings: {}, clusters: {}, k={}."),
     ("Отчёт для просмотра владельцем: 12 примеров на кластер.\n", "A report for the owner: 12 examples per cluster.\n"),

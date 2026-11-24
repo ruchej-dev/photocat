@@ -63,6 +63,7 @@
 | `src/index.rs` | L2 | обход `walkdir`, rayon-параллелизм, поток-писатель | egui |
 | `src/dupes.rs` | L2 | union-find, точные и похожие дубли, CSV | egui |
 | `src/embed.rs` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means | egui, БД-строки |
+| `src/eval.rs` | L2 | размеченная проверка: воспроизводимая выборка, `labels.csv`, контактные листы, top-1/top-3 и точность уверенного тега | egui, строки SQL |
 | `src/ocr.rs` | L2 | кандидаты на текст, проход `tesseract`, запись текста в БД | egui, декодирование картинок |
 | `src/faces.rs` | L2 | SCRFD-детекция, выравнивание, ArcFace-эмбеддинги, кластеры лиц | egui, прямые SQL-строки |
 | `src/organize.rs` | L2 | план по датам, hardlink/copy/symlink, выгрузка альбома копиями | egui |
@@ -148,6 +149,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # границы сло�
 ./target/release/photocat search "справка" --text        # поиск по распознанному тексту
 ./target/release/photocat doctor                         # что есть: ffmpeg, tesseract, языки, модель
 ./target/release/photocat clusters --k 30                # кластеры → plan/M3-clusters.md
+./target/release/photocat eval --folder DIR --out DIR     # размеченная проверка: выборка, labels.csv, листы
+./target/release/photocat eval --labels DIR/labels.csv    # top-1/top-3, уверенность, процентили
 ./target/release/photocat models list                    # каталог моделей и что уже скачано
 ./target/release/photocat models download --id ID --yes  # веса (сеть, только по согласию)
 ./target/release/photocat settings [--lang en|ru]        # модель, путь, лимит, пороги, язык

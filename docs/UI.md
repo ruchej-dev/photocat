@@ -368,6 +368,10 @@ Colours come from `ui.visuals()` (the egui theme); the only own constants are th
   sure" is about the caption, not about the search. Inventing a tag is forbidden.
 - A confident tag (the first ≥ 0.22 and the gap ≥ 0.01) → the line "tag: furniture", the accent on
   that line; the other weights are visible without the accent.
+- The card shows exactly what `photocat eval` scores: the first weight as top-1, the first three as
+  top-3, and the same 0.22 / 0.01 rule decides "not sure" and "confident". A change of the card's tag
+  logic must be checked against the labelled sample (`docs/ARCHITECTURE.md` § "Labelled check of the
+  tags"), not by eye on one photo.
 - Every tag in the filter shows the snapshot count at its percentile threshold ("furniture · 669"):
   zero is visible before the press, not after. A tag is selected and there are zero snapshots →
   "no snapshots with the tag "furniture" above the 70% threshold (0.23) — lower the threshold slider

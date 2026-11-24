@@ -48,6 +48,8 @@ D=/tmp/pc-bench.db
 ./target/release/photocat embed --db "$D" --jobs 8 --batch 8
 ./target/release/photocat search "cake" --db "$D" --top 5
 ./target/release/photocat clusters --db "$D" --k 30 --out /tmp/M3-clusters.md
+./target/release/photocat eval --db "$D" --folder <dir> --out /tmp/tag-eval --sample 120
+./target/release/photocat eval --db "$D" --labels /tmp/tag-eval/labels.csv
 du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 ```
 
@@ -69,6 +71,7 @@ du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 | `embed` 2340 files, SigLIP 2 base 224 multilingual, `--jobs 8` | 398.8 s (0.170 s/file), one frame; CLIP on the same run 147 s — the machine, not the model, sets the absolute numbers, the ratio is 2.7× | > 600 s |
 | `embed` 2340 files, SigLIP base 224 English | 404.5 s (0.173 s/file), one frame | > 600 s |
 | `embed --retag`, 2340 files, the vectors already in the DB | 2–4 s (SigLIP 1 2.1 s, SigLIP 2 3.5 s) — no photo is read | > 15 s |
+| `eval --labels`, 120 shots of `Фотографии с телефона`, CLIP multilingual (2026-11-24) | top-1 85.4 %, top-3 97.6 %, confident tag 79.7 % | top-1 < 70 % or top-3 < 90 % means the tag logic regressed |
 | The CLIP multilingual model (4 files) | 217.5 MiB | the files do not match by sha256 |
 | The CLIP en model (3 files) | 148.6 MiB | > 5 s for a check/network |
 | The SigLIP base 224 English model (3 files) | 203.5 MiB | the files do not match by sha256 |

@@ -1388,6 +1388,41 @@ pub fn load_tags(conn: &Connection, source: &str) -> Result<HashMap<i64, Vec<(St
     Ok(out)
 }
 
+/// Файл, годный в размеченную выборку M15.7: картинка не в корзине, с превью и с тегами
+/// модели. Порядок — по sha256: выборка не зависит от имён и дат и повторяется один в один.
+#[derive(Debug, Clone)]
+pub struct TaggedFile {
+    pub id: i64,
+    pub path: String,
+    pub sha256: String,
+    /// Путь превью относительно `<кэш>/photocat/thumbs`.
+    pub thumb: Option<String>,
+}
+
+pub fn tagged_files(conn: &Connection, source: &str) -> Result<Vec<TaggedFile>> {
+    let mut st = conn.prepare(
+        "SELECT f.id, f.path, f.sha256, f.thumb
+         FROM files f
+         WHERE f.kind='image' AND f.thumb IS NOT NULL AND f.trashed_at IS NULL
+           AND f.sha256 IS NOT NULL AND f.sha256 <> ''
+           AND EXISTS(SELECT 1 FROM tags t WHERE t.file_id=f.id AND t.source=?1)
+         ORDER BY f.sha256",
+    )?;
+    let rows = st.query_map([source], |r| {
+        Ok(TaggedFile {
+            id: r.get(0)?,
+            path: r.get(1)?,
+            sha256: r.get(2)?,
+            thumb: r.get(3)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
 /// sha256 текста, уже распознанного у файла: file_id → sha256 файла на момент OCR.
 pub fn ocr_shas(conn: &Connection) -> Result<HashMap<i64, String>> {
     let mut st = conn.prepare("SELECT file_id, sha256 FROM ocr")?;

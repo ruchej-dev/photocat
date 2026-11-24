@@ -553,7 +553,7 @@ tests, clippy and the layers are green.
 
 ---
 
-## M15 — tags that work on any archive (1–5 done 2026-11-23, 6 done 2026-11-24; 7 — next)
+## M15 — tags that work on any archive ✅ (1–5 done 2026-11-23, 6–7 done 2026-11-24)
 
 **Goal.** The tags should work from the first launch on any archive, without tuning the prompts to
 `Фотографии с телефона`; 100% of the scale always leaves something; the owner can add his own labels
@@ -601,11 +601,14 @@ questions — `plan/M15-tags.md`.
    per file against 0.063 — so the default stays the multilingual CLIP. `plan/STATUS.md` § M15.6.
    Open tail: the fp16 text tower (538.7 MiB) was not tried, so it is unknown how much of the loss is
    int8.
-7. **A check on two independent folders with a labelled sample** (≥100 shots including
+7. ✅ **A check on two independent folders with a labelled sample** (≥100 shots including
    renders/screenshots): top-1/top-3, how many "furniture" shots at the 100 %/70 % percentile, the
    embedding time and the DB size — with the date, the folder and the model in
-   `docs/ARCHITECTURE.md` § Measurements. The two folders and the label-free metrics
-   (documents via OCR text) are already in place since M15.6.
+   `docs/ARCHITECTURE.md` § Measurements. Done 2026-11-24: `photocat eval`, 120 shots per folder,
+   blind labels; top-1 85.4 % / 82.6 %, top-3 97.6 % / 97.7 %, confident tag 79.7 % / 79.0 %,
+   furniture 13/13 at 70 % and 0/13 at 100 % (by construction), 126.1 s / 16.7 s to embed, DB
+   30 MB / 2.3 MB. ADR 0042; `plan/STATUS.md` § M15.7. Open: the owner's re-read of the labels and
+   a labelled top-N for furniture precision.
 
 **Not doing.** Hardcoding prompts/thresholds for the current archive; auto-tuning for one folder;
 the network for prompts; deleting/renaming files; promising an object detector.

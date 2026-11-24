@@ -48,6 +48,8 @@ D=/tmp/pc-bench.db
 ./target/release/photocat embed --db "$D" --jobs 8 --batch 8
 ./target/release/photocat search "торт" --db "$D" --top 5
 ./target/release/photocat clusters --db "$D" --k 30 --out /tmp/M3-clusters.md
+./target/release/photocat eval --db "$D" --folder <dir> --out /tmp/tag-eval --sample 120
+./target/release/photocat eval --db "$D" --labels /tmp/tag-eval/labels.csv
 du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 ```
 
@@ -69,6 +71,7 @@ du -sh "$D" ~/.cache/photocat/thumbs ~/.cache/photocat/models/clip-vit-b32
 | `embed` 2340 файлов, SigLIP 2 base 224 мультиязычная, `--jobs 8` | 398.8 с (0.170 с/файл), один кадр; CLIP в том же прогоне 147 с — абсолютные числа задаёт загрузка машины, отношение 2.7× | > 600 с |
 | `embed` 2340 файлов, SigLIP base 224 английская | 404.5 с (0.173 с/файл), один кадр | > 600 с |
 | `embed --retag`, 2340 файлов, векторы уже в БД | 2–4 с (SigLIP 1 — 2.1 с, SigLIP 2 — 3.5 с), ни один снимок не читается | > 15 с |
+| `eval --labels`, 120 снимков «Фотографий с телефона», CLIP multilingual (2026-11-24) | top-1 85.4 %, top-3 97.6 %, уверенный тег 79.7 % | top-1 < 70 % или top-3 < 90 % — регрессия логики тегов |
 | Модель CLIP multilingual (4 файла) | 217.5 МиБ | файлы не совпали по sha256 |
 | Модель CLIP en (3 файла) | 148.6 МиБ | > 5 с на проверку/сеть |
 | Модель SigLIP base 224 английская (3 файла) | 203.5 МиБ | файлы не совпали по sha256 |

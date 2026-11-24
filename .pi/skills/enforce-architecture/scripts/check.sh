@@ -29,11 +29,12 @@ declare -A ALLOWED=(
   [storage]="db"
   [verify]="db derive i18n"
   [embed]="derive db tools i18n"
+  [eval]="db embed"
   [ocr]="derive db tools i18n"
   [faces]="derive db embed i18n"
   [player]=""
-  [app]="i18n derive db index dupes organize verify embed ocr faces player tools recycle storage"
-  [main]="i18n derive db index dupes organize verify embed ocr faces player app tools"
+  [app]="i18n derive db index dupes organize verify embed eval ocr faces player tools recycle storage"
+  [main]="i18n derive db index dupes organize verify embed eval ocr faces player app tools"
 )
 
 echo "1. dependencies between modules"
