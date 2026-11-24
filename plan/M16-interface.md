@@ -1,120 +1,147 @@
-# M16 — интерфейс по образцу PhotoPrism
+# M16 — the interface after the PhotoPrism model
 
-Задача: переработать оболочку GUI, взяв за образец PhotoPrism, не трогая данные, архив и логику
-проходов. Документ — разбор текущего интерфейса, варианты, выбор и границы работы. Нормативные
-правила остаются в `docs/UI.ru.md` и `.pi/skills/ui-design/`; здесь — почему они меняются.
+*Русская версия: [M16-interface.ru.md](M16-interface.ru.md).*
 
-## 1. Что есть сейчас (анализ, 2026-11-23)
+The task: rework the GUI shell taking PhotoPrism as the model, without touching the data, the
+archive and the logic of the passes. The document is the analysis of the current interface, the
+options, the choice and the boundaries of the work. The normative rules stay in `docs/UI.md` and
+`.pi/skills/ui-design/`; here — why they change.
 
-Оболочка: верхняя панель в две строки (каталог + «Индексировать» + «Обновить» + «Каталоги» +
-«Сведения» + «Настройки»; режим поиска + поле + «Найти» + «Сбросить»), строка статуса внизу,
-левая панель 260 px (марка, 5 видов, фильтр по пути/дате, «только изображения», ползунок плиток,
-контекст вида, блок модели, блок OCR, прижатая «Сводка»), центр (заголовок вида 14 px + счётчик
-12 px, сетка `draw_cell` 150 px, шаг 8 px), правая панель 280 px («Сведения о файле»).
+## 1. What there is now (an analysis, 2026-11-23)
 
-Стиль: дефолт egui 0.37 (шрифт 14, `item_spacing` 8×3, скругление 3–4), плоские панели, каждый
-блок левой панели и карточки обёрнут `Frame::group` — рамка в рамке. Один акцент
-`rgb(90,170,255)`, четыре разрешённых серых. Иконок нет, все пункты — словами.
+The shell: the top bar in two rows (the folder + "Index" + "Refresh" + "Folders" +
+"Details" + "Settings"; the search mode + the field + "Find" + "Reset"), a status row at the bottom,
+the left panel 260 px (the brand, 5 views, a filter by path/date, "images only", the tile slider,
+the view context, the model block, the OCR block, a pinned "Summary"), the centre (the view title
+14 px + the counter 12 px, the `draw_cell` grid 150 px, a step of 8 px), the right panel 280 px
+("File details").
 
-Элементы и их цена по рубрике `ui-design`:
+The style: the egui 0.37 default (font 14, `item_spacing` 8×3, rounding 3–4), flat panels, every
+block of the left panel and the cards wrapped in `Frame::group` — a frame in a frame. One accent
+`rgb(90,170,255)`, four allowed greys. There are no icons, all the items are words.
 
-| Элемент | Сейчас | Что не так |
+The elements and their price by the `ui-design` rubric:
+
+| Element | Now | What is wrong |
 |---|---|---|
-| Навигация | 5 слов без групп, без чисел | нет иерархии «библиотека / инструменты», цена пункта («103 группы») не видна до клика; «Корзина · N» — единственный счётчик |
-| Верхняя панель | каталог и поиск в двух строках, действия справа | поле каталога конкурирует с поиском по весу; «Сведения» — переключатель панели, а не действие |
-| Заголовок вида | 14 px + 12 px в одну строку | не отличается от тела; нет места для управления видом (плитки, фильтры) |
-| Сетка | плоский список 2230 плиток, порядок от старых к новым | нет опоры «момент»: человек ищет «май 2024», а видит бесконечную ленту; дата есть только под каждой плиткой |
-| Плитка | фон `extreme_bg`, превью, дата 11 px | нет отклика на наведение (курсор/обводка), шаг 8 px съедает 15% ширины сетки |
-| Фильтры | путь/дата и «только изображения» в панели, тег и порог — в блоке модели | три места для одного понятия «фильтр»; активный фильтр не виден над сеткой; сброс — отдельной кнопкой в другом месте |
-| Секции панели | каждая в рамке `Frame::group` | «карточный суп»: рамки спорят с фото за внимание, плотность падает |
-| Сведения | превью 4:3, две кнопки, метаданные столбиком «подпись над значением» | 6 строк = ~130 px вертикали; имя файла нигде не главное; кнопка «Открыть полный экран» не выделена |
-| Прогресс | до пяти строк под верхней панелью | при двух проходах сетка уезжает вниз; «Стоп» есть у каждой строки — это правильно |
-| Статус | 11 px слева, выбранный файл справа | при пустом статусе стоит «—» — пустое место вместо факта |
+| Navigation | 5 words without groups, without numbers | there is no hierarchy "library / tools", the price of an item ("103 groups") is not visible before a click; "Trash · N" — the only counter |
+| The top bar | the folder and the search in two rows, the actions on the right | the folder field competes with the search by weight; "Details" — a panel switch, not an action |
+| The view title | 14 px + 12 px in one row | it does not differ from the body; there is no room for controlling the view (tiles, filters) |
+| The grid | a flat list of 2230 tiles, the order from the old to the new | there is no "moment" support: a person looks for "May 2024" and sees an endless feed; the date is only under every tile |
+| A tile | the `extreme_bg` background, a preview, the date 11 px | there is no response to hovering (a cursor/an outline), the step of 8 px eats 15% of the grid width |
+| Filters | path/date and "images only" in the panel, the tag and the threshold — in the model block | three places for one notion "filter"; the active filter is not visible above the grid; the reset — a separate button in another place |
+| Panel sections | each in a `Frame::group` frame | "card soup": the frames compete with the photos for attention, the density falls |
+| Details | a 4:3 preview, two buttons, the metadata as a stack of "label above value" | 6 rows = ~130 px of vertical space; the file name is not the main thing anywhere; the "Open full screen" button is not highlighted |
+| Progress | up to five rows under the top bar | with two passes the grid moves down; every row has a "Stop" — that is right |
+| Status | 11 px on the left, the selected file on the right | with an empty status there is a "—" — an empty place instead of a fact |
 
-## 2. Что берём у PhotoPrism (и что нет)
+## 2. What we take from PhotoPrism (and what we do not)
 
-Берём **структуру**, а не оформление:
+We take the **structure**, not the look:
 
-1. **Боковая навигация группами** — «Библиотека» (Все файлы, Календарь, Лица) и «Инструменты»
-   (Дубли и серии, Корзина), у каждого пункта число справа, марка сверху, настройки — в верхней
-   панели (в PhotoPrism они внизу списка; у нас правило `nayti-za-sekundu.md` кладёт их в
-   верхнюю панель, оставляем).
-2. **Плоские секции** вместо рамок: подпись 11 px приглушённым, содержимое, тонкая линия.
-3. **Поиск — главный элемент верхней панели**, режим «Смысловой / По тексту» — сегментированный
-   переключатель перед полем.
-4. **Панель содержимого**: название вида 18 px, факты рядом, справа — размер плиток; ниже строка
-   активных фильтров чипами с «×» и итог «найдено N из M».
-5. **Группировка по месяцам**: заголовок «май 2024 · файлов 132 · 5.4 ГиБ», снимки от свежих к
-   старым, шаг плиток 2 px (в PhotoPrism — 1 px; 2 px остаётся в шкале 4 px).
-6. **Инспектор**: имя файла заголовком, метаданные строками «подпись — значение», действия над
-   метаданными, ниже теги и текст.
+1. **Side navigation in groups** — "Library" (All files, Calendar, Faces) and "Tools"
+   (Duplicates and series, Trash), every item with a number on the right, the brand on top, the
+   settings — in the top
+   bar (in PhotoPrism they are at the bottom of the list; our rule `nayti-za-sekundu.md` puts them
+   into the
+   top bar, we keep that).
+2. **Flat sections** instead of frames: a label 11 px in a muted colour, the contents, a thin line.
+3. **The search as the main element of the top bar**, the mode "Semantic / By text" — a segmented
+   switch before the field.
+4. **The content panel**: the view name 18 px, the facts next to it, on the right — the tile size;
+   below, a row
+   of the active filters as chips with "×" and the total "found N of M".
+5. **Grouping by months**: the header "May 2024 · 132 files · 5.4 GiB", the shots from the newest
+   to the
+   old, a tile step of 2 px (in PhotoPrism — 1 px; 2 px stays within the 4 px scale).
+6. **The inspector**: the file name as a heading, the metadata as "label — value" rows, the actions
+   above
+   the metadata, below the tags and the text.
 
-Не берём: светлую тему, иконки без подписей, «плитки-карточки» с тенями и большими радиусами,
-мультивыбор галочками (это отдельная задача: меняет модель состояния, карточку и дубли), карту
-мест, альбомы, «Избранное» — их в модели данных нет, обещать нечего.
+We do not take: a light theme, icons without labels, "tile-cards" with shadows and big radii,
+a multiple selection with checkboxes (that is a separate task: it changes the state model, the card
+and the duplicates), a map of
+places, albums, "Favourites" — they are not in the data model, there is nothing to promise.
 
-## 3. Варианты и цена
+## 3. The options and their price
 
-**A. Косметика.** Оставить всё, поменять отступы, заголовок 18 px, убрать рамки. Цена: ~120 строк
-в `app.rs`, привычка не меняется. Не решает главного: в сетке нет опоры по датам, фильтры
-размазаны. Рубрика: п. 7 (плотность) — да, п. 10 (за секунду) — нет.
+**A. Cosmetics.** Keep everything, change the paddings, the title 18 px, drop the frames. The price:
+~120 lines
+in `app.rs`, a habit does not change. It does not solve the main thing: the grid has no support by
+dates, the filters are
+smeared. The rubric: item 7 (density) — yes, item 10 (in a second) — no.
 
-**B. Оболочка PhotoPrism (выбран).** Боковая навигация группами со счётчиками, плоские секции,
-панель содержимого с чипами фильтра и размером плиток, сетка группами по месяцам от свежих,
-плитки с шагом 2 px и откликом на наведение, инспектор с именем файла и строками «подпись —
-значение», единый стиль (шаг 8×6, кнопка 26 px, радиус 4). Цена: ~450 строк в `app.rs` и правки
-`docs/UI.ru.md`; привычка: месячные заголовки и порядок «свежие сверху» — как в телефоне и в
-PhotoPrism; всё остальное на месте. Компромисс: плитки стоят плотнее, дата под плиткой остаётся
-мельче заголовка месяца — узнавание не страдает.
+**B. The PhotoPrism shell (chosen).** Side navigation in groups with counters, flat sections,
+a content panel with filter chips and the tile size, the grid grouped by months from the newest,
+tiles with a 2 px step and a response to hovering, an inspector with the file name and "label —
+value" rows, one style (a step 8×6, a button 26 px, a radius 4). The price: ~450 lines in `app.rs`
+and edits to
+`docs/UI.md`; a habit: month headers and the order "newest on top" — as in a phone and in
+PhotoPrism; everything else is in place. A compromise: the tiles stand denser, the date under a tile
+stays
+smaller than the month header — recognition does not suffer.
 
-**C. Полная копия PhotoPrism.** Светлая тема, иконки, альбомы, избранное, мультивыбор, карта.
-Цена: недели, новые данные в БД, нарушение «иконка без подписи запрещена» и «своих цветов нет».
-Отклонён: это чужая модель архива, а не наша.
+**C. A full copy of PhotoPrism.** A light theme, icons, albums, favourites, a multiple selection, a
+map.
+The price: weeks, new data in the DB, a violation of "an icon without a label is forbidden" and "there
+are no own colours".
+Rejected: it is someone else's archive model, not ours.
 
-## 4. Решение (по рубрике)
+## 4. The decision (by the rubric)
 
-| Пункт рубрики | A | B | C |
+| Rubric item | A | B | C |
 |---|---|---|---|
-| 1. Одно главное действие | да | да | нет (альбомы спорят с поиском) |
-| 2. Узнавание вместо поиска | частично | да (месяц + дата) | да |
-| 3. Число рядом с подписью | да | да | да |
-| 4. Состояние видно | да | да (чипы фильтра) | да |
-| 5. Ничего только по наведению | да | да | нет (иконки) |
-| 7. Плотность | нет | да (шаг 2 px) | нет (крупные карточки) |
-| 10. За секунду | нет | да (фильтр и сброс над сеткой) | частично |
-| 12. Ничего не прыгает | да | да (заголовок и чипы всегда на месте) | нет |
+| 1. One main action | yes | yes | no (the albums compete with the search) |
+| 2. Recognition instead of a search | partly | yes (month + date) | yes |
+| 3. A number next to a label | yes | yes | yes |
+| 4. The state is visible | yes | yes (filter chips) | yes |
+| 5. Nothing only by hovering | yes | yes | no (icons) |
+| 7. Density | no | yes (a 2 px step) | no (big cards) |
+| 10. In a second | no | yes (the filter and the reset above the grid) | partly |
+| 12. Nothing jumps | yes | yes (the title and the chips are always in place) | no |
 
-Выбран **B**. Запись: `docs/DECISIONS.ru.md` ADR 0033, правила — `docs/UI.ru.md`.
+**B** is chosen. The record: `docs/DECISIONS.md` ADR 0033, the rules — `docs/UI.md`.
 
-## 5. Границы работы
+## 5. The boundaries of the work
 
-- Меняется только `src/app.rs` (оболочка, сетка, панели, стиль) и документы.
-- Не меняются: схема БД, индексация, дубли, CLIP, OCR, лица, плеер, корзина, сеть.
-- Оригиналы не трогаются; ни одного нового действия с файлами на диске.
-- Левая панель остаётся 260 px, правая 280 px, минимум окна 1000×700, 4 колонки при 1240 px.
-- Акцент один, шрифты 11/12/14/16/18, отступы 2/4/6/8/12/16/24, серые 150/190/210/235.
+- Only `src/app.rs` changes (the shell, the grid, the panels, the style) and the documents.
+- They do not change: the DB schema, indexing, duplicates, CLIP, OCR, faces, the player, the trash,
+  the network.
+- The originals are not touched; not a single new action with files on disk.
+- The left panel stays 260 px, the right one 280 px, the minimum window 1000×700, 4 columns at
+  1240 px.
+- One accent, the fonts 11/12/14/16/18, the steps 2/4/6/8/12/16/24, the greys 150/190/210/235.
 
-## 6. Критерии приёмки
+## 6. Acceptance criteria
 
-1. Левая панель: две группы с заголовками, у пунктов числа справа; «Все файлы» и «Корзина»
-   показывают реальные счётчики; при окне 840 px навигация и фильтр видны без прокрутки.
-2. Верхняя панель: две строки управления; поиск с сегментированным режимом; «Индексировать» —
-   единственная акцентная кнопка; прогресс не сдвигает сетку больше чем на свою строку.
-3. Сетка: месяцы по убыванию, заголовок «май 2024 · N файлов · объём», внутри — свежие сверху;
-   шаг плиток 2 px; наведение даёт обводку и курсор; 4 колонки при 1240 px.
-4. Над сеткой: чипы активных фильтров с «×», итог «найдено N из M», ползунок «Плитки».
-5. Инспектор: имя файла 14 px, путь 11 px, метаданные строками «подпись — значение», действия
-   до метаданных; ничего не появляется по наведению.
-6. Секции левой панели и карточки без рамок `Frame::group`; стиль один на весь GUI.
-7. `cargo clippy --all-targets` чисто, `enforce-architecture` без нарушений, `cargo test` зелёный,
-   `timeout 6 photocat gui --db <копия реальной БД>` не падает (с предупреждением владельцу).
-8. Документы обновлены тем же изменением: `docs/UI.ru.md`, `.pi/skills/ui-design/references/verstka.md`,
-   `docs/DECISIONS.ru.md` 0033, `plan/STATUS.md`, `plan/BACKLOG.md`.
+1. The left panel: two groups with headings, the items with numbers on the right; "All files" and
+   "Trash"
+   show real counters; in a 840 px window the navigation and the filter are visible without
+   scrolling.
+2. The top bar: two control rows; the search with a segmented mode; "Index" —
+   the only accent button; the progress does not shift the grid by more than its own row.
+3. The grid: months in descending order, the header "May 2024 · N files · size", inside — the newest
+   on top;
+   a tile step of 2 px; hovering gives an outline and a cursor; 4 columns at 1240 px.
+4. Above the grid: chips of the active filters with "×", the total "found N of M", the "Tiles"
+   slider.
+5. The inspector: the file name 14 px, the path 11 px, the metadata as "label — value" rows, the
+   actions
+   before the metadata; nothing appears on hover.
+6. The sections of the left panel and the cards without `Frame::group` frames; one style for the
+   whole GUI.
+7. `cargo clippy --all-targets` clean, `enforce-architecture` without violations, `cargo test` green,
+   `timeout 6 photocat gui --db <a copy of the real DB>` does not crash (with a warning to the
+   owner).
+8. The documents are updated by the same change: `docs/UI.md`,
+   `.pi/skills/ui-design/references/verstka.md`,
+   `docs/DECISIONS.md` 0033, `plan/STATUS.md`, `plan/BACKLOG.md`.
 
-## 7. Что осталось за границей (честно)
+## 7. What stayed outside the boundary (honestly)
 
-- Мультивыбор плиток и пакетные действия над выборкой — следующая задача, не эта.
-- Закрепление заголовка месяца при прокрутке: egui `ScrollArea` не даёт sticky-строку без
-  ручной отрисовки; заголовок живёт в потоке.
-- Карта, альбомы, избранное, метки-облака — в модели данных нет; не обещаем.
-- Клавиатура (Ctrl+I/Ctrl+F/F5, стрелки по сетке) — по-прежнему в §Долг `docs/UI.ru.md`.
+- The multiple selection of tiles and batch actions over the selection — the next task, not this
+  one.
+- Pinning the month header while scrolling: the egui `ScrollArea` does not give a sticky row without
+  manual drawing; the header lives in the flow.
+- The map, albums, favourites, tag clouds — they are not in the data model; we do not promise them.
+- The keyboard (Ctrl+I/Ctrl+F/F5, the arrows over the grid) — still in §Debt of `docs/UI.md`.

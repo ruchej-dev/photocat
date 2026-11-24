@@ -1,87 +1,96 @@
-> Сделано **M19: альбомы в БД** (дерево, порядок, только строки; ADR 0034), **M20: выгрузка
-> альбома копиями**, **M15.4/M15.5: словарь тегов**, **M9: экран «Целостность»**, **M10:
-> напоминание о проверке по сроку** (баннер без автозапуска; ADR 0037) и **M11: быстрый поиск
-> похожих** (индекс по блокам вместо BK-tree; ADR 0038), **M12: каталог моделей CLIP**
-> (SigLIP 768, схема 7; ADR 0039). До них — **M18: мультивыбор плиток**, **M17: представление
-> сетки и сортировка**, **M16: интерфейс по образцу PhotoPrism** (`plan/M16-interface.md`,
-> ADR 0033). Очередь — **M15.6: мультиязычная модель и калибровка**, затем **M15.7: проверка на
-> двух каталогах**.
-> Переименование оригиналов владелец отменил (2026-11-23). Точка входа: `plan/STATUS.md`.
-> Ниже — исторический лог M13–M14c, не актуальный статус.
+# SESSION — M13: a revision of the owner's interface
 
-# SESSION — M13: ревизия интерфейса владельца
+*Русская версия: [SESSION.ru.md](SESSION.ru.md).*
 
-Взято из замечаний после просмотра (полный список — `plan/BACKLOG.md` § M13).
-Состояние: готово, см. `plan/STATUS.md`.
+> Done: **M19: albums in the DB** (a tree, an order, rows only; ADR 0034), **M20: the album export
+> as copies**, **M15.4/M15.5: the tag dictionary**, **M9: the "Integrity" screen**, **M10:
+> the check reminder by a due date** (a banner without an automatic start; ADR 0037) and **M11: a
+> fast search of similar shots** (a block index instead of a BK-tree; ADR 0038), **M12: the CLIP
+> model catalogue** (SigLIP 768, schema 7; ADR 0039). Before them — **M18: multiple selection of
+> tiles**, **M17: the grid layout and the sort order**, **M16: the interface after the PhotoPrism
+> model** (`plan/M16-interface.md`, ADR 0033). The queue — **M15.6: a multilingual model and
+> calibration**, then **M15.7: a check on two folders**.
+> The owner cancelled renaming the originals (2026-11-23). The entry point: `plan/STATUS.md`.
+> Below is the historical log of M13–M14c, not the current status.
 
-## Что сделано
+Taken from the remarks after a review (the full list — `plan/BACKLOG.md` § M13).
+The state: done, see `plan/STATUS.md`.
 
-| Шаг | Файл | Суть |
+## What was done
+
+| Step | File | The essence |
 |---|---|---|
-| 1 | `src/app.rs` | `Viewer`: модальный полный экран, фоновый декод 1920 px, ←/→, слайд-шоу, масштаб, OCR-текст, возврат в тот же вид |
-| 2 | `src/app.rs` | двойной клик в `draw_cell`, кнопка «Открыть полный экран»; порционный декод текстур (8 за кадр) и плавная прокрутка |
-| 3 | `src/app.rs` | правая панель закрывается «Скрыть»/«Сведения»; календарь «Год/Месяц/Неделя» |
-| 4 | `src/app.rs`, `src/db.rs`, `src/faces.rs` | лица: клик ведёт в день, «выбрать» на кропах, пакетное имя, «Фото, где все вместе» |
-| 5 | `src/app.rs` | объяснения у «оставить», «Экспорт плана», «Посчитать теги»; полный текст OCR |
-| 6 | `src/app.rs`, `src/db.rs` | каталоги: `settings.roots`, встроенный выбор папки, индексация нескольких, убрать из индекса |
-| 7 | `src/db.rs`, `src/recycle.rs`, `Cargo.toml` | корзина: `trashed_at`, вид «Корзина», системная корзина ОС по подтверждению |
-| 8 | `src/storage.rs`, `src/app.rs` | занятое место, очистка превью/лиц, сброс индекса |
-| 9 | `src/embed.rs`, `src/db.rs`, `src/app.rs` | 14 CLIP-подсказок, «Посчитать теги», свои теги `user_tags` |
-| 10 | `docs/`, `check.sh`, `AGENTS.md` | правила UI, схема, ADR 0025/0026, исключение для `storage.rs` |
+| 1 | `src/app.rs` | `Viewer`: a modal full screen, a background decode of 1920 px, ←/→, a slideshow, zoom, the OCR text, a return to the same view |
+| 2 | `src/app.rs` | a double click in `draw_cell`, the "Open full screen" button; a portioned decode of textures (8 per frame) and smooth scrolling |
+| 3 | `src/app.rs` | the right panel closes with "Hide"/"Details"; the calendar "Year/Month/Week" |
+| 4 | `src/app.rs`, `src/db.rs`, `src/faces.rs` | faces: a click leads to the day, "pick" on crops, a batch name, "Photo where everyone is together" |
+| 5 | `src/app.rs` | explanations at "keep", "Export the plan", "Compute tags"; the full OCR text |
+| 6 | `src/app.rs`, `src/db.rs` | folders: `settings.roots`, the built-in folder picker, indexing of several, removing from the index |
+| 7 | `src/db.rs`, `src/recycle.rs`, `Cargo.toml` | the trash: `trashed_at`, the "Trash" view, the OS trash on a confirmation |
+| 8 | `src/storage.rs`, `src/app.rs` | the used space, a cleanup of previews/faces, an index reset |
+| 9 | `src/embed.rs`, `src/db.rs`, `src/app.rs` | 14 CLIP hints, "Compute tags", own tags `user_tags` |
+| 10 | `docs/`, `check.sh`, `AGENTS.md` | the UI rules, the schema, ADR 0025/0026, the exception for `storage.rs` |
 
-## Критерии приёмки
+## Acceptance criteria
 
-1. Двойной клик открывает полный экран; закрытие возвращает вид/фильтр/день — да.
-2. Слайд-шоу листает текущий список; видео открывается системным проигрывателем — да.
-3. Правую панель можно закрыть, календарь не обрезается — да.
-4. Календарь листается годом/месяцем/неделей — да.
-5. Клик по лицу ведёт в день, а не в общую сетку — да.
-6. Несколько лиц назначаются одной группе; «все вместе» ищет пересечение групп — да.
-7. Каталоги добавляются кнопкой и убираются только из индекса — да.
-8. «В корзину» не трогает диск; очистка корзины — только системная, с подтверждением — да.
-9. Занятое место и очистка кэша/индекса — да, архив не трогается.
-10. Размер плиток 100–260 px, прокрутка плавная — да.
+1. A double click opens the full screen; closing returns the view/filter/day — yes.
+2. The slideshow flips the current list; a video opens in the system player — yes.
+3. The right panel can be closed, the calendar is not cropped — yes.
+4. The calendar flips by a year/month/week — yes.
+5. A click on a face leads to the day, not to the common grid — yes.
+6. Several faces are assigned to one group; "everyone together" searches the intersection of the
+   groups — yes.
+7. Folders are added with a button and removed only from the index — yes.
+8. "To trash" does not touch the disk; emptying the trash — the system one only, with a
+   confirmation — yes.
+9. The used space and a cleanup of the cache/the index — yes, the archive is not touched.
+10. The tile size 100–260 px, scrolling is smooth — yes.
 
-## Проверки
+## Checks
 
-- `cargo test` — 79 passed, 3 ignored, включая корзину приложения и пакетное назначение лиц.
-- `cargo clippy --all-targets` — чисто.
-- `bash .pi/skills/enforce-architecture/scripts/check.sh` — 38 проверок, 0 нарушений.
-- Миграция копии реальной БД (`/tmp`, 22 МиБ, 2230 файлов): схема 2 → 4, `files` 2230,
-  `trashed_at` и `user_tags` на месте.
-- `timeout 6 photocat gui --db /tmp/photocat-test.db` — код 124, падений нет.
+- `cargo test` — 79 passed, 3 ignored, including the app trash and the batch assignment of faces.
+- `cargo clippy --all-targets` — clean.
+- `bash .pi/skills/enforce-architecture/scripts/check.sh` — 38 checks, 0 violations.
+- Migration of a copy of the real DB (`/tmp`, 22 MiB, 2230 files): schema 2 → 4, `files` 2230,
+  `trashed_at` and `user_tags` in place.
+- `timeout 6 photocat gui --db /tmp/photocat-test.db` — code 124, no crashes.
 
-## Ограничения
+## Limitations
 
-- Масштаб >100% без панорамирования: кадр центрируется и обрезается.
-- Свои теги — ручные; CLIP сам их не создаёт, 14 подсказок фиксированы.
-- Видео — системный проигрыватель, внутри egui только кадр-обложка.
-- Отдельных альбомов тогда не было: клик по лицу ведёт в день календаря. Альбомы — M19
+- Above 100% zoom there is no panning: the frame is centred and cropped.
+- Own tags are manual; CLIP does not create them, the 14 hints are fixed.
+- Video — the system player, inside egui only the cover frame.
+- There were no separate albums then: a click on a face leads to a calendar day. Albums — M19
   (`plan/M19-albums.md`).
-- Очистка моделей не сделана: они качаются только по согласию.
+- Clearing the models is not done: they are downloaded only with consent.
 
-## M13b — после проверки владельцем
+## M13b — after the owner's review
 
-| Проблема | Причина | Исправление |
+| Problem | Cause | The fix |
 |---|---|---|
-| Полный экран грузится секунды | ждали полный декод + не было превью-заглушки | 320 px превью сразу, кадр 1920 px в фоне, предзагрузка выбранного, старый поток отбрасывается |
-| У видео нет превью | старая БД не проходила видео после M4 | инкрементальная индексация пересчитывает видео без `thumb`/`duration_s`; 258/258 |
-| Видео не играет | был только системный проигрыватель | «Смотреть видео» запускает ffplay: видео и звук в отдельном окне |
-| Календарь обрезан справа | 7 колонок шире из-за `item_spacing` | шаг 4 px, ширина от него; шапка недели тоже |
-| Две кнопки тегов, фото пропали | раздельные проходы + фильтр только по верхнему тегу | одна кнопка; фильтр по любому весу выше порога |
-| Из «Лиц» пустой день | старый поиск/фильтр прятал снимок | `open_from_faces` сбрасывает фильтры |
-| Непонятно, как индексировать каталог | добавление не запускало проход | «Добавить и индексировать», автозапуск, поле сверху заполняется |
-| Индексация долгая | каждый раз читались все файлы | пропуск по путь+размер+mtime; повтор 0.024 с, видео 10.2 с |
+| The full screen loads for seconds | it waited for the full decode + there was no placeholder preview | the 320 px preview at once, the 1920 px frame in the background, a preload of the selected one, the old stream is dropped |
+| A video has no preview | the old DB did not walk videos after M4 | the incremental indexing recomputes videos without `thumb`/`duration_s`; 258/258 |
+| Video does not play | there was only the system player | "Watch the video" launches ffplay: video and sound in a separate window |
+| The calendar is cropped on the right | 7 columns were wider because of `item_spacing` | a 4 px step, the width from it; the week header too |
+| Two tag buttons, photos disappeared | separate passes + a filter by the top tag only | one button; a filter by any weight above the threshold |
+| An empty day from "Faces" | the old search/filter hid the shot | `open_from_faces` resets the filters |
+| It is unclear how to index a folder | adding did not start a pass | "Add and index", an automatic start, the field on top is filled |
+| Indexing is slow | every file was read every time | a skip by path+size+mtime; a repeat 0.024 s, videos 10.2 s |
 
-Замеры: копия БД 2230 файлов, `index --jobs 16`: 1971 без изменений, 259 обработано (258 видео
-+ 1 битый JPEG), 10.2 с; повтор — 0.024 с. Декод 36 МБ JPEG — 1.3 с (превью видно сразу),
-12–14 МБ — 0.5 с.
+Measurements: a copy of the DB of 2230 files, `index --jobs 16`: 1971 unchanged, 259 processed (258
+videos
++ 1 broken JPEG), 10.2 s; a repeat — 0.024 s. Decoding a 36 MB JPEG — 1.3 s (the preview is visible
+at once),
+12–14 MB — 0.5 s.
 
-## M13c — без мыла при листании, нормальное слайд-шоу
+## M13c — no blur while flipping, a normal slideshow
 
-- Один фоновый декодер с очередью (текущий, следующий, предыдущий, +1), кэш 4 кадра, очередь 8.
-- Пока следующий кадр не готов, показывается предыдущий резкий; 320 px миниатюра только по центру
-  и не растягивается.
-- JPEG на Linux: TurboJPEG DCT-масштаб (108 Мп — 0.52 с вместо 1.33 с).
-- Слайд-шоу: интервал 3/5/10 с, пробел, по кругу, ждёт готовый кадр; ←/→ сбрасывают таймер.
-- Видео: «Смотреть видео» запускает ffplay (видео и звук в отдельном окне).
+- One background decoder with a queue (the current, the next, the previous, +1), a cache of 4 frames,
+  a queue of 8.
+- While the next frame is not ready, the previous sharp one is shown; the 320 px thumbnail only in
+  the centre
+  and is not stretched.
+- JPEG on Linux: the TurboJPEG DCT scale (108 MP — 0.52 s instead of 1.33 s).
+- The slideshow: an interval of 3/5/10 s, space, in a loop, it waits for a ready frame; ←/→ reset
+  the timer.
+- Video: "Watch the video" launches ffplay (video and sound in a separate window).

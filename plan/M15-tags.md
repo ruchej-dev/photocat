@@ -1,242 +1,297 @@
-# M15 — теги, которые работают на любом каталоге
+# M15 — tags that work on any archive
 
-**Статус:** M15.1 (ансамбль кадров), M15.2 (процентильный порог), M15.3 («не уверен» в карточке),
-M15.4 (словарь тегов и промптов в БД) и M15.5 (общие шаблоны промптов) сделаны; дальше — M9,
-затем M15.6 (только после M12) и M15.7 (размеченная выборка).
-Читать вместе с `plan/STATUS.md` (что уже сделано), `plan/BACKLOG.md` § M15
-(критерии) и `docs/ARCHITECTURE.ru.md` § «Теги».
+*Русская версия: [M15-tags.ru.md](M15-tags.ru.md).*
 
-## 1. Зачем
+**Status:** M15.1 (the frame ensemble), M15.2 (the percentile threshold), M15.3 ("not sure" in the
+card),
+M15.4 (the dictionary of tags and prompts in the DB) and M15.5 (common prompt templates) are done;
+next — M9,
+then M15.6 (only after M12) and M15.7 (a labelled sample).
+Read together with `plan/STATUS.md` (what is already done), `plan/BACKLOG.md` § M15
+(the criteria) and `docs/ARCHITECTURE.md` § "Tags".
 
-Владелец открыл `8.jpg` (вертикальный рендер шкафа) и увидел сверху «документ», ниже —
-«скриншот», «интерьер», и только потом «мебель 0.25». Задача не в том, чтобы подкрутить
-промпты под этот архив, а в том, чтобы теги работали на **любом** каталоге, у любого владельца,
-с первого запуска, без ручной настройки под содержимое.
+## 1. Why
 
-Границы: CLIP-теги — подсказки, не детектор объектов. Оригиналы не меняются, сеть — только за
-весами модели, вкусовщина в промптах не должна попадать в дефолт.
+The owner opened `8.jpg` (a vertical render of a wardrobe) and saw "document" on top, below —
+"screenshot", "interior", and only then "furniture 0.25". The task is not to tweak
+the prompts for this archive, but to make the tags work on **any** archive, for any owner,
+from the first launch, without manual tuning for the contents.
 
-## 2. Что уже сделано (не забыть перед стартом)
+The boundaries: CLIP tags are hints, not an object detector. The originals do not change, the network
+— only for
+the model weights, personal taste in the prompts must not get into the default.
 
-M14d закоммичен отдельной темой («Не молчать фильтру тегов: шкала порога и счётчики»):
-фильтр по тегу перестал молча показывать ноль.
+## 2. What is already done (do not forget it before a start)
 
-- `src/app.rs`: ползунок порога рядом с выбором тега и в «Настройках → Теги»;
-  шкала 0–100 % **от самого сильного веса во всём индексе**; 100 % = этот вес;
-  старый порог выше максимума при чтении индекса становится 100 %, в статусе сказано почему;
-- `src/app.rs`: у каждого тега в фильтре число снимков при текущем пороге; пустой фильтр
-  объясняет порог и предлагает «Сбросить фильтр»;
-- `src/embed.rs`: `max_score()` — самый сильный вес среди тегов файла;
-- `docs/UI.ru.md`, `docs/ARCHITECTURE.ru.md`, `docs/DECISIONS.ru.md`, `plan/STATUS.md` обновлены;
-- тесты: `cargo test` — 108 тестов, 104 прошло, 4 `#[ignore]`; `clippy` — чисто,
+M14d was committed as a separate topic ("Do not stay silent, tag filter: the threshold scale and the
+counters"):
+the tag filter stopped silently showing zero.
+
+- `src/app.rs`: the threshold slider next to the tag picker and in "Settings → Tags";
+  the scale 0–100% **of the strongest weight in the whole index**; 100% = that weight;
+  an old threshold above the maximum becomes 100% when the index is read, and the status says why;
+- `src/app.rs`: each tag in the filter carries the number of shots at the current threshold; an
+  empty filter
+  explains the threshold and offers "Reset the filter";
+- `src/embed.rs`: `max_score()` — the strongest weight among the tags of a file;
+- `docs/UI.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `plan/STATUS.md` are updated;
+- tests: `cargo test` — 108 tests, 104 passed, 4 `#[ignore]`; `clippy` — clean,
   `check.sh` — 39/0.
 
-M15.1 тоже сделан: `derive::clip_inputs` отдаёт центр-кроп и весь кадр (letterbox), `embed`
-усредняет векторы, `embed --refresh` пересчитывает уже посчитанные. Результат и честная
-поправка к критерию — в § M15.1.
+M15.1 is done too: `derive::clip_inputs` gives the centre crop and the whole frame (letterbox),
+`embed`
+averages the vectors, `embed --refresh` recomputes what was already computed. The result and the
+honest
+correction to the criterion — in § M15.1.
 
-**После M15.2:** фильтр хранится как процентиль (`tag_show_pct = 70`), а `tag_show = 0.22`
-снова означает только уверенность тега. Старая база мигрирует при чтении: уверенность 0.22,
-фильтр 70 % — см. § M15.2.
+**After M15.2:** the filter is stored as a percentile (`tag_show_pct = 70`), and `tag_show = 0.22`
+again means only the tag confidence. An old DB migrates when it is read: the confidence 0.22,
+the filter 70% — see § M15.2.
 
-## 3. Диагноз: почему `8.jpg` — «документ»
+## 3. The diagnosis: why `8.jpg` is "document"
 
-`8.jpg` — 433×800, белый рендер шкафа с полками. В БД:
+`8.jpg` — 433×800, a white render of a wardrobe with shelves. In the DB:
 
-| тег | вес |
+| tag | weight |
 |---|---|
-| документ | 0.276 |
-| скриншот | 0.271 |
-| интерьер | 0.266 |
-| мебель | 0.255 |
+| document | 0.276 |
+| screenshot | 0.271 |
+| interior | 0.266 |
+| furniture | 0.255 |
 
-Разрыв между первым и вторым — 0.0047, то есть меньше порога уверенности 0.01. Приложение
-**не считает «документ» уверенным тегом**: акцента нет, список просто отсортирован по весу.
-Правильный ответ на кадре — «не уверен».
+The gap between the first and the second — 0.0047, that is, less than the confidence threshold 0.01.
+The app
+**does not consider "document" a confident tag**: there is no accent, the list is simply sorted by
+weight.
+The right answer on the frame is "not sure".
 
-Одна из причин — **центральный кроп**. `derive::clip_input` брал квадрат `min(w,h)` по центру
-и растягивал в 224×224. У вертикального кадра 433×800 (превью 173×320) остаются белые полки
-и перекладины без верха, низа и водяного знака — для CLIP это похоже на лист/интерфейс. Но
-замер M15.1 показал, что кроп — не единственная причина: весь кадр убирает «документ» из
-лидеров, а вперёд выходит «интерьер». Завышенная база общих промптов остаётся (см. § M15.1).
+One of the causes is the **centre crop**. `derive::clip_input` took the square `min(w,h)` in the
+centre
+and stretched it into 224×224. A vertical frame of 433×800 (a preview of 173×320) keeps the white
+shelves
+and crossbars without a top, a bottom and a watermark — for CLIP that looks like a sheet/an
+interface. But
+the M15.1 measurement showed that the crop is not the only cause: the whole frame removes "document"
+from
+the leaders, but "interior" comes forward. The overstated baseline of the common prompts remains
+(see § M15.1).
 
-Диагностический прогон на той же модели (один кадр, не замер корпуса):
+A diagnostic run on the same model (one frame, not a corpus measurement):
 
-- центр-кроп (как сейчас): документ 0.267, интерьер 0.261, скриншот 0.259, **мебель 0.254**;
-- весь кадр с полями (letterbox): **мебель 0.254**, интерьер 0.254, скриншот 0.252,
-  документ 0.252.
+- the centre crop (as now): document 0.267, interior 0.261, screenshot 0.259, **furniture 0.254**;
+- the whole frame with margins (letterbox): **furniture 0.254**, interior 0.254, screenshot 0.252,
+  document 0.252.
 
-Мебель выходит на первое место, когда модель видит кадр целиком. Разрывы всё ещё крошечные —
-на таком рендере модель неуверенна, — но это доказывает: **кроп важнее промптов**. Никакой
-промпт не поможет, если модель видит только белые полки.
+Furniture comes first when the model sees the frame whole. The gaps are still tiny —
+on such a render the model is unsure — but it proves: **the crop matters more than the prompts**. No
+prompt helps if the model sees only white shelves.
 
-Систематика по корпусу: из 717 снимков с «мебелью» ≥ 0.22 у **337** «документ» или «скриншот»
-выше мебели, и во всех 337 мебель стоит второй. Это не случайность, а завышенная база у общих
-промптов «документ»/«скриншот» плюс кроп. Центр-кроп и общие промпты — две разные причины,
-лечить нужно обе.
+The systematics over the corpus: of 717 shots with "furniture" ≥ 0.22, **337** have "document" or
+"screenshot"
+above furniture, and in all 337 furniture is second. This is not an accident, but an overstated
+baseline of the common
+prompts "document"/"screenshot" plus the crop. The centre crop and the common prompts are two
+different causes,
+both have to be treated.
 
-## 4. Решения (не подгонять под каталог)
+## 4. The decisions (do not tune to the folder)
 
-1. **Дефолтный набор тегов — общий.** Никаких «шкаф-купе», «гардероб», «чертёж» из этого
-   архива в стандартных промптах. Дефолт: метка + 2–3 общих шаблона, одинаковых для любого
-   каталога.
-2. **Вход модели — ансамбль кадров.** Центр-кроп + весь кадр с полями (letterbox), векторы
-   усредняются и нормализуются. Это лечит вертикальные/широкие кадры и не зависит от содержимого.
-3. **Порог — процентиль по каждому тегу**, а не сырой косинус. 100 % = самый сильный снимок
-   **этого тега**, 0 % = все. Тогда 100 % всегда что-то оставляет, а шкала переносится на любой
-   каталог и любую модель. На маленьком каталоге (< 100 файлов) — запасной сырой порог и
-   предупреждение «мало данных».
-4. **Уверенность — по отрыву.** Если первый и второй теги близки (как 0.276 и 0.271), в карточке
-   явно «тег: не уверен», а не подсвеченный «документ». Показывать топ-3 с весами.
-5. **Словарь тегов — настраиваемый.** Метки и промпты хранятся в БД на каждую модель; дефолт
-   засевается один раз; правки владельца не перезатираются. Свои темы («Шкаф», «Комод»,
-   «Чертёж») добавляются как конфигурация, а не как хардкод под один архив.
-6. **Пересчёт без повторного CLIP по фото.** Векторы картинок не зависят от промптов. Правка
-   словаря пересчитывает только текстовые векторы и веса из уже сохранённых `embeddings` —
-   это секунды/минута, а не полный `embed`.
-7. **Модель — отдельный рычаг.** SigLIP 2 multilingual / CLIP ViT-L/14 дают лучшее качество,
-   но это другой размер, ONNX, токенизатор и калибровка. Сначала кроп и словарь, потом модель.
+1. **The default set of tags is common.** No "wardrobe with sliding doors", "dresser", "drawing" from
+   this
+   archive in the standard prompts. The default: a label + 2–3 common templates, the same for any
+   folder.
+2. **The model input is an ensemble of frames.** A centre crop + the whole frame with margins
+   (letterbox), the vectors
+   are averaged and normalized. This treats vertical/wide frames and does not depend on the contents.
+3. **The threshold is a percentile per tag**, not a raw cosine. 100% = the strongest shot
+   **of this tag**, 0% = all. Then 100% always leaves something, and the scale transfers to any
+   folder and any model. On a small folder (< 100 files) — the fallback raw threshold and
+   the warning "little data".
+4. **The confidence is by the lead.** If the first and the second tags are close (like 0.276 and
+   0.271), the card
+   explicitly says "tag: not sure", not a highlighted "document". Show the top-3 with the weights.
+5. **The dictionary of tags is configurable.** The labels and the prompts are stored in the DB per
+   model; the default
+   is seeded once; the owner's edits are not overwritten. Own topics ("Wardrobe", "Dresser",
+   "Drawing") are added as configuration, not as a hardcode for one archive.
+6. **A recompute without a repeated CLIP over the photos.** The image vectors do not depend on the
+   prompts. An edit
+   of the dictionary recomputes only the text vectors and the weights from the already stored
+   `embeddings` —
+   that is seconds/a minute, not a full `embed`.
+7. **The model is a separate lever.** SigLIP 2 multilingual / CLIP ViT-L/14 give a better quality,
+   but that is another size, ONNX, tokenizer and calibration. First the crop and the dictionary, then
+   the model.
 
-## 5. Задачи по порядку
+## 5. The tasks in order
 
-### M15.1 — Ансамбль кадров вместо одного центр-кропа ✅ (2026-11-23)
+### M15.1 — an ensemble of frames instead of one centre crop ✅ (2026-11-23)
 
-**Сделано.** `derive::clip_inputs` декодирует превью один раз и отдаёт два кадра: центр-кроп и
-весь кадр с полями (letterbox, поля — средний цвет). `embed_thumbs` считает два вектора на снимок,
-усредняет и снова нормализует; в БД один вектор. `photocat embed --refresh` сбрасывает векторы
-активной модели, иначе пропуск по sha256 не даёт пересчитать. Тесты: letterbox сохраняет
-пропорции и заливает поля средним цветом; `clip_inputs` отдаёт два кадра; среднее двух
-ортонормальных векторов снова единичной длины.
+**Done.** `derive::clip_inputs` decodes the preview once and gives two frames: the centre crop and
+the whole frame with margins (letterbox, the margins — the mean colour). `embed_thumbs` computes two
+vectors per shot,
+averages them and normalizes again; the DB holds one vector. `photocat embed --refresh` resets the
+vectors of the
+active model, otherwise the skip by sha256 does not let it recompute. Tests: the letterbox keeps
+the proportions and fills the margins with the mean colour; `clip_inputs` gives two frames; the mean
+of two
+orthonormal vectors has unit length again.
 
-**Замеры.** Корпус 2229 файлов: 176.6 с против 77.3 с (2.3×, в пределах 2.5×), 0 ошибок.
-«мебель» ≥0.22: 717 → 1029; top-1 «документ» 266 → 248; уверенный тег 1284 → 1285; у 98.4%
-старых уверенных top-1 тот же; векторы 4.35 МиБ, БД не выросла.
+**Measurements.** The corpus of 2229 files: 176.6 s against 77.3 s (2.3×, within 2.5×), 0 errors.
+"furniture" ≥0.22: 717 → 1029; top-1 "document" 266 → 248; a confident tag 1284 → 1285; in 98.4%
+of the old confident ones top-1 is the same; the vectors 4.35 MiB, the DB did not grow.
 
-**Поправка к приёмке.** `8.jpg` при полном кадре: центр — скриншот 0.278 / документ 0.275 /
-интерьер 0.271 / мебель 0.257; весь кадр — интерьер 0.274 / мебель 0.262 / скриншот 0.261 /
-документ 0.257; ансамбль — интерьер 0.278 / скриншот 0.275 / документ 0.272 / мебель 0.265.
-«Мебель» первой не становится. Критерий «мебель первая» из одного кропа недостижим без подгонки
-промптов, поэтому он переносится: top-1 и «не уверен» — M15.3, промпты — M15.5. Размеченной
-выборки ≥ 100 снимков пока нет — это M15.7; вместо неё замерена устойчивость top-1 на корпусе.
+**A correction to the acceptance.** `8.jpg` with the whole frame: the centre — screenshot 0.278 /
+document 0.275 /
+interior 0.271 / furniture 0.257; the whole frame — interior 0.274 / furniture 0.262 / screenshot
+0.261 /
+document 0.257; the ensemble — interior 0.278 / screenshot 0.275 / document 0.272 / furniture 0.265.
+"Furniture" does not become first. The criterion "furniture first" from one crop is unreachable
+without tuning
+the prompts, so it is moved: top-1 and "not sure" — M15.3, the prompts — M15.5. A labelled
+sample of ≥ 100 shots does not exist yet — that is M15.7; instead the stability of top-1 was
+measured on the corpus.
 
-### M15.2 — Процентиль по каждому тегу вместо глобального максимума ✅ (2026-11-23)
+### M15.2 — a percentile per tag instead of a global maximum ✅ (2026-11-23)
 
-**Сделано.** `settings.tag_show_pct` (0–100, по умолчанию 70) — порог фильтра; процентиль
-считается отдельно по каждому тегу из распределения весов (`embed::tag_distributions`), «все
-теги» — по лучшему весу файла. Распределения строятся при загрузке тегов, а не каждый кадр.
-Уверенность тега осталась отдельной (`tag_show` = 0.22 + отрыв 0.01) и продолжает работать в
-карточке, OCR и `{tag}` в витрине. Миграция: если ключа `tag_show_pct` нет, `tag_show`
-возвращается к 0.22, фильтр ставится на 70 %. Меньше 100 файлов — сырой порог и предупреждение.
+**Done.** `settings.tag_show_pct` (0–100, 70 by default) — the filter threshold; the percentile
+is counted separately per tag from the distribution of the weights (`embed::tag_distributions`),
+"all
+tags" — by the best weight of the file. The distributions are built when the tags are loaded, not
+every frame.
+The tag confidence stayed separate (`tag_show` = 0.22 + a lead of 0.01) and keeps working in
+the card, OCR and `{tag}` in the showcase. The migration: if the `tag_show_pct` key is absent,
+`tag_show`
+returns to 0.22, the filter is set to 70%. Fewer than 100 files — the raw threshold and a warning.
 
-**Замеры** (2229 файлов): 0 % — 2229 снимков у каждого тега; 70 % — 669 у каждого (пороги
-0.229–0.248), хоть один тег проходит у 2129 из 2229; 100 % — ровно 1 снимок у каждого тега
-(«мебель» 0.298, «документ» 0.327, «дети» 0.280, «интерьер» 0.306). Счётчики у тегов совпадают
-с фильтром: и то и другое идёт через `tag_threshold`.
+**Measurements** (2229 files): 0% — 2229 shots for each tag; 70% — 669 for each (the thresholds
+0.229–0.248), at least one tag passes for 2129 of 2229; 100% — exactly 1 shot for each tag
+("furniture" 0.298, "document" 0.327, "children" 0.280, "interior" 0.306). The counters at the tags
+match
+the filter: both go through `tag_threshold`.
 
-**Приёмка.** Выполнена: на 100 % у любого тега ≥ 1 снимок, на 0 % — все, счётчики совпадают,
-маленький каталог предупреждает и берёт сырой порог, тесты на процентили и миграцию зелёные.
+**Acceptance.** Met: at 100% any tag has ≥ 1 shot, at 0% — all, the counters match,
+a small folder warns and takes the raw threshold, the tests for the percentiles and the migration are
+green.
 
-### M15.3 — Явное «не уверен» в карточке ✅ (2026-11-23)
+### M15.3 — an explicit "not sure" in the card ✅ (2026-11-23)
 
-**Сделано.** Если `confident_tag_with` вернул `None`, карточка пишет «тег: не уверен — первые веса
-близки», не подсвечивает первый тег, показывает топ-3 с весом и процентилем (доля снимков с меньшим
-весом этого тега), остальные — под «все теги (N)». У уверенного тега — строка «тег: <имя>» и
-акцент. На маленьком каталоге процентиль не показывается (шумно), остаётся вес.
+**Done.** If `confident_tag_with` returned `None`, the card writes "tag: not sure — the first weights
+are close", does not highlight the first tag, shows the top-3 with the weight and the percentile (the
+share of shots with a lower
+weight of this tag), the rest — under "all tags (N)". A confident tag has the line "tag: <name>" and
+an accent. On a small folder the percentile is not shown (noisy), only the weight remains.
 
-**Приёмка.** `8.jpg` (документ 0.271 / интерьер 0.270, отрыв 0.001) показывает «не уверен», а не
-«документ»; на явном снимке один тег подсвечен. Проверено тестами без окна через
-`egui::Context::run_ui`, `clippy`, `check.sh` и smoke-тестом GUI.
+**Acceptance.** `8.jpg` (document 0.271 / interior 0.270, a lead of 0.001) shows "not sure", not
+"document"; on an obvious shot one tag is highlighted. Checked by tests without a window through
+`egui::Context::run_ui`, `clippy`, `check.sh` and a GUI smoke test.
 
-### M15.4 — Словарь тегов и промптов в БД ✅ (2026-11-23)
+### M15.4 — a dictionary of tags and prompts in the DB ✅ (2026-11-23)
 
-**Сделано.** Таблица `tag_defs(model, tag_id, label, prompts, enabled, position, min_pct)`
-(схема 6); `DEFAULT_TAGS` из 14 общих меток; засев только в пустую таблицу, правки владельца
-не перезатираются; `embed --retag` пересчитывает веса по сохранённым векторам (2229 файлов за
-1.0–1.2 с); редактор в «Настройках → Теги», `photocat tags` (list/add/enable/disable/rm/export/
-import/reset); JSON без путей и фото; старые метки, которых нет в словаре, остаются в фильтре.
-Замер и приёмка — `plan/STATUS.md` § M15.4, решение — ADR 0036.
+**Done.** The table `tag_defs(model, tag_id, label, prompts, enabled, position, min_pct)`
+(schema 6); `DEFAULT_TAGS` of 14 common labels; the seeding only into an empty table, the owner's
+edits
+are not overwritten; `embed --retag` recomputes the weights over the stored vectors (2229 files in
+1.0–1.2 s); the editor in "Settings → Tags", `photocat tags` (list/add/enable/disable/rm/export/
+import/reset); JSON without paths and photos; the old labels that are not in the dictionary stay in
+the filter.
+The measurement and the acceptance — `plan/STATUS.md` § M15.4, the decision — ADR 0036.
 
-Исходные критерии:
+The original criteria:
 
-- Таблица `tag_defs(model, tag_id, label, prompts_json, enabled, order, min_percentile)` или
-  JSON в `settings`; `db::SCHEMA_VERSION` поднять, старые БД догнать.
-- Дефолтный набор в коде; засевать только если для модели пусто; правки владельца не
-  перезатирать. Версия набора — чтобы обновление дефолта не ломало кастом.
-- Заменить `TAG_LABELS`/`PROMPTS_RU`/`PROMPTS_EN` в `app.rs`, `ocr.rs`, `organize.rs` на
-  загруженный набор. `tags` и `tag_hidden` остаются как есть (ключ file_id+tag).
-- Пересчёт из сохранённых `embeddings` без повторного чтения фото; кнопка «Пересчитать теги»
-  и/или `embed --retag`.
-- Добавить/удалить/переименовать тег, включить/выключить, изменить промпты; импорт/экспорт JSON.
-- **Приёмка:** на тестовой БД добавить «Шкаф» с промптом, пересчитать, отфильтровать;
-  правки переживают перезапуск; дефолт не содержит слов из этого архива; тесты roundtrip.
+- The table `tag_defs(model, tag_id, label, prompts_json, enabled, order, min_percentile)` or
+  JSON in `settings`; bump `db::SCHEMA_VERSION`, catch the old DBs up.
+- The default set in the code; seed only if the model has nothing; do not overwrite the owner's
+  edits. A version of the set — so that a default update does not break a custom one.
+- Replace `TAG_LABELS`/`PROMPTS_RU`/`PROMPTS_EN` in `app.rs`, `ocr.rs`, `organize.rs` with
+  the loaded set. `tags` and `tag_hidden` stay as they are (the key file_id+tag).
+- A recompute from the stored `embeddings` without reading the photos again; the "Recompute tags"
+  button
+  and/or `embed --retag`.
+- Add/remove/rename a tag, enable/disable, change the prompts; JSON import/export.
+- **Acceptance:** on a test DB add "Wardrobe" with a prompt, recompute, filter;
+  the edits survive a restart; the default contains no words from this archive; the roundtrip
+  tests.
 
-### M15.5 — Общий ансамбль промптов и необязательные теги ✅ (2026-11-23)
+### M15.5 — a common ensemble of prompts and optional tags ✅ (2026-11-23)
 
-**Сделано.** У всех 14 меток по 2–3 общих шаблона на двух языках; вес тега — лучший из шаблонов
-(среднее проигрывало по всем метрикам). `DEFAULT_TAG_VERSION` = 2, отпечаток словаря
-(`settings.tag_defs_sig`) обновляет дефолт только в нетронутом словаре. «Чертёж/схема» в дефолт
-не добавлена: это ниша, владелец добавляет её через словарь. Замер на двух каталогах и честные
-потери уверенности — `plan/STATUS.md` § M15.5; ADR 0036 обновлён.
+**Done.** All 14 labels have 2–3 common templates in two languages; the tag weight is the best of the
+templates
+(the average lost on all the metrics). `DEFAULT_TAG_VERSION` = 2, the dictionary fingerprint
+(`settings.tag_defs_sig`) updates the default only in an untouched dictionary. "Drawing/scheme" is
+not added to the default:
+it is a niche, the owner adds it through the dictionary. The measurement on two folders and the
+honest
+losses of confidence — `plan/STATUS.md` § M15.5; ADR 0036 is updated.
 
-Исходные критерии:
+The original criteria:
 
-- На каждую метку 2–3 общих шаблона: «фотография {метка}», «на снимке есть {метка}»,
-  «крупный план: {метка}»; для сложных меток оставить один точный описательный промпт.
-- Не добавлять в дефолт «шкаф-купе» и подобное. «Чертёж/схема» — общая категория, можно
-  включить по умолчанию или оставить выключенной; решить владельцем.
-- Оценить на двух каталогах, не на одном; сравнить с M15.1/M15.2.
-- **Приёмка:** дефолт одинаков для любого каталога; замеры top-1/top-3 до/после; docs.
+- 2–3 common templates per label: "a photo of {label}", "the picture shows {label}",
+  "a close-up: {label}"; for complex labels keep one precise descriptive prompt.
+- Do not add "wardrobe with sliding doors" and the like to the default. "Drawing/scheme" — a common
+  category, it can be
+  enabled by default or left disabled; decide by the owner.
+- Evaluate on two folders, not on one; compare with M15.1/M15.2.
+- **Acceptance:** the default is the same for any folder; measurements of top-1/top-3
+  before/after; docs.
 
-### M15.6 — Модель лучше (связано с M12)
+### M15.6 — a better model (related to M12)
 
-- Кандидаты: SigLIP 2 multilingual (приоритет), CLIP ViT-L/14 (если хватит CPU/места).
-- Нужны: ONNX, токенизатор, `sha256`, размер, лицензия, запись в каталог моделей, `dim` из
-  модели (сейчас `DIM = 512` зашит), калибровка порогов/процентилей, замер скорости на CPU.
-- **Приёмка:** M12 + сравнение на двух каталогах; старые модели и векторы не смешиваются.
+- The candidates: SigLIP 2 multilingual (priority), CLIP ViT-L/14 (if the CPU/the space is enough).
+- Needed: ONNX, a tokenizer, `sha256`, the size, the licence, an entry in the model catalogue, `dim`
+  from
+  the model (now `DIM = 512` is hardcoded), calibration of the thresholds/percentiles, a speed
+  measurement on the CPU.
+- **Acceptance:** M12 + a comparison on two folders; the old models and vectors are not mixed.
 
-### M15.7 — Проверка на двух независимых каталогах
+### M15.7 — a check on two independent folders
 
-- Не подгонять промпты под `Фотографии с телефона`. Второй каталог — любой другой (другая
-  папка владельца, публичный набор), зафиксировать до экспериментов.
-- Метрики: top-1/top-3 на размеченной выборке (≥ 100 снимков, включая рендеры/скриншоты),
-  сколько снимков «мебели» находятся при 100 % / 70 % процентиле, время эмбеддингов, размер БД.
-- **Приёмка:** числа в `docs/ARCHITECTURE.ru.md` § Замеры с датой, каталогом и моделью;
-  улучшение на обоих, а не только на своём.
+- Do not tune the prompts to `Фотографии с телефона`. The second folder — any other (another
+  folder of the owner, a public set), fixed before the experiments.
+- The metrics: top-1/top-3 on a labelled sample (≥ 100 shots, including renders/screenshots),
+  how many "furniture" shots are found at the 100% / 70% percentile, the embedding time, the DB
+  size.
+- **Acceptance:** the numbers in `docs/ARCHITECTURE.md` § Measurements with the date, the folder and
+  the model;
+  an improvement on both, not only on ours.
 
-### M15.8 — Документы и интерфейс
+### M15.8 — documents and the interface
 
-- `docs/UI.ru.md`: шкала процентилей, «не уверен», редактор словаря.
-- `docs/ARCHITECTURE.ru.md`: препроцессинг, схема `tag_defs`, пересчёт из векторов.
-- `docs/DECISIONS.ru.md`: ADR 0032.
-- `plan/STATUS.md`: M15 с числами.
+- `docs/UI.md`: the percentile scale, "not sure", the dictionary editor.
+- `docs/ARCHITECTURE.md`: the preprocessing, the `tag_defs` schema, the recompute from the vectors.
+- `docs/DECISIONS.md`: ADR 0032.
+- `plan/STATUS.md`: M15 with the numbers.
 
-## 6. Что уже пробовали и что не сработало
+## 6. What was already tried and did not work
 
-- **Прямой процент от косинуса (0–100 % = 0.00–1.00)** — 100 % = 1.00, на 100 % всегда пусто;
-  отклонено.
-- **Предел модели 0.50** — 100 % = 0.50, на этом архиве тоже пусто (максимум 0.32);
-  отклонено владельцем.
-- **Глобальный максимум** — текущее состояние: 100 % = 0.32, что-то остаётся; но у отдельного
-  тега («мебель» 0.29) на 100 % может быть ноль. Поэтому следующий шаг — процентиль по тегу.
-- **Z-оценки по тегам** — на `8.jpg` документ z≈2.9, мебель z≈1.4; документ всё равно сверху.
-  Нормировка полезна, но одна не спасает; кроп важнее.
-- **Промпты под этот архив** — запрещены: не переносятся на другие каталоги.
+- **A direct percentage of the cosine (0–100% = 0.00–1.00)** — 100% = 1.00, at 100% it is always
+  empty;
+  rejected.
+- **The model limit 0.50** — 100% = 0.50, on this archive it is empty too (the maximum 0.32);
+  rejected by the owner.
+- **A global maximum** — the current state: 100% = 0.32, something remains; but for a separate
+  tag ("furniture" 0.29) at 100% there may be zero. That is why the next step is a percentile per
+  tag.
+- **Z-scores per tag** — on `8.jpg` document z≈2.9, furniture z≈1.4; document is still on top.
+  The normalization is useful, but alone it does not save; the crop matters more.
+- **Prompts for this archive** — forbidden: they do not transfer to other folders.
 
-## 7. Открытые вопросы владельцу
+## 7. Open questions to the owner
 
-1. ~~«Чертёж/схема» — общий тег по умолчанию или только в редакторе словаря?~~ Решено в M15.5:
-   в дефолт не входит (ниша, а не общая категория), добавляется через словарь.
-2. Сколько кропов: 2 (центр + весь кадр) или 3 (ещё 0.7×)? Цена — время эмбеддингов.
-3. Второй каталог для проверки — какой? (нужен независимый, не `Фотографии с телефона`).
-4. Пересчитывать существующие векторы автоматически при обновлении или по кнопке?
-5. Модель крупнее (SigLIP 2 / CLIP-L): сколько минут на корпус и сколько места допустимо?
-6. Текущий `tag_show = 0.25` — сохранить как процентиль или вернуть 0.22/70 %?
+1. ~~"Drawing/scheme" — a common default tag or only in the dictionary editor?~~ Decided in M15.5:
+   it is not in the default (a niche, not a common category), it is added through the dictionary.
+2. How many crops: 2 (the centre + the whole frame) or 3 (also 0.7×)? The price — the embedding
+   time.
+3. Which second folder for the check? (an independent one is needed, not `Фотографии с телефона`).
+4. Recompute the existing vectors automatically on an update or by a button?
+5. A bigger model (SigLIP 2 / CLIP-L): how many minutes per corpus and how much space is allowed?
+6. The current `tag_show = 0.25` — keep it as a percentile or return 0.22/70%?
 
-## 8. Не делать
+## 8. Not doing
 
-- Не хардкодить промпты и пороги под `Фотографии с телефона`.
-- Не отправлять фото/пути/промпты в сеть; сеть — только за весами по согласию.
-- Не удалять и не переименовывать файлы архива.
-- Не обещать «детектор объектов»: CLIP-теги остаются подсказками, точный объект — свободный
-  поиск или отдельная модель/детектор (это уже другой класс).
-- Не менять дефолтный набор тегов без записи в `docs/UI.ru.md` и `docs/DECISIONS.ru.md`.
+- Do not hardcode the prompts and the thresholds for `Фотографии с телефона`.
+- Do not send photos/paths/prompts to the network; the network — only for the weights with consent.
+- Do not delete or rename the archive files.
+- Do not promise an "object detector": CLIP tags stay hints, an exact object — a free
+  search or a separate model/detector (that is a different class already).
+- Do not change the default set of tags without an entry in `docs/UI.md` and `docs/DECISIONS.md`.

@@ -1515,3 +1515,23 @@ code was touched.
 
 **Next.** M21.8c: `plan/SESSION.md`, `plan/M15-tags.md`, `plan/M16-interface.md`,
 `plan/M19-albums.md`.
+
+## M21.8c — the plan documents in English (2026-11-24)
+
+The remaining plan documents are English now, each with its Russian original next to it and a link
+from both sides: `plan/SESSION.md` + `.ru.md` (the M13–M14c log), `plan/M15-tags.md` + `.ru.md`
+(the tag diagnosis, the five done steps and the three left), `plan/M16-interface.md` + `.ru.md`
+(the analysis that led to ADR 0033) and `plan/M19-albums.md` + `.ru.md` (the album schema and the
+collision table of the export). All 7 `#`/`##`/`###` headings, all the tables (the `8.jpg` weights,
+the collision table, the M19/M20 measurements) and every number are kept; the example album names
+in the CLI snippets are English (`Dacha 2024`), while the corpus folder stays as it is on disk.
+
+**Not translated.** `plan/M3-clusters.md` — a local report with archive paths; it is in `.gitignore`
+and is data, not documentation.
+
+**Checks.** The heading trees of every pair match (`SESSION` 7/7, `M15-tags` 17/17,
+`M16-interface` 8/8, `M19-albums` 15/15); the English files keep only the link line and the corpus
+path in Cyrillic. `plan/I18N.md` closes the M21.8 row and the "Repository" bullet lists all the plan
+pairs. No code was touched.
+
+**Next.** M21.9: `.pi/skills/*` and `.pi/prompts/*`.

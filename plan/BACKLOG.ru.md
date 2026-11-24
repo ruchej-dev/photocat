@@ -736,7 +736,7 @@ GPS/тегам/камере, запись порядка в БД.
 
 ---
 
-## M21 — language of the project and of the interface ◐ (mechanism, GUI screens and CLI reports done; documentation left)
+## M21 — language of the project and of the interface ◐ (mechanism, GUI screens, CLI reports and the documentation done; `.pi/` left)
 
 **Goal.** The repository speaks English (docs, commits) while the Russian documentation stays as the
 second variant; the interface language is chosen in the settings: English is the main language,
