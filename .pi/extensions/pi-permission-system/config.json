@@ -4,20 +4,14 @@
     "path": {
       "*": "allow"
     },
-    "path_write": {
-      "*": "ask",
-      "/home/alx/projects/photocat": "allow",
-      "/home/alx/projects/photocat/*": "allow",
-      "~/projects/photocat": "allow",
-      "~/projects/photocat/*": "allow",
-      "/tmp": "allow",
-      "/tmp/*": "allow"
-    },
     "write": {
       "*": "allow"
     },
     "edit": {
       "*": "allow"
+    },
+    "bash": {
+      "rm -rf /tmp/photocat*": "allow"
     },
     "external_directory_read": {
       "*": "allow"
@@ -25,10 +19,11 @@
     "external_directory_write": {
       "*": "ask",
       "/tmp": "allow",
-      "/tmp/*": "allow"
-    },
-    "bash": {
-      "rm -rf /tmp/photocat*": "allow"
+      "/tmp/*": "allow",
+      "/home/alx/.cache/photocat": "allow",
+      "/home/alx/.cache/photocat/*": "allow",
+      "~/.cache/photocat": "allow",
+      "~/.cache/photocat/*": "allow"
     }
   }
 }
