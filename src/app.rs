@@ -1210,6 +1210,23 @@ fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(8.0);
 }
 
+/// A block of content on the card tone: an 8 px rounding, a 1 px border, 8 px of air inside.
+/// The screens the mock-up has no layout for are built from the same parts as the main one
+/// (M22.9, `plan/M22-ui-spec.md` §3), so a group of pictures is a card, not a `Frame::group`.
+fn card_block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    let th = theme(ui);
+    let width = ui.available_width();
+    egui::Frame::new()
+        .fill(th.card)
+        .stroke(egui::Stroke::new(1.0, th.border))
+        .corner_radius(egui::CornerRadius::same(RADIUS_CARD as u8))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width((width - 16.0).max(0.0));
+            add(ui);
+        });
+}
+
 /// The chip of an active filter: the word with "×"; a click removes only this filter (M16).
 fn filter_chip(ui: &mut egui::Ui, text: &str, lang: Lang) -> bool {
     ui.add(
@@ -2853,9 +2870,7 @@ impl App {
         ui.add_space(6.0);
         ui.label(egui::RichText::new(t(lang, "Integrity")).size(18.0));
         ui.label(
-            egui::RichText::new(t(lang, "comparing copies and a sha256 manifest"))
-                .size(12.0)
-                .color(dim(ui)),
+            num(ui, t(lang, "comparing copies and a sha256 manifest"), 12.0).color(dim(ui)),
         );
         ui.add_space(4.0);
         ui.label(
@@ -2877,6 +2892,7 @@ impl App {
                 a_changed |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.integrity_a)
+                            .font(egui::TextStyle::Monospace)
                             .hint_text(t(lang, "/home/…/Photos from the phone"))
                             .desired_width(460.0),
                     )
@@ -2885,6 +2901,7 @@ impl App {
                 ui.label(format!("{}:", t(lang, "Folder B (copy)")));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.integrity_b)
+                        .font(egui::TextStyle::Monospace)
                         .hint_text(t(lang, "/mnt/backup/Photos from the phone"))
                         .desired_width(460.0),
                 );
@@ -2893,6 +2910,7 @@ impl App {
                 manifest_changed |= ui
                     .add(
                         egui::TextEdit::singleline(&mut self.integrity_manifest)
+                            .font(egui::TextStyle::Monospace)
                             .hint_text(t(lang, "<cache>/photocat/manifest.sha256"))
                             .desired_width(460.0),
                     )
@@ -8579,12 +8597,15 @@ fn draw_face_cell(
     lang: i18n::Lang,
 ) {
     let w = cs.tile.clamp(100.0, 260.0);
+    let th = theme(ui);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, w + 26.0), egui::Sense::click());
     let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
     let mut button_clicked = false;
     if ui.is_rect_visible(rect) {
+        // A face tile is a card of the same palette as a file tile: the card tone, an 8 px radius
+        // and a mono 10 caption (M22.9). The metrics stay 150×150 + 26 (docs/UI.md § Metrics).
         ui.painter()
-            .rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+            .rect_filled(rect, egui::CornerRadius::same(RADIUS_CARD as u8), th.card);
         if !cs.textures.contains_key(&f.id) && !cs.missing.contains(&f.id) {
             match f
                 .thumb
@@ -8606,6 +8627,7 @@ fn draw_face_cell(
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
+            round_preview(ui, img_rect, RADIUS_CARD, th.card);
         } else {
             ui.painter().text(
                 img_rect.center(),
@@ -8620,19 +8642,21 @@ fn draw_face_cell(
             .as_deref()
             .map(|d| d.chars().take(10).collect::<String>())
             .unwrap_or_else(|| t(lang, "no date").to_string());
+        // The caption of a face tile: the date in mono 10 on the left, the detection score in
+        // mono 10 `text_dim` on the right — the same caption band as a file tile.
         ui.painter().text(
             egui::pos2(rect.left() + 3.0, img_rect.bottom() + 3.0),
             egui::Align2::LEFT_TOP,
             date,
-            egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(190),
+            egui::FontId::monospace(10.0),
+            th.text_med,
         );
         ui.painter().text(
             egui::pos2(rect.right() - 3.0, img_rect.bottom() + 3.0),
             egui::Align2::RIGHT_TOP,
             format!("{:.2}", f.score),
-            egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(150),
+            egui::FontId::monospace(10.0),
+            th.text_dim,
         );
         // A false merge is split right on the tile, without going to another screen.
         let btn = egui::Rect::from_min_size(
@@ -8672,8 +8696,8 @@ fn draw_face_cell(
         if is_picked {
             ui.painter().rect_stroke(
                 img_rect,
-                3.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
+                egui::CornerRadius::same(RADIUS_CARD as u8),
+                egui::Stroke::new(2.0, accent(ui)),
                 egui::StrokeKind::Inside,
             );
         }
@@ -8681,8 +8705,8 @@ fn draw_face_cell(
     if cs.selected_file == Some(f.file_id) {
         ui.painter().rect_stroke(
             rect,
-            3.0,
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(90, 170, 255)),
+            egui::CornerRadius::same(RADIUS_CARD as u8),
+            egui::Stroke::new(2.0, accent(ui)),
             egui::StrokeKind::Inside,
         );
     }
@@ -9026,8 +9050,8 @@ fn day_strip(
 
 /// A text fragment with the matches: FTS5 marks them with « », the UI paints them with the accent.
 fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
-    let normal = ui.visuals().text_color();
-    let accent = egui::Color32::from_rgb(90, 170, 255);
+    let normal = theme(ui).text;
+    let accent_color = accent(ui);
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = ui.available_width().max(120.0);
     let mut matched = false;
@@ -9056,13 +9080,13 @@ fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     for ch in text.chars() {
         match ch {
             '«' | '»' => {
-                flush(&mut segment, matched, normal, accent, &mut job);
+                flush(&mut segment, matched, normal, accent_color, &mut job);
                 matched = ch == '«';
             }
             _ => segment.push(ch),
         }
     }
-    flush(&mut segment, matched, normal, accent, &mut job);
+    flush(&mut segment, matched, normal, accent_color, &mut job);
     job
 }
 
@@ -11079,8 +11103,16 @@ impl eframe::App for App {
 
         // "Integrity" is a form, not a grid: it needs neither the tiles nor their cache nor the order.
         // The screen is drawn before `self.items`/`self.textures` are borrowed and leaves the frame by itself.
+        // A form is still a screen of the same window: the canvas tone and the 12/6 margin of the
+        // content panel, so the title stands where the title of the grid stands (M22.9).
         if self.view == View::Integrity {
-            egui::CentralPanel::default().show(ui, |ui| self.integrity_panel(ui));
+            let canvas = theme(ui).canvas;
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::Frame::new()
+                    .fill(canvas)
+                    .inner_margin(egui::Margin::symmetric(12, 6))
+                    .show(ui, |ui| self.integrity_panel(ui));
+            });
             return;
         }
 
@@ -11116,8 +11148,9 @@ impl eframe::App for App {
             cell_style: self.settings.cell_style,
             time_only: false,
             // The background a tile lies on: the corner cuts of the preview paint exactly it.
+            // A duplicate group is a card, so its tiles lie on the card tone (M22.9).
             bg: if self.view == View::Dupes {
-                ui.visuals().faint_bg_color
+                theme(ui).card
             } else {
                 theme(ui).canvas
             },
@@ -11754,11 +11787,28 @@ impl eframe::App for App {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (n, g) in groups.iter().enumerate() {
-                            ui.group(|ui| {
+                            // A group is a card of the palette, the same tone a tile lies on (M22.9).
+                            card_block(ui, |ui| {
                                 let reason = g.reason.label(lang);
                                 let advice_text = g.advice.label(lang);
-                                let head = i18n::fill(lang, "#{} — {} · {} files · {} spare", &[(n + 1).to_string(), reason.to_string(), g.members.len().to_string(), db::human_in(lang, g.waste).to_string()]);
-                                ui.label(head);
+                                let facts = i18n::fill(
+                                    lang,
+                                    "{} files · {} spare",
+                                    &[
+                                        g.members.len().to_string(),
+                                        db::human_in(lang, g.waste),
+                                    ],
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(num(ui, format!("#{}", n + 1), 11.0).color(dim(ui)));
+                                    ui.label(egui::RichText::new(reason).size(13.0).strong());
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(num(ui, facts, 11.0).color(dim(ui)));
+                                        },
+                                    );
+                                });
                                 let keep = dupes::keep_of(&items, g);
                                 let name = Path::new(&items[keep].path)
                                     .file_name()
@@ -11769,7 +11819,8 @@ impl eframe::App for App {
                                     .iter()
                                     .any(|&i| items[i].decision.as_deref() == Some("keep"));
                                 let advice = i18n::fill(lang, "{}: keep {} — {}", &[if decided { "decision" } else { "advice" }.to_string(), name.to_string(), advice_text.to_string()]);
-                                ui.label(advice);
+                                ui.label(egui::RichText::new(advice).size(11.0).color(dim(ui)));
+                                ui.add_space(4.0);
                                 let row: Vec<&FileRow> =
                                     g.members.iter().map(|&i| &items[i]).collect();
                                 draw_files(ui, ctx, &mut cells, &row);
@@ -12576,7 +12627,11 @@ impl eframe::App for App {
                         })
                         .collect();
                     ui.horizontal(|ui| {
-                        ui.heading(t(lang, "Photos with everyone together"));
+                        ui.label(
+                            egui::RichText::new(t(lang, "Photos with everyone together"))
+                                .size(14.0)
+                                .strong(),
+                        );
                         ui.label(
                             egui::RichText::new(names.join(" + "))
                                 .size(12.0)
@@ -12584,7 +12639,7 @@ impl eframe::App for App {
                         );
                     });
                     let found = i18n::fill(lang, "photos: {}", &[ids.len().to_string()]);
-                    ui.label(found);
+                    ui.label(num(ui, found, 11.0).color(dim(ui)));
                     if ids.is_empty() {
                         ui.label(t(
                             lang,
@@ -12604,13 +12659,24 @@ impl eframe::App for App {
                     .find(|c| Some(c.id) == face_selected)
                     .cloned();
                 if let Some(c) = &current {
+                    // The name of the group is a subheading of the view: 14 px, the facts in mono 11
+                    // (M22.9) — the same rhythm as the album's own card header.
                     ui.horizontal(|ui| {
-                        ui.heading(if c.label.is_empty() {
-                            t(lang, "no name").to_string()
-                        } else {
-                            c.label.clone()
-                        });
-                        ui.label(format!("{} · {}", faces_n(c.faces as usize), photos_n(c.photos as usize)));
+                        ui.label(
+                            egui::RichText::new(if c.label.is_empty() {
+                                t(lang, "no name").to_string()
+                            } else {
+                                c.label.clone()
+                            })
+                            .size(14.0)
+                            .strong(),
+                        );
+                        let facts = format!(
+                            "{} · {}",
+                            faces_n(c.faces as usize),
+                            photos_n(c.photos as usize)
+                        );
+                        ui.label(num(ui, facts, 11.0).color(dim(ui)));
                     });
                     ui.horizontal(|ui| {
                         ui.label(t(lang, "Person's name:"));
@@ -12709,15 +12775,18 @@ impl eframe::App for App {
                 } else {
                     ui.horizontal(|ui| {
                         let bytes: i64 = trash_items.iter().map(|r| r.size).sum();
-                        ui.label(format!(
+                        let facts = format!(
                             "{} · {}",
                             files_n(trash_items.len()),
                             db::human_in(lang, bytes)
-                        ));
+                        );
+                        ui.label(num(ui, facts, 11.0).color(dim(ui)));
                         if word_button(ui, Icon::Restore, t(lang, "Restore all")).clicked() {
                             trash_restore_all = true;
                         }
-                        let b = WordButton::primary(
+                        // The only red word in the window: this is the one path that changes the
+                        // disk, and it asks for a confirmation (M22.9).
+                        let b = WordButton::danger(
                             Icon::Delete,
                             format!(
                                 "{} ({})",
@@ -13027,6 +13096,47 @@ mod tests {
             egui::Shape::Vec(v) => {
                 for s in v {
                     collect_text_pos(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Every drawn text section with its font and colour: the screens without a mock-up must put
+    /// their numbers in the numeric family and take their colours from the palette (M22.9).
+    fn collect_text_formats(
+        shape: &egui::Shape,
+        out: &mut Vec<(String, egui::FontId, egui::Color32)>,
+    ) {
+        match shape {
+            egui::Shape::Text(t) => {
+                let job = &t.galley.job;
+                for s in &job.sections {
+                    let text = job
+                        .text
+                        .get(usize::from(s.byte_range.start)..usize::from(s.byte_range.end))
+                        .unwrap_or_default()
+                        .trim()
+                        .to_owned();
+                    if !text.is_empty() {
+                        // A galley may leave the colour unset, so the frame's fallback and an
+                        // override decide what is painted; both are the palette's doing.
+                        let color = if s.format.color == egui::Color32::PLACEHOLDER {
+                            t.fallback_color
+                        } else {
+                            s.format.color
+                        };
+                        out.push((
+                            text,
+                            s.format.font_id.clone(),
+                            t.override_text_color.unwrap_or(color),
+                        ));
+                    }
+                }
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_text_formats(s, out);
                 }
             }
             _ => {}
@@ -13379,6 +13489,28 @@ mod tests {
         let mut texts = Vec::new();
         for c in &out.shapes {
             collect_text(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// One frame of the whole window with every drawn word, its font and its colour: the screens
+    /// without a mock-up are checked for the numeric family and for the palette (M22.9).
+    fn window_text_formats(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::FontId, egui::Color32)> {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text_formats(&c.shape, &mut texts);
         }
         out.drop_without_applying_deltas();
         texts
@@ -14296,8 +14428,10 @@ mod tests {
                 "missing “{needle}”: {texts:?}"
             );
         }
+        // The group is a card: "#1", the reason and the facts in mono (M22.9).
         assert!(
-            texts.iter().any(|t| t.starts_with("#1 — ") && t.contains("2 files")),
+            texts.iter().any(|t| t == "#1")
+                && texts.iter().any(|t| t.contains("2 files") && t.contains("spare")),
             "the group line is not translated: {texts:?}"
         );
         assert!(
@@ -14554,6 +14688,325 @@ mod tests {
             !texts.iter().any(|t| t.contains("вердикт: копии совпадают")),
             "a Russian report is left in the English window: {texts:?}"
         );
+    }
+
+    /// The colours a screen may use: the dark palette plus white (an image tint); a colour with
+    /// transparency is a tone of the palette over something else and is allowed too.
+    fn palette() -> Vec<egui::Color32> {
+        let p = super::DARK;
+        vec![
+            p.canvas,
+            p.panel,
+            p.card,
+            p.field,
+            p.border,
+            p.border_strong,
+            p.text,
+            p.text_med,
+            p.text_dim,
+            p.accent,
+            p.accent_hover,
+            p.on_accent,
+            p.accent_soft,
+            p.danger,
+            egui::Color32::WHITE,
+        ]
+    }
+
+    /// M22.9: a screen without a mock-up writes no colour of its own — every drawn word, fill and
+    /// stroke is a token of the palette. (Text over a darkened photograph is the documented
+    /// exception; none of these four screens paints over a photograph.)
+    fn assert_palette(app: &mut App, ctx: &egui::Context, screen: &str) {
+        let size = egui::vec2(1240.0, 1400.0);
+        let allowed = palette();
+        let ok = |c: &egui::Color32, what: &str| {
+            assert!(
+                allowed.iter().any(|p| p == c) || c.a() < 255,
+                "the {screen} screen paints {what} off the palette: {c:?}"
+            );
+        };
+        for (text, _, color) in window_text_formats(app, ctx, size) {
+            // Text on a dimmed frame is the documented exception: the background there is a
+            // photograph, not the theme. The marks on a tile keep gray(235)/gray(210).
+            if color == egui::Color32::from_gray(235) || color == egui::Color32::from_gray(210) {
+                continue;
+            }
+            ok(&color, &format!("“{text}”"));
+        }
+        for (_, color) in window_fills(app, ctx) {
+            ok(&color, "a fill");
+        }
+        for (_, stroke) in window_strokes(app, ctx, size) {
+            ok(&stroke.color, "a stroke");
+        }
+    }
+
+    /// M22.9: the duplicates screen has no mock-up, so it is built from the parts of the main one —
+    /// a group is a card of the card tone, "#1" and the facts in mono, the words "keep" and "spare"
+    /// stay words, and nothing here is red: the screen touches no file.
+    #[test]
+    fn the_duplicates_screen_borrows_the_parts_of_the_main_one() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-dupes-card.db"));
+        let mut a = file_row(1, "image", "a.jpg");
+        let mut b = file_row(2, "image", "b.jpg");
+        a.sha256 = "same".into();
+        b.sha256 = "same".into();
+        app.items = vec![a, b];
+        app.groups = crate::dupes::find_groups(&app.items, 6);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Dupes;
+        let ctx = egui::Context::default();
+        let formats = window_text_formats(&mut app, &ctx, egui::vec2(1240.0, 1400.0));
+        let find = |needle: &str| {
+            formats
+                .iter()
+                .find(|(t, _, _)| t == needle)
+                .cloned()
+                .unwrap_or_else(|| panic!("no “{needle}”: {formats:?}"))
+        };
+        // The labels are the ones the screen had: the number, the reason, the facts, the buttons.
+        let (_, number_font, _) = find("#1");
+        assert_eq!(number_font, egui::FontId::monospace(11.0), "the group number is mono");
+        find("exact copy");
+        let (_, facts_font, _) = find("2 files · 1 B spare");
+        assert_eq!(facts_font, egui::FontId::monospace(11.0), "the facts are mono");
+        find("Find groups");
+        find("keep");
+        assert!(
+            formats.iter().any(|(t, _, _)| t.contains("keep b.jpg")),
+            "the advice keeps its words: {formats:?}"
+        );
+        // The group is a card: a fill of the card tone across the content panel.
+        let content = egui::Rect::from_min_max(
+            egui::pos2(super::LEFT_W, 100.0),
+            egui::pos2(1240.0, 800.0),
+        );
+        let fills = window_fills(&mut app, &ctx);
+        assert!(
+            fills.iter().any(|(r, c)| *c == super::DARK.card
+                && content.contains_rect(*r)
+                && r.width() > 400.0),
+            "the group is not a card: {fills:?}"
+        );
+        assert!(
+            !formats.iter().any(|(_, _, c)| *c == super::DARK.danger),
+            "the duplicates screen has no red: {formats:?}"
+        );
+        assert_palette(&mut app, &ctx, "duplicates");
+    }
+
+    /// M22.9: the faces screen keeps the metrics of a face tile (150×150 + 26) and takes the look
+    /// from the palette: the date and the score in mono 10, a picked face in the accent.
+    #[test]
+    fn the_faces_screen_takes_its_caption_from_the_palette() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-faces-card.db"));
+        app.face_faces = 1;
+        app.face_photos = 1;
+        app.face_images = 1;
+        app.face_todo = 0;
+        app.face_clusters = vec![db::FaceCluster {
+            id: 7,
+            label: "Lisa".into(),
+            faces: 1,
+            photos: 1,
+        }];
+        app.face_views = vec![db::FaceView {
+            id: 1,
+            file_id: 1,
+            path: "/tmp/a.jpg".into(),
+            taken_at: Some("2024-05-01 10:00".into()),
+            thumb: None,
+            score: 0.62,
+            cluster_id: Some(7),
+        }];
+        app.face_selected_cluster = Some(7);
+        app.face_picked.insert(1);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Faces;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 1400.0);
+        let formats = window_text_formats(&mut app, &ctx, size);
+        let find = |needle: &str| {
+            formats
+                .iter()
+                .find(|(t, _, _)| t == needle)
+                .cloned()
+                .unwrap_or_else(|| panic!("no “{needle}”: {formats:?}"))
+        };
+        find("not him");
+        find("picked");
+        find("Save the name");
+        let (_, title_font, _) = find("Lisa");
+        assert_eq!(title_font.size, 14.0, "the group's name is a 14 px subheading");
+        let (_, facts_font, _) = find("1 person · 1 photo");
+        assert_eq!(facts_font, egui::FontId::monospace(11.0), "the facts are mono");
+        let (_, date_font, date_color) = find("2024-05-01");
+        assert_eq!(date_font, egui::FontId::monospace(10.0), "the date is mono 10");
+        assert_eq!(date_color, super::DARK.text_med);
+        let (_, score_font, score_color) = find("0.62");
+        assert_eq!(score_font, egui::FontId::monospace(10.0), "the score is mono 10");
+        assert_eq!(score_color, super::DARK.text_dim);
+        // A picked face carries a 2 px accent frame — the same mark as a picked tile.
+        let strokes = window_strokes(&mut app, &ctx, size);
+        assert!(
+            strokes
+                .iter()
+                .any(|(_, s)| s.width == 2.0 && s.color == super::DARK.accent),
+            "the picked face is not marked in the accent: {strokes:?}"
+        );
+        assert_palette(&mut app, &ctx, "faces");
+    }
+
+    /// M22.9: the trash counts in mono and has exactly one red word — its one action that changes
+    /// the disk.
+    #[test]
+    fn the_trash_paints_only_its_emptying_in_danger() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-trash-card.db"));
+        let mut row = file_row(1, "image", "trashed.jpg");
+        row.trashed_at = Some(1_700_000_000);
+        app.trash_items = vec![row];
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Trash;
+        let ctx = egui::Context::default();
+        let formats = window_text_formats(&mut app, &ctx, egui::vec2(1240.0, 1400.0));
+        let find = |needle: &str| {
+            formats
+                .iter()
+                .find(|(t, _, _)| t == needle)
+                .cloned()
+                .unwrap_or_else(|| panic!("no “{needle}”: {formats:?}"))
+        };
+        find("Restore all");
+        find("in trash");
+        find("restore");
+        let (_, empty_font, empty_color) = find("Empty the trash (1)");
+        assert_eq!(empty_color, super::DARK.danger, "the emptying is the red word");
+        assert_eq!(empty_font.size, 13.0);
+        let restore_color = find("Restore all").2;
+        assert_ne!(restore_color, super::DARK.danger, "the restore stays neutral");
+        let (_, count_font, count_color) = find("1 file · 1 B");
+        assert_eq!(count_font, egui::FontId::monospace(11.0), "the counter is mono");
+        assert_eq!(count_color, super::DARK.text_med);
+        assert_palette(&mut app, &ctx, "trash");
+    }
+
+    /// M22.9: the integrity screen is a form of the same window — the title where the grid's title
+    /// stands, the path fields in the numeric family, one accent button and no other colour.
+    #[test]
+    fn the_integrity_screen_takes_its_fields_and_its_one_accent() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-integrity-card.db"));
+        app.integrity_a = "/tmp/archive".into();
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Integrity;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 1400.0);
+        let formats = window_text_formats(&mut app, &ctx, size);
+        let find = |needle: &str| {
+            formats
+                .iter()
+                .find(|(t, _, _)| t == needle)
+                .cloned()
+                .unwrap_or_else(|| panic!("no “{needle}”: {formats:?}"))
+        };
+        // "Integrity" is also the word of the navigation row (13 px): the view title is the 18 px one.
+        let title_font = formats
+            .iter()
+            .find(|(t, f, _)| t == "Integrity" && f.size == 18.0)
+            .map(|(_, f, _)| f.clone())
+            .expect("the title of the form");
+        assert_eq!(title_font.size, 18.0, "the title is the view title");
+        let (_, facts_font, _) = find("comparing copies and a sha256 manifest");
+        assert_eq!(facts_font, egui::FontId::monospace(12.0), "the facts are mono 12");
+        let (_, path_font, _) = find("/tmp/archive");
+        assert_eq!(
+            path_font.family,
+            egui::FontFamily::Monospace,
+            "a path is not proportional text"
+        );
+        // The title stands at the same place as the title of the grid: the content panel margin
+        // of 12 px, not the raw edge of the central panel.
+        let layout = window_layout(&mut app, &ctx, size);
+        let (_, title_pos) = layout
+            .iter()
+            .find(|(t, pos)| t == "Integrity" && pos.x > super::LEFT_W)
+            .expect("the title of the form");
+        assert!(
+            title_pos.x >= super::LEFT_W + 12.0,
+            "the form starts at the edge of the panel: {title_pos:?}"
+        );
+        // One accent button: the main action of the screen.
+        let content = egui::Rect::from_min_max(
+            egui::pos2(super::LEFT_W, 100.0),
+            egui::pos2(1240.0, 1000.0),
+        );
+        let accent_fills = window_fills(&mut app, &ctx)
+            .into_iter()
+            .filter(|(r, c)| *c == super::DARK.accent && content.contains_rect(*r))
+            .count();
+        assert_eq!(accent_fills, 1, "the form has exactly one accent fill");
+        assert_palette(&mut app, &ctx, "integrity");
+    }
+
+    /// The M22.9 measurement on the real DB: a frame of each screen without a mock-up.
+    /// Not in the ordinary run: `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
+    /// cargo test --release -- --ignored screens_without_a_mock_up_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn screens_without_a_mock_up_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        // The groups of the left panel's button: the screen is measured with its content, not empty.
+        app.groups = crate::dupes::find_groups(&app.items, app.max_dist);
+        let faces = app.face_views.len();
+        if let Some(c) = app.face_clusters.first() {
+            app.face_selected_cluster = Some(c.id);
+        }
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let size = egui::vec2(1240.0, 840.0);
+        let mut t = 0.0_f64;
+        let mut drive = |app: &mut App, t: &mut f64| {
+            let raw = egui::RawInput {
+                time: Some(*t),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let start = Instant::now();
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+            let ms = start.elapsed().as_secs_f32() * 1000.0;
+            out.drop_without_applying_deltas();
+            *t += 1.0 / 60.0;
+            ms
+        };
+        for (view, screen) in [
+            (View::Dupes, "duplicates"),
+            (View::Faces, "faces"),
+            (View::Trash, "trash"),
+            (View::Integrity, "integrity"),
+        ] {
+            app.view = view;
+            let mut times = Vec::new();
+            for _ in 0..40 {
+                times.push(drive(&mut app, &mut t));
+            }
+            times.sort_by(|a, b| a.total_cmp(b));
+            let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+            println!(
+                "{screen}: {} files, {} groups, {faces} faces; p50 {:.2} ms ({:.0} fps), p95 {:.2} ms",
+                n,
+                app.groups.len(),
+                p(0.50),
+                1000.0 / p(0.50),
+                p(0.95)
+            );
+        }
     }
 
     /// M21.4f: the left panel is translated completely — the model block, the text block and the summary.

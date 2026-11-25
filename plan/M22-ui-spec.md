@@ -116,18 +116,21 @@ reason is written in ADR 0044.
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 ✅ |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 ✅ |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 ✅ |
-| Duplicates | — | no mock-up: same strips, header, chips row, `draw_cell`, amber "keep", red-free everywhere | M22.9 |
-| Faces | — | same panels, face tile metrics unchanged, accent only on a picked face | M22.9 |
-| Trash | — | same, `danger` only on "Empty the trash" | M22.9 |
-| Integrity | — | form fields and report in mono, one accent button, no new colour | M22.9 |
+| Duplicates | — | no mock-up: same strips, header, `card_block` per group, `draw_cell`, amber "keep", red-free everywhere | M22.9 ✅ |
+| Faces | — | same panels, face tile metrics unchanged, caption in mono 10, accent only on a picked face | M22.9 ✅ |
+| Trash | — | same, `danger` only on "Empty the trash" | M22.9 ✅ |
+| Integrity | — | the content panel's form: path fields in mono, the report in mono, one accent button, no new colour | M22.9 ✅ |
 | Settings | `photocat_4` (partial) | the section list (caps heading, icons, the accent edge of the active row, the mono value at the right) and the row rhythm; **the content stays ours**, plus "Interface → theme" | M22.8 ✅ |
 | Dialogs (folders, picker, export, storage, album) | `photocat_4` (settings only) | card tone, 1 px border, 8 px radius, mono numbers | M22.10 |
 
 **Rule for a screen without a mock-up.** A new or unfinished screen is built from the same parts and
 in the same order: top strip (nothing), view title + facts, chips row, content, status strip. It uses
-`draw_cell` for files, the same `caps_label`/`num`/`hairline` helpers, the same palette, the same
-panel widths and the same word for the same notion. One accent per view: the main action. Red is
-allowed only for the OS-trash path.
+`draw_cell` for files, `card_block` for a group of pictures, the same `caps_label`/`num`/`hairline`
+helpers, the same palette, the same panel widths and the same word for the same notion. One accent
+per view: the main action. Red is allowed only for the OS-trash path. The chips row belongs to the
+views that filter (grid, calendar, albums): duplicates, faces and trash apply no filter, and a row
+saying "no filters" over a list that cannot be filtered would be a false statement — their own row of
+choice (the picked people, the trash counter with its two actions) stands where the chips row stands.
 
 ## 4. What changes in the behaviour documents
 
@@ -509,12 +512,55 @@ diagnostics` 0 errors.
 **Files.** `src/app.rs` (`Icon`, `paint_icon`, `WordButton`, `settings_nav_item`, `SettingsTab::icon`,
 the button sweep), `src/i18n.rs`, `docs/UI.md`, `docs/DECISIONS.md` (ADR 0048), `plan/`.
 
-### M22.9 — screens without a mock-up
+### M22.9 — screens without a mock-up ✅ (this change)
 
 1. Duplicates, faces, trash, integrity: the header, the chips row, the panel widths, the mono numbers
    and the accent are the same as on the main screen; there is no local colour.
 2. `danger` only on "Empty the trash"; `keep`/`spare` keep their words.
 3. Each screen gets one headless frame test that checks the labels are unchanged.
+
+**Result.** The four screens the mock-up has no layout for now follow the rule of §3 literally. A
+duplicate group is a `card_block` — the `card` tone, a 1 px `border`, an 8 px radius, 8 px inside —
+instead of egui's `Frame::group`: the row is "#N" in mono 11, the reason at 13 px strong and the facts
+"N files · X spare" in mono 11 at the right edge, the advice at 11 px in `text_dim`, and the tiles lie
+on the card tone (the previews' corner cuts used to be painted `faint_bg_color`, which happened to be
+the same tone; now `theme(ui).card`, so the two cannot drift). `draw_face_cell` was the last place with
+a hard-coded colour: the old blue `rgb(90,170,255)` on a picked face and on the selected file, the
+`extreme_bg_color` well, a 3 px radius and grey 190/150 captions in a proportional 11 px font. Now the
+tile is a `card` with the 8 px radius, the caption is mono 10 — the date `text_med` on the left, the
+detection score `text_dim` on the right, exactly like a file tile — and both frames are the 2 px
+accent; the metrics 150×150 + 26 are untouched. The group's name became a 14 px subheading with its
+facts in mono 11 and the "Photos with everyone together" heading dropped from 18 px to 14 px, so the
+18 px title is the view's alone. In the trash the counter reads in mono 11 `text_dim` and "Empty the
+trash" changed from `primary` to `danger`: the accent means "selected" and "keep", while the one path
+that changes the disk is the one red word of the window (docs/UI.md § Layout). The integrity screen
+grew the content panel's frame (canvas tone, a 12/6 margin), so its title stands where the grid's title
+stands; its facts are mono 12, its three path fields take the numeric family, and "Compare the copies"
+stays the only accent fill of the form. `highlight_job` — the OCR match in the card and the search
+snippet — lost the same old blue (a defect left from M22.5) and paints the theme's accent.
+
+**Checks.** Four headless frame tests, one per screen, each asserting the labels the screen had and the
+tokens it now uses: `the_duplicates_screen_borrows_the_parts_of_the_main_one` ("#1" and the facts in
+mono 11, the group's card fill across the content panel, no `danger` anywhere, and the whole screen on
+the palette), `the_faces_screen_takes_its_caption_from_the_palette` (the date and the score in mono 10
+with their tokens, the 14 px name, the 2 px accent frame on a picked face, the palette only),
+`the_trash_paints_only_its_emptying_in_danger` ("Empty the trash (1)" in `danger`, "Restore all"
+neutral, the counter in mono 11), `the_integrity_screen_takes_its_fields_and_its_one_accent` (the title
+next to the grid's, the facts in mono 12, the path in the numeric family, exactly one accent fill). The
+palette assertion walks every drawn word with its font and colour (a galley may leave the colour
+unset, so the frame's fallback and override are resolved) and every fill and stroke of the frame; text
+on a dimmed photograph keeps the documented grey-235/210 exception, and none of the four screens is
+red.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, the real DB of 2232 files, 2498 faces, release,
+headless frames at 1240×840, 40 frames per screen): duplicates p50 5.61–5.71 ms (175–178 fps), p95 ≤
+7.21; faces p50 8.07–8.49 ms (118–124 fps), p95 ≤ 10.63 — the heaviest of the four, because every face
+tile decodes its crop within the 8-per-frame budget; trash p50 5.08–5.13 ms (195–197 fps), p95 ≤ 6.96;
+integrity p50 4.77 ms (210 fps), p95 ≤ 7.29. `cargo test` 272 passed (268 + 4), `cargo clippy
+--all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
+
+**Files.** `src/app.rs` (`card_block`, `View::Dupes`, `draw_face_cell`, `View::Faces`, `View::Trash`,
+`integrity_panel`, `highlight_job`, the four tests and the measurement), `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
 ### M22.10 — dialogs and reports
 

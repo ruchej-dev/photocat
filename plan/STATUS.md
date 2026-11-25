@@ -5,7 +5,8 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048) → next:M22.9 (the screens without a mock-up), then M22.10–M22.11 and M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
+the parts of the main screen) → next:M22.10 (dialogs and reports), then M22.11 and M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -2434,7 +2435,8 @@ Screens, § States, and the stale paragraph claiming that colours come from `ui.
 §6 M22.5 carry the result and the numbers, `plan/BACKLOG.md` counts M22.5 as done,
 `docs/references/mockups/README.md` marks `photocat_12` as built, and `plan/I18N.md` gets the new
 labels. Still open, outside this task: `highlight_job` (the OCR match in the card and the search
-snippet) still paints the old blue — it belongs to M22.9's pass over the screens without a mock-up.
+snippet) still paints the old blue — it belongs to M22.9's pass over the screens without a mock-up
+(closed there: the match takes the theme's accent).
 
 ## M22.6 — the albums' cards inside the tree (2026-11-25) ✅
 
@@ -2544,3 +2546,54 @@ the two rows of the content panel; § Screens follows. `docs/DECISIONS.md` ADR 0
 same sentence as the fonts: nothing is bundled). `plan/M22-ui-spec.md` §5 q. 11 gets the owner's answer,
 §3 and §6 M22.8 the result; `plan/I18N.md` gets the one new label ("Settings sections"); this file and
 `plan/BACKLOG.md` count M22.8 as done.
+
+## M22.9 — the screens without a mock-up (2026-11-25) ✅
+
+The four screens the mock-up set has no layout for — duplicates, faces, trash, integrity — were the
+last ones built by hand: the duplicates' groups were egui `Frame::group` boxes on a tone that only
+happened to match the tiles, `draw_face_cell` still painted the old blue `rgb(90,170,255)` on a picked
+face and a selected file and kept grey 190/150 captions in a proportional font, the trash's empty
+button was the accent one, and the integrity form began at the raw edge of the central panel. Spec
+§6 M22.9 asks for the same parts as the main screen: the header, the mono numbers, one accent, red
+only on the OS-trash path, and no local colour.
+
+**How.** A new `card_block` draws a group of content as a card of the palette — the `card` tone, a
+1 px `border`, an 8 px radius, 8 px inside — and the duplicate screen uses it per group: "#N" in mono
+11 `text_dim`, the reason at 13 px strong, the facts "N files · X spare" in mono 11 at the right edge,
+the advice at 11 px, the tiles on the card tone (`cells.bg` is `theme(ui).card` there now, so the
+previews' corner cuts cannot drift from the card). The face tile keeps its metrics 150×150 + 26: the
+`card` tone with the 8 px radius instead of a 3 px one on `extreme_bg_color`, the caption in mono 10
+(the date `text_med` on the left, the detection score `text_dim` on the right — the caption band of a
+file tile), and both the picked face and the selected file carry the 2 px accent. The group's name
+became a 14 px subheading with the facts in mono 11, and "Photos with everyone together" dropped from
+18 px to 14 px, so the 18 px view title stays alone. The trash's counter reads in mono 11 and "Empty
+the trash" moved from `primary` to `danger` — the one word of the window that changes the disk, and
+the only place red is allowed. The integrity screen became the content panel's form (canvas tone, a
+12/6 margin, so the title stands where the grid's title stands): facts in mono 12, the three path
+fields in the numeric family, "Compare the copies" the only accent fill. `highlight_job` — the OCR
+match in the card and the search snippet, a defect left from M22.5 — lost the same old blue and takes
+the theme's accent.
+
+**Checks.** Four headless frame tests, one per screen, each checking the labels the screen had and the
+tokens it now uses; a shared helper walks every drawn word with its font and colour (resolving the
+galley's unset colour through the shape's fallback and override) plus every fill and stroke, and fails
+on a colour outside the palette; the grey-235/210 of text on a dimmed photograph stays the documented
+exception. The duplicates test asserts the group's card fill across the content panel and that no
+`danger` appears on the screen; the faces test the mono 10 caption and the 2 px accent frame; the trash
+that "Empty the trash (1)" is `danger` and "Restore all" is not; the integrity that its title sits at
+the content panel's margin and that the form holds exactly one accent fill. `cargo test` 272 passed
+(268 + 4), `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0
+errors, `cargo test --test source_language` 3 passed.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, the real DB of 2232 files, 52 duplicate groups
+and 2498 faces, release, 1240×840 headless frames, 40 frames per screen): duplicates p50 5.61–5.71 ms
+(175–178 fps), p95 ≤ 7.21; faces p50 8.07–8.49 ms (118–124 fps), p95 ≤ 10.63 (the heaviest — every face
+tile decodes its crop inside the 8-per-frame budget); trash p50 5.08–5.13 ms (195–197 fps), p95 ≤ 6.96;
+integrity p50 4.77 ms (210 fps), p95 ≤ 7.29.
+
+**Documents.** `docs/UI.md` § Layout gets the paragraph on the screens without a mock-up and loses the
+stale "radii over 4 px" line that contradicted the 4/6/8 scale; § Metrics gets rows for the face
+tile's caption, a duplicate group and the trash, and the integrity row now names the form's frame and
+the numeric path fields; § Screens follows. `plan/M22-ui-spec.md` §3 marks the four screens as built,
+§6 M22.9 carries the result and the numbers; `docs/ARCHITECTURE.md` § Measurements gets the row; this
+file and `plan/BACKLOG.md` count M22.9 as done.

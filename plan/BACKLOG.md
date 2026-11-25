@@ -1029,7 +1029,10 @@ M22.7 (the full-screen viewer: the header and the tools row with words, "1:1" an
 series strip of the day, the face chips over the frame, the inspector with the same file card) —
 2026-11-25; M22.8 (the settings dialog after `photocat_4` — a caps section list with icons and the
 accent edge of the active row — and the mock-up's icons as drawn geometry on every button of the
-window, ADR 0048) — 2026-11-25.
+window, ADR 0048) — 2026-11-25; M22.9 (duplicates, faces, trash and integrity built from the parts of
+the main screen: a `card_block` per duplicate group, the face tile's caption in mono 10, the one
+`danger` word on "Empty the trash", the integrity form in the content panel with mono path fields and
+one accent) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
