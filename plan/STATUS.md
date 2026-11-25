@@ -7,7 +7,7 @@
 
 STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
 the parts of the main screen), M22.10 (dialogs and reports: one card frame, one accent button, mono
-numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language), M22.13 (every action button carries an icon: six chained `.button(` calls and the one menu became `WordButton`s, and the guard now fails on a chained button or a word-only menu) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language), M22.13 (every action button carries an icon: six chained `.button(` calls and the one menu became `WordButton`s, and the guard now fails on a chained button or a word-only menu), M22.14 (a tile is a card again — the preview on the `field` well, the body on `card` — and the file card follows `photocat_1`: the preview card, the identity row, the "Shooting params" block, album and tag chips, the engine row; `card_block` counts its own line) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -49,6 +49,21 @@ because the tag dictionary was looked up by `settings.model_id`, empty until the
 `db::text_tag_labels` now reads the labels of the `document`/`screenshot` ids from every dictionary,
 so 357 candidates are proposed again instead of 203
 (`a_confident_document_tag_counts_without_a_saved_model_choice` fails on the old code).
+
+M22.14 is the owner's review of the right panel and the tile view after M22.13. A tile takes the
+`card` tone with the preview on a `field` well (the mock-up's `surface-container-highest`): the well
+used to be the `canvas` tone of the grid itself, so a fitted snapshot had no visible tile around it
+and read as a photograph at full size with a caption — the preview is still fitted whole. The file
+card follows `photocat_1` block by block: the info glyph, the preview as a 4:3 card with all four
+corners cut and the duration badge of a video, the identity row (name in the numeric family in the
+accent, size on the right), the mono path, a `card_block` "Shooting params", album chips, AI tags as
+a caps row with `CLIP <weight>%` and chips "tag 30% ×" (the weight and the percentile in the hint),
+own tags as chips, the engine name next to "Text on the photo". The exposure badges and the
+share/favourite/delete circles stay refused. A defect of `card_block` surfaced with it: the block
+forgot its own 1 px line and was 2 px wider than the 280 px panel, pushing the panel past the window
+(M22.12's rule) — counted now. `the_light_ground_is_neutral_and_the_tile_well_is_the_field` and
+`the_file_card_fits_the_right_panel` cover both; 279 tests, `cargo test --test source_language` 3,
+`clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors.
 
 Since M17 the owner chooses how he looks at the archive: "By months" (as in PhotoPrism) or "Flat",
 and the order — date ↓ (default) / date ↑ / name / size. Both settings live in `settings`
@@ -2806,3 +2821,40 @@ shows its glyph before the word and "Open full screen" its fullscreen frame.
 **Documents.** `docs/UI.md` § Layout gets the `ComboBox`/menu rule and the new guard in § "Where a
 button keeps its word alone"; ADR 0048 gets the revision paragraph; `plan/M22-ui-spec.md` §6 M22.13
 carries the result; this file and `plan/BACKLOG.md` count M22.13.
+
+## M22.14 — the tile card and the file card after `photocat_1` (2026-11-26) ✅
+
+The owner after M22.13: "the right panel does not match the mock-up; in tile mode you again made the
+photographs full size, but they must be fitted into the tile".
+
+**Symptoms.** The grid drew the whole tile — the well of the preview and the caption strip — on two
+tones: `canvas` and `panel`. `canvas` is the tone of the grid itself, so a photo that did not fill
+the 4:3 frame had an invisible letterbox and no visible card: the snapshot floated on the canvas at
+full size with a caption under it. The right panel was a plain list of label-value rows: no preview
+card, no identity row with the size, no grouped shooting parameters, no chips.
+
+**Done.** `draw_cell` fills the card body with `card` and the preview well with `field` (the
+mock-up's `surface-container-highest`); the fitted preview is unchanged. `file_card` is rebuilt after
+`photocat_1`: `round_preview` cuts all four corners for a card, the preview gets an 8 px radius and a
+1 px `border` and a video a duration badge; the name is mono 12 in the accent with the size at the
+right edge and the path in mono 10; the shooting parameters live in a `card_block` with caps labels
+("Shooting params", "Date and time", "Resolution", "Location") and the checksum under a hairline;
+albums and tags are `card_chip`s with a count in a `caps_row`, the confident tag in the accent, the
+weight and the percentile in the hint, "all tags (N)" for the unsure case; own tags are chips too;
+"Text on the photo" carries the engine name at the right. The header gains the info glyph.
+
+**A defect found on the way.** `card_block` set its content to `available − 16` and forgot the 1 px
+line painted on both sides: every block was 2 px wider than its column, and inside the 280 px right
+panel that widened the panel and pushed a frame past the window — the very failure M22.12 banned.
+The line is counted now; no other screen changes its look, only by 2 px.
+
+**Checks.** `the_file_card_fits_the_right_panel` (M22.12) fails on the old `card_block` with a frame
+at x 1242 in a 1240 px window and passes now; the palette test is renamed to
+`the_light_ground_is_neutral_and_the_tile_well_is_the_field` and looks for `field` wells. `cargo
+test` 279 passed, `cargo test --test source_language` 3 passed, `cargo clippy --all-targets` clean,
+`check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. On the screen at 1240×840 the tiles are
+cards with the photo inside and the file card shows the mock-up's blocks.
+
+**Documents.** `docs/UI.md` § Layout and § Metrics (the tile well), the file-card row of § Screens;
+`plan/M22-ui-spec.md` §2.4, §2.5 and §6 M22.14; `plan/I18N.md` (the new labels); this file and
+`plan/BACKLOG.md` count M22.14.

@@ -907,10 +907,10 @@ fn panel_edge(ui: &egui::Ui, left: bool) {
         .vline(x, r.y_range(), egui::Stroke::new(1.0, theme(ui).border));
 }
 
-/// Cut the top corners of a preview to the card radius: the picture is drawn rectangular,
-/// so the outer corners are returned to the background the tile lies on.
-/// The caption strip closes the bottom corners, they need no work.
-fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32) {
+/// Cut the corners of a preview to the card radius: the picture is drawn rectangular, so the outer
+/// corners are returned to the background under the card. A tile has a caption strip that closes
+/// the bottom corners; a preview card has none, so it asks for all four.
+fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32, bottom: bool) {
     let r = radius
         .min(rect.width() / 2.0)
         .min(rect.height() / 2.0);
@@ -926,7 +926,7 @@ fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32
         }
         pts
     };
-    let (l, t, rt) = (rect.left(), rect.top(), rect.right());
+    let (l, t, rt, b) = (rect.left(), rect.top(), rect.right(), rect.bottom());
     let nw = arc(
         egui::pos2(l, t),
         egui::pos2(l + r, t + r),
@@ -939,7 +939,22 @@ fn round_preview(ui: &egui::Ui, rect: egui::Rect, radius: f32, bg: egui::Color32
         1.5 * std::f32::consts::PI,
         2.0 * std::f32::consts::PI,
     );
-    for pts in [nw, ne] {
+    let mut corners = vec![nw, ne];
+    if bottom {
+        corners.push(arc(
+            egui::pos2(l, b),
+            egui::pos2(l + r, b - r),
+            std::f32::consts::PI,
+            0.5 * std::f32::consts::PI,
+        ));
+        corners.push(arc(
+            egui::pos2(rt, b),
+            egui::pos2(rt - r, b - r),
+            0.5 * std::f32::consts::PI,
+            0.0,
+        ));
+    }
+    for pts in corners {
         ui.painter()
             .add(egui::Shape::convex_polygon(pts, bg, egui::Stroke::NONE));
     }
@@ -953,11 +968,55 @@ fn hairline(ui: &mut egui::Ui) {
         .rect_filled(rect, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
 }
 
-/// A section heading in a panel: 11 px, secondary colour, no caps.
-fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(8.0);
-    ui.label(egui::RichText::new(text).size(11.0).color(dim(ui)));
-    ui.add_space(2.0);
+/// A caps heading of a card block with a mono value at the right edge — "ALBUMS 2",
+/// "AI TAGS CLIP 84%" (the mock-up's section rows).
+fn caps_row(ui: &mut egui::Ui, text: &str, right: &str, accent_word: bool) {
+    ui.horizontal(|ui| {
+        caps_label(ui, text);
+        if !right.is_empty() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let color = if accent_word { accent(ui) } else { dim(ui) };
+                ui.label(num(ui, right, 10.0).color(color));
+            });
+        }
+    });
+}
+
+/// A chip of the file card: the mock-up's tag and album chip — 20 px high, mono 11, the accent
+/// when the tag is confident, the "×" inside removes it. Returns `true` when it was clicked.
+fn card_chip(ui: &mut egui::Ui, text: &str, selected: bool, hint: &str) -> bool {
+    let th = theme(ui);
+    let font = egui::FontId::monospace(11.0);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(format!("{text} ×"), font, th.text_med);
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 14.0, 20.0),
+        egui::Sense::click(),
+    );
+    if ui.is_rect_visible(rect) {
+        let (fill, border, color) = if selected {
+            (th.accent_soft, th.accent, th.accent)
+        } else if resp.hovered() {
+            (th.card, th.border_strong, th.text)
+        } else {
+            (th.field, th.border, th.text_med)
+        };
+        let radius = egui::CornerRadius::same(RADIUS_CTRL as u8);
+        ui.painter().rect_filled(rect, radius, fill);
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter()
+            .galley(rect.center() - galley.size() / 2.0, galley, color);
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.on_hover_text(hint).clicked()
 }
 
 /// A "caption on the left — number on the right" row: numbers always at the right edge of the column.
@@ -1229,14 +1288,17 @@ fn block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 /// (M22.9, `plan/M22-ui-spec.md` §3), so a group of pictures is a card, not a `Frame::group`.
 fn card_block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let th = theme(ui);
-    let width = ui.available_width();
+    // The frame adds its 8 px inner margin and its 1 px line on each side to the content: without
+    // them counted a block grew 2 px past the panel and the window (M22.12's rule, found again
+    // while checking the file card in M22.14).
+    let width = ui.available_width() - 2.0 * (8.0 + 1.0);
     egui::Frame::new()
         .fill(th.card)
         .stroke(egui::Stroke::new(1.0, th.border))
         .corner_radius(egui::CornerRadius::same(RADIUS_CARD as u8))
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
-            ui.set_width((width - 16.0).max(0.0));
+            ui.set_width(width.max(0.0));
             add(ui);
         });
 }
@@ -6347,6 +6409,7 @@ impl App {
         let lang = self.settings.lang;
         ui.add_space(8.0);
         ui.horizontal(|ui| {
+            icon_mark(ui, Icon::Info, 14.0);
             ui.label(egui::RichText::new(t(lang, "File details")).size(14.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -6394,11 +6457,14 @@ impl App {
             self.ocr_text.insert(id, text.unwrap_or_default());
         }
 
+        let th = theme(ui);
         let w = ui.available_width();
-        let h = (w * 0.75).min(210.0);
+        // The mock-up's preview card: a 4:3 well of the canvas tone, an 8 px radius and a 1 px line.
+        // The snapshot is fitted whole, never cropped (the owner's rule of M22.2).
+        let h = (w * 0.75).min(210.0).round();
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
-        ui.painter()
-            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+        ui.painter().rect_filled(rect, RADIUS_CARD, th.canvas);
+        let well = rect.shrink(1.0);
         let ctx = ui.ctx().clone();
         let mut cells = Cells {
             textures: &mut self.textures,
@@ -6415,11 +6481,13 @@ impl App {
             tile: self.tile_size,
             lang,
             budget: 4,
-            bg: ui.visuals().extreme_bg_color,
+            bg: th.canvas,
             cell_style: db::CellStyle::Tiles,
             time_only: false,
         };
-        if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
+        if paint_thumb(ui, &ctx, &mut cells, &f, well) {
+            round_preview(ui, well, RADIUS_CARD, th.canvas, true);
+        } else {
             let txt = match f.kind.as_str() {
                 "video" => t(lang, "▶ video").to_string(),
                 _ => t(lang, "no preview").to_string(),
@@ -6432,10 +6500,50 @@ impl App {
                 dim(ui),
             );
         }
+        ui.painter().rect_stroke(
+            rect,
+            RADIUS_CARD,
+            egui::Stroke::new(1.0, th.border),
+            egui::StrokeKind::Inside,
+        );
+        // The badge of the mock-up in the corner of the preview: the duration of a video.
+        if f.kind == "video" {
+            let txt = match f.duration_s {
+                Some(d) => format!("▶ {}", db::duration(d)),
+                None => t(lang, "▶ video").to_string(),
+            };
+            let galley = ui
+                .painter()
+                .layout_no_wrap(txt, egui::FontId::monospace(10.0), egui::Color32::from_gray(235));
+            let badge = egui::Rect::from_min_size(
+                egui::pos2(
+                    rect.left() + 6.0,
+                    rect.bottom() - 6.0 - galley.size().y - 4.0,
+                ),
+                egui::vec2(galley.size().x + 10.0, galley.size().y + 4.0),
+            );
+            ui.painter()
+                .rect_filled(badge, RADIUS_CTRL, egui::Color32::from_black_alpha(150));
+            ui.painter().galley(
+                egui::pos2(badge.left() + 5.0, badge.center().y - galley.size().y / 2.0),
+                galley,
+                egui::Color32::from_gray(235),
+            );
+        }
         ui.add_space(8.0);
-        // The file name is the main thing, the path is its caption (the PhotoPrism inspector).
-        ui.label(egui::RichText::new(file_name(&f.path)).size(14.0));
-        ui.label(egui::RichText::new(&f.path).size(11.0).color(dim(ui)));
+        // The mock-up's identity row: the name in the numeric family on the left, the size on the
+        // right; the path is its caption below.
+        ui.horizontal(|ui| {
+            ui.label(
+                num(ui, file_name(&f.path), 12.0)
+                    .strong()
+                    .color(accent(ui)),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(num(ui, db::human_in(lang, f.size), 11.0).color(dim(ui)));
+            });
+        });
+        ui.add(egui::Label::new(num(ui, &f.path, 10.0).color(dim(ui))).wrap());
         if self.picked.len() > 1 {
             let bytes: i64 = self
                 .items
@@ -6485,8 +6593,11 @@ impl App {
                 }
             }
         });
-        ui.add_space(4.0);
+        ui.add_space(6.0);
 
+        // The mock-up's shooting-parameters card: the camera, the date and the resolution in two
+        // columns, the coordinates and the checksum. The exposure badges of the mock-up are not
+        // built: the index keeps the camera name only (plan/M22-ui-spec.md §5).
         let date = format!(
             "{} ({})",
             f.taken_at
@@ -6495,28 +6606,56 @@ impl App {
                 .unwrap_or_else(|| "—".into()),
             date_source(&f.taken_src, lang)
         );
-        meta_row(ui, t(lang, "Date"), &date);
-        if let Some(c) = &f.camera {
-            meta_row(ui, t(lang, "Camera"), c);
-        }
-        if let (Some(a), Some(b)) = (f.lat, f.lon) {
-            meta_row(ui, "GPS", &format!("{a:.5}, {b:.5}"));
-        }
-        let mut size = format!("{}×{} · {}", f.width, f.height, db::human_in(lang, f.size));
-        if f.kind == "video"
-            && let Some(d) = f.duration_s
-        {
-            size.push_str(&format!(" · ▶ {}", db::duration(d)));
-        }
-        meta_row(ui, t(lang, "Size"), &size);
-        meta_row(
-            ui,
-            "SHA256",
-            &format!("{}…", &f.sha256[..16.min(f.sha256.len())]),
-        );
+        let resolution = format!("{}\u{d7}{}", f.width, f.height);
+        card_block(ui, |ui| {
+            caps_label(ui, t(lang, "Shooting params"));
+            ui.add_space(2.0);
+            if let Some(c) = &f.camera {
+                ui.horizontal(|ui| {
+                    icon_mark(ui, Icon::Photo, 14.0);
+                    ui.label(egui::RichText::new(c).size(12.0));
+                });
+            }
+            ui.add_space(2.0);
+            ui.horizontal_top(|ui| {
+                let col = ((ui.available_width() - 8.0) / 2.0).max(60.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(col, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        caps_label(ui, t(lang, "Date and time"));
+                        ui.add(egui::Label::new(num(ui, &date, 11.0)).wrap());
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    egui::vec2(col, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        caps_label(ui, t(lang, "Resolution"));
+                        let mut value = resolution.clone();
+                        if f.kind == "video"
+                            && let Some(d) = f.duration_s
+                        {
+                            value.push_str(&format!(" · ▶ {}", db::duration(d)));
+                        }
+                        ui.add(egui::Label::new(num(ui, value, 11.0)).wrap());
+                    },
+                );
+            });
+            if let (Some(a), Some(b)) = (f.lat, f.lon) {
+                ui.add_space(2.0);
+                caps_label(ui, t(lang, "Location"));
+                ui.add(egui::Label::new(num(ui, format!("{a:.5}, {b:.5}"), 11.0)).wrap());
+            }
+            ui.add_space(4.0);
+            hairline(ui);
+            ui.add_space(2.0);
+            let sum = format!("SHA256 {}…", &f.sha256[..16.min(f.sha256.len())]);
+            ui.label(num(ui, sum, 10.0).color(dim(ui)));
+        });
 
-        // The albums of the file (M19): a row in the inspector, "×" removes only the album row.
-        // Nothing changes on disk.
+        // The albums of the file (M19): chips in the inspector, the "×" removes only the album
+        // row. Nothing changes on disk.
         if self.file_albums_for != Some(id) {
             self.file_albums_for = Some(id);
             self.file_albums = db::open(&self.db_path)
@@ -6524,24 +6663,22 @@ impl App {
                 .unwrap_or_default();
         }
         if !self.file_albums.is_empty() {
-            section_label(ui, t(lang, "Albums"));
             let list = self.file_albums.clone();
+            ui.add_space(8.0);
+            caps_row(ui, t(lang, "Albums"), &list.len().to_string(), false);
+            ui.add_space(2.0);
             let mut remove_from: Option<i64> = None;
-            for (album_id, path) in &list {
-                ui.horizontal(|ui| {
-                    if ui
-                        .small_button("×")
-                        .on_hover_text(t(
-                            lang,
-                            "remove the photo from this album; the file on disk is unchanged",
-                        ))
-                        .clicked()
-                    {
+            ui.horizontal_wrapped(|ui| {
+                for (album_id, path) in &list {
+                    let hint = t(
+                        lang,
+                        "remove the photo from this album; the file on disk is unchanged",
+                    );
+                    if card_chip(ui, &shorten(path, 30), false, hint) {
                         remove_from = Some(*album_id);
                     }
-                    ui.label(egui::RichText::new(shorten(path, 34)).size(12.0));
-                });
-            }
+                }
+            });
             if let Some(album_id) = remove_from {
                 match db::open(&self.db_path)
                     .and_then(|c| db::remove_from_album(&c, album_id, &[id]))
@@ -6559,56 +6696,93 @@ impl App {
             }
         }
 
-        section_label(ui, t(lang, "AI tags"));
-        // Confidence comes from the margin of the first tag over the second (threshold and margin in the settings).
-        // Without a margin "document" is not highlighted: an honest "not sure" and the top 3,
-        // the other weights under a collapsible row, so as not to pass noise off as an answer.
+        // Confidence comes from the margin of the first tag over the second (threshold and margin
+        // in the settings). The mock-up's section row: the caps heading on the left, "CLIP" and the
+        // weight of the leading tag on the right; the tags themselves are chips.
         let confident = self.tags.get(&id).and_then(|tags| {
             embed::confident_tag_with(tags, self.settings.tag_show, self.settings.tag_margin)
                 .map(|(tag, _)| tag.to_string())
         });
         let mut hide: Option<String> = None;
         if let Some(tags) = self.tags.get(&id).cloned() {
+            let lead = tags.first().map(|(_, s)| *s).unwrap_or(0.0);
+            let clip = if confident.is_some() {
+                format!("CLIP {:.0}%", lead * 100.0)
+            } else {
+                "CLIP".to_string()
+            };
+            ui.add_space(8.0);
+            caps_row(ui, t(lang, "AI tags"), &clip, confident.is_some());
             match &confident {
                 Some(tag) => {
                     ui.label(
                         egui::RichText::new(format!("{} {tag}", t(lang, "tag:")))
-                            .size(12.0)
-                            .color(accent(ui)),
+                            .size(11.0)
+                            .color(dim(ui)),
                     );
                 }
                 None if !tags.is_empty() => {
                     ui.label(
                         egui::RichText::new(t(lang, "tag: not sure — the top weights are close"))
-                            .size(12.0)
+                            .size(11.0)
                             .color(dim(ui)),
                     );
                 }
                 None => {}
             }
             ui.add_space(2.0);
-            let spacing = ui.spacing_mut().item_spacing.y;
-            ui.spacing_mut().item_spacing.y = 2.0;
+            let hint = t(
+                lang,
+                "remove the tag from this photo; the original does not change",
+            );
             let top = if confident.is_some() { tags.len() } else { 3.min(tags.len()) };
-            for (tag, score) in tags.iter().take(top) {
-                let pct = self.tag_percentile(tag, *score);
-                tag_row(ui, tag, *score, pct, confident.as_deref(), &mut hide, lang);
-            }
+            ui.horizontal_wrapped(|ui| {
+                for (tag, score) in tags.iter().take(top) {
+                    let pct = self.tag_percentile(tag, *score);
+                    let label = format!(
+                        "{} {:.0}%",
+                        i18n::word(lang, tag),
+                        score * 100.0
+                    );
+                    let tip = match pct {
+                        Some(p) => format!("{hint} · {score:.2} · {p}%"),
+                        None => format!("{hint} · {score:.2}"),
+                    };
+                    let chosen = confident.as_deref() == Some(tag.as_str());
+                    if card_chip(ui, &label, chosen, &tip) {
+                        hide = Some(tag.clone());
+                    }
+                }
+            });
             if confident.is_none() && tags.len() > top {
                 egui::CollapsingHeader::new(format!("{} ({})", t(lang, "all tags"), tags.len()))
                     .id_salt(("card_tags", id))
                     .show(ui, |ui| {
-                        for (tag, score) in tags.iter().skip(top) {
-                            let pct = self.tag_percentile(tag, *score);
-                            tag_row(ui, tag, *score, pct, None, &mut hide, lang);
-                        }
+                        ui.horizontal_wrapped(|ui| {
+                            for (tag, score) in tags.iter().skip(top) {
+                                let pct = self.tag_percentile(tag, *score);
+                                let label = format!(
+                                    "{} {:.0}%",
+                                    i18n::word(lang, tag),
+                                    score * 100.0
+                                );
+                                let tip = match pct {
+                                    Some(p) => format!("{hint} · {score:.2} · {p}%"),
+                                    None => format!("{hint} · {score:.2}"),
+                                };
+                                if card_chip(ui, &label, false, &tip) {
+                                    hide = Some(tag.clone());
+                                }
+                            }
+                        });
                     });
             }
-            ui.spacing_mut().item_spacing.y = spacing;
         } else {
+            ui.add_space(8.0);
+            caps_row(ui, t(lang, "AI tags"), "CLIP", false);
             ui.label(
                 egui::RichText::new(t(lang, "tag: not computed"))
-                    .size(12.0)
+                    .size(11.0)
                     .color(dim(ui)),
             );
         }
@@ -6643,26 +6817,25 @@ impl App {
             }
         }
 
-        section_label(ui, t(lang, "My tags"));
+        ui.add_space(8.0);
         let own = self.user_tags.get(&id).cloned().unwrap_or_default();
+        caps_row(ui, t(lang, "My tags"), &own.len().to_string(), false);
         if own.is_empty() {
             ui.label(
                 egui::RichText::new(t(lang, "none yet"))
-                    .size(12.0)
+                    .size(11.0)
                     .color(dim(ui)),
             );
         }
         let mut remove_own: Option<String> = None;
-        for tag in &own {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tag).size(12.0));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(WordButton::small(Icon::Remove, t(lang, "remove"))).clicked() {
-                        remove_own = Some(tag.clone());
-                    }
-                });
-            });
-        }
+        let own_hint = t(lang, "remove");
+        ui.horizontal_wrapped(|ui| {
+            for tag in &own {
+                if card_chip(ui, tag, false, own_hint) {
+                    remove_own = Some(tag.clone());
+                }
+            }
+        });
         if let Some(tag) = remove_own {
             match db::remove_user_tag(&self.db_path, id, &tag) {
                 Ok(()) => {
@@ -6710,7 +6883,9 @@ impl App {
         }
 
         if f.kind == "image" {
-            section_label(ui, t(lang, "Text on the photo"));
+            ui.add_space(8.0);
+            let engine = if self.tesseract.is_some() { "tesseract" } else { "" };
+            caps_row(ui, t(lang, "Text on the photo"), engine, false);
             let label = if self.ocr_text.get(&id).is_some_and(|t| !t.trim().is_empty()) {
                 t(lang, "Recognize again")
             } else {
@@ -8741,7 +8916,7 @@ fn draw_face_cell(
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
-            round_preview(ui, img_rect, RADIUS_CARD, th.card);
+            round_preview(ui, img_rect, RADIUS_CARD, th.card, false);
         } else {
             ui.painter().text(
                 img_rect.center(),
@@ -8863,46 +9038,6 @@ fn score_percentile(sorted_desc: &[f32], score: f32) -> Option<u32> {
     Some((below as f64 * 100.0 / sorted_desc.len() as f64).round() as u32)
 }
 
-/// A tag row in the card: the label, the weight, the percentile and "remove".
-fn tag_row(
-    ui: &mut egui::Ui,
-    tag: &str,
-    score: f32,
-    pct: Option<u32>,
-    confident: Option<&str>,
-    hide: &mut Option<String>,
-    lang: i18n::Lang,
-) {
-    ui.horizontal(|ui| {
-        let color = if confident == Some(tag) {
-            accent(ui)
-        } else {
-            ui.visuals().text_color()
-        };
-        ui.label(
-            egui::RichText::new(i18n::word(lang, tag))
-                .size(12.0)
-                .color(color),
-        );
-        ui.label(
-            egui::RichText::new(match pct {
-                Some(p) => format!("{score:.2} · {p}%"),
-                None => format!("{score:.2}"),
-            })
-            .size(11.0)
-            .color(dim(ui)),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(WordButton::small(Icon::Remove, t(lang, "remove")))
-                .on_hover_text(t(lang, t(lang, "remove the tag from this photo; the original does not change")))
-                .clicked()
-            {
-                *hide = Some(tag.to_string());
-            }
-        });
-    });
-}
 
 struct Cells<'a> {
     /// The background of the parent under a tile (the grid canvas or a duplicate-group card).
@@ -10619,11 +10754,15 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             sw: RADIUS_CARD as u8,
             se: RADIUS_CARD as u8,
         };
-        ui.painter().rect_filled(img_rect, top, th.canvas);
+        // The card body and the well of the preview: the mock-up's tile is a card tone with the
+        // snapshot on the lighter `surface-container-highest` well, so a photo that does not fill
+        // the 4:3 frame still sits visibly inside a tile instead of floating on the canvas.
+        ui.painter().rect_filled(rect, RADIUS_CARD, th.card);
+        ui.painter().rect_filled(img_rect, top, th.field);
         ui.painter().rect_filled(cap_rect, bottom, th.panel);
         let drawn = paint_thumb(ui, ctx, cs, f, img_rect);
         if drawn {
-            round_preview(ui, img_rect, RADIUS_CARD, cs.bg);
+            round_preview(ui, img_rect, RADIUS_CARD, cs.bg, false);
         }
         // The caption: the file name on the left, the date on the right in monospaced digits (M22).
         // The name is cut at the edge of the date rather than running onto the neighbouring tile.
@@ -14653,10 +14792,10 @@ mod tests {
             texts.iter().any(|t| t.contains("тег: не уверен")),
             "no honest “not sure”: {texts:?}"
         );
-        assert!(texts.iter().any(|t| t == "документ"));
-        assert!(texts.iter().any(|t| t == "мебель"));
+        assert!(texts.iter().any(|t| t.starts_with("документ ")));
+        assert!(texts.iter().any(|t| t.starts_with("мебель ")));
         assert!(
-            !texts.iter().any(|t| t == "дети"),
+            !texts.iter().any(|t| t.starts_with("дети ")),
             "the fourth tag is hidden under “all tags”: {texts:?}"
         );
     }
@@ -14701,12 +14840,12 @@ mod tests {
         let texts = card_frame(&mut app, &egui::Context::default());
         for needle in [
             "File details",
-            "Date",
-            "Camera",
-            "Size",
-            "AI tags",
-            "My tags",
-            "Text on the photo",
+            "SHOOTING PARAMS",
+            "DATE AND TIME",
+            "RESOLUTION",
+            "AI TAGS",
+            "MY TAGS",
+            "TEXT ON THE PHOTO",
             "Open full screen",
             "To trash",
         ] {
@@ -14725,9 +14864,9 @@ mod tests {
         );
         for ru in [
             "Сведения о файле",
-            "Теги ИИ",
-            "Свои теги",
-            "Текст на фото",
+            "ТЕГИ ИИ",
+            "СВОИ ТЕГИ",
+            "ТЕКСТ НА ФОТО",
             "Открыть полный экран",
         ] {
             assert!(
@@ -16110,7 +16249,7 @@ mod tests {
         let ctx = egui::Context::default();
         let texts = viewer_frame(&mut app, &ctx, None);
         assert!(
-            texts.iter().any(|t| t == "AI tags"),
+            texts.iter().any(|t| t == "AI TAGS"),
             "the card of the frame is next to it: {texts:?}"
         );
         assert!(
@@ -16150,9 +16289,10 @@ mod tests {
             .find(|(w, _)| w == "Сведения о файле")
             .expect("the panel title is on screen");
         // The panel keeps its 280 px: a row wider than the card widens it past the window and
-        // shifts the whole card right, so the title leaves its edge.
+        // shifts the whole card right, so the title leaves its edge. The info icon and the gap
+        // before the word take 20 px of the 12 px inner margin.
         assert!(
-            title.1.left() <= panel_left + 12.0,
+            title.1.left() >= panel_left && title.1.left() <= panel_left + 40.0,
             "the card is not shifted right: the title at {:?}, the panel at {panel_left}",
             title.1
         );
@@ -17819,10 +17959,11 @@ mod tests {
     }
 
     /// M22.11: the light ground is neutral — a warm canvas casts on the photograph, and a
-    /// photograph is the one thing the window must not judge. The tile frame is the canvas token,
-    /// so the ground under a preview comes from the theme and never from the accent.
+    /// photograph is the one thing the window must not judge. The well of a tile is the field
+    /// token (the mock-up's `surface-container-highest`), so the letterbox around a preview comes
+    /// from the theme and never from the accent.
     #[test]
-    fn the_light_ground_is_neutral_and_the_tile_frame_is_the_canvas() {
+    fn the_light_ground_is_neutral_and_the_tile_well_is_the_field() {
         let p = super::LIGHT;
         for (name, tone) in [
             ("canvas", p.canvas),
@@ -17843,8 +17984,8 @@ mod tests {
             egui::Color32::from_rgb(0xf8, 0xfa, 0xfc),
             "the light canvas is not the neutral `canvas-base`"
         );
-        // The grid paints the frame of every tile in that tone: the letterbox around a preview is
-        // the neutral canvas in both themes.
+        // The grid paints the well of every tile in that tone: the letterbox around a preview is
+        // the neutral field in both themes.
         for theme in [super::DARK, super::LIGHT] {
             let mut app = calendar_app();
             app.view = View::Grid;
@@ -17858,11 +17999,11 @@ mod tests {
             let frames = parts
                 .fills
                 .iter()
-                .filter(|(r, c)| *c == theme.canvas && r.width() > 80.0 && r.height() > 60.0)
+                .filter(|(r, c)| *c == theme.field && r.width() > 80.0 && r.height() > 60.0)
                 .count();
             assert!(
                 frames >= 3,
-                "the tile frames are not the canvas tone in this theme: {frames} of them, {:?}",
+                "the tile wells are not the field tone in this theme: {frames} of them, {:?}",
                 parts.fills
             );
         }

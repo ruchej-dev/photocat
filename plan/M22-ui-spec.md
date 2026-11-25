@@ -86,10 +86,11 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 - Grid: **three cell views**, `settings.cell_style`, the segment "Tile / Rows / List" in the
   content panel header. **Tile** (default, the mock-up) — one width from the "Tiles" slider
   (100–260 px, 150 by default), the columns share the width, a **4:3 frame** + a **22 px** caption
-  band, the preview fitted inside whole (no crop, no stretch). **Rows** — the row height from the
-  slider (never below 70 % of it), the row fills the width, the tile's width follows its frame's
-  aspect and the preview fills the tile (no margins). **List** — a row 44 px with a 58×40 thumbnail,
-  the name, the date and the size. A file without dimensions gets 4:3.
+  band, the preview fitted inside whole (no crop, no stretch) on a `field` well, the card body on
+  `card` and the caption on `panel` (M22.14). **Rows** — the row height from the slider (never below
+  70 % of it), the row fills the width, the tile's width follows its frame's aspect and the preview
+  fills the tile (no margins). **List** — a row 44 px with a 58×40 thumbnail, the name, the date and
+  the size. A file without dimensions gets 4:3.
 - **Grid step 10 px** (the mock-up's `gap-2.5`) between tiles and between rows; month groups are
   separated by 24 px.
 - Dialogs: settings 760×620 of content, export and picker as now; every dialog is a card — the `card`
@@ -108,10 +109,17 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
   because with an icon on each button they no longer fit beside the title); a chip row that never
   disappears; the month heading 14 px + facts 11 px mono, pinned at
   the top edge of the grid area while its group is on screen (M22.4).
-- Tile: card frame 1 px, preview, caption band 22 px with the file name (mono 10, left) and the date
-  (mono 10, `text_dim`, right). A video keeps the `▶ M:SS` strip. Selected/keep/picked — accent.
-- Inspector: title `FILE DETAILS`, preview, name, path, `label — value` rows, albums, AI tags, my
-  tags, OCR text — same block order as now, in the new tokens.
+- Tile: card frame 1 px, preview on the `field` well, caption band 22 px with the file name (mono 10,
+  left) and the date (mono 10, `text_dim`, right). A video keeps the `▶ M:SS` strip.
+  Selected/keep/picked — accent.
+- Inspector (M22.14): the info glyph and `FILE DETAILS` with "Hide"; the preview as a card (4:3,
+  the `canvas` well, the 8 px radius, a 1 px `border`, all four corners cut); the identity row — the
+  name in the numeric family in the accent and the size on the right; the path in mono 10 `text_dim`;
+  a `card_block` "Shooting params" with the camera, the two columns "Date and time" / "Resolution",
+  "Location" and the checksum; "Albums" as chips; "AI tags" as a caps row with `CLIP <weight>%` on
+  the right and chips "tag 30% ×"; "My tags" as chips with the own-tag field; "Text on the photo"
+  with the engine name on the right. The weights and percentiles stay in the chip hints; the
+  exposure badges of the mock-up are not built (the index keeps the camera name, §5 q. 5).
 
 ## 3. Screens: what is drawn by a mock-up and what is not
 
@@ -710,6 +718,39 @@ checks, `rust-analyzer diagnostics` 0 errors.
 
 **Files.** `src/app.rs` (`WordButton` call sites, `Icon::Sort`, `paint_icon`, the guard),
 `docs/UI.md`, `docs/DECISIONS.md` (ADR 0048 revision), `plan/`.
+
+### M22.14 — the tile card and the file card after `photocat_1` ✅
+
+The owner after M22.13: "the right panel does not match the mock-up; in tile mode you again made the
+photographs full size, but they must be fitted into the tile".
+
+1. **A tile is a card again.** The body takes the `card` tone, the well of the preview the `field`
+   tone (the mock-up's `surface-container-highest`), the caption the `panel` tone. The preview was
+   drawn on the `canvas` tone — the tone of the grid itself — so a fitted snapshot had no visible
+   tile around it and read as a photograph at full size with a caption under it. The preview is
+   still fitted whole: no crop, no stretch (M22.2), the fitted photo now sits on a visible well.
+2. **The file card follows `photocat_1` block by block:** the info glyph before "File details"; the
+   preview as a 4:3 card (the `canvas` well, the 8 px radius, a 1 px `border`, all four corners cut,
+   the duration badge of a video); the identity row — the name in the numeric family in the accent,
+   the size on the right; the path in mono 10; a `card_block` "Shooting params" (the camera after a
+   photo glyph, "Date and time" and "Resolution" in two columns, "Location", a hairline, SHA256);
+   "Albums" as chips with a count; "AI tags" as a caps row with `CLIP <weight>%` on the right and
+   chips "tag 30% ×" (the confident one in the accent, a click removes it, the weight and the
+   percentile in the hint, the "not sure" line, the top-3 and "all tags (N)" as before); "My tags"
+   as chips with the own-tag field; "Text on the photo" with the engine name on the right. The
+   exposure badges and the share/favourite/delete circles of the mock-up stay refused (§5 q. 5).
+3. **A block counts its own line.** `card_block` sized its content as `available − 16` and forgot
+   the 1 px `border` on both sides, so every block was 2 px wider than the panel: inside the 280 px
+   right panel that pushed the panel and the window edge (M22.12's rule). The line is counted now.
+
+**Result.** A letterboxed snapshot stands on a `field` well inside a `card` tile in both themes; the
+file card of `photocat_1` is drawn with chips and caps headings; the right panel is 280 px and no
+frame leaves the window. `the_light_ground_is_neutral_and_the_tile_well_is_the_field` and
+`the_file_card_fits_the_right_panel` cover both; `cargo test` 279, `cargo test --test source_language`
+3, `clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`draw_cell`, `round_preview`, `card_block`, `caps_row`, `card_chip`,
+`file_card`, `details_panel`, the tests), `src/i18n.rs`, `docs/UI.md`, `plan/`.
 
 ## 7. Not doing in M22
 

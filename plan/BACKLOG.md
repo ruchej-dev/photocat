@@ -1046,7 +1046,11 @@ window, a headless frame of the whole window fails on any rectangle outside it, 
 line is built from the settings language) — 2026-11-25; M22.13 (every action button carries an
 icon: six chained `.button(` calls became `WordButton`s, the one menu of the window is a `WordButton`
 over `Popup::menu` with the `sort` glyph, and the guard now fails on a chained button or a word-only
-menu) — 2026-11-25.
+menu) — 2026-11-25; M22.14 (a tile is a card again — the preview on the `field` well, the body on
+`card`, the caption on `panel` — and the file card of `photocat_1`: the preview card with all four
+corners cut, the identity row with the name and the size, the "Shooting params" block, album and tag
+chips, the engine row; `card_block` counts its own 1 px line, so no block is wider than its panel) —
+2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
@@ -1055,7 +1059,8 @@ menu) — 2026-11-25.
    10/11/12/13/14/18, monospace numbers, caps labels.
 2. The main screen follows `photocat_1`: a 32 px top strip and a 28 px bottom strip, the working
    folder in the left panel; three cell views — the mock-up's 4:3 tile (default) with the preview
-   fitted whole and a 22 px caption band, proportion rows, and a list; a 10 px gap, accent selection.
+   fitted whole and a 22 px caption band, the preview on the `field` well of a `card`; proportion
+   rows, and a list; a 10 px gap, accent selection.
    Previews follow the EXIF orientation and a stale preview is rewritten when its dimensions differ.
 3. Calendar (`photocat_2`, `photocat_12`), albums (`photocat_3`) and the viewer (`photocat_5/6`) are
    brought to the same tokens; the albums keep the tree (an owner's decision is asked in the spec §5).
