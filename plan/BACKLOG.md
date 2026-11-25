@@ -1043,7 +1043,10 @@ ratio of every pair the screens paint is a test now, the light accent became the
 in both palettes without a colour of its own) — 2026-11-25; M22.12 (the right panel keeps its
 280 px: the own-tag row takes the width the button leaves and no longer widens the panel past the
 window, a headless frame of the whole window fails on any rectangle outside it, and the first status
-line is built from the settings language) — 2026-11-25.
+line is built from the settings language) — 2026-11-25; M22.13 (every action button carries an
+icon: six chained `.button(` calls became `WordButton`s, the one menu of the window is a `WordButton`
+over `Popup::menu` with the `sort` glyph, and the guard now fails on a chained button or a word-only
+menu) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

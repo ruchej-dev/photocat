@@ -688,6 +688,29 @@ farthest painted edge is 1240.0 at 1240 and 1691.0 at 1691; nothing is painted o
 **Files.** `src/app.rs` (`file_card`, the load path, `collect_text_rects`, `collect_rect_bounds`,
 `window_rects_at`, the test), `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
+### M22.13 — every action button carries an icon ✅
+
+The owner's question after M22.12: "all icons placed?" No: the guard
+`every_button_of_the_window_has_an_icon` looked for `ui.button(` and missed a button chained as
+`ui\n.button(…)`. Six action buttons were word-only: "Check now" and "Remind me later" (integrity
+banner), "Open full screen" and "Show the full text" (file card), "restore hidden tags (N)" and
+"Go to <month> <year>" (calendar).
+
+1. Every one is a `WordButton` (`Verified`, `Close`, `FitScreen`, `TextFields`, `Restore`,
+   `CalendarToday`).
+2. The one menu of the window, "Sort", is a `WordButton` with the `sort` glyph that opens its list
+   through `Popup::menu`; a plain `menu_button` is forbidden.
+3. A `ComboBox` is a select, not a button — the language, the model, the theme and the album parent
+   keep words, as the mock-up's `<select>` does.
+4. The guard fails on a chained `.button(`, on any `Button::new(` and on `ui.menu_button(`.
+
+**Result.** The six buttons and the Sort control carry icons; the icon set is 64 glyphs. The guard
+fails on the pre-M22.13 code with the six offenders. `cargo test` 279, `clippy` clean, `check.sh` 55
+checks, `rust-analyzer diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`WordButton` call sites, `Icon::Sort`, `paint_icon`, the guard),
+`docs/UI.md`, `docs/DECISIONS.md` (ADR 0048 revision), `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".

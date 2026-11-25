@@ -1296,5 +1296,13 @@ placed into a fixed rect, the "×" of a chip, the album tree's collapse triangle
 album row — and menus keep words, because an egui menu button takes text or a texture and a texture
 is the second pipeline this ADR refuses.
 
+**Revision (M22.13).** The menu exception is closed for the one menu of the window: "Sort" is a
+`WordButton` with the `sort` glyph that opens its list through `Popup::menu`, so a menu no longer
+hides an action behind a word without an icon. A `ComboBox` keeps words — it is the mock-up's
+`<select>` (the language, the model, the theme, the album parent), not a button. The source guard
+`every_button_of_the_window_has_an_icon` now fails on a chained `.button(` and on `ui.menu_button(`;
+the old scan looked for `ui.button(` only and missed six action buttons (the file card, the
+integrity banner and the calendar).
+
 **Forbids:** an icon font or icon package, an SVG/PNG icon asset, an emoji as an icon, a button whose
-only content is an icon, a per-screen colour for an icon.
+only content is an icon, a per-screen colour for an icon, a `menu_button` without an icon.

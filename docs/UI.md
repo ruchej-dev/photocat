@@ -177,19 +177,22 @@ the interface rules at the end of the file.
   its own scroll area with a copy button, never a proportional paragraph.
 - **Forbidden:** shadows, gradients, radii beyond the 4/6/8 scale, emoji icons (except "▶"), an
   icon without a label as the only path, skeletons and full-screen spinners.
-- **Icons (M22.8).** The set is the mock-up's Material Symbols by name, drawn as geometry by
-  `app::paint_icon` — no icon font, no image file, the binary does not grow (ADR 0048). Every
+- **Icons (M22.8, M22.13).** The set is the mock-up's Material Symbols by name, drawn as geometry
+  by `app::paint_icon` — no icon font, no image file, the binary does not grow (ADR 0048). Every
   action button is one `WordButton`: the icon 14 px (12 px in a compact row), a 1.5 px stroke, the
   colour of its word, 6 px before the word. The word always stays: an icon is never the only path.
   Navigation rows (`All files`, `Albums`, `Calendar`, `People`, `Duplicates & series`, `Integrity`,
-  `Trash`) and the section list of the dialog carry the same icons. The colour comes from the theme,
-  so both themes and the disabled state need no second drawing.
+  `Trash`), the section list of the dialog and the "Sort" control (a `WordButton` over
+  `Popup::menu`) carry the same icons. A `ComboBox` is a select, not a button: the language, the
+  model, the theme and the album parent keep words, as the mock-up's `<select>` does. The colour
+  comes from the theme, so both themes and the disabled state need no second drawing.
 - **Where a button keeps its word alone.** Four kinds of target are too small or too special for an
   icon, and each is checked by `every_button_of_the_window_has_an_icon` in `src/app.rs`:
   the per-tile actions placed into a fixed 20 px rect (`keep`, `restore`, `pick`, `not him`), the
   "×" of a filter chip (it is part of the chip), the collapse triangle of the album tree, and the
-  "×" that removes a row from an album. Menus ("Sort", the model and language pickers) keep words:
-  an egui menu button takes text or a texture, and a texture is a second icon pipeline — refused.
+  "×" that removes a row from an album. A plain `menu_button` is forbidden: the one menu of the
+  window ("Sort") is a `WordButton` that opens its list through `Popup::menu`, so a menu carries an
+  icon like every other action.
 - **The player.** ⏮ ▶ ⏸ ⏭ and the sound sign are the first members of the same set (`Icon`), drawn
   as geometry and not as emoji; every button has a hint, ▶ in the centre of a video frame is
   labelled with words, and paging and play are duplicated by ←/→ and space. This is the owner's

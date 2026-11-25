@@ -5462,14 +5462,14 @@ impl App {
             };
             ui.label(egui::RichText::new(fact).size(11.0).color(dim(ui)));
             if ui
-                .button(t(lang, "Check now"))
+                .add(WordButton::new(Icon::Verified, t(lang, "Check now")))
                 .on_hover_text(t(lang, "read the archive and compare it with the saved manifest"))
                 .clicked()
             {
                 open = true;
             }
             if ui
-                .button(t(lang, "Remind me later"))
+                .add(WordButton::new(Icon::Close, t(lang, "Remind me later")))
                 .on_hover_text(t(lang, "hide the banner until the next launch"))
                 .clicked()
             {
@@ -6457,7 +6457,7 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             if ui
-                .button(t(lang, "Open full screen"))
+                .add(WordButton::new(Icon::FitScreen, t(lang, "Open full screen")))
                 .on_hover_text(t(lang, "double-clicking a tile does the same"))
                 .clicked()
             {
@@ -6628,9 +6628,9 @@ impl App {
         let hidden = self.hidden_tags.get(&id).copied().unwrap_or(0);
         if hidden > 0
             && ui
-                .button(format!(
-                    "{} ({hidden})",
-                    t(lang, "restore hidden tags")
+                .add(WordButton::new(
+                    Icon::Restore,
+                    format!("{} ({hidden})", t(lang, "restore hidden tags")),
                 ))
                 .clicked()
         {
@@ -6757,7 +6757,7 @@ impl App {
                         });
                 });
                 if ui
-                    .button(t(lang, "Show the full text"))
+                    .add(WordButton::new(Icon::TextFields, t(lang, "Show the full text")))
                     .on_hover_text(t(lang, "full screen: the frame and all recognized text"))
                     .clicked()
                 {
@@ -9235,6 +9235,7 @@ enum Icon {
     GridView,
     ViewAgenda,
     ViewList,
+    Sort,
     // Words that repeat everywhere.
     Add,
     Remove,
@@ -9583,6 +9584,12 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui:
             line(pt(-0.85, 0.0), pt(0.85, 0.0));
         }
         Icon::Check => seg(vec![pt(-0.85, 0.05), pt(-0.25, 0.65), pt(0.9, -0.7)]),
+        // The mock-up's `sort`: three rails, the shortest at the bottom.
+        Icon::Sort => {
+            line(pt(-0.9, -0.55), pt(0.9, -0.55));
+            line(pt(-0.9, 0.0), pt(0.45, 0.0));
+            line(pt(-0.9, 0.55), pt(0.0, 0.55));
+        }
         Icon::CheckCircle => {
             ring(0.0, 0.0, 0.92);
             seg(vec![pt(-0.45, 0.02), pt(-0.12, 0.38), pt(0.5, -0.38)]);
@@ -11470,7 +11477,8 @@ impl eframe::App for App {
                         let searching = self.semantic_hits.is_some();
                         let mut sort = self.settings.grid_sort;
                         let sort_resp = ui.add_enabled_ui(!searching, |ui| {
-                            ui.menu_button(t(lang, "Sort"), |ui| {
+                            let resp = ui.add(WordButton::new(Icon::Sort, t(lang, "Sort")));
+                            egui::Popup::menu(&resp).show(|ui| {
                                 if album_scope_now {
                                     ui.selectable_value(
                                         &mut sort,
@@ -11490,11 +11498,11 @@ impl eframe::App for App {
                                     .size(11.0)
                                     .color(dim(ui)),
                                 );
-                            })
+                            });
+                            resp
                         });
                         sort_resp
                             .inner
-                            .response
                             .on_disabled_hover_text(t(lang, "the search sets the order"))
                             .on_hover_text(t(lang, "tile order: date, name or size"));
                         if sort != self.settings.grid_sort {
@@ -12345,11 +12353,14 @@ impl eframe::App for App {
                                     {
                                         ui.add_space(4.0);
                                         if ui
-                                            .button(format!(
-                                                "{} {} {}",
-                                                t(lang, "Go to"),
-                                                i18n::month_name(lang, m as usize),
-                                                y
+                                            .add(WordButton::new(
+                                                Icon::CalendarToday,
+                                                format!(
+                                                    "{} {} {}",
+                                                    t(lang, "Go to"),
+                                                    i18n::month_name(lang, m as usize),
+                                                    y
+                                                ),
                                             ))
                                             .clicked()
                                         {
@@ -18194,7 +18205,7 @@ mod tests {
         vec![
             Search, Close, Settings, DockToRight, Folder, FolderSpecial, CreateNewFolder, Sync,
             Refresh, PhotoLibrary, Photo, Videocam, CollectionsBookmark, CalendarMonth,
-            CalendarToday, Face, BurstMode, Verified, Apps, GridView, ViewAgenda, ViewList, Add,
+            CalendarToday, Face, BurstMode, Verified, Apps, GridView, ViewAgenda, ViewList, Sort, Add,
             Remove, Edit, MoveTo, ContentCopy, Download, Upload, Check, CheckCircle, Delete,
             Restore, Stop, ArrowUp, ArrowDown, ArrowBack, ChevronLeft, ChevronRight, ZoomIn,
             ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Slideshow, TextFields,
@@ -18392,8 +18403,13 @@ mod tests {
         let mut offenders = Vec::new();
         for marker in [
             "egui::Button::new(",
-            "ui.button(",
+            // A chained `.button(` is a button too; the old scan looked for `ui.button(` only and
+            // missed "Open full screen", "Check now" and four more (M22.13).
+            ".button(",
             ".small_button(",
+            // The one menu of the window is a `WordButton` over `Popup::menu`; a plain
+            // `menu_button` carries words only, which the mock-up does not do (M22.13).
+            "ui.menu_button(",
             "primary_button(",
             "danger_button(",
         ] {
