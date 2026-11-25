@@ -1032,7 +1032,11 @@ accent edge of the active row — and the mock-up's icons as drawn geometry on e
 window, ADR 0048) — 2026-11-25; M22.9 (duplicates, faces, trash and integrity built from the parts of
 the main screen: a `card_block` per duplicate group, the face tile's caption in mono 10, the one
 `danger` word on "Empty the trash", the integrity form in the content panel with mono path fields and
-one accent) — 2026-11-25.
+one accent) — 2026-11-25; M22.10 (dialogs and reports: one `dialog_frame` — the card tone, a 1 px
+`border`, the 8 px radius, 16 px of air — for all seven dialogs, 14 px titles inside the type scale,
+exactly one accent button per action dialog and `danger` on the OS-trash confirmation, a facts row in
+mono 11 for the numbers, the export report in mono 11 with a copy button, and the last two English
+words of the Russian window through `t()`) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

@@ -6,7 +6,8 @@
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
 STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
-the parts of the main screen) → next:M22.10 (dialogs and reports), then M22.11 and M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+the parts of the main screen), M22.10 (dialogs and reports: one card frame, one accent button, mono
+numbers) → next:M22.11 (the light theme pass), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -145,6 +146,16 @@ instead of clipping, with a constant height across views (M22.2a holds). Measure
 (2232 files, release, 1240×840): the settings dialog p50 6.89–8.01 ms (125–145 fps), p95 ≤ 8.13 ms
 over the seven sections; the grid pass p50 6.73–6.84 ms (146–149 fps), unchanged against M22.2b's
 6.4–6.7 ms.
+Since M22.10 every dialog of the window is the same card: the `card` tone, a 1 px `border` line, the
+8 px radius and 16 px of air inside — a modal used to be egui's `Frame::popup`, the frame of a menu
+with the 6 px `menu_corner_radius` and 6 px of air — and its title is a 14 px subheading, because the
+type scale has no 16. The five action dialogs carry exactly one accent button (the export dialog's
+"Export N files" was a plain button and is the main action now); the trash confirmation, the one
+button that touches the disk, wears the `danger` line and no accent. A number of a dialog lives in a
+facts row of its own in mono 11 ("2 files" per folder root, "1 file · 18.4 MiB", "2 albums · 2 files",
+"export: 3/8") instead of inside a translated sentence, and the export report is a mono 11 body in a
+scroll area with a copy button. Measured on a copy of the real DB: folder list p50 0.03 ms, export
+with a 500-line plan p50 0.18 ms, the other dialogs 0.02–0.08 ms.
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
@@ -2597,3 +2608,57 @@ tile's caption, a duplicate group and the trash, and the integrity row now names
 the numeric path fields; § Screens follows. `plan/M22-ui-spec.md` §3 marks the four screens as built,
 §6 M22.9 carries the result and the numbers; `docs/ARCHITECTURE.md` § Measurements gets the row; this
 file and `plan/BACKLOG.md` count M22.9 as done.
+
+## M22.10 — dialogs and reports (2026-11-25) ✅
+
+Spec §6 M22.10 asks for one look for the dialogs the mock-up set has no layout for: the card tone, a
+1 px border, the 8 px radius, mono numbers, one accent button, and report bodies in mono 11 with a
+copy button. Every dialog of the window was a `Frame::popup` — egui's frame for a *menu*: the
+`menu_corner_radius` of 6 px, the `menu_margin` of 6 px, and the 16 px titles the settings dialog took
+along were outside the type scale (10/11/12/13/14/18).
+
+**How.** One `dialog_frame(ctx)` gives a modal the card — the `card` tone, a 1 px `border`, the 8 px
+radius, 16 px inside — and every modal uses it: the folder list, the picker, the three storage
+confirmations, the album dialog, the export dialog, the trash confirmation and the settings dialog
+(whose content keeps its 760×620 and now sits 16 px inside the card). A dialog's title is a 14 px
+subheading — the settings pane's heading too, so the whole window lives on the scale.
+
+A number inside a translated sentence cannot be moved into the numeric family (the translation owns
+the word order), so the three dialogs that had numbers grew a facts row of their own, exactly like the
+album header of M22.6: the folder list counts the indexed files of each root ("2 files", mono 11
+`text_med`), the trash confirmation reads "1 file · 18.4 MiB" above the sentence "Will be moved to the
+OS trash." and the album delete shows the names, then "2 albums · 2 files", then the hint that the
+rows go and the files stay. The export's progress ("export: 3/8") and its report body are mono 11; the
+report moved into its own scroll area, as the integrity report already was. The folder counts live in
+`App::root_counts`, refreshed when the index or the folder list changes: counting 2232 paths per frame
+cost 0.84 ms, and the dialog is open for minutes.
+
+Each of the five action dialogs has exactly one accent button: "Export N files" was `WordButton::new`
+and is `WordButton::primary` now, next to "Index all", "Add and index", the cleaning confirmation and
+the album's confirm. The trash confirmation is the one dialog whose button moves files: it wears
+`WordButton::danger` and no accent (M22.9). Along the way the last two English words of the Russian
+window — "Close" and "Copy the report" in the export dialog — went through `t()`; both were in the
+table already, the call was missing.
+
+**Checks.** `every_dialog_is_a_card_with_one_accent_button` walks all seven dialogs after the fade-in
+(a modal's palette arrives with a multiplied alpha while it animates, so the frame helper runs the
+clock): the card frame is found by the tone, the 1 px `border` and the 8 px radius together, the five
+action dialogs hold exactly one accent button, the settings dialog none (every change is saved at
+once) and the trash confirmation none but a `danger` line; no 16 px word is left, and every drawn
+word, fill and line is a token of the palette.
+`the_dialogs_put_their_numbers_in_the_numeric_family` holds "2 files", "2 albums · 2 files",
+"1 file · 1 B", "export: 3/8" and the report body in mono 11; `the_export_dialog_speaks_the_chosen_language`
+fails on the old code with "Close" in the Russian window. `cargo test` 275 passed (272 + 3), `cargo
+clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors,
+`cargo test --test source_language` 3 passed.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, a copy of the real DB of 2232 files with an album
+of 500 files so that the export dialog draws a 500-line plan, release, 1240×840 headless frames, 16
+frames per dialog after four warm-up frames): folder list p50 0.03 ms, p95 0.04; picker p50 0.08 ms;
+storage 0.02 ms; album delete 0.02 ms; export p50 0.18 ms, p95 0.32; trash 0.02 ms; settings p50
+0.06 ms, p95 0.08. The folder list cost 0.84 ms per frame before its counters were cached.
+
+**Documents.** `docs/UI.md` § Layout gets "a dialog is a card" (the frame, the 14 px title, one accent
+button, the facts row, the report body); `plan/M22-ui-spec.md` §2.4 names the dialog frame and §6
+M22.10 carries the result; `docs/ARCHITECTURE.md` § Measurements gets the row; this file and
+`plan/BACKLOG.md` count M22.10 as done.

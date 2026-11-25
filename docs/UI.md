@@ -145,6 +145,14 @@ the interface rules at the end of the file.
 - **The right panel:** "File details" is pinned on top, the rest scrolls. Nothing is selected by
   itself: while there is no file, the panel says "Pick a snapshot in the grid".
 - **Forms:** input fields 380–420 px, long paths 520 px, a line no longer than 80 characters.
+- **A dialog is a card** (M22.10): the `card` tone, a 1 px `border` line, the 8 px radius and 16 px
+  of air inside, its title at 14 px (a dialog had 16 px, which is outside the type scale) and at most
+  one accent button — the main action of the dialog. The one exception is the trash confirmation,
+  whose button touches the disk: it wears the `danger` line and no accent. A number of a dialog is
+  never inside a translated sentence but in a facts row of its own in mono 11 ("1 file · 18.4 MiB",
+  "2 albums · 2 files", "export: 3/8"), exactly like the album header; the folder list counts the
+  indexed files of each root. **A report** — the export and the integrity one — is a mono 11 body in
+  its own scroll area with a copy button, never a proportional paragraph.
 - **Forbidden:** shadows, gradients, radii beyond the 4/6/8 scale, emoji icons (except "▶"), an
   icon without a label as the only path, skeletons and full-screen spinners.
 - **Icons (M22.8).** The set is the mock-up's Material Symbols by name, drawn as geometry by
@@ -298,7 +306,8 @@ a rare one.
 | Tag chip | 20 px high, mono 11, the word and the count of snapshots after a middle dot ("furniture · 669"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — accent fill, accent 1 px border and accent text; the width follows the text and never the state, so a click does not move the row | `app.rs::tag_chip` |
 | Right panel | 280 px; closed by "Hide" and by "Details" in the top bar; hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right` |
 | Preview in the card | the panel width, 4:3, no higher than 210 px, the frame fitted entirely; below the file name 14 px and the path 11 px | `App::file_card` |
-| "Settings" dialog | 760×620 px, a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 16 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
+| "Settings" dialog | 760×620 px of content inside the dialog frame, a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 14 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
+| Dialog | one `dialog_frame` for all seven: the `card` tone, a 1 px `border`, the 8 px radius and 16 px of air inside; the title 14 px, the body 13 px, hints 11–12 px; at most one accent button — the dialog's main action — and no accent at all on the settings dialog, where every change is saved at once; the trash confirmation is the one dialog whose button moves files, so it carries the `danger` border and no fill; a number stands in a facts row of its own in mono 11, never inside a translated sentence; a report body is mono 11 in its own scroll area with a copy button (M22.10) | `app.rs::dialog_frame`, the `*_modal` functions |
 | Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |
 | Top strip | 32 px, one row, `panel` tone, 1 px bottom line | `App::top_bar` |
 | Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters | `App::status_bar` |

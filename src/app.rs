@@ -1227,6 +1227,22 @@ fn card_block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
         });
 }
 
+/// The frame of a dialog (M22.10): the card tone, a 1 px line and the 8 px radius of a card, with
+/// 16 px of air inside. `egui::Modal` defaults to `Frame::popup`, which is the frame of a menu — a
+/// 6 px radius and 6 px of air — so without this a dialog would look like a dropdown.
+fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    let th = if ctx.theme() == egui::Theme::Light {
+        LIGHT
+    } else {
+        DARK
+    };
+    egui::Frame::new()
+        .fill(th.card)
+        .stroke(egui::Stroke::new(1.0, th.border))
+        .corner_radius(egui::CornerRadius::same(RADIUS_CARD as u8))
+        .inner_margin(egui::Margin::same(16))
+}
+
 /// The chip of an active filter: the word with "×"; a click removes only this filter (M16).
 fn filter_chip(ui: &mut egui::Ui, text: &str, lang: Lang) -> bool {
     ui.add(
@@ -1813,6 +1829,8 @@ struct App {
     album_name_input: String,
     album_move_parent: i64,
     album_delete_text: String,
+    /// The numbers of the delete confirmation: the albums and the file rows in mono 11 (M22.10).
+    album_delete_facts: String,
     /// The albums of the selected file for the card: a cache for one file.
     file_albums: Vec<(i64, String)>,
     file_albums_for: Option<i64>,
@@ -1988,6 +2006,9 @@ struct App {
     trash_rx: Option<mpsc::Receiver<TrashReply>>,
     /// Folders and the built-in folder picker (without depending on the system dialog).
     roots: Vec<String>,
+    /// How many indexed files lie in each root: the folder list says where the archive is. Counted
+    /// when the index or the folder list changes, not on every frame of the dialog (M22.10).
+    root_counts: BTreeMap<String, usize>,
     roots_open: bool,
     picker_open: bool,
     picker_current: PathBuf,
@@ -2023,6 +2044,7 @@ impl App {
             album_name_input: String::new(),
             album_move_parent: 0,
             album_delete_text: String::new(),
+            album_delete_facts: String::new(),
             file_albums: Vec::new(),
             file_albums_for: None,
             export_open: false,
@@ -2152,6 +2174,7 @@ impl App {
             trash_progress: None,
             trash_rx: None,
             roots: Vec::new(),
+            root_counts: BTreeMap::new(),
             roots_open: false,
             picker_open: false,
             picker_current: std::env::var_os("HOME")
@@ -2326,6 +2349,23 @@ impl App {
             }
         }
         self.refresh_albums();
+        self.refresh_root_counts();
+    }
+
+    /// The files of each root for the folder list: one pass over the index, not one per frame.
+    fn refresh_root_counts(&mut self) {
+        self.root_counts = self
+            .roots
+            .iter()
+            .map(|root| {
+                let n = self
+                    .items
+                    .iter()
+                    .filter(|f| Path::new(&f.path).starts_with(root))
+                    .count();
+                (root.clone(), n)
+            })
+            .collect();
     }
 
     /// The album tree and the files of the open node (M19). DB rows only.
@@ -2484,12 +2524,20 @@ impl App {
         if dialog == AlbumDialog::Delete {
             let subtree = self.album_subtree(id);
             let rows: i64 = subtree.iter().map(|n| n.files).sum();
-            let names: Vec<&str> = subtree.iter().map(|n| n.name.as_str()).collect();
-            self.album_delete_text = i18n::fill(lang, "Will be deleted: {}. Albums {}, file rows {}. The files stay on disk.", &[names
-                    .iter()
-                    .map(|n| format!("«{n}»"))
-                    .collect::<Vec<_>>()
-                    .join(", ").to_string(), subtree.len().to_string(), rows.to_string()]);
+            let names = subtree
+                .iter()
+                .map(|n| format!("«{}»", n.name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            // The names and the caption stay words; the counters are a mono row of their own —
+            // a number inside a translated sentence cannot be put into the numeric family (M22.10).
+            let facts = format!(
+                "{} · {}",
+                i18n::count(lang, subtree.len(), "album"),
+                i18n::count(lang, rows as usize, "file")
+            );
+            self.album_delete_text = i18n::fill(lang, "Will be deleted: {}", &[names]);
+            self.album_delete_facts = facts;
         }
         self.album_dialog = Some(dialog);
     }
@@ -3326,7 +3374,9 @@ impl App {
                 tools::ALL.len()
             ),
         );
-        let resp = egui::Modal::new(egui::Id::unique("photocat-settings")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("photocat-settings"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.allocate_ui_with_layout(
                 egui::vec2(760.0, 620.0),
                 egui::Layout::top_down(egui::Align::Min),
@@ -3335,7 +3385,7 @@ impl App {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
-                        ui.label(egui::RichText::new(t(lang, "Settings")).size(16.0));
+                        ui.label(egui::RichText::new(t(lang, "Settings")).size(14.0));
                     });
                     ui.add_space(8.0);
                     egui::Panel::bottom("settings-footer").show(ui, |ui| {
@@ -3418,9 +3468,16 @@ impl App {
         let mut index_all = false;
         let mut remove: Option<String> = None;
         let roots = self.roots.clone();
-        let resp = egui::Modal::new(egui::Id::unique("photocat-roots")).show(ctx, |ui| {
+        // How many indexed files lie in each root: the folder list says where the archive is.
+        let counts: Vec<usize> = roots
+            .iter()
+            .map(|root| self.root_counts.get(root).copied().unwrap_or(0))
+            .collect();
+        let modal = egui::Modal::new(egui::Id::unique("photocat-roots"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.set_min_width(520.0);
-            ui.label(egui::RichText::new(t(lang, "Archive folders")).size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Archive folders")).size(14.0));
             ui.label(
                 egui::RichText::new(t(
                     lang,
@@ -3437,7 +3494,7 @@ impl App {
                 .id_salt("roots-list")
                 .max_height(260.0)
                 .show(ui, |ui| {
-                    for root in &roots {
+                    for (i, root) in roots.iter().enumerate() {
                         ui.horizontal(|ui| {
                             ui.label(root);
                             ui.with_layout(
@@ -3453,6 +3510,11 @@ impl App {
                                     {
                                         remove = Some(root.clone());
                                     }
+                                    let n = counts.get(i).copied().unwrap_or(0);
+                                    ui.label(
+                                        num(ui, i18n::count(lang, n, "file"), 11.0)
+                                            .color(dim(ui)),
+                                    );
                                 },
                             );
                         });
@@ -3548,9 +3610,11 @@ impl App {
         let current = self.picker_current.clone();
         let entries = self.picker_entries.clone();
         let error = self.picker_error.clone();
-        let resp = egui::Modal::new(egui::Id::unique("photocat-picker")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("photocat-picker"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.set_min_width(520.0);
-            ui.label(egui::RichText::new(t(lang, "Add a folder")).size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Add a folder")).size(14.0));
             ui.label(
                 egui::RichText::new(current.display().to_string())
                     .size(11.0)
@@ -3612,6 +3676,7 @@ impl App {
                 self.roots.push(path.clone());
                 self.settings.roots = self.roots.clone();
                 self.path_input = path.clone();
+                self.refresh_root_counts();
                 self.save_settings();
                 self.status = format!("{}: {path}", t(lang, "folder added"));
             }
@@ -3656,9 +3721,11 @@ impl App {
         };
         let mut confirmed = false;
         let mut cancel = false;
-        let resp = egui::Modal::new(egui::Id::unique("photocat-storage")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("photocat-storage"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.set_min_width(460.0);
-            ui.label(egui::RichText::new(title).size(16.0));
+            ui.label(egui::RichText::new(title).size(14.0));
             ui.add_space(4.0);
             ui.label(text);
             ui.add_space(8.0);
@@ -3736,13 +3803,24 @@ impl App {
             )
             .collect();
         let delete_text = self.album_delete_text.clone();
-        let resp = egui::Modal::new(egui::Id::unique("photocat-album")).show(ctx, |ui| {
+        let delete_facts = self.album_delete_facts.clone();
+        let modal = egui::Modal::new(egui::Id::unique("photocat-album"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.set_min_width(480.0);
-            ui.label(egui::RichText::new(dialog.title(lang)).size(16.0));
+            ui.label(egui::RichText::new(dialog.title(lang)).size(14.0));
             ui.add_space(6.0);
             match dialog {
                 AlbumDialog::Delete => {
                     ui.label(&delete_text);
+                    ui.label(num(ui, &delete_facts, 11.0).color(dim(ui)));
+                    ui.label(
+                        egui::RichText::new(t(
+                            lang,
+                            "The album rows are removed; the files stay on disk.",
+                        ))
+                        .size(12.0),
+                    );
                 }
                 AlbumDialog::Move => {
                     ui.label(
@@ -3847,9 +3925,11 @@ impl App {
         });
         let error = self.export_error.clone();
         let files = plan.as_ref().map(|p| p.files()).unwrap_or(0);
-        let resp = egui::Modal::new(egui::Id::unique("photocat-export")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("photocat-export"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.set_min_width(640.0);
-            ui.label(egui::RichText::new(t(lang, "Export the album to disk")).size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Export the album to disk")).size(14.0));
             ui.label(i18n::fill(lang, "Album “{}”", std::slice::from_ref(&title)));
             ui.label(
                 egui::RichText::new(t(
@@ -3895,7 +3975,7 @@ impl App {
                 if ui
                     .add_enabled(
                         !running,
-                        WordButton::new(
+                        WordButton::primary(
                             Icon::Download,
                             i18n::fill(lang, "Export {} files", &[files.to_string()]),
                         ),
@@ -3905,12 +3985,12 @@ impl App {
                 {
                     start = true;
                 }
-                if word_button(ui, Icon::Close, "Close").clicked() {
+                if word_button(ui, Icon::Close, t(lang, "Close")).clicked() {
                     close = true;
                 }
             });
             if let Some(text) = &progress_text {
-                ui.label(egui::RichText::new(text).size(11.0).color(dim(ui)));
+                ui.label(num(ui, text, 11.0).color(dim(ui)));
             }
             if !error.is_empty() {
                 ui.label(
@@ -3940,12 +4020,20 @@ impl App {
             }
             if !report_text.is_empty() {
                 ui.add_space(6.0);
-                ui.separator();
-                ui.label(&report_text);
+                hairline(ui);
+                ui.add_space(6.0);
+                // A report is read line by line and copied as is: the numeric family, 11 px (M22.10).
+                egui::ScrollArea::both()
+                    .id_salt("export-report")
+                    .max_height(160.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.label(num(ui, &report_text, 11.0));
+                    });
                 for line in errors.iter().take(5) {
-                    ui.label(egui::RichText::new(line).size(11.0).color(dim(ui)));
+                    ui.label(num(ui, line, 11.0).color(dim(ui)));
                 }
-                if word_button(ui, Icon::ContentCopy, "Copy the report").clicked() {
+                if word_button(ui, Icon::ContentCopy, t(lang, "Copy the report")).clicked() {
                     copy = true;
                 }
             }
@@ -3980,17 +4068,15 @@ impl App {
         let n = self.trash_items.len();
         let bytes: i64 = self.trash_items.iter().map(|r| r.size).sum();
         let lang = self.settings.lang;
-        let resp = egui::Modal::new(egui::Id::unique("photocat-trash")).show(ctx, |ui| {
+        let facts = format!("{} · {}", i18n::count(lang, n, "file"), db::human_in(lang, bytes));
+        let modal = egui::Modal::new(egui::Id::unique("photocat-trash"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
             ui.set_min_width(460.0);
-            ui.label(egui::RichText::new(t(lang, "Empty the trash?")).size(16.0));
+            ui.label(egui::RichText::new(t(lang, "Empty the trash?")).size(14.0));
             ui.add_space(4.0);
-            ui.label({
-                    i18n::fill(
-                        lang,
-                        "Will be moved to the OS trash: {} files, {}.",
-                        &[n.to_string(), db::human_in(lang, bytes)],
-                    )
-                });
+            ui.label(num(ui, &facts, 11.0).color(dim(ui)));
+            ui.label(t(lang, "Will be moved to the OS trash."));
             ui.label(
                 egui::RichText::new(t(
                     lang,
@@ -4000,7 +4086,8 @@ impl App {
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let b = WordButton::primary(Icon::Delete, t(lang, "Move to the OS trash"));
+                // The one path that touches the disk wears the danger border, not the accent (M22.9).
+                let b = WordButton::danger(Icon::Delete, t(lang, "Move to the OS trash"));
                 if ui
                     .add(b)
                     .clicked()
@@ -4051,7 +4138,7 @@ impl App {
 
     fn settings_section(&mut self, ui: &mut egui::Ui, tab: SettingsTab) {
         let lang = self.settings.lang;
-        ui.label(egui::RichText::new(tab.label(lang)).size(16.0));
+        ui.label(egui::RichText::new(tab.label(lang)).size(14.0));
         ui.add_space(4.0);
         ui.separator();
         ui.add_space(8.0);
@@ -13041,9 +13128,9 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, COAST_DECAY_S, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter,
-        PickClick, Scroll, SettingsTab, StorageAction, View, Viewer, WHEEL_NOTCH_PTS, clamp_pan,
-        album_card_size, days_in_month, db, first_weekday_monday, fit_rect, list_meta_px,
+        AlbumDialog, App, COAST_DECAY_S, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan,
+        KindFilter, PickClick, Scroll, SettingsTab, StorageAction, View, Viewer, WHEEL_NOTCH_PTS,
+        clamp_pan, album_card_size, days_in_month, db, first_weekday_monday, fit_rect, list_meta_px,
         list_name_px,
         list_row_height, monday_of, month_groups, nearest_file_month, one_to_one_zoom, parse_date,
         pick_kind, rotate_rect, rotated_size, score_percentile, shift_month, shift_to_file_month,
@@ -13211,6 +13298,23 @@ mod tests {
             egui::Shape::Vec(v) => {
                 for s in v {
                     collect_strokes(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Every rectangle of a frame with its fill, its line and its rounding: a dialog is a card,
+    /// so its frame is recognised by the tone, the 1 px line and the 8 px radius together (M22.10).
+    fn collect_rect_styles(
+        shape: &egui::Shape,
+        out: &mut Vec<(egui::Rect, egui::Color32, egui::Stroke, egui::CornerRadius)>,
+    ) {
+        match shape {
+            egui::Shape::Rect(r) => out.push((r.rect, r.fill, r.stroke, r.corner_radius)),
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_rect_styles(s, out);
                 }
             }
             _ => {}
@@ -13453,6 +13557,111 @@ mod tests {
         }
         out.drop_without_applying_deltas();
         texts
+    }
+
+    /// One dialog frame with the words and their fonts, the fills and every rectangle (fill, line,
+    /// rounding): a dialog is a card with one accent button and mono numbers, and all of that is
+    /// checkable without a window (M22.10).
+    #[derive(Default)]
+    struct DialogParts {
+        texts: Vec<(String, egui::FontId, egui::Color32)>,
+        fills: Vec<(egui::Rect, egui::Color32)>,
+        rects: Vec<(egui::Rect, egui::Color32, egui::Stroke, egui::CornerRadius)>,
+    }
+
+    /// The dialogs the window has: the folder list, the picker, the three storage confirmations,
+    /// the album dialog, the export dialog, the trash confirmation and the settings dialog.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Dialog {
+        Roots,
+        Picker,
+        Storage,
+        Album,
+        Export,
+        Trash,
+        Settings,
+    }
+
+    /// The state a dialog needs and the function that draws it: one place for both, so a test
+    /// walks over every dialog of the window.
+    fn open_dialog(app: &mut App, which: Dialog) -> fn(&mut App, &egui::Context) {
+        match which {
+            Dialog::Roots => {
+                app.roots_open = true;
+                App::roots_modal
+            }
+            Dialog::Picker => {
+                app.picker_open = true;
+                app.refresh_picker();
+                App::picker_modal
+            }
+            Dialog::Storage => {
+                app.storage_confirm = Some(StorageAction::Thumbs);
+                App::storage_modal
+            }
+            Dialog::Album => {
+                app.album_selected = app.albums.first().map(|n| n.id);
+                app.album_open_dialog(AlbumDialog::Delete);
+                App::album_modal
+            }
+            Dialog::Export => {
+                if let Some(id) = app.albums.first().map(|n| n.id) {
+                    app.export_dialog_open(id);
+                }
+                App::export_modal
+            }
+            Dialog::Trash => {
+                let mut row = file_row(1, "image", "trashed.jpg");
+                row.trashed_at = Some(1_700_000_000);
+                app.trash_items = vec![row];
+                app.trash_confirm = true;
+                App::trash_modal
+            }
+            Dialog::Settings => {
+                app.settings_open = true;
+                App::settings_modal
+            }
+        }
+    }
+
+    fn dialog_parts(
+        app: &mut App,
+        ctx: &egui::Context,
+        draw: fn(&mut App, &egui::Context),
+    ) -> DialogParts {
+        // The palette of the window: a modal inherits the style of the context it is shown in.
+        super::style(ctx);
+        let raw = |t: f64| egui::RawInput {
+            time: Some(t),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1240.0, 840.0),
+            )),
+            ..Default::default()
+        };
+        // A modal does not know its size on the first frame and fades in over a fifth of a second:
+        // the colours of the last frame are the palette's only when the clock has run.
+        let mut t = 0.0_f64;
+        for _ in 0..20 {
+            let out = ctx.run_ui(raw(t), |ui| {
+                let ctx = ui.ctx().clone();
+                draw(app, &ctx);
+            });
+            out.drop_without_applying_deltas();
+            t += 1.0 / 60.0;
+        }
+        let out = ctx.run_ui(raw(t), |ui| {
+            let ctx = ui.ctx().clone();
+            draw(app, &ctx);
+        });
+        let mut parts = DialogParts::default();
+        for c in &out.shapes {
+            collect_text_formats(&c.shape, &mut parts.texts);
+            collect_fills(&c.shape, &mut parts.fills);
+            collect_rect_styles(&c.shape, &mut parts.rects);
+        }
+        out.drop_without_applying_deltas();
+        parts
     }
 
     /// One frame of the whole window without a window: it checks the month groups and their order.
@@ -17971,4 +18180,347 @@ mod tests {
             "the controls start left of the title: {tile:?} vs {title:?}"
         );
     }
+
+    /// An app with an album tree of two nodes, a root with two indexed files and one file outside
+    /// it: the dialogs need albums, counted folders and a trash row (M22.10).
+    fn dialog_app(name: &str) -> App {
+        // A fresh DB per run: an album is unique among its siblings, and a test may not delete a
+        // file (check.sh), so the name of the file carries the process and the moment.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-dialogs-{}-{stamp}-{name}.db",
+            std::process::id()
+        ));
+        let root = format!("/tmp/photocat-dialogs-archive-{stamp}-{name}");
+        {
+            let conn = db::open(&path).expect("a temporary DB");
+            let mut a = file_row(0, "image", "a.jpg");
+            a.path = format!("{root}/2024/a.jpg");
+            let mut b = file_row(0, "image", "b.jpg");
+            b.path = format!("{root}/2024/b.jpg");
+            let mut outside = file_row(0, "image", "c.jpg");
+            outside.path = "/tmp/photocat-dialogs-elsewhere/c.jpg".into();
+            for row in [&a, &b, &outside] {
+                db::insert(&conn, row).expect("a file row");
+            }
+            let id_of = |p: &str| -> i64 {
+                conn.query_row("SELECT id FROM files WHERE path=?1", [p], |r| r.get(0))
+                    .expect("a file id")
+            };
+            let (first, second) = (id_of(&a.path), id_of(&b.path));
+            let parent = db::create_album(&conn, 0, "Dacha 2024", "").expect("an album");
+            let child = db::create_album(&conn, parent, "May", "").expect("an album");
+            db::add_to_album(&conn, parent, &[first]).expect("an album row");
+            db::add_to_album(&conn, child, &[second]).expect("an album row");
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::En;
+        app.roots = vec![root.clone()];
+        app.settings.roots = vec![root];
+        app.refresh_root_counts();
+        app
+    }
+
+    /// M22.10: every dialog of the window is a card — the `card` tone, a 1 px `border` line, the
+    /// 8 px radius and its own air inside — with one accent button at most and no 16 px title: the
+    /// type scale stops at 14. The trash confirmation is the one dialog whose button touches the
+    /// disk, so it wears `danger` and no accent at all; the settings dialog has no primary action,
+    /// because every change is saved at once.
+    #[test]
+    fn every_dialog_is_a_card_with_one_accent_button() {
+        let ctx = egui::Context::default();
+        let th = super::DARK;
+        let allowed = palette();
+        let radius = egui::CornerRadius::same(super::RADIUS_CARD as u8);
+        for which in [
+            Dialog::Roots,
+            Dialog::Picker,
+            Dialog::Storage,
+            Dialog::Album,
+            Dialog::Export,
+            Dialog::Trash,
+            Dialog::Settings,
+        ] {
+            let mut app = dialog_app("cards");
+            let draw = open_dialog(&mut app, which);
+            let parts = dialog_parts(&mut app, &ctx, draw);
+            // The frame of the dialog: the card tone, a 1 px line, the 8 px radius.
+            let card = parts
+                .rects
+                .iter()
+                .filter(|(_, fill, stroke, r)| {
+                    *fill == th.card && stroke.color == th.border && *r == radius
+                })
+                .max_by(|a, b| a.0.width().total_cmp(&b.0.width()))
+                .cloned();
+            let card = card.unwrap_or_else(|| {
+                panic!("{which:?}: the dialog is not a card: {:?}", parts.rects)
+            });
+            assert!(
+                card.0.width() > 400.0 && card.0.height() > 120.0,
+                "{which:?}: the card frame is too small to be the dialog: {:?}",
+                card.0
+            );
+            // One accent button: a pressed target at least 20 px high. A 2 px accent edge of a
+            // picked row is a fill too, so the height and the width both have to be a button's.
+            let accents: Vec<egui::Rect> = parts
+                .fills
+                .iter()
+                .filter(|(r, c)| {
+                    *c == th.accent && r.width() > 20.0 && r.height() >= 20.0
+                })
+                .map(|(r, _)| *r)
+                .collect();
+            if matches!(which, Dialog::Trash) {
+                assert!(
+                    accents.is_empty(),
+                    "{which:?}: the path to the OS trash must not wear the accent: {accents:?}"
+                );
+                assert!(
+                    parts
+                        .rects
+                        .iter()
+                        .any(|(_, _, s, _)| s.color == th.danger && s.width > 0.5),
+                    "{which:?}: the danger border is missing: {:?}",
+                    parts.rects
+                );
+            } else if which == Dialog::Settings {
+                // Every change is saved at once: the settings dialog has no primary action.
+                assert!(
+                    accents.is_empty(),
+                    "{which:?}: the settings dialog has no main action: {accents:?}"
+                );
+            } else {
+                assert_eq!(
+                    accents.len(),
+                    1,
+                    "{which:?}: the dialog has {} accent buttons: {accents:?}",
+                    accents.len()
+                );
+            }
+            // The type scale has no 16: a dialog's title is a 14 px subheading.
+            assert!(
+                !parts.texts.iter().any(|(_, f, _)| f.size == 16.0),
+                "{which:?}: a 16 px word is outside the type scale: {:?}",
+                parts
+                    .texts
+                    .iter()
+                    .filter(|(_, f, _)| f.size == 16.0)
+                    .map(|(t, _, _)| t.clone())
+                    .collect::<Vec<_>>()
+            );
+            // Nothing here is a colour of its own: every word, fill and line is a token.
+            let ok = |c: &egui::Color32, what: &str| {
+                assert!(
+                    allowed.iter().any(|p| p == c) || c.a() < 255,
+                    "{which:?} paints {what} off the palette: {c:?}"
+                );
+            };
+            for (text, _, color) in &parts.texts {
+                ok(color, &format!("“{text}”"));
+            }
+            for (_, color) in &parts.fills {
+                ok(color, "a fill");
+            }
+            for (_, _, stroke, _) in &parts.rects {
+                if *stroke != egui::Stroke::NONE {
+                    ok(&stroke.color, "a line");
+                }
+            }
+        }
+    }
+
+    /// M22.10: the numbers of a dialog are in the numeric family — the files of a counted folder,
+    /// the volume of the trash, the albums and rows of a delete, the export's progress and the
+    /// report it wrote. A number inside a translated sentence cannot be turned monospace, so the
+    /// dialogs carry a facts row of their own, exactly like the album header (M22.6).
+    #[test]
+    fn the_dialogs_put_their_numbers_in_the_numeric_family() {
+        let ctx = egui::Context::default();
+        let mono11 = egui::FontId::monospace(11.0);
+        let find = |parts: &DialogParts, word: &str| -> (String, egui::FontId, egui::Color32) {
+            parts
+                .texts
+                .iter()
+                .find(|(t, _, _)| t == word)
+                .cloned()
+                .unwrap_or_else(|| panic!("no “{word}”: {:?}", parts.texts))
+        };
+
+        // The folder list: how many indexed files lie in each root.
+        let mut app = dialog_app("numbers-roots");
+        let draw = open_dialog(&mut app, Dialog::Roots);
+        let parts = dialog_parts(&mut app, &ctx, draw);
+        let (_, font, color) = find(&parts, "2 files");
+        assert_eq!(font, mono11, "the count of a folder is mono 11");
+        assert_eq!(color, super::DARK.text_med);
+
+        // The album delete: the names stay words, the counters are a row of their own.
+        let mut app = dialog_app("numbers-album");
+        let draw = open_dialog(&mut app, Dialog::Album);
+        let parts = dialog_parts(&mut app, &ctx, draw);
+        let (_, font, _) = find(&parts, "2 albums · 2 files");
+        assert_eq!(font, mono11, "the counters of a delete are mono 11");
+        find(&parts, "The album rows are removed; the files stay on disk.");
+
+        // The trash: the counted files and their volume.
+        let mut app = dialog_app("numbers-trash");
+        let draw = open_dialog(&mut app, Dialog::Trash);
+        let parts = dialog_parts(&mut app, &ctx, draw);
+        let (_, font, _) = find(&parts, "1 file · 1 B");
+        assert_eq!(font, mono11, "the volume of the trash is mono 11");
+        find(&parts, "Will be moved to the OS trash.");
+
+        // The export: the progress of the copy and the report as it is written to a file.
+        let mut app = dialog_app("numbers-export");
+        let draw = open_dialog(&mut app, Dialog::Export);
+        let progress = db::Progress::default();
+        progress.set_total(8);
+        for _ in 0..3 {
+            progress.tick();
+        }
+        app.export_progress = Some(std::sync::Arc::new(progress));
+        app.export_report = Some(crate::organize::ExportReport {
+            copied: 2,
+            bytes: 2048,
+            lang: i18n::Lang::En,
+            ..Default::default()
+        });
+        let parts = dialog_parts(&mut app, &ctx, draw);
+        let (_, font, _) = find(&parts, "export: 3/8");
+        assert_eq!(font, mono11, "the export progress is mono 11");
+        let report = parts
+            .texts
+            .iter()
+            .find(|(t, _, _)| t.starts_with("exported 2 files"))
+            .unwrap_or_else(|| panic!("no report body: {:?}", parts.texts));
+        assert_eq!(report.1, mono11, "the report body is mono 11");
+        find(&parts, "Copy the report");
+    }
+
+    /// M22.10: the export dialog was the last surface of the Russian window that answered in
+    /// English — "Close" and "Copy the report" were written past `t()`. Now the dialog speaks the
+    /// chosen language like the folder list, the storage confirmation and the trash.
+    #[test]
+    fn the_export_dialog_speaks_the_chosen_language() {
+        let ctx = egui::Context::default();
+        let mut app = dialog_app("export-i18n");
+        app.settings.lang = i18n::Lang::Ru;
+        let draw = open_dialog(&mut app, Dialog::Export);
+        app.export_report = Some(crate::organize::ExportReport {
+            copied: 1,
+            lang: i18n::Lang::Ru,
+            ..Default::default()
+        });
+        let parts = dialog_parts(&mut app, &ctx, draw);
+        let words: Vec<&str> = parts.texts.iter().map(|(t, _, _)| t.as_str()).collect();
+        for want in ["Выгрузить альбом на диск", "Закрыть", "Скопировать отчёт"] {
+            assert!(
+                words.contains(&want),
+                "missing “{want}” in the Russian window: {words:?}"
+            );
+        }
+        for english in ["Close", "Copy the report", "Export the album to disk"] {
+            assert!(
+                !words.contains(&english),
+                "the English word “{english}” is left in the Russian window: {words:?}"
+            );
+        }
+    }
+
+
+    /// The dialogs on the real DB: the folder list over 2234 files, the export with a 500-line
+    /// plan, the album delete, the storage confirmation, the trash and the settings dialog.
+    /// Sixteen frames of each after four warm-up frames; the modal has to find its size and finish
+    /// fading first. `PHOTOCAT_BENCH_DB=<a copy of photocat.db> cargo test --release -- --ignored
+    /// dialogs_measurement --nocapture`. The number goes to `docs/ARCHITECTURE.md` § Measurements.
+    #[test]
+    #[ignore]
+    fn dialogs_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        // An album with 500 files: the export dialog then draws a plan of 500 lines.
+        let out = std::env::temp_dir().join("photocat-dialogs-measure-out");
+        std::fs::create_dir_all(&out).expect("a target folder");
+        let album = {
+            let conn = db::open(std::path::Path::new(&path)).expect("the bench DB");
+            let mut app = App::new(std::path::PathBuf::from(&path));
+            let id = match app.albums.first().map(|n| n.id) {
+                Some(id) => id,
+                None => db::create_album(&conn, 0, "Measurement", "").expect("an album"),
+            };
+            let ids: Vec<i64> = app.items.iter().take(500).map(|f| f.id).collect();
+            db::add_to_album(&conn, id, &ids).expect("the album rows");
+            app.settings.roots = app.roots.clone();
+            id
+        };
+        let mut app = App::new(std::path::PathBuf::from(&path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        app.export_out = out.to_string_lossy().to_string();
+        app.export_plan_for = Some(app.export_plan_key());
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        for which in [
+            Dialog::Roots,
+            Dialog::Picker,
+            Dialog::Storage,
+            Dialog::Album,
+            Dialog::Export,
+            Dialog::Trash,
+            Dialog::Settings,
+        ] {
+            let draw = open_dialog(&mut app, which);
+            if which == Dialog::Export {
+                app.export_out = out.to_string_lossy().to_string();
+                app.export_dialog_open(album);
+                app.export_show_plan();
+                assert!(
+                    app.export_plan.as_ref().is_some_and(|p| p.files() > 100),
+                    "the plan of the export dialog is empty"
+                );
+            }
+            let drive = |app: &mut App, t: f64| -> f32 {
+                let raw = egui::RawInput {
+                    time: Some(t),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                };
+                let start = Instant::now();
+                let out = ctx.run_ui(raw, |ui| {
+                    let ctx = ui.ctx().clone();
+                    draw(app, &ctx);
+                });
+                let ms = start.elapsed().as_secs_f32() * 1000.0;
+                out.drop_without_applying_deltas();
+                ms
+            };
+            let mut t = 0.0_f64;
+            for _ in 0..4 {
+                drive(&mut app, t);
+                t += 1.0 / 60.0;
+            }
+            let mut times = Vec::new();
+            for _ in 0..16 {
+                times.push(drive(&mut app, t));
+                t += 1.0 / 60.0;
+            }
+            times.sort_by(|a, b| a.total_cmp(b));
+            let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+            println!(
+                "corpus {n} files, dialog {which:?}: p50 {:.2} ms ({:.0} fps), p95 {:.2} ms, p99 {:.2} ms",
+                p(0.50),
+                1000.0 / p(0.50),
+                p(0.95),
+                p(0.99)
+            );
+        }
+    }
+
 }

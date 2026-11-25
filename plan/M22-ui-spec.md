@@ -88,7 +88,9 @@ reason is written in ADR 0044.
   the name, the date and the size. A file without dimensions gets 4:3.
 - **Grid step 10 px** (the mock-up's `gap-2.5`) between tiles and between rows; month groups are
   separated by 24 px.
-- Dialogs: settings 760×620, export and picker as now.
+- Dialogs: settings 760×620 of content, export and picker as now; every dialog is a card — the `card`
+  tone, a 1 px `border`, the 8 px radius and 16 px of air — with one 14 px title and one accent button
+  at most (M22.10).
 
 ### 2.5 Main screen (the first task)
 
@@ -121,7 +123,7 @@ reason is written in ADR 0044.
 | Trash | — | same, `danger` only on "Empty the trash" | M22.9 ✅ |
 | Integrity | — | the content panel's form: path fields in mono, the report in mono, one accent button, no new colour | M22.9 ✅ |
 | Settings | `photocat_4` (partial) | the section list (caps heading, icons, the accent edge of the active row, the mono value at the right) and the row rhythm; **the content stays ours**, plus "Interface → theme" | M22.8 ✅ |
-| Dialogs (folders, picker, export, storage, album) | `photocat_4` (settings only) | card tone, 1 px border, 8 px radius, mono numbers | M22.10 |
+| Dialogs (folders, picker, export, storage, album) | `photocat_4` (settings only) | card tone, 1 px border, 8 px radius, mono numbers | M22.10 ✅ |
 
 **Rule for a screen without a mock-up.** A new or unfinished screen is built from the same parts and
 in the same order: top strip (nothing), view title + facts, chips row, content, status strip. It uses
@@ -562,11 +564,58 @@ integrity p50 4.77 ms (210 fps), p95 ≤ 7.29. `cargo test` 272 passed (268 + 4)
 **Files.** `src/app.rs` (`card_block`, `View::Dupes`, `draw_face_cell`, `View::Faces`, `View::Trash`,
 `integrity_panel`, `highlight_job`, the four tests and the measurement), `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
-### M22.10 — dialogs and reports
+### M22.10 — dialogs and reports ✅ (this change)
 
 1. Folders, picker, export, storage and album dialogs: card tone, 1 px border, 8 px radius, mono
    numbers, one accent button.
 2. Report bodies stay monospace 11 px with a copy button.
+
+**Result.** A modal used to be `Frame::popup` — the frame of a menu: the `menu_corner_radius` of
+6 px, 6 px of air and the `menu_margin`, while the spec has a dialog at 8 px. One `dialog_frame`
+now gives every dialog of the window the card: the `card` tone, a 1 px `border` line, the 8 px
+radius and 16 px of air inside (M22.10). It is used by the folder list, the picker, the three
+storage confirmations, the album dialog, the export dialog and the trash confirmation — and by the
+settings dialog, whose content keeps its 760×620. The 16 px titles of the dialogs were outside the
+type scale (10/11/12/13/14/18): a dialog's title is a 14 px subheading now, the settings pane's
+heading too, so the whole window lives on the scale.
+
+A number inside a translated sentence cannot be put into the numeric family, so the dialogs that
+had numbers grew a facts row of their own, exactly like the album header (M22.6): the folder list
+counts the indexed files of each root ("2 files" in mono 11, counted once when the index or the
+folder list changes, not per frame), the trash confirmation reads "1 file · 18.4 MiB" in mono 11
+above the sentence "Will be moved to the OS trash.", the album delete shows the names, then
+"2 albums · 2 files" in mono 11, then the hint that the rows go and the files stay, and the export
+dialog's progress ("export: 3/8") is mono 11. Each of the five action dialogs has exactly one
+accent button: "Export N files" in the export dialog was a plain button and is the main action now,
+together with "Index all", "Add and index", the cleaning confirmation and the album's confirm. The
+trash confirmation is the one dialog whose button touches the disk: it wears `danger` and no accent
+(M22.9). The export report was a 13 px proportional paragraph and is a mono 11 body in its own
+scroll area with the copy button, as the integrity report already was. Along the way two buttons of
+the export dialog ("Close", "Copy the report") were written past `t()` — the last English words in
+the Russian window.
+
+**Checks.** Three headless tests. `every_dialog_is_a_card_with_one_accent_button` walks all seven
+dialogs after the fade-in (the palette arrives with a multiplied alpha while the modal animates):
+the frame is the card tone with a 1 px `border` and the 8 px radius, exactly one accent button in
+the five action dialogs, none in the settings dialog (every change is saved at once) and none in the
+trash confirmation, which carries the `danger` line instead; no 16 px word is left, and every drawn
+word, fill and line is a token of the palette. `the_dialogs_put_their_numbers_in_the_numeric_family`
+holds "2 files", "2 albums · 2 files", "1 file · 1 B", "export: 3/8" and the report body in mono 11.
+`the_export_dialog_speaks_the_chosen_language` fails on the old code with "Close" in the Russian
+window.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, a copy of the real DB of 2232 files, an album
+with 500 files so that the export dialog draws a 500-line plan, release, 1240×840 headless frames,
+16 frames per dialog after four warm-up frames): folder list p50 0.03 ms, p95 0.04; picker p50
+0.08 ms; storage 0.02 ms; album delete 0.02 ms; export 0.18 ms, p95 0.32; trash 0.02 ms; settings
+p50 0.06 ms, p95 0.08 — a dialog costs a fraction of the 16.7 ms of a 60 fps frame, and the folder
+list cost 0.84 ms per frame before its counters were counted on a reload. `cargo test` 275 passed
+(272 + 3), `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .`
+0 errors.
+
+**Files.** `src/app.rs` (`dialog_frame`, the six modals, `album_delete_facts`, `root_counts`,
+`WordButton::danger` in the trash confirmation, the export report body, the three tests and the
+measurement), `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
 ### M22.11 — light theme pass
 
