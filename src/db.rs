@@ -1148,6 +1148,19 @@ pub struct FaceView {
     pub cluster_id: Option<i64>,
 }
 
+/// A face box over the frame of its file (M22.7): the photo in the full screen marks who is
+/// in it. The coordinates are image pixels of the file as it is seen (EXIF orientation applied).
+#[derive(Debug, Clone)]
+pub struct FaceBox {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub score: f32,
+    /// The name of the group; empty while the group has no name.
+    pub label: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct FaceCluster {
     pub id: i64,
@@ -1267,6 +1280,31 @@ pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec
             thumb: r.get(4)?,
             score: r.get(5)?,
             cluster_id: r.get(6)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// The faces of one file with the names of their groups: the chips over the frame in the full
+/// screen. An unnamed group gives an empty label.
+pub fn load_face_boxes(conn: &Connection, file_id: i64) -> Result<Vec<FaceBox>> {
+    let mut st = conn.prepare(
+        "SELECT f.x,f.y,f.w,f.h,f.score,COALESCE(c.label,'')
+         FROM faces f LEFT JOIN face_clusters c ON c.id=f.cluster_id
+         WHERE f.file_id=?1 ORDER BY f.quality DESC, f.id",
+    )?;
+    let rows = st.query_map([file_id], |r| {
+        Ok(FaceBox {
+            x: r.get(0)?,
+            y: r.get(1)?,
+            w: r.get(2)?,
+            h: r.get(3)?,
+            score: r.get(4)?,
+            label: r.get(5)?,
         })
     })?;
     let mut out = Vec::new();
@@ -2477,6 +2515,13 @@ mod tests {
         save_face_assignments(&mut c, &[(face_id, Some(clustered))], false).unwrap();
         label_face_cluster(&c, clustered, "Лиза").unwrap();
         assert_eq!(load_face_clusters(&c).unwrap()[0].label, "Лиза");
+
+        // The chips over the frame in the full screen: the box and the name of the group.
+        let boxes = load_face_boxes(&c, file_id).unwrap();
+        assert_eq!(boxes.len(), 1);
+        assert_eq!((boxes[0].x, boxes[0].y, boxes[0].w, boxes[0].h), (10, 20, 30, 40));
+        assert_eq!(boxes[0].label, "Лиза");
+        assert!((boxes[0].score - 0.9).abs() < 1e-6);
 
         let split = split_face(&mut c, face_id).unwrap();
         let moved = &load_faces(&c).unwrap()[0];

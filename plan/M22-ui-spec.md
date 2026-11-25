@@ -113,7 +113,7 @@ reason is written in ADR 0044.
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 ✅ |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 ✅ |
-| Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 |
+| Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 ✅ |
 | Duplicates | — | no mock-up: same strips, header, chips row, `draw_cell`, amber "keep", red-free everywhere | M22.9 |
 | Faces | — | same panels, face tile metrics unchanged, accent only on a picked face | M22.9 |
 | Trash | — | same, `danger` only on "Empty the trash" | M22.9 |
@@ -425,13 +425,38 @@ row (no floating bar) and "Album order" stays in the Sort menu. Measured on a co
 files, release): the Albums view p50 6.94–7.51 ms (133–144 fps), p95 7.18–7.99 ms. Four headless tests;
 `cargo test` 254, `clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors.
 
-### M22.7 — full-screen viewer
+### M22.7 — full-screen viewer ✅ (this change)
 
 1. Header: name 14 px mono details (size, `W×H`), position in accent, "Back to the grid".
 2. The tools row (zoom, 1:1, fit, rotate, inspector toggle) with words and hints; no icon-only path.
 3. The series strip under the frame: neighbouring snapshots with the date and the position.
 4. The face chips over the frame (a name and a percentage) — only when the faces are computed.
 5. The player row keeps its geometric icons (`paint_icon`) and its hints.
+
+**Result.** The viewer is the mock-up's `photocat_5/6` inside the same modal: the header ("Back to the grid", the name at 14 px, the date and the facts in mono 11, "N of M" in the
+accent at the right) over the tools row, where every tool is a word with a hint ("Zoom out" · the
+percentage in mono · "Zoom in" · "Fit" · "1:1" · "Rotate" · "Text on the photo" · "In the system
+viewer" · "Inspector"): no icon-only path. "1:1" (`one_to_one`) is the scale that shows one image
+pixel per screen pixel, so the zoom ceiling went from 400 % to `MAX_ZOOM` 800 %; "Rotate" (`paint_frame`, `rotated_size`) turns the *view* by 90° through a
+rotated mesh — the file on disk, the DB and the preview are untouched, and the next file opens
+unturned. Under the frame the series strip (`viewer_series`, `draw_series_strip`) draws the neighbours
+of the same day: the caps label, the day in mono 11 and "· N files", then a window of up to sixteen
+64×48 plates with the preview fitted whole, the position inside the day in mono 10 and a 2 px accent
+frame on the current one; a click jumps there (`viewer_goto`). A window, not a scroll area: the strip
+is computed around the current file, so the one-scroll-per-region rule holds. The face chips
+(`paint_face_chips`, `db::load_face_boxes`) mark every face the model found with a 1.5 px accent box
+and a dark plate above it ("Lisa (92%)"), read once per file and turned together with the view. The
+"Inspector" toggle — or the I key — opens the same `file_card` in a 280 px right column, so the full
+screen has a second caller and no second card. The playback row keeps its geometric icons, seek and
+volume. Measured on the real DB (2232 files, release, headless frames at 1240×840) with sixteen
+neighbours in the strip and one face on the frame: p50 6.91–8.65 ms (116–145 fps), p95
+7.73–10.45 ms; with the inspector on p50 6.89–7.89 ms (127–145 fps), p95 9.47–11.46 ms over four
+runs. Computing the series on every frame cost p50 9.66 ms, so it is computed on a file change now. Seven
+headless tests (the series of the day and its absence without a date, the turn's geometry, the turn
+not following the next file, the strip in a frame, the face chip, the inspector's card, the English
+labels); `cargo test` 261, `clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors.
+
+**Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
 ### M22.8 — settings dialog
 

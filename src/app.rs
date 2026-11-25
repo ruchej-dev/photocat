@@ -308,6 +308,16 @@ struct ViewerTextures<'a> {
     paused: bool,
 }
 
+/// What the full screen draws this frame: the frame itself, the turn of the view and the faces
+/// over it (M22.7).
+struct ViewerFrame<'a> {
+    textures: ViewerTextures<'a>,
+    /// The turn of the view by 90° steps: 0, 90, 180 or 270 degrees clockwise.
+    rot: u8,
+    /// The faces of the file; empty until the face model has seen it.
+    faces: &'a [db::FaceBox],
+}
+
 /// The full-screen viewer: one photo over the whole grid, with a slideshow and text.
 struct Viewer {
     ids: Vec<i64>,
@@ -316,10 +326,29 @@ struct Viewer {
     /// The offset of the zoomed frame from the centre, in screen points. On a file change and
     /// at the "fit" scale it is zero, the frame is centred (docs/UI.md).
     pan: egui::Vec2,
+    /// The view turned by 90° steps (M22.7): only the view turns, the file on disk is unchanged.
+    rotation: u8,
+    /// The file card next to the frame: off by default, the frame gets the whole width.
+    inspector: bool,
+    /// The day of the current file and its neighbours: the series strip under the frame. Computed
+    /// on a file change, not every frame — it walks the whole list (M22.7).
+    day: Option<String>,
+    series: Vec<StripItem>,
     show_text: bool,
     slideshow: bool,
     interval_s: u64,
     last_advance: std::time::Instant,
+}
+
+/// A neighbour in the series strip of the full screen: where it sits in the viewer order, the
+/// file itself and its position inside its day (M22.7).
+#[derive(Clone)]
+struct StripItem {
+    idx: usize,
+    id: i64,
+    thumb: Option<String>,
+    video: bool,
+    pos: usize,
 }
 
 /// A section of the "Settings" dialog: rare settings do not take the screen from the grid.
@@ -513,6 +542,21 @@ fn accent(ui: &egui::Ui) -> egui::Color32 {
 fn dim(ui: &egui::Ui) -> egui::Color32 {
     ui.visuals().widgets.noninteractive.fg_stroke.color
 }
+
+/// The playback row under the frame in the full screen: 32 px of icon buttons and the 6 px egui
+/// puts before the row.
+const VIEWER_PLAYER_H: f32 = 38.0;
+/// The series strip under the frame: the air, the caps label with the day and the 64×48 thumbnail
+/// row (measured 80 px, the budget keeps 7 px for the label's line height).
+const VIEWER_SERIES_H: f32 = 87.0;
+/// The biggest scale of the full screen: "1:1" on a 1920 px frame asks for more than 100 %.
+const MAX_ZOOM: f32 = 8.0;
+/// The thumbnail of the series strip: 64×48, the position in the corner.
+const SERIES_THUMB_W: f32 = 64.0;
+const SERIES_THUMB_H: f32 = 48.0;
+/// How many neighbours the series strip holds: a window around the current file, so the strip
+/// needs no scroll area of its own.
+const SERIES_WINDOW: usize = 16;
 
 /// Layout metrics: change only together with docs/UI.md.
 const LEFT_W: f32 = 260.0;
@@ -1844,6 +1888,8 @@ struct App {
     /// The full-screen viewer and the loading of a large frame in the background.
     viewer: Option<Viewer>,
     viewer_tex: Option<(i64, egui::TextureHandle)>,
+    /// The faces of the frame in the full screen, read from the DB once per file (M22.7).
+    viewer_faces: Option<(i64, Vec<db::FaceBox>)>,
     /// A pre-decoded frame of the selected file: the full screen opens without waiting.
     photo_cache: HashMap<i64, (usize, usize, Vec<u8>)>,
     photo_loading: HashSet<i64>,
@@ -2020,6 +2066,7 @@ impl App {
             tile_size: 150.0,
             viewer: None,
             viewer_tex: None,
+            viewer_faces: None,
             photo_cache: HashMap::new(),
             photo_loading: HashSet::new(),
             photo_jobs: VecDeque::new(),
@@ -5436,7 +5483,7 @@ impl App {
                 if show_card {
                     ui.add_space(8.0);
                     hairline(ui);
-                    self.file_card(ui);
+                    self.file_card(ui, self.selected);
                     ui.add_space(8.0);
                     hairline(ui);
                     self.stats_block(ui);
@@ -6025,13 +6072,14 @@ impl App {
         egui::ScrollArea::vertical()
             .id_salt("details-scroll")
             .auto_shrink([false, false])
-            .show(ui, |ui| self.file_card(ui));
+            .show(ui, |ui| self.file_card(ui, self.selected));
     }
 
-    /// The file card: a preview, metadata, tags and text. One for the whole interface.
-    fn file_card(&mut self, ui: &mut egui::Ui) {
+    /// The file card: a preview, metadata, tags and text. One for the whole interface:
+    /// the right panel, the narrow window and the inspector of the full screen call it (M22.7).
+    fn file_card(&mut self, ui: &mut egui::Ui, shown: Option<i64>) {
         let lang = self.settings.lang;
-        let Some(id) = self.selected else {
+        let Some(id) = shown else {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(t(
@@ -6795,16 +6843,22 @@ impl App {
         }
         let idx = ids.iter().position(|&id| id == file_id).unwrap_or(0);
         self.request_around(&ids, idx);
-        self.viewer = Some(Viewer {
+        let mut viewer = Viewer {
             ids,
             idx,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            rotation: 0,
+            inspector: false,
+            day: None,
+            series: Vec::new(),
             show_text: false,
             slideshow: false,
             interval_s: 3,
             last_advance: std::time::Instant::now(),
-        });
+        };
+        self.set_series(&mut viewer);
+        self.viewer = Some(viewer);
         self.viewer_tex = None;
     }
 
@@ -6822,6 +6876,82 @@ impl App {
         // A new frame is shown from the centre: someone else's offset on another photo looks
         // like a cropped frame for no reason.
         v.pan = egui::Vec2::ZERO;
+        // A sideways-looking frame was turned on purpose for one file; the next one is shown
+        // as it is stored (M22.7).
+        v.rotation = 0;
+        self.set_series(v);
+    }
+
+    /// Jump to a file of the series strip: the same as a step, but straight to the sixth
+    /// neighbour; the video is stopped and the frame is centred and turned back (M22.7).
+    fn viewer_goto(&mut self, v: &mut Viewer, idx: usize) {
+        if idx >= v.ids.len() || idx == v.idx {
+            return;
+        }
+        self.stop_video();
+        v.idx = idx;
+        v.last_advance = std::time::Instant::now();
+        v.pan = egui::Vec2::ZERO;
+        v.rotation = 0;
+        self.set_series(v);
+    }
+
+    /// Keep the series strip of the viewer in step with the file on screen (M22.7).
+    fn set_series(&self, v: &mut Viewer) {
+        let (day, series) = self.viewer_series(v);
+        v.day = day;
+        v.series = series;
+    }
+
+    /// The neighbours of the current file inside its day — the "series" of the full screen
+    /// (M22.7): the snapshots of one date, in the order of the viewer. The strip is a window
+    /// around the current file, so it needs no scroll area of its own.
+    ///
+    /// A file without a date has no series: there is nothing to stand next to.
+    fn viewer_series(&self, v: &Viewer) -> (Option<String>, Vec<StripItem>) {
+        let day_of = |id: i64| {
+            self.items
+                .iter()
+                .chain(self.trash_items.iter())
+                .find(|r| r.id == id)
+                .and_then(|r| r.taken_at.as_deref())
+                .map(|d| d.chars().take(10).collect::<String>())
+        };
+        let Some(day) = v.ids.get(v.idx).copied().and_then(day_of) else {
+            return (None, Vec::new());
+        };
+        let mut all: Vec<StripItem> = Vec::new();
+        let mut pos = 0usize;
+        let mut cur_pos = 0usize;
+        for (idx, id) in v.ids.iter().copied().enumerate() {
+            if day_of(id).as_deref() != Some(day.as_str()) {
+                continue;
+            }
+            let Some(f) = self
+                .items
+                .iter()
+                .chain(self.trash_items.iter())
+                .find(|r| r.id == id)
+            else {
+                continue;
+            };
+            pos += 1;
+            if idx == v.idx {
+                cur_pos = pos;
+            }
+            all.push(StripItem {
+                idx,
+                id,
+                thumb: f.thumb.clone(),
+                video: f.kind == "video",
+                pos,
+            });
+        }
+        let start = cur_pos
+            .saturating_sub(SERIES_WINDOW / 2)
+            .min(all.len().saturating_sub(SERIES_WINDOW));
+        let series = all.into_iter().skip(start).take(SERIES_WINDOW).collect();
+        (Some(day), series)
     }
 
     fn viewer_modal(&mut self, ctx: &egui::Context) {
@@ -6916,7 +7046,6 @@ impl App {
         {
             self.textures.insert(id, t);
         }
-        let preview = self.textures.get(&id);
         let mut open_video = false;
         let mut start_video = false;
         let mut stop_video = false;
@@ -6944,278 +7073,452 @@ impl App {
         }
         // A player frame belongs to a particular file: without the check the old video is drawn
         // over the new photo and the file change is not visible.
-        let video_frame = self.video_tex.as_ref().filter(|_| self.video_id == Some(id));
+        // The textures are cloned out of `self`: the inspector draws the file card, which needs
+        // the whole `App`, so the modal closure borrows it mutably (M22.7).
+        let video_frame = self
+            .video_tex
+            .as_ref()
+            .filter(|_| self.video_id == Some(id))
+            .cloned();
         let paused = video_active && self.video.as_ref().is_some_and(|p| !p.is_playing());
-        let current_full = self.viewer_tex.as_ref().filter(|(t, _)| *t == id);
+        let full_tex = self.viewer_tex.as_ref().filter(|(t, _)| *t == id).cloned();
         // A video has no "full frame": there it is the cover frame, not a loading state.
-        let stale = self
+        let stale_tex = self
             .viewer_tex
             .as_ref()
             .filter(|(t, _)| *t != id && f.kind != "video")
-            .map(|(_, t)| t);
+            .map(|(_, t)| t.clone());
+        let preview_tex = self.textures.get(&id).cloned();
+        // The faces of the frame: read once per file, only when the model has run (M22.7).
+        if self.viewer_faces.as_ref().map(|(fid, _)| *fid) != Some(id) {
+            let boxes = db::open(&self.db_path)
+                .and_then(|c| db::load_face_boxes(&c, id))
+                .unwrap_or_default();
+            self.viewer_faces = Some((id, boxes));
+        }
+        let faces = self
+            .viewer_faces
+            .as_ref()
+            .filter(|(fid, _)| *fid == id)
+            .map(|(_, b)| b.clone())
+            .unwrap_or_default();
+        // The neighbours of the same day: the strip under the frame, computed on a file change.
+        // The thumbnails come from the same cache as the grid: a file that has just been on the
+        // screen costs nothing.
+        for item in &v.series {
+            if self.textures.contains_key(&item.id) || self.missing.contains(&item.id) {
+                continue;
+            }
+            let loaded = item.thumb.as_ref().and_then(|rel| {
+                load_texture(ctx, &self.thumbs_dir.join(rel), &format!("t{}", item.id))
+            });
+            match loaded {
+                Some(t) => {
+                    self.textures.insert(item.id, t);
+                }
+                None => {
+                    self.missing.insert(item.id);
+                }
+            }
+        }
         let mut new_zoom = v.zoom;
         let mut new_pan = v.pan;
         let mut new_text = v.show_text;
         let mut new_slideshow = v.slideshow;
         let mut new_interval = v.interval_s;
+        let mut new_rotation = v.rotation;
+        let mut new_inspector = v.inspector;
+        let mut want_one_to_one = false;
+        let mut goto: Option<usize> = None;
+        if ctx.input(|i| i.key_pressed(egui::Key::I)) {
+            new_inspector = !v.inspector;
+        }
 
         let screen = ctx.content_rect();
         let resp = egui::Modal::new(egui::Id::unique("photocat-viewer")).show(ctx, |ui| {
-            ui.set_min_size(screen.size() - egui::vec2(48.0, 48.0));
-            ui.horizontal(|ui| {
-                let name = Path::new(&f.path)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(&f.path);
-                ui.label(egui::RichText::new(name).size(16.0));
-                let date = f
-                    .taken_at
-                    .as_deref()
-                    .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-                    .unwrap_or_else(|| t(lang, "no date").into());
-                ui.label(egui::RichText::new(date).size(11.0).color(dim(ui)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(t(lang, "Close")).clicked() {
+            let min_size = screen.size() - egui::vec2(48.0, 48.0);
+            ui.set_min_size(min_size);
+            let avail = ui.available_size();
+            let chrome_top = ui.cursor().top();
+            let insp_w = if v.inspector {
+                RIGHT_W + 16.0
+            } else {
+                0.0
+            };
+            let left_w = (avail.x - insp_w).max(200.0);
+            let strip_h = if v.series.len() > 1 {
+                VIEWER_SERIES_H
+            } else {
+                0.0
+            };
+            // The chrome flows by itself, so a narrow window may wrap the tools row without
+            // clipping it; the body takes what is left (M22.7).
+                // The header: the way back, the name, the facts in mono, the position in the
+                // accent (M22.7).
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(t(lang, "Back to the grid"))
+                        .on_hover_text(t(lang, "close the full screen — Esc"))
+                        .clicked()
+                    {
                         close = true;
                     }
-                    ui.label(
-                        egui::RichText::new(i18n::position(lang, v.idx + 1, v.ids.len()))
-                            .size(11.0)
-                            .color(dim(ui)),
-                    );
-                });
-            });
-            ui.add_space(4.0);
-            // The playback bar: paging, play and pause, seeking, the volume.
-            ui.horizontal_wrapped(|ui| {
-                if icon_button(ui, Icon::Prev, 32.0, t(lang, "previous file — ←")).clicked() {
-                    step_click = -1;
-                }
-                let playing = video_active && self.video.as_ref().is_some_and(|p| p.is_playing());
-                if f.kind == "video" {
-                    if video_active && self.video.is_none() {
+                    ui.label(egui::RichText::new(file_name(&f.path)).size(14.0));
+                    let mut facts =
+                        format!("{} · {}×{}", db::human_in(lang, f.size), f.width, f.height);
+                    if f.kind == "video"
+                        && let Some(d) = f.duration_s
+                    {
+                        facts.push_str(&format!(" · ▶ {}", db::duration(d)));
+                    }
+                    let date = f
+                        .taken_at
+                        .as_deref()
+                        .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
+                        .unwrap_or_else(|| t(lang, "no date").into());
+                    ui.label(num(ui, format!("{date} · {facts}"), 11.0).color(dim(ui)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new(t(lang, "ffplay in its own window"))
+                            num(ui, i18n::position(lang, v.idx + 1, v.ids.len()), 11.0)
+                                .color(accent(ui)),
+                        );
+                    });
+                });
+                hairline(ui);
+                // The tools row: a word and a hint for every tool, no icon-only path (M22.7).
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button(t(lang, "Zoom out"))
+                        .on_hover_text(t(lang, "100 % fits the frame into the window"))
+                        .clicked()
+                    {
+                        new_zoom = (v.zoom - 0.25).max(0.5);
+                    }
+                    ui.label(num(ui, format!("{:.0} %", v.zoom * 100.0), 11.0));
+                    if ui
+                        .button(t(lang, "Zoom in"))
+                        .on_hover_text(t(lang, "above 100 % the frame is dragged with the mouse"))
+                        .clicked()
+                    {
+                        new_zoom = (v.zoom + 0.25).min(MAX_ZOOM);
+                    }
+                    if ui
+                        .button(t(lang, "Fit"))
+                        .on_hover_text(t(lang, "the whole frame in the window"))
+                        .clicked()
+                    {
+                        new_zoom = 1.0;
+                        new_pan = egui::Vec2::ZERO;
+                    }
+                    if ui
+                        .add_enabled(full_tex.is_some(), egui::Button::new(t(lang, "1:1")))
+                        .on_hover_text(t(lang, "one image pixel per screen pixel"))
+                        .clicked()
+                    {
+                        want_one_to_one = true;
+                    }
+                    if ui
+                        .button(t(lang, "Rotate"))
+                        .on_hover_text(t(
+                            lang,
+                            "turn the view by 90°; the file on disk is unchanged",
+                        ))
+                        .clicked()
+                    {
+                        new_rotation = (v.rotation + 1) % 4;
+                    }
+                    if v.zoom > 1.0 {
+                        ui.label(
+                            egui::RichText::new(t(lang, "drag to move the frame"))
                                 .size(11.0)
                                 .color(dim(ui)),
                         );
-                    } else if icon_button(
-                        ui,
-                        if playing { Icon::Pause } else { Icon::Play },
-                        32.0,
-                        if video_active {
-                            t(lang, "pause and resume — space")
-                        } else {
-                            t(lang, "play the video — space")
-                        },
-                    )
-                    .clicked()
-                    {
-                        if video_active {
-                            toggle_video = true;
-                        } else {
-                            start_video = true;
-                        }
                     }
-                } else if icon_button(
-                    ui,
-                    if v.slideshow { Icon::Pause } else { Icon::Play },
-                    32.0,
-                    t(lang, "slideshow — space"),
-                )
-                .clicked()
-                {
-                    new_slideshow = !v.slideshow;
-                }
-                if icon_button(ui, Icon::Next, 32.0, t(lang, "next file — →")).clicked() {
-                    step_click = 1;
-                }
-                if f.kind == "video" {
-                    if video_active && let Some(p) = self.video.as_ref() {
-                        let dur = p.duration_s().max(0.001);
-                        let mut pos = p.position_s().min(dur);
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} / {}",
-                                db::duration(pos),
-                                db::duration(dur)
-                            ))
-                            .size(11.0)
-                            .color(dim(ui)),
-                        );
-                        let w = (ui.available_width() - 220.0).max(160.0);
-                        let resp = ui.add_sized(
-                            [w, 18.0],
-                            egui::Slider::new(&mut pos, 0.0..=dur)
-                                .show_value(false)
-                                .trailing_fill(true),
-                        );
-                        if resp.dragged() || resp.clicked() {
-                            seek_video = Some(pos);
-                        }
-                        icon_mark(ui, Icon::Volume, 18.0);
-                        let mut vol = p.volume();
-                        if ui
-                            .add_sized(
-                                [90.0, 18.0],
-                                egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false),
-                            )
-                            .changed()
-                        {
-                            volume_video = Some(vol);
-                        }
-                        if !p.has_audio() {
-                            ui.label(
-                                egui::RichText::new(t(lang, "no device"))
-                                    .size(11.0)
-                                    .color(dim(ui)),
-                            );
-                        }
-                    }
-                    if video_active
-                        && ui
-                            .selectable_label(true, t(lang, "Stop the video"))
-                            .on_hover_text(t(lang, "stop and go back to the poster frame"))
-                            .clicked()
-                    {
-                        stop_video = true;
-                    }
-                } else {
                     if ui
-                        .selectable_label(
-                            v.slideshow,
-                            if v.slideshow {
-                                t(lang, "Stop the slideshow")
-                            } else {
-                                t(lang, "Slideshow")
-                            },
-                        )
-                        .on_hover_text(t(lang, "space — start/stop; walks the current list"))
+                        .selectable_label(v.show_text, t(lang, "Text on the photo"))
                         .clicked()
                     {
-                        new_slideshow = !v.slideshow;
+                        new_text = !v.show_text;
                     }
-                    ui.label(egui::RichText::new(t(lang, "interval:")).size(11.0).color(dim(ui)));
-                    for secs in [3u64, 5, 10] {
-                        if ui
-                            .selectable_label(v.interval_s == secs, i18n::seconds(lang, secs))
-                            .clicked()
-                        {
-                            new_interval = secs;
-                        }
+                    if f.kind != "video" && ui.button(t(lang, "In the system viewer")).clicked()
+                    {
+                        open_video = true;
                     }
-                }
-            });
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("−").on_hover_text(t(lang, "zoom out")).clicked() {
-                    new_zoom = (v.zoom - 0.25).max(0.5);
-                }
-                if ui.button(t(lang, "Fit")).clicked() {
-                    new_zoom = 1.0;
-                }
-                if ui.button("+").on_hover_text(t(lang, "zoom in")).clicked() {
-                    new_zoom = (v.zoom + 0.25).min(4.0);
-                }
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} {:.0}%",
-                        t(lang, "zoom"),
-                        v.zoom * 100.0
-                    ))
-                    .size(11.0)
-                    .color(dim(ui)),
+                    if ui
+                        .selectable_label(v.inspector, t(lang, "Inspector"))
+                        .on_hover_text(t(lang, "the file card next to the frame — I"))
+                        .clicked()
+                    {
+                        new_inspector = !v.inspector;
+                    }
+                });
+            // The chrome may take two rows on a narrow window: the body follows what it used up,
+            // measured from the cursor, so nothing is clipped (M22.7).
+            let chrome_h = ui.cursor().top() - chrome_top;
+            ui.add_space(4.0);
+            let body_h = (min_size.y - chrome_h - 4.0).max(120.0);
+            let frame_h = (body_h - VIEWER_PLAYER_H - strip_h).max(120.0);
+            // 1:1 — one image pixel per screen pixel: the frame is fitted at `fit`, so the scale
+            // that shows it as it is stored is `1 / fit` (M22.7).
+            if want_one_to_one
+                && let Some((_, t)) = full_tex.as_ref()
+            {
+                new_zoom = one_to_one_zoom(
+                    rotated_size(t.size_vec2(), v.rotation),
+                    egui::vec2(left_w, frame_h),
                 );
-                if v.zoom > 1.0 {
-                    ui.label(
-                        egui::RichText::new(t(lang, "drag to move the frame"))
-                            .size(11.0)
-                            .color(dim(ui)),
-                    );
-                }
-                if ui
-                    .selectable_label(v.show_text, t(lang, "Text on the photo"))
-                    .clicked()
-                {
-                    new_text = !v.show_text;
-                }
-                if f.kind != "video" && ui.button(t(lang, "In the system viewer")).clicked() {
-                    open_video = true;
-                }
-            });
-            ui.separator();
-            let avail = ui.available_size();
-            let content_h = (avail.y - 8.0).max(120.0);
-            let mut image_resp = None;
-            if v.show_text {
-                ui.horizontal(|ui| {
-                    let img_w = (avail.x * 0.62).max(160.0);
-                    ui.allocate_ui(egui::vec2(img_w, content_h), |ui| {
-                        image_resp = Some(draw_viewer_image(
-                            ui,
-                            ViewerTextures {
-                                full: current_full,
-                                preview,
-                                stale,
-                                video: video_frame,
-                                paused,
-                            },
-                            &f,
-                            v.zoom,
-                            &mut new_pan,
-                            egui::vec2(img_w, content_h),
-                            lang,
-                        ));
-                    });
-                    ui.separator();
-                    egui::ScrollArea::vertical()
-                        .id_salt("viewer-text")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.label(
-                                egui::RichText::new(t(lang, "Text on the photo"))
-                                    .size(11.0)
-                                    .color(dim(ui)),
-                            );
-                            let text = self.ocr_text.get(&id).cloned().unwrap_or_default();
-                            if text.trim().is_empty() {
-                                ui.label(
-                                    egui::RichText::new(t(
+            }
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_w, body_h),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        let mut image_resp = None;
+                        if v.show_text {
+                            ui.horizontal(|ui| {
+                                let img_w = (left_w * 0.62).max(160.0);
+                                ui.allocate_ui(egui::vec2(img_w, frame_h), |ui| {
+                                    image_resp = Some(draw_viewer_image(
+                                        ui,
+                                        ViewerFrame {
+                                            textures: ViewerTextures {
+                                                full: full_tex.as_ref(),
+                                                preview: preview_tex.as_ref(),
+                                                stale: stale_tex.as_ref(),
+                                                video: video_frame.as_ref(),
+                                                paused,
+                                            },
+                                            rot: v.rotation,
+                                            faces: &faces,
+                                        },
+                                        &f,
+                                        v.zoom,
+                                        &mut new_pan,
+                                        egui::vec2(img_w, frame_h),
                                         lang,
-                                        "No text recognized. The “Recognize text” button is in the file card.",
-                                    ))
-                                    .size(12.0)
-                                    .color(dim(ui)),
-                                );
+                                    ));
+                                });
+                                ui.separator();
+                                egui::ScrollArea::vertical()
+                                    .id_salt("viewer-text")
+                                    .max_height(frame_h)
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new(t(lang, "Text on the photo"))
+                                                .size(11.0)
+                                                .color(dim(ui)),
+                                        );
+                                        let text =
+                                            self.ocr_text.get(&id).cloned().unwrap_or_default();
+                                        if text.trim().is_empty() {
+                                            ui.label(
+                                                egui::RichText::new(t(
+                                                    lang,
+                                                    "No text recognized. The “Recognize text” button is in the file card.",
+                                                ))
+                                                .size(12.0)
+                                                .color(dim(ui)),
+                                            );
+                                        } else {
+                                            ui.add(egui::Label::new(text).wrap());
+                                        }
+                                    });
+                            });
+                        } else {
+                            image_resp = Some(draw_viewer_image(
+                                ui,
+                                ViewerFrame {
+                                    textures: ViewerTextures {
+                                        full: full_tex.as_ref(),
+                                        preview: preview_tex.as_ref(),
+                                        stale: stale_tex.as_ref(),
+                                        video: video_frame.as_ref(),
+                                        paused,
+                                    },
+                                    rot: v.rotation,
+                                    faces: &faces,
+                                },
+                                &f,
+                                v.zoom,
+                                &mut new_pan,
+                                egui::vec2(left_w, frame_h),
+                                lang,
+                            ));
+                        }
+                        // A click on the video frame is like a big ▶ button: play or pause.
+                        if f.kind == "video" && image_resp.is_some_and(|r| r.clicked()) {
+                            if video_active {
+                                toggle_video = true;
                             } else {
-                                ui.add(egui::Label::new(text).wrap());
+                                start_video = true;
+                            }
+                        }
+                        // The playback bar: paging, play and pause, seeking, the volume.
+                        ui.horizontal_wrapped(|ui| {
+                            if icon_button(ui, Icon::Prev, 32.0, t(lang, "previous file — ←"))
+                                .clicked()
+                            {
+                                step_click = -1;
+                            }
+                            let playing =
+                                video_active && self.video.as_ref().is_some_and(|p| p.is_playing());
+                            if f.kind == "video" {
+                                if video_active && self.video.is_none() {
+                                    ui.label(
+                                        egui::RichText::new(t(lang, "ffplay in its own window"))
+                                            .size(11.0)
+                                            .color(dim(ui)),
+                                    );
+                                } else if icon_button(
+                                    ui,
+                                    if playing { Icon::Pause } else { Icon::Play },
+                                    32.0,
+                                    if video_active {
+                                        t(lang, "pause and resume — space")
+                                    } else {
+                                        t(lang, "play the video — space")
+                                    },
+                                )
+                                .clicked()
+                                {
+                                    if video_active {
+                                        toggle_video = true;
+                                    } else {
+                                        start_video = true;
+                                    }
+                                }
+                            } else if icon_button(
+                                ui,
+                                if v.slideshow { Icon::Pause } else { Icon::Play },
+                                32.0,
+                                t(lang, "slideshow — space"),
+                            )
+                            .clicked()
+                            {
+                                new_slideshow = !v.slideshow;
+                            }
+                            if icon_button(ui, Icon::Next, 32.0, t(lang, "next file — →")).clicked()
+                            {
+                                step_click = 1;
+                            }
+                            if f.kind == "video" {
+                                if video_active && let Some(p) = self.video.as_ref() {
+                                    let dur = p.duration_s().max(0.001);
+                                    let mut pos = p.position_s().min(dur);
+                                    ui.label(
+                                        num(
+                                            ui,
+                                            format!(
+                                                "{} / {}",
+                                                db::duration(pos),
+                                                db::duration(dur)
+                                            ),
+                                            11.0,
+                                        )
+                                        .color(dim(ui)),
+                                    );
+                                    let w = (ui.available_width() - 220.0).max(160.0);
+                                    let resp = ui.add_sized(
+                                        [w, 18.0],
+                                        egui::Slider::new(&mut pos, 0.0..=dur)
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    );
+                                    if resp.dragged() || resp.clicked() {
+                                        seek_video = Some(pos);
+                                    }
+                                    icon_mark(ui, Icon::Volume, 18.0);
+                                    let mut vol = p.volume();
+                                    if ui
+                                        .add_sized(
+                                            [90.0, 18.0],
+                                            egui::Slider::new(&mut vol, 0.0..=1.0)
+                                                .show_value(false),
+                                        )
+                                        .changed()
+                                    {
+                                        volume_video = Some(vol);
+                                    }
+                                    if !p.has_audio() {
+                                        ui.label(
+                                            egui::RichText::new(t(lang, "no device"))
+                                                .size(11.0)
+                                                .color(dim(ui)),
+                                        );
+                                    }
+                                }
+                                if video_active
+                                    && ui
+                                        .selectable_label(true, t(lang, "Stop the video"))
+                                        .on_hover_text(t(
+                                            lang,
+                                            "stop and go back to the poster frame",
+                                        ))
+                                        .clicked()
+                                {
+                                    stop_video = true;
+                                }
+                            } else {
+                                if ui
+                                    .selectable_label(
+                                        v.slideshow,
+                                        if v.slideshow {
+                                            t(lang, "Stop the slideshow")
+                                        } else {
+                                            t(lang, "Slideshow")
+                                        },
+                                    )
+                                    .on_hover_text(t(
+                                        lang,
+                                        "space — start/stop; walks the current list",
+                                    ))
+                                    .clicked()
+                                {
+                                    new_slideshow = !v.slideshow;
+                                }
+                                ui.label(
+                                    egui::RichText::new(t(lang, "interval:")).size(11.0).color(dim(ui)),
+                                );
+                                for secs in [3u64, 5, 10] {
+                                    if ui
+                                        .selectable_label(
+                                            v.interval_s == secs,
+                                            i18n::seconds(lang, secs),
+                                        )
+                                        .clicked()
+                                    {
+                                        new_interval = secs;
+                                    }
+                                }
                             }
                         });
-                });
-            } else {
-                image_resp = Some(draw_viewer_image(
-                    ui,
-                    ViewerTextures {
-                        full: current_full,
-                        preview,
-                        stale,
-                        video: video_frame,
-                        paused,
+                        // The series of the day: the neighbours with their position in it.
+                        if strip_h > 0.0 {
+                            goto = draw_series_strip(
+                                ui,
+                                v.day.as_deref(),
+                                &v.series,
+                                v.idx,
+                                &self.textures,
+                                lang,
+                            );
+                        }
                     },
-                    &f,
-                    v.zoom,
-                    &mut new_pan,
-                    egui::vec2(avail.x, content_h),
-                    lang,
-                ));
-            }
-            // A click on the video frame is like a big ▶ button: play or pause.
-            if f.kind == "video" && image_resp.is_some_and(|r| r.clicked()) {
-                if video_active {
-                    toggle_video = true;
-                } else {
-                    start_video = true;
+                );
+                if v.inspector {
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(RIGHT_W);
+                        panel_edge(ui, true);
+                        ui.add_space(4.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("viewer-card")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| self.file_card(ui, Some(id)));
+                    });
                 }
-            }
+            });
         });
         if resp.backdrop_response.clicked() {
             close = true;
@@ -7223,6 +7526,8 @@ impl App {
         v.zoom = new_zoom;
         v.pan = new_pan;
         v.show_text = new_text;
+        v.rotation = new_rotation;
+        v.inspector = new_inspector;
         if v.slideshow != new_slideshow {
             v.last_advance = std::time::Instant::now();
         }
@@ -7262,10 +7567,16 @@ impl App {
             self.viewer_step(&mut v, step_click);
             ctx.request_repaint();
         }
+        // A click in the series strip opens that file at once.
+        if let Some(idx) = goto {
+            self.viewer_goto(&mut v, idx);
+            ctx.request_repaint();
+        }
         if close {
             self.stop_video();
             self.viewer = None;
             self.viewer_tex = None;
+            self.viewer_faces = None;
         } else {
             self.request_around(&v.ids, v.idx);
             self.viewer = Some(v);
@@ -8705,16 +9016,19 @@ fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
 /// One way to draw a frame in the full-screen viewer: 100% means fitted, more means
 /// zoomed; a zoomed frame is dragged with the mouse (`pan`) and does not leave the edges
 /// of the area (the wheel does not page the file).
+/// `rot` turns the view by 90° steps, `faces` marks who is in the frame (M22.7).
 /// Returns the response of the frame area: a click on a video is play or pause.
 fn draw_viewer_image(
     ui: &mut egui::Ui,
-    tex: ViewerTextures<'_>,
+    frame: ViewerFrame<'_>,
     f: &FileRow,
     zoom: f32,
     pan: &mut egui::Vec2,
     size: egui::Vec2,
     lang: i18n::Lang,
 ) -> egui::Response {
+    let tex = frame.textures;
+    let rot = frame.rot;
     let (area, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
     let mut resp = if f.kind == "video" {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -8737,10 +9051,11 @@ fn draw_viewer_image(
         }
         return resp;
     }
+    let mut shown: Option<(egui::Rect, egui::Rect)> = None;
     if let Some((tid, t)) = tex.full
         && *tid == f.id
     {
-        let ts = t.size_vec2();
+        let ts = rotated_size(t.size_vec2(), rot);
         let fit = (area.width() / ts.x).min(area.height() / ts.y);
         let size = ts * (fit * zoom);
         // A zoomed frame is dragged with the left button: without this, at a scale above 100%
@@ -8752,23 +9067,20 @@ fn draw_viewer_image(
             }
             resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
         }
-        let img = egui::Rect::from_center_size(area.center() + *pan, size);
+        let disp = egui::Rect::from_center_size(area.center() + *pan, size);
         let p = ui.painter().with_clip_rect(area.shrink(1.0));
-        p.image(
-            t.id(),
-            img,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
+        paint_frame(&p, t.id(), disp, rot, egui::Color32::WHITE);
+        // The box the picture occupies before the turn: the face chips are placed in it.
+        shown = Some((
+            egui::Rect::from_center_size(disp.center(), rotated_size(disp.size(), rot)),
+            disp,
+        ));
     } else if let Some(t) = tex.stale {
-        // While the next frame is decoding the previous sharp one is held — without mush.
+        // While the next frame is decoding the previous sharp one is held — without mush. The
+        // chips stay away: they belong to the file that is opening, not to the frame on screen.
+        let disp = fit_rect(area.shrink(1.0), rotated_size(t.size_vec2(), rot));
         let p = ui.painter().with_clip_rect(area.shrink(1.0));
-        p.image(
-            t.id(),
-            fit_rect(area.shrink(1.0), t.size_vec2()),
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
+        paint_frame(&p, t.id(), disp, rot, egui::Color32::WHITE);
         ui.painter().text(
             egui::pos2(area.left() + 8.0, area.bottom() - 8.0),
             egui::Align2::LEFT_BOTTOM,
@@ -8778,16 +9090,15 @@ fn draw_viewer_image(
         );
     } else if let Some(t) = tex.preview {
         // The native 320 px thumbnail in the centre, without stretching it over the whole screen.
-        let size = t.size_vec2();
-        let scale = (area.width() / size.x).min(area.height() / size.y).min(1.0);
-        let rect = egui::Rect::from_center_size(area.center(), size * scale);
+        let native = rotated_size(t.size_vec2(), rot);
+        let scale = (area.width() / native.x).min(area.height() / native.y).min(1.0);
+        let disp = egui::Rect::from_center_size(area.center(), native * scale);
         let p = ui.painter().with_clip_rect(area.shrink(1.0));
-        p.image(
-            t.id(),
-            rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::from_gray(230),
-        );
+        paint_frame(&p, t.id(), disp, rot, egui::Color32::from_gray(230));
+        shown = Some((
+            egui::Rect::from_center_size(disp.center(), rotated_size(disp.size(), rot)),
+            disp,
+        ));
         // A video never has a "full frame": that is the cover frame, there is nothing to wait for.
         if f.kind != "video" {
             ui.painter().text(
@@ -8807,10 +9118,227 @@ fn draw_viewer_image(
             dim(ui),
         );
     }
+    if let Some((content, disp)) = shown {
+        paint_face_chips(ui, content, disp, rot, f, frame.faces, lang);
+    }
     if f.kind == "video" {
         paint_play_overlay(ui, area, lang);
     }
     resp
+}
+
+/// The scale that shows one image pixel per screen pixel (M22.7): the frame is fitted into the
+/// area at `fit`, so the frame as it is stored needs `1 / fit`. The smallest frame is still shown
+/// at half size, the biggest at `MAX_ZOOM`.
+fn one_to_one_zoom(frame: egui::Vec2, area: egui::Vec2) -> f32 {
+    let fit = (area.x / frame.x.max(1.0))
+        .min(area.y / frame.y.max(1.0))
+        .max(0.01);
+    (1.0 / fit).clamp(0.5, MAX_ZOOM)
+}
+
+/// The size of a frame as the view shows it: a 90° turn swaps the sides (M22.7).
+fn rotated_size(size: egui::Vec2, rot: u8) -> egui::Vec2 {
+    if rot % 2 == 1 {
+        egui::vec2(size.y, size.x)
+    } else {
+        size
+    }
+}
+
+/// A frame drawn into `disp` and turned by 90° steps about its centre. Only the view turns:
+/// the file on disk and the DB are unchanged (M22.7).
+fn paint_frame(
+    p: &egui::Painter,
+    tex: egui::TextureId,
+    disp: egui::Rect,
+    rot: u8,
+    tint: egui::Color32,
+) {
+    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    let rot = rot % 4;
+    if rot == 0 {
+        p.image(tex, disp, uv, tint);
+        return;
+    }
+    let content = egui::Rect::from_center_size(disp.center(), rotated_size(disp.size(), rot));
+    let mut mesh = egui::Mesh::with_texture(tex);
+    mesh.add_rect_with_uv(content, uv, tint);
+    mesh.rotate(
+        egui::emath::Rot2::from_angle(std::f32::consts::FRAC_PI_2 * rot as f32),
+        disp.center(),
+    );
+    p.add(egui::Shape::mesh(mesh));
+}
+
+/// A box turned about a centre by 90° steps: the sides stay axis-aligned, so its corners are
+/// enough to know the new rectangle (M22.7).
+fn rotate_rect(r: egui::Rect, center: egui::Pos2, rot: u8) -> egui::Rect {
+    let rot = rot % 4;
+    if rot == 0 {
+        return r;
+    }
+    let turn = egui::emath::Rot2::from_angle(std::f32::consts::FRAC_PI_2 * rot as f32);
+    egui::Rect::from_points(
+        &[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()]
+            .map(|p| center + turn * (p - center)),
+    )
+}
+
+/// The face chips over the frame: who is in the picture and with what confidence. Drawn only
+/// when the face model has seen this file; the boxes are image pixels of the same oriented frame
+/// the viewer shows, so a turn moves them with it (M22.7).
+fn paint_face_chips(
+    ui: &egui::Ui,
+    content: egui::Rect,
+    disp: egui::Rect,
+    rot: u8,
+    f: &FileRow,
+    faces: &[db::FaceBox],
+    lang: i18n::Lang,
+) {
+    if faces.is_empty() || f.width == 0 || f.height == 0 {
+        return;
+    }
+    let p = ui.painter().with_clip_rect(disp);
+    for face in faces {
+        let r = egui::Rect::from_min_size(
+            content.min
+                + egui::vec2(
+                    face.x as f32 / f.width as f32 * content.width(),
+                    face.y as f32 / f.height as f32 * content.height(),
+                ),
+            egui::vec2(
+                face.w as f32 / f.width as f32 * content.width(),
+                face.h as f32 / f.height as f32 * content.height(),
+            ),
+        );
+        let r = rotate_rect(r, disp.center(), rot);
+        if r.width() < 8.0 || r.height() < 8.0 {
+            continue;
+        }
+        p.rect_stroke(
+            r,
+            2.0,
+            egui::Stroke::new(1.5, accent(ui)),
+            egui::StrokeKind::Outside,
+        );
+        let name: &str = if face.label.is_empty() {
+            i18n::t(lang, "face")
+        } else {
+            &face.label
+        };
+        let text = format!("{name} ({:.0}%)", face.score * 100.0);
+        let galley = p.layout_no_wrap(
+            text,
+            egui::FontId::proportional(10.0),
+            egui::Color32::from_gray(235),
+        );
+        // The chip sits above the box and never leaves the frame.
+        let pos = egui::pos2(
+            r.left(),
+            (r.top() - galley.size().y - 6.0).max(disp.top() + 2.0),
+        );
+        let plate = egui::Rect::from_min_size(pos, galley.size()).expand2(egui::vec2(4.0, 2.0));
+        p.rect_filled(plate, 4.0, egui::Color32::from_black_alpha(180));
+        p.rect_stroke(
+            plate,
+            4.0,
+            egui::Stroke::new(1.0, accent(ui)),
+            egui::StrokeKind::Inside,
+        );
+        p.galley(pos, galley, egui::Color32::from_gray(235));
+    }
+}
+
+/// The series strip under the frame: the day, the number of its snapshots and the neighbours
+/// with their position inside the day. A click opens one; the current one has the accent frame
+/// (M22.7).
+fn draw_series_strip(
+    ui: &mut egui::Ui,
+    day: Option<&str>,
+    series: &[StripItem],
+    cur: usize,
+    textures: &HashMap<i64, egui::TextureHandle>,
+    lang: i18n::Lang,
+) -> Option<usize> {
+    let mut open = None;
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        caps_label(ui, t(lang, "Series"));
+        ui.label(num(ui, day.unwrap_or_default(), 11.0));
+        ui.label(
+            egui::RichText::new(format!("· {}", i18n::count(lang, series.len(), "file")))
+                .size(11.0)
+                .color(dim(ui)),
+        );
+    });
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for item in series {
+            let (rect, resp) = ui.allocate_exact_size(
+                egui::vec2(SERIES_THUMB_W, SERIES_THUMB_H),
+                egui::Sense::click(),
+            );
+            let picked = item.idx == cur;
+            let th = theme(ui);
+            ui.painter().rect_filled(rect, 4.0, th.card);
+            if let Some(tex) = textures.get(&item.id) {
+                ui.painter().with_clip_rect(rect.shrink(1.0)).image(
+                    tex.id(),
+                    fit_rect(rect.shrink(1.0), tex.size_vec2()),
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            // The position inside the day: the number the owner walks by in the grid.
+            let plate = egui::Rect::from_min_size(
+                rect.left_bottom() + egui::vec2(3.0, -15.0),
+                egui::vec2(20.0, 12.0),
+            );
+            ui.painter()
+                .rect_filled(plate, 2.0, egui::Color32::from_black_alpha(150));
+            ui.painter().text(
+                plate.center(),
+                egui::Align2::CENTER_CENTER,
+                item.pos.to_string(),
+                egui::FontId::monospace(10.0),
+                if picked {
+                    accent(ui)
+                } else {
+                    egui::Color32::from_gray(235)
+                },
+            );
+            if item.video {
+                ui.painter().text(
+                    rect.right_top() + egui::vec2(-4.0, 3.0),
+                    egui::Align2::RIGHT_TOP,
+                    "▶",
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::from_gray(235),
+                );
+            }
+            let stroke = if picked {
+                egui::Stroke::new(2.0, accent(ui))
+            } else {
+                egui::Stroke::new(1.0, th.border)
+            };
+            ui.painter()
+                .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+            let resp = resp
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(i18n::fill(
+                    lang,
+                    "photo {} of the day",
+                    &[item.pos.to_string()],
+                ));
+            if resp.clicked() {
+                open = Some(item.idx);
+            }
+        }
+    });
+    open
 }
 
 /// The frame proportion: it chooses the tile width in a row. The sizes live in the DB, so
@@ -11595,8 +12123,9 @@ mod tests {
         PickClick, Scroll, SettingsTab, StorageAction, View, Viewer, WHEEL_NOTCH_PTS, clamp_pan,
         album_card_size, days_in_month, db, first_weekday_monday, fit_rect, list_meta_px,
         list_name_px,
-        list_row_height, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
-        score_percentile, shift_month, shift_to_file_month,
+        list_row_height, monday_of, month_groups, nearest_file_month, one_to_one_zoom, parse_date,
+        pick_kind, rotate_rect, rotated_size, score_percentile, shift_month, shift_to_file_month,
+        MAX_ZOOM,
     };
     use crate::embed;
     use crate::i18n::{self, t};
@@ -11777,6 +12306,39 @@ mod tests {
         let mut texts = Vec::new();
         for c in &out.shapes {
             collect_text(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// The text of a full-screen frame with where it landed: the strip budget is checked by places,
+    /// not by words (M22.7).
+    fn viewer_frame_positions(app: &mut App, ctx: &egui::Context) -> Vec<(String, egui::Pos2)> {
+        viewer_frame_positions_at(app, ctx, egui::vec2(1240.0, 840.0))
+    }
+
+    /// The same at any window size: the tools row wraps on a narrow window, the body must follow.
+    fn viewer_frame_positions_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::Pos2)> {
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let first = ctx.run_ui(raw(), |ui| {
+            let ctx = ui.ctx().clone();
+            app.viewer_modal(&ctx);
+        });
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| {
+            let ctx = ui.ctx().clone();
+            app.viewer_modal(&ctx);
+        });
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text_pos(&c.shape, &mut texts);
         }
         out.drop_without_applying_deltas();
         texts
@@ -12565,12 +13127,99 @@ mod tests {
         );
     }
 
+    /// The full screen on the real DB: the frame, the face chips, the series strip and the
+    /// inspector, sixteen 1240×840 frames. The numbers go to `docs/ARCHITECTURE.md`
+    /// § Measurements.
+    /// `PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored viewer_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn viewer_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        // The day with the most snapshots: the series strip is part of the measurement.
+        let mut best = (0usize, 0i64);
+        for r in app.items.iter().filter(|r| r.kind == "image" && r.taken_at.is_some()) {
+            let day = r.taken_at.as_deref().map(|d| &d[..10.min(d.len())]);
+            let same = app
+                .items
+                .iter()
+                .filter(|x| x.taken_at.as_deref().map(|d| &d[..10.min(d.len())]) == day)
+                .count();
+            if same > best.0 {
+                best = (same, r.id);
+            }
+        }
+        assert!(best.1 != 0, "a photo with a date in the corpus");
+        app.open_viewer(best.1);
+        app.viewer.as_mut().expect("the viewer is open").inspector = true;
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let size = egui::vec2(1240.0, 840.0);
+        let mut drive = |app: &mut App, t: f64| -> f32 {
+            let raw = egui::RawInput {
+                time: Some(t),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let start = Instant::now();
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+            let ms = start.elapsed().as_secs_f32() * 1000.0;
+            out.drop_without_applying_deltas();
+            ms
+        };
+        let mut t = 0.0_f64;
+        for (inspector, word) in [
+            (false, "frame + chips + strip"),
+            (true, "frame + chips + strip + inspector"),
+        ] {
+            app.viewer.as_mut().expect("the viewer is open").inspector = inspector;
+            for _ in 0..4 {
+                drive(&mut app, t);
+                t += 1.0 / 60.0;
+            }
+            let mut times = Vec::new();
+            for _ in 0..16 {
+                times.push(drive(&mut app, t));
+                t += 1.0 / 60.0;
+            }
+            times.sort_by(|a, b| a.total_cmp(b));
+            let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+            println!(
+                "corpus {n} files, full screen ({word}): p50 {:.2} ms ({:.0} fps), p95 {:.2} ms, p99 {:.2} ms",
+                p(0.50),
+                1000.0 / p(0.50),
+                p(0.95),
+                p(0.99)
+            );
+        }
+        let faces = app.viewer_faces.as_ref().map(|(_, f)| f.len()).unwrap_or(0);
+        let (day, series) = app
+            .viewer
+            .as_ref()
+            .map(|v| (v.day.clone(), v.series.len()))
+            .unwrap_or_default();
+        println!(
+            "the series of {day:?} — {series} snapshots, {faces} faces on the frame"
+        );
+    }
+
     fn viewer_with(ids: Vec<i64>, idx: usize) -> Viewer {
         Viewer {
             ids,
             idx,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            rotation: 0,
+            inspector: false,
+            day: None,
+            series: Vec::new(),
             show_text: false,
             slideshow: false,
             interval_s: 3,
@@ -13164,9 +13813,14 @@ mod tests {
         let ctx = egui::Context::default();
         let texts = viewer_frame(&mut app, &ctx, None);
         for want in [
-            "Close",
+            "Back to the grid",
             "Slideshow",
             "Fit",
+            "1:1",
+            "Rotate",
+            "Inspector",
+            "Zoom out",
+            "Zoom in",
             "interval:",
             "3 s",
             "Text on the photo",
@@ -13180,8 +13834,11 @@ mod tests {
             );
         }
         for ru in [
-            "Закрыть",
+            "К сетке",
             "Вписать",
+            "Уменьшить",
+            "Повернуть",
+            "Инспектор",
             "Слайд-шоу",
             "интервал:",
             "Текст на фото",
@@ -13450,6 +14107,215 @@ mod tests {
 
     fn bounds() -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(150.0, 150.0))
+    }
+
+    /// M22.7: the series is the day of the current file — the neighbours in viewer order with
+    /// their position inside the day. A file of another date is not in it, and a file without
+    /// a date has no series at all.
+    #[test]
+    fn the_series_is_the_day_of_the_current_file() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-series.db"));
+        let mut other = file_row(2, "image", "b.jpg");
+        other.taken_at = Some("2024-05-02T09:00".into());
+        let mut late = file_row(3, "image", "c.jpg");
+        late.taken_at = Some("2024-05-01T23:00".into());
+        app.items = vec![file_row(1, "image", "a.jpg"), other, late];
+        let v = viewer_with(vec![1, 2, 3], 0);
+        let (day, series) = app.viewer_series(&v);
+        assert_eq!(day.as_deref(), Some("2024-05-01"));
+        assert_eq!(
+            series.iter().map(|s| s.idx).collect::<Vec<_>>(),
+            vec![0, 2],
+            "only the two snapshots of that day"
+        );
+        assert_eq!(series.iter().map(|s| s.pos).collect::<Vec<_>>(), vec![1, 2]);
+
+        app.items[0].taken_at = None;
+        let (day, series) = app.viewer_series(&viewer_with(vec![1, 2], 0));
+        assert!(day.is_none(), "a file without a date has no series");
+        assert!(series.is_empty());
+    }
+
+    /// M22.7: a turn by 90° swaps the sides of the frame, and the box of a face turns with it.
+    #[test]
+    fn a_turn_by_ninety_degrees_swaps_the_sides_of_the_frame() {
+        let portrait = egui::vec2(240.0, 320.0);
+        assert_eq!(rotated_size(egui::vec2(320.0, 240.0), 0), egui::vec2(320.0, 240.0));
+        assert_eq!(rotated_size(egui::vec2(320.0, 240.0), 1), portrait);
+        assert_eq!(rotated_size(egui::vec2(320.0, 240.0), 2), egui::vec2(320.0, 240.0));
+        assert_eq!(rotated_size(egui::vec2(320.0, 240.0), 3), portrait);
+
+        let center = egui::pos2(100.0, 100.0);
+        let r = egui::Rect::from_min_size(egui::pos2(80.0, 90.0), egui::vec2(20.0, 10.0));
+        assert_eq!(rotate_rect(r, center, 0), r);
+        let turned = rotate_rect(r, center, 1);
+        assert_eq!(turned, egui::Rect::from_min_size(egui::pos2(100.0, 80.0), egui::vec2(10.0, 20.0)));
+        assert_eq!(rotate_rect(r, center, 2), egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(20.0, 10.0)));
+    }
+
+    /// M22.7: "1:1" is the scale where one image pixel takes one screen pixel, not "100 %".
+    #[test]
+    fn one_to_one_shows_the_frame_as_it_is_stored() {
+        let area = egui::vec2(896.0, 620.0);
+        // A 1920×1080 frame is fitted at 0.4667 and needs 2.14× to be seen pixel for pixel.
+        let z = one_to_one_zoom(egui::vec2(1920.0, 1080.0), area);
+        assert!((z - 2.1429).abs() < 0.001, "got {z}");
+        // A small frame is not blown up: the fit is 100 % already, the floor keeps it sane.
+        assert_eq!(one_to_one_zoom(egui::vec2(320.0, 240.0), area), 0.5);
+        // A huge frame is capped by MAX_ZOOM rather than by an endless scale.
+        assert_eq!(one_to_one_zoom(egui::vec2(20000.0, 15000.0), area), MAX_ZOOM);
+    }
+
+    /// M22.7: a turn is about one file; the next one is shown the way it is stored.
+    #[test]
+    fn turning_the_view_does_not_follow_the_next_file() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-turn.db"));
+        let mut v = viewer_with(vec![7, 8], 0);
+        v.rotation = 1;
+        app.viewer_step(&mut v, 1);
+        assert_eq!(v.rotation, 0);
+    }
+
+    /// M22.7: the full screen shows the series of the day under the frame.
+    #[test]
+    fn the_full_screen_draws_the_series_of_the_day() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-series-frame.db"));
+        app.items = vec![file_row(1, "image", "a.jpg"), file_row(2, "image", "b.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.open_viewer(1);
+        let ctx = egui::Context::default();
+        let positions = viewer_frame_positions(&mut app, &ctx);
+        let texts: Vec<String> = positions.iter().map(|(t, _)| t.clone()).collect();
+        assert!(
+            texts.iter().any(|t| t == "SERIES"),
+            "the strip has a label: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "2024-05-01"),
+            "the strip names the day: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "· 2 files"),
+            "the strip counts the snapshots of the day: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "1") && texts.iter().any(|t| t == "2"),
+            "every neighbour carries its position in the day: {texts:?}"
+        );
+        // Neither the tools row nor the strip is cut off by the modal: the window is 840 px, the
+        // modal keeps a 24 px margin, a row of buttons is 26 px and a 64×48 thumbnail ends 14 px
+        // below the top of its number.
+        let bottom = positions
+            .iter()
+            .filter(|(t, _)| t == "1" || t == "2")
+            .map(|(_, p)| p.y)
+            .fold(0.0_f32, f32::max);
+        assert!(
+            bottom + 14.0 <= 816.0,
+            "the series strip must fit the modal: the number at {bottom} with a 48 px thumbnail"
+        );
+        let tools = positions
+            .iter()
+            .find(|(t, _)| t == "Zoom out")
+            .map(|(_, p)| p.y)
+            .expect("the tools row is drawn");
+        assert!(
+            tools + 20.0 <= positions
+                .iter()
+                .find(|(t, _)| t == "SERIES")
+                .map(|(_, p)| p.y)
+                .expect("the strip is below the frame"),
+            "the tools row comes before the strip"
+        );
+        // A narrow window wraps the tools row instead of clipping it, and the body follows: the
+        // strip still ends above the bottom edge of the modal.
+        let narrow = viewer_frame_positions_at(&mut app, &ctx, egui::vec2(760.0, 620.0));
+        let bottom = narrow
+            .iter()
+            .filter(|(t, _)| t == "1" || t == "2")
+            .map(|(_, p)| p.y)
+            .fold(0.0_f32, f32::max);
+        assert!(
+            bottom > 0.0 && bottom + 14.0 <= 596.0,
+            "at 760×620 the strip must fit the modal: the number at {bottom}"
+        );
+    }
+
+    /// M22.7: the faces of the frame are marked over it with the name and the score.
+    #[test]
+    fn the_full_screen_marks_the_faces_over_the_frame() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-viewer-faces.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.viewer_faces = Some((
+            1,
+            vec![db::FaceBox {
+                x: 10,
+                y: 20,
+                w: 30,
+                h: 40,
+                score: 0.92,
+                label: "Lisa".into(),
+            }],
+        ));
+        app.open_viewer(1);
+        let ctx = egui::Context::default();
+        let tex = ctx.load_texture(
+            "frame",
+            egui::ColorImage::from_rgba_unmultiplied([4, 3], &[200u8; 48]),
+            egui::TextureOptions::LINEAR,
+        );
+        app.viewer_tex = Some((1, tex));
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts.iter().any(|t| t == "Lisa (92%)"),
+            "the face is named over the frame: {texts:?}"
+        );
+        // Without faces nothing is marked: an empty list draws no chips.
+        app.viewer_faces = Some((1, Vec::new()));
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            !texts.iter().any(|t| t.contains("(92%)")),
+            "no faces, no chips: {texts:?}"
+        );
+        // A turned frame is drawn through the mesh and keeps the chips over it.
+        app.viewer_faces = Some((
+            1,
+            vec![db::FaceBox {
+                x: 10,
+                y: 20,
+                w: 30,
+                h: 40,
+                score: 0.92,
+                label: "Lisa".into(),
+            }],
+        ));
+        app.viewer.as_mut().expect("the viewer is open").rotation = 1;
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts.iter().any(|t| t == "Lisa (92%)"),
+            "the chip turns with the frame: {texts:?}"
+        );
+    }
+
+    /// M22.7: the inspector shows the file card of the frame inside the viewer.
+    #[test]
+    fn the_inspector_shows_the_card_of_the_frame() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-viewer-card.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.open_viewer(1);
+        app.viewer.as_mut().expect("the viewer is open").inspector = true;
+        let ctx = egui::Context::default();
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts.iter().any(|t| t == "AI tags"),
+            "the card of the frame is next to it: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "a.jpg"),
+            "the header keeps the name: {texts:?}"
+        );
     }
 
     #[test]
