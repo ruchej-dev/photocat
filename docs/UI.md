@@ -110,7 +110,20 @@ the interface rules at the end of the file.
   the OS trash.
 - **Readable text** is the `text_med`/`text_dim` tier of the theme: the caption under a tile
   `text_dim`, the word "spare" `text`, text on a dimmed frame `gray(235)` (a photograph, not a
-  theme). Contrast is checked in both themes (`plan/M22-ui-spec.md` M22.11).
+  theme). Contrast is checked in both themes by `app::tests::both_themes_pass_the_contrast_ratio`
+  (M22.11): body text and the accent words ≥ 4.5:1 on `canvas`/`panel`/`card` and on the selection
+  fill, dim hints ≥ 3.0:1, the danger word ≥ 4.5:1. A token that fails is changed, not the rule —
+  that is why the light accent is the design system's `amber-focus` `#b45309`, not the drawn
+  screen's `#d97706` (2.91:1 on the panel). The accent on the `field` tone is not a pair the
+  screens paint (an idle chip and a disabled row carry `text_med`/`text_dim`), so it is not claimed.
+- **The window is looked at in both themes** (M22.11): `app::tests::every_screen_paints_only_the_
+  tokens_of_its_theme` renders the grid, the four calendar layers, the albums and the full screen in
+  dark and in light and fails on a word, fill or line that is not a token of the palette in use; the
+  four screens without a mock-up and all seven dialogs do the same in their own tests.
+- **The ground is neutral** (M22.11): the light `canvas` is the design system's cool `canvas-base`
+  `#f8fafc`, never its warm Material `background` `#fff8f5`; every ground token keeps `r ≤ g ≤ b`,
+  and a tile's frame is painted in `canvas`, so the letterbox around a photograph does not cast on
+  the photograph. `accent_soft` is the only warm tone and it means "selected", never ground.
 - **One scroll per region.** No nested `ScrollArea`; the exception is the face group list
   (`max_height 250`).
 - **A place for a tile is always reserved**: no preview — the text goes in the same rectangle. There
@@ -301,6 +314,7 @@ a rare one.
 | Preview in the cache | 320 px on the long side, JPEG q≈80 | `index.rs` → `derive::analyze_image` |
 | Tooltip preview | up to 400 px on the long side, proportions kept | `draw_cell` |
 | Left panel | 260 px, width not draggable | `Panel::left(...).exact_size` |
+| Navigation row | 28 px, a 14 px icon and the word at 13 px, the count in mono 11 at the right edge, radius 6; the active row sits on the `card` tone with a 2 px accent edge on the left and its word and number in the accent — the same mark as the settings section list (M22.11); hovering shows the card tone as well | `app.rs::nav_item` |
 | Year row | 20 px, two columns of three rows (`All years` included, so the block never grows): the year in mono 11 on the left, the count of files in mono 10 at the right edge; the picked year has the accent fill and the accent text; "All years" appears only while a year is picked | `app.rs::year_row`, `years_block` |
 | Summary row | 16 px: an 11 px caption on the left, an 11 px mono number at the right edge; four rows fit under the pinned "Summary" of the left panel | `app.rs::stat_row` |
 | Tag chip | 20 px high, mono 11, the word and the count of snapshots after a middle dot ("furniture · 669"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — accent fill, accent 1 px border and accent text; the width follows the text and never the state, so a click does not move the row | `app.rs::tag_chip` |

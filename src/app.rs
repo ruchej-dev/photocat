@@ -519,11 +519,17 @@ const DARK: Theme = Theme {
     accent_hover: egui::Color32::from_rgb(0xd9, 0x77, 0x06),
     on_accent: egui::Color32::from_rgb(0x11, 0x13, 0x17),
     accent_soft: egui::Color32::from_rgba_premultiplied(0x3a, 0x25, 0x02, 38),
-    danger: egui::Color32::from_rgb(0xef, 0x44, 0x44),
+    // M22.11: the mock-up's red `#ef4444` reads 4.34:1 on the card tone, below the 4.5 the danger
+    // word needs at 13 px; the same hue a step brighter keeps the signal and passes on every ground.
+    danger: egui::Color32::from_rgb(0xf4, 0x5c, 0x5c),
     dark: true,
 };
 
-/// The light palette of the mock-up: cold slate, the same amber with AA contrast on white.
+/// The light palette of the mock-up: cold slate with no warm cast in the ground, so the canvas
+/// does not tint a photograph. The amber is the design system's own `amber-focus` `#b45309`: the
+/// drawn screen's `#d97706` reads 2.9:1 on the panel and 3.2:1 on white, below AA for the words it
+/// colours (a picked chip, the active row, a confident tag); `#b45309` is 4.51:1 on the selection
+/// fill and 5.02:1 on the card at the same hue (M22.11).
 const LIGHT: Theme = Theme {
     canvas: egui::Color32::from_rgb(0xf8, 0xfa, 0xfc),
     panel: egui::Color32::from_rgb(0xf1, 0xf5, 0xf9),
@@ -534,11 +540,12 @@ const LIGHT: Theme = Theme {
     text: egui::Color32::from_rgb(0x0f, 0x17, 0x2a),
     text_med: egui::Color32::from_rgb(0x47, 0x55, 0x69),
     text_dim: egui::Color32::from_rgb(0x64, 0x74, 0x8b),
-    accent: egui::Color32::from_rgb(0xd9, 0x77, 0x06),
-    accent_hover: egui::Color32::from_rgb(0xb4, 0x53, 0x09),
+    accent: egui::Color32::from_rgb(0xb4, 0x53, 0x09),
+    accent_hover: egui::Color32::from_rgb(0x92, 0x40, 0x0e),
     on_accent: egui::Color32::from_rgb(0xff, 0xff, 0xff),
     accent_soft: egui::Color32::from_rgb(0xfe, 0xf3, 0xc7),
-    danger: egui::Color32::from_rgb(0xdc, 0x26, 0x26),
+    // The light `DESIGN.md` error `#ba1a1a`: `#dc2626` reads 4.41:1 on the panel.
+    danger: egui::Color32::from_rgb(0xba, 0x1a, 0x1a),
     dark: false,
 };
 
@@ -999,17 +1006,24 @@ fn nav_item(
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_H), egui::Sense::click());
     if ui.is_rect_visible(rect) {
-        // The active item: filled with the field tone and the text in the accent, radius 6 px —
-        // as in the drawn screen (the row is `rounded-md` there, without a left bar).
-        let fill = if selected {
-            th.field
-        } else if resp.hovered() {
+        // The active item: the card tone, the text in the accent and a 2 px accent edge on the
+        // left, radius 6 px (M22.11). The field tone of the drawn screen reads 4.07:1 under the
+        // light accent; the card tone is 5.02:1 in light and 7.60:1 in dark, and the same mark as
+        // the section list of the settings dialog.
+        let fill = if selected || resp.hovered() {
             th.card
         } else {
             egui::Color32::TRANSPARENT
         };
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(RADIUS_ITEM as u8), fill);
+        if selected {
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(rect.left_top(), egui::vec2(2.0, rect.height())),
+                0.0,
+                th.accent,
+            );
+        }
         let color = if selected {
             th.accent
         } else if resp.hovered() {
@@ -13629,8 +13643,9 @@ mod tests {
         ctx: &egui::Context,
         draw: fn(&mut App, &egui::Context),
     ) -> DialogParts {
-        // The palette of the window: a modal inherits the style of the context it is shown in.
-        super::style(ctx);
+        // The palette of the window: a modal inherits the style of the context it is shown in, so
+        // the dialog is looked at in the theme the app carries (M22.11).
+        super::apply_theme(ctx, app.settings.theme);
         let raw = |t: f64| egui::RawInput {
             time: Some(t),
             screen_rect: Some(egui::Rect::from_min_size(
@@ -14899,10 +14914,9 @@ mod tests {
         );
     }
 
-    /// The colours a screen may use: the dark palette plus white (an image tint); a colour with
-    /// transparency is a tone of the palette over something else and is allowed too.
-    fn palette() -> Vec<egui::Color32> {
-        let p = super::DARK;
+    /// The colours a screen may use: the tokens of one palette plus white (an image tint); a
+    /// colour with transparency is a tone of the palette over something else and is allowed too.
+    fn palette(p: super::Theme) -> Vec<egui::Color32> {
         vec![
             p.canvas,
             p.panel,
@@ -14922,31 +14936,99 @@ mod tests {
         ]
     }
 
-    /// M22.9: a screen without a mock-up writes no colour of its own — every drawn word, fill and
-    /// stroke is a token of the palette. (Text over a darkened photograph is the documented
-    /// exception; none of these four screens paints over a photograph.)
-    fn assert_palette(app: &mut App, ctx: &egui::Context, screen: &str) {
+    /// The WCAG 2.1 contrast ratio of two opaque tones: 1.0 is the same colour, 21.0 is black on
+    /// white. M22.11 checks the palette with it instead of judging by eye.
+    fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
+        let luminance = |c: egui::Color32| {
+            let channel = |v: u8| {
+                let v = v as f32 / 255.0;
+                if v <= 0.039_28 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            let [r, g, b, _] = c.to_srgba_unmultiplied();
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+        };
+        let (a, b) = (luminance(a), luminance(b));
+        let (hi, lo) = if a > b { (a, b) } else { (b, a) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// What the eye sees when a translucent token is laid over a ground. egui keeps colours
+    /// premultiplied, so the fill is already weighted by its alpha and is added to the ground.
+    fn over(fill: egui::Color32, ground: egui::Color32) -> egui::Color32 {
+        let [fr, fg, fb, fa] = fill.to_array();
+        let [br, bg, bb, _] = ground.to_array();
+        let k = 1.0 - fa as f32 / 255.0;
+        let mix = |f: u8, b: u8| (f as f32 + b as f32 * k).round().min(255.0) as u8;
+        egui::Color32::from_rgb(mix(fr, br), mix(fg, bg), mix(fb, bb))
+    }
+
+    /// One frame of the whole window in a chosen palette with every word, fill and line. The theme
+    /// is set as a restart would set it: `settings.theme`, and the window applies it itself. Two
+    /// frames, because a modal does not know its size on the first one.
+    fn window_parts_in(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+        mode: db::ThemeMode,
+    ) -> DialogParts {
+        app.settings.theme = mode;
+        app.theme_key = None;
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut window = eframe::Frame::_new_kittest();
+        let first = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut window));
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut window));
+        let mut parts = DialogParts::default();
+        for c in &out.shapes {
+            collect_text_formats(&c.shape, &mut parts.texts);
+            collect_fills(&c.shape, &mut parts.fills);
+            collect_rect_styles(&c.shape, &mut parts.rects);
+        }
+        out.drop_without_applying_deltas();
+        parts
+    }
+
+    /// M22.9, M22.11: a screen writes no colour of its own — every drawn word, fill and stroke is a
+    /// token of the palette of the theme in use, in both themes. (Text over a darkened photograph
+    /// is the documented exception; it is the grey of a mark on a tile, never a theme tone.)
+    fn assert_palette(app: &mut App, ctx: &egui::Context, screen: &str, p: super::Theme) {
         let size = egui::vec2(1240.0, 1400.0);
-        let allowed = palette();
+        let mode = if p.dark {
+            db::ThemeMode::Dark
+        } else {
+            db::ThemeMode::Light
+        };
+        let allowed = palette(p);
+        let theme = if p.dark { "dark" } else { "light" };
         let ok = |c: &egui::Color32, what: &str| {
             assert!(
-                allowed.iter().any(|p| p == c) || c.a() < 255,
-                "the {screen} screen paints {what} off the palette: {c:?}"
+                allowed.iter().any(|q| q == c) || c.a() < 255,
+                "the {screen} screen paints {what} off the {theme} palette: {c:?}"
             );
         };
-        for (text, _, color) in window_text_formats(app, ctx, size) {
+        let parts = window_parts_in(app, ctx, size, mode);
+        for (text, _, color) in &parts.texts {
             // Text on a dimmed frame is the documented exception: the background there is a
             // photograph, not the theme. The marks on a tile keep gray(235)/gray(210).
-            if color == egui::Color32::from_gray(235) || color == egui::Color32::from_gray(210) {
+            if *color == egui::Color32::from_gray(235) || *color == egui::Color32::from_gray(210) {
                 continue;
             }
-            ok(&color, &format!("“{text}”"));
+            ok(color, &format!("“{text}”"));
         }
-        for (_, color) in window_fills(app, ctx) {
-            ok(&color, "a fill");
+        for (_, color) in &parts.fills {
+            ok(color, "a fill");
         }
-        for (_, stroke) in window_strokes(app, ctx, size) {
-            ok(&stroke.color, "a stroke");
+        for (_, _, stroke, _) in &parts.rects {
+            if *stroke != egui::Stroke::NONE {
+                ok(&stroke.color, "a stroke");
+            }
         }
     }
 
@@ -15001,7 +15083,8 @@ mod tests {
             !formats.iter().any(|(_, _, c)| *c == super::DARK.danger),
             "the duplicates screen has no red: {formats:?}"
         );
-        assert_palette(&mut app, &ctx, "duplicates");
+        assert_palette(&mut app, &ctx, "duplicates", super::DARK);
+        assert_palette(&mut app, &ctx, "duplicates", super::LIGHT);
     }
 
     /// M22.9: the faces screen keeps the metrics of a face tile (150×150 + 26) and takes the look
@@ -15063,7 +15146,8 @@ mod tests {
                 .any(|(_, s)| s.width == 2.0 && s.color == super::DARK.accent),
             "the picked face is not marked in the accent: {strokes:?}"
         );
-        assert_palette(&mut app, &ctx, "faces");
+        assert_palette(&mut app, &ctx, "faces", super::DARK);
+        assert_palette(&mut app, &ctx, "faces", super::LIGHT);
     }
 
     /// M22.9: the trash counts in mono and has exactly one red word — its one action that changes
@@ -15096,7 +15180,8 @@ mod tests {
         let (_, count_font, count_color) = find("1 file · 1 B");
         assert_eq!(count_font, egui::FontId::monospace(11.0), "the counter is mono");
         assert_eq!(count_color, super::DARK.text_med);
-        assert_palette(&mut app, &ctx, "trash");
+        assert_palette(&mut app, &ctx, "trash", super::DARK);
+        assert_palette(&mut app, &ctx, "trash", super::LIGHT);
     }
 
     /// M22.9: the integrity screen is a form of the same window — the title where the grid's title
@@ -15153,7 +15238,8 @@ mod tests {
             .filter(|(r, c)| *c == super::DARK.accent && content.contains_rect(*r))
             .count();
         assert_eq!(accent_fills, 1, "the form has exactly one accent fill");
-        assert_palette(&mut app, &ctx, "integrity");
+        assert_palette(&mut app, &ctx, "integrity", super::DARK);
+        assert_palette(&mut app, &ctx, "integrity", super::LIGHT);
     }
 
     /// The M22.9 measurement on the real DB: a frame of each screen without a mock-up.
@@ -15201,20 +15287,29 @@ mod tests {
             (View::Integrity, "integrity"),
         ] {
             app.view = view;
-            let mut times = Vec::new();
-            for _ in 0..40 {
-                times.push(drive(&mut app, &mut t));
+            // Both palettes (M22.11): the light theme must cost what the dark one costs, and on the
+            // real archive no word, fill or line may fall off the palette of the theme in use.
+            for (mode, name, theme) in [
+                (db::ThemeMode::Dark, "dark", super::DARK),
+                (db::ThemeMode::Light, "light", super::LIGHT),
+            ] {
+                app.settings.theme = mode;
+                let mut times = Vec::new();
+                for _ in 0..40 {
+                    times.push(drive(&mut app, &mut t));
+                }
+                times.sort_by(|a, b| a.total_cmp(b));
+                let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+                println!(
+                    "{screen} ({name}): {} files, {} groups, {faces} faces; p50 {:.2} ms ({:.0} fps), p95 {:.2} ms",
+                    n,
+                    app.groups.len(),
+                    p(0.50),
+                    1000.0 / p(0.50),
+                    p(0.95)
+                );
+                assert_palette(&mut app, &ctx, screen, theme);
             }
-            times.sort_by(|a, b| a.total_cmp(b));
-            let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
-            println!(
-                "{screen}: {} files, {} groups, {faces} faces; p50 {:.2} ms ({:.0} fps), p95 {:.2} ms",
-                n,
-                app.groups.len(),
-                p(0.50),
-                1000.0 / p(0.50),
-                p(0.95)
-            );
         }
     }
 
@@ -17457,7 +17552,9 @@ mod tests {
         let light = ctx.style_of(egui::Theme::Light);
         assert!(!light.visuals.dark_mode, "the light palette was not applied");
         assert_eq!(light.visuals.panel_fill, super::LIGHT.panel);
-        assert_eq!(super::LIGHT.accent, egui::Color32::from_rgb(0xd9, 0x77, 0x06));
+        // M22.11: the light accent is the design system's `amber-focus`, not the drawn screen's
+        // `#d97706`, which reads below AA under the words it colours.
+        assert_eq!(super::LIGHT.accent, egui::Color32::from_rgb(0xb4, 0x53, 0x09));
         super::apply_theme(&ctx, db::ThemeMode::Dark);
         assert_eq!(ctx.theme(), egui::Theme::Dark);
         let dark = ctx.style_of(egui::Theme::Dark);
@@ -17495,6 +17592,163 @@ mod tests {
         }
         let c = db::open(&path).unwrap();
         assert_eq!(db::load_settings(&c).theme, db::ThemeMode::Light);
+        // A fresh install opens the dark screen of the mock-up: the choice is a change, not a state.
+        assert_eq!(db::Settings::default().theme, db::ThemeMode::Dark);
+    }
+
+    /// M22.11: contrast is a number, not a taste. AA body text is 4.5:1, a dim hint 3.0:1; the
+    /// accent words — a picked chip, the active row, a confident tag — are body text. The pairs
+    /// below are the ones the screens actually paint: the field tone carries only body and dim
+    /// words (an idle chip, a disabled row), never an accent one.
+    #[test]
+    fn both_themes_pass_the_contrast_ratio() {
+        for (name, p) in [("dark", super::DARK), ("light", super::LIGHT)] {
+            for (ground_name, ground) in [
+                ("canvas", p.canvas),
+                ("panel", p.panel),
+                ("card", p.card),
+                ("field", p.field),
+            ] {
+                for (what, tone, need) in [
+                    ("text", p.text, 4.5),
+                    ("text_med", p.text_med, 4.5),
+                    ("text_dim", p.text_dim, 3.0),
+                ] {
+                    let ratio = contrast(tone, ground);
+                    assert!(
+                        ratio >= need,
+                        "{name}: {what} on {ground_name} is {ratio:.2}:1, below {need}"
+                    );
+                }
+            }
+            // The accent words: a picked chip and the active row on the selection fill, a
+            // confident tag and a mode value on the card, a banner word on the panel.
+            for (ground_name, ground) in [
+                ("canvas", p.canvas),
+                ("panel", p.panel),
+                ("card", p.card),
+                ("selection", over(p.accent_soft, p.card)),
+            ] {
+                let ratio = contrast(p.accent, ground);
+                assert!(
+                    ratio >= 4.5,
+                    "{name}: accent on {ground_name} is {ratio:.2}:1, below 4.5"
+                );
+            }
+            // The one red word, on the grounds it is drawn on (a danger button is transparent).
+            for (ground_name, ground) in [
+                ("canvas", p.canvas),
+                ("panel", p.panel),
+                ("card", p.card),
+            ] {
+                let ratio = contrast(p.danger, ground);
+                assert!(
+                    ratio >= 4.5,
+                    "{name}: danger on {ground_name} is {ratio:.2}:1, below 4.5"
+                );
+            }
+            // A filled accent button: white on amber in light, ink on amber in dark — idle and
+            // under the cursor, because the hover tone is the darker one.
+            for (state, fill) in [("idle", p.accent), ("hovered", p.accent_hover)] {
+                let ratio = contrast(p.on_accent, fill);
+                assert!(
+                    ratio >= 4.5,
+                    "{name}: text on the {state} accent fill is {ratio:.2}:1, below 4.5"
+                );
+            }
+        }
+    }
+
+    /// M22.11: the light ground is neutral — a warm canvas casts on the photograph, and a
+    /// photograph is the one thing the window must not judge. The tile frame is the canvas token,
+    /// so the ground under a preview comes from the theme and never from the accent.
+    #[test]
+    fn the_light_ground_is_neutral_and_the_tile_frame_is_the_canvas() {
+        let p = super::LIGHT;
+        for (name, tone) in [
+            ("canvas", p.canvas),
+            ("panel", p.panel),
+            ("card", p.card),
+            ("field", p.field),
+            ("border", p.border),
+        ] {
+            let [r, g, b, _] = tone.to_srgba_unmultiplied();
+            assert!(
+                r <= g && g <= b,
+                "the light {name} is warm: {tone:?}"
+            );
+        }
+        // The cool `canvas-base` of the light design system, not its warm Material `background`.
+        assert_eq!(
+            p.canvas,
+            egui::Color32::from_rgb(0xf8, 0xfa, 0xfc),
+            "the light canvas is not the neutral `canvas-base`"
+        );
+        // The grid paints the frame of every tile in that tone: the letterbox around a preview is
+        // the neutral canvas in both themes.
+        for theme in [super::DARK, super::LIGHT] {
+            let mut app = calendar_app();
+            app.view = View::Grid;
+            let ctx = egui::Context::default();
+            let mode = if theme.dark {
+                db::ThemeMode::Dark
+            } else {
+                db::ThemeMode::Light
+            };
+            let parts = window_parts_in(&mut app, &ctx, egui::vec2(1240.0, 840.0), mode);
+            let frames = parts
+                .fills
+                .iter()
+                .filter(|(r, c)| *c == theme.canvas && r.width() > 80.0 && r.height() > 60.0)
+                .count();
+            assert!(
+                frames >= 3,
+                "the tile frames are not the canvas tone in this theme: {frames} of them, {:?}",
+                parts.fills
+            );
+        }
+    }
+
+    /// M22.11: every screen is looked at in both palettes — its words, fills and lines stay the
+    /// tokens of the theme in use, so the light window is not the dark screen with a white ground.
+    /// The four screens without a mock-up and the seven dialogs check themselves in their own
+    /// tests; here are the main screen, the calendar in its layers, the albums and the full screen.
+    #[test]
+    fn every_screen_paints_only_the_tokens_of_its_theme() {
+        let ctx = egui::Context::default();
+        for p in [super::DARK, super::LIGHT] {
+            let mut app = calendar_app();
+            app.view = View::Grid;
+            assert_palette(&mut app, &ctx, "grid", p);
+            for scale in [CalScale::Year, CalScale::Month, CalScale::Week, CalScale::Day] {
+                let mut app = calendar_app();
+                app.cal_scale = scale;
+                app.cal_day = Some("2024-05-01".into());
+                assert_palette(&mut app, &ctx, "calendar", p);
+            }
+            let mut app = calendar_app();
+            app.view = View::Albums;
+            app.albums = vec![db::AlbumNode {
+                id: 1,
+                parent_id: 0,
+                position: 0,
+                name: "Summer".into(),
+                note: String::new(),
+                depth: 0,
+                files: 3,
+                trashed: 0,
+                subalbums: 0,
+                bytes: 6144,
+                cover: Some("/tmp/a.jpg".into()),
+            }];
+            app.album_selected = Some(1);
+            app.album_set = app.items.iter().map(|f| f.id).collect();
+            assert_palette(&mut app, &ctx, "albums", p);
+            let mut app = calendar_app();
+            app.selected = Some(1);
+            app.viewer = Some(viewer_with(vec![1], 0));
+            assert_palette(&mut app, &ctx, "full screen", p);
+        }
     }
 
     /// The language choice lives in the DB (`settings.lang`), not in the process memory: after a
@@ -17944,11 +18198,14 @@ mod tests {
             let u = c.to_srgba_unmultiplied();
             (0..3).all(|i| (u[i] as i16 - accent[i] as i16).abs() <= 2)
         };
+        // The left panel keeps an edge of its own on the active view (M22.11): it sits at the
+        // panel's padding, so the section list of the dialog is found to the right of x = 100.
         let mut edges: Vec<egui::Rect> = fills
             .iter()
             .filter(|(r, c)| {
                 (r.width() - 2.0).abs() < 0.01
                     && (r.height() - super::NAV_H).abs() < 0.01
+                    && r.left() > 100.0
                     && same_hue(*c)
             })
             .map(|(r, _)| *r)
@@ -18232,102 +18489,109 @@ mod tests {
     #[test]
     fn every_dialog_is_a_card_with_one_accent_button() {
         let ctx = egui::Context::default();
-        let th = super::DARK;
-        let allowed = palette();
         let radius = egui::CornerRadius::same(super::RADIUS_CARD as u8);
-        for which in [
-            Dialog::Roots,
-            Dialog::Picker,
-            Dialog::Storage,
-            Dialog::Album,
-            Dialog::Export,
-            Dialog::Trash,
-            Dialog::Settings,
+        // Both themes: a dialog is a card in each of them, and the red of the OS-trash path has to
+        // stay a token of the theme it is drawn in (M22.11).
+        for (mode, th) in [
+            (db::ThemeMode::Dark, super::DARK),
+            (db::ThemeMode::Light, super::LIGHT),
         ] {
-            let mut app = dialog_app("cards");
-            let draw = open_dialog(&mut app, which);
-            let parts = dialog_parts(&mut app, &ctx, draw);
-            // The frame of the dialog: the card tone, a 1 px line, the 8 px radius.
-            let card = parts
-                .rects
-                .iter()
-                .filter(|(_, fill, stroke, r)| {
-                    *fill == th.card && stroke.color == th.border && *r == radius
-                })
-                .max_by(|a, b| a.0.width().total_cmp(&b.0.width()))
-                .cloned();
-            let card = card.unwrap_or_else(|| {
-                panic!("{which:?}: the dialog is not a card: {:?}", parts.rects)
-            });
-            assert!(
-                card.0.width() > 400.0 && card.0.height() > 120.0,
-                "{which:?}: the card frame is too small to be the dialog: {:?}",
-                card.0
-            );
-            // One accent button: a pressed target at least 20 px high. A 2 px accent edge of a
-            // picked row is a fill too, so the height and the width both have to be a button's.
-            let accents: Vec<egui::Rect> = parts
-                .fills
-                .iter()
-                .filter(|(r, c)| {
-                    *c == th.accent && r.width() > 20.0 && r.height() >= 20.0
-                })
-                .map(|(r, _)| *r)
-                .collect();
-            if matches!(which, Dialog::Trash) {
-                assert!(
-                    accents.is_empty(),
-                    "{which:?}: the path to the OS trash must not wear the accent: {accents:?}"
-                );
-                assert!(
-                    parts
-                        .rects
-                        .iter()
-                        .any(|(_, _, s, _)| s.color == th.danger && s.width > 0.5),
-                    "{which:?}: the danger border is missing: {:?}",
-                    parts.rects
-                );
-            } else if which == Dialog::Settings {
-                // Every change is saved at once: the settings dialog has no primary action.
-                assert!(
-                    accents.is_empty(),
-                    "{which:?}: the settings dialog has no main action: {accents:?}"
-                );
-            } else {
-                assert_eq!(
-                    accents.len(),
-                    1,
-                    "{which:?}: the dialog has {} accent buttons: {accents:?}",
-                    accents.len()
-                );
-            }
-            // The type scale has no 16: a dialog's title is a 14 px subheading.
-            assert!(
-                !parts.texts.iter().any(|(_, f, _)| f.size == 16.0),
-                "{which:?}: a 16 px word is outside the type scale: {:?}",
-                parts
-                    .texts
+            let allowed = palette(th);
+            for which in [
+                Dialog::Roots,
+                Dialog::Picker,
+                Dialog::Storage,
+                Dialog::Album,
+                Dialog::Export,
+                Dialog::Trash,
+                Dialog::Settings,
+            ] {
+                let mut app = dialog_app("cards");
+                app.settings.theme = mode;
+                let draw = open_dialog(&mut app, which);
+                let parts = dialog_parts(&mut app, &ctx, draw);
+                // The frame of the dialog: the card tone, a 1 px line, the 8 px radius.
+                let card = parts
+                    .rects
                     .iter()
-                    .filter(|(_, f, _)| f.size == 16.0)
-                    .map(|(t, _, _)| t.clone())
-                    .collect::<Vec<_>>()
-            );
-            // Nothing here is a colour of its own: every word, fill and line is a token.
-            let ok = |c: &egui::Color32, what: &str| {
+                    .filter(|(_, fill, stroke, r)| {
+                        *fill == th.card && stroke.color == th.border && *r == radius
+                    })
+                    .max_by(|a, b| a.0.width().total_cmp(&b.0.width()))
+                    .cloned();
+                let card = card.unwrap_or_else(|| {
+                    panic!("{which:?}: the dialog is not a card: {:?}", parts.rects)
+                });
                 assert!(
-                    allowed.iter().any(|p| p == c) || c.a() < 255,
-                    "{which:?} paints {what} off the palette: {c:?}"
+                    card.0.width() > 400.0 && card.0.height() > 120.0,
+                    "{which:?}: the card frame is too small to be the dialog: {:?}",
+                    card.0
                 );
-            };
-            for (text, _, color) in &parts.texts {
-                ok(color, &format!("“{text}”"));
-            }
-            for (_, color) in &parts.fills {
-                ok(color, "a fill");
-            }
-            for (_, _, stroke, _) in &parts.rects {
-                if *stroke != egui::Stroke::NONE {
-                    ok(&stroke.color, "a line");
+                // One accent button: a pressed target at least 20 px high. A 2 px accent edge of a
+                // picked row is a fill too, so the height and the width both have to be a button's.
+                let accents: Vec<egui::Rect> = parts
+                    .fills
+                    .iter()
+                    .filter(|(r, c)| {
+                        *c == th.accent && r.width() > 20.0 && r.height() >= 20.0
+                    })
+                    .map(|(r, _)| *r)
+                    .collect();
+                if matches!(which, Dialog::Trash) {
+                    assert!(
+                        accents.is_empty(),
+                        "{which:?}: the path to the OS trash must not wear the accent: {accents:?}"
+                    );
+                    assert!(
+                        parts
+                            .rects
+                            .iter()
+                            .any(|(_, _, s, _)| s.color == th.danger && s.width > 0.5),
+                        "{which:?}: the danger border is missing: {:?}",
+                        parts.rects
+                    );
+                } else if which == Dialog::Settings {
+                    // Every change is saved at once: the settings dialog has no primary action.
+                    assert!(
+                        accents.is_empty(),
+                        "{which:?}: the settings dialog has no main action: {accents:?}"
+                    );
+                } else {
+                    assert_eq!(
+                        accents.len(),
+                        1,
+                        "{which:?}: the dialog has {} accent buttons: {accents:?}",
+                        accents.len()
+                    );
+                }
+                // The type scale has no 16: a dialog's title is a 14 px subheading.
+                assert!(
+                    !parts.texts.iter().any(|(_, f, _)| f.size == 16.0),
+                    "{which:?}: a 16 px word is outside the type scale: {:?}",
+                    parts
+                        .texts
+                        .iter()
+                        .filter(|(_, f, _)| f.size == 16.0)
+                        .map(|(t, _, _)| t.clone())
+                        .collect::<Vec<_>>()
+                );
+                // Nothing here is a colour of its own: every word, fill and line is a token.
+                let ok = |c: &egui::Color32, what: &str| {
+                    assert!(
+                        allowed.iter().any(|p| p == c) || c.a() < 255,
+                        "{which:?} paints {what} off the palette: {c:?}"
+                    );
+                };
+                for (text, _, color) in &parts.texts {
+                    ok(color, &format!("“{text}”"));
+                }
+                for (_, color) in &parts.fills {
+                    ok(color, "a fill");
+                }
+                for (_, _, stroke, _) in &parts.rects {
+                    if *stroke != egui::Stroke::NONE {
+                        ok(&stroke.color, "a line");
+                    }
                 }
             }
         }

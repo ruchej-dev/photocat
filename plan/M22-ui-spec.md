@@ -44,16 +44,20 @@ frame (there the background is a photograph, not the theme).
 | `text` | `#e2e2e8` | `#0f172a` | names, counters, headings |
 | `text_med` | `#a7aab3` | `#475569` | labels, EXIF keys, secondary rows |
 | `text_dim` | `#7b808c` | `#64748b` | placeholders, hints, disabled |
-| `accent` | `#f59e0b` | `#d97706` | selected, confident tag, keep, progress |
-| `accent_hover` | `#d97706` | `#b45309` | hover/pressed of the accent |
+| `accent` | `#f59e0b` | `#b45309` | selected, confident tag, keep, progress |
+| `accent_hover` | `#d97706` | `#92400e` | hover/pressed of the accent |
 | `on_accent` | `#111317` | `#ffffff` | text on the accent fill |
 | `accent_soft` | amber 15 % | `#fef3c7` | selection fill, active row, chips |
-| `danger` | `#ef4444` | `#dc2626` | "To trash", "Empty the trash" only |
+| `danger` | `#f45c5c` | `#ba1a1a` | "To trash", "Empty the trash" only |
 
 Where the two `DESIGN.md` files disagree with the HTML screens (the dark front-matter is a warm
 Material scheme, the rendered dark screens are cool graphite and the prose says "cool industrial
 grays"), the **rendered screens win for dark** and the **light `DESIGN.md` wins for light**. The
 reason is written in ADR 0044.
+
+The light amber is the design system's own `amber-focus` `#b45309`, not the drawn screen's `#d97706`:
+the latter reads 2.9:1 on the panel and 3.2:1 on white, below AA under the words it colours. The dark
+red and the light red were moved a step for the same reason (M22.11; the numbers are in §6).
 
 ### 2.2 Shape, lines and depth
 
@@ -617,12 +621,47 @@ list cost 0.84 ms per frame before its counters were counted on a reload. `cargo
 `WordButton::danger` in the trash confirmation, the export report body, the three tests and the
 measurement), `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
-### M22.11 — light theme pass
+### M22.11 — light theme pass ✅
 
 1. Every screen is looked at in both themes: contrast of `text_med`/`text_dim` on `panel`/`card` ≥ 4.5
    for body text, ≥ 3.0 for dim hints.
 2. The preview area does not tint a photograph: the light canvas is neutral, no warm cast.
 3. The dark theme stays the default; the choice survives a restart.
+
+**Done.** The pass found two real failures and no screen that wrote a colour of its own. (1) The light
+`accent` `#d97706` read 2.91:1 on the panel and 2.86:1 on the selection fill, yet it colours the active
+navigation row, the picked chip, the picked year and the confident tag — all body text. It became the
+light design system's own `amber-focus` `#b45309` (4.58:1 on the panel, 5.02:1 on the card, 4.51:1 on
+the selection fill); `accent_hover` followed to `#92400e`. The active row of the left panel also changed
+from the `field` tone to the `card` tone with a 2 px accent edge — the tone §2.5 asks for, the mark the
+settings section list already had, and 5.02:1 under the accent in light against 4.07:1 before. (2) The
+danger word read 4.34:1 on the dark card and 4.41:1 on the light panel: the dark red became `#f45c5c`
+(5.07:1) and the light one the design system's error `#ba1a1a` (5.90–6.46:1).
+
+**Checked.** `both_themes_pass_the_contrast_ratio` computes the WCAG 2.1 ratio of every pair the
+screens actually paint — body ≥ 4.5, dim hints ≥ 3.0, the accent on canvas/panel/card/selection, the
+danger word on its three grounds, the text on the idle and hovered accent fill. `the_light_ground_is_
+neutral_and_the_tile_frame_is_the_canvas` keeps the light ground cool (`r ≤ g ≤ b`) and asserts the tile
+frame is the canvas token in both themes, so the letterbox around a photograph is the neutral ground.
+`every_screen_paints_only_the_tokens_of_its_theme` renders the grid, the four calendar layers, the
+albums and the full screen in both palettes and fails on any word, fill or line that is not a token;
+the four screens without a mock-up and all seven dialogs do the same in their own tests, in both themes.
+A fresh install still opens dark (`db::Settings::default`), and the choice survives a restart — the
+settings row was already there.
+
+**Measured** (WCAG 2.1; `dark` selection composited, amber 15 % over the card):
+
+| Pair | Dark | Light |
+|---|---|---|
+| `text` on `canvas` / `panel` / `card` | 14.97 / 13.22 / 12.64 | 17.06 / 16.30 / 17.85 |
+| `text_med` on `canvas` / `panel` / `card` | 8.32 / 7.35 / 7.03 | 7.24 / 6.92 / 7.58 |
+| `text_dim` on `canvas` / `panel` / `card` | 4.88 / 4.31 / 4.12 | 4.55 / 4.34 / 4.76 |
+| `accent` on `panel` / `card` / selection | 7.94 / 7.60 / 4.59 | 4.58 / 5.02 / 4.51 |
+| `danger` on `panel` / `card` | 5.31 / 5.07 | 5.90 / 6.46 |
+| `on_accent` on `accent` / `accent_hover` | 8.66 / 5.84 | 5.02 / 7.09 |
+
+**Files.** `src/app.rs` (`LIGHT`, `DARK`, `nav_item`, `palette`, `contrast`, `over`, `window_parts_in`,
+`assert_palette`, the three tests), `docs/UI.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `plan/`.
 
 ## 7. Not doing in M22
 

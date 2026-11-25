@@ -1005,7 +1005,7 @@ was touched: `cargo test`, `clippy` and `check.sh` are unaffected.
 
 ---
 
-## M22 — the desktop UI specification: two themes and screen-by-screen conformance
+## M22 — the desktop UI specification: two themes and screen-by-screen conformance ✅
 
 **Goal.** The owner's mock-up set (`docs/references/mockups/`) becomes the interface: one token palette
 with a dark and a light theme, the layout of the main screens, and the same rules for the screens the
@@ -1036,7 +1036,11 @@ one accent) — 2026-11-25; M22.10 (dialogs and reports: one `dialog_frame` — 
 `border`, the 8 px radius, 16 px of air — for all seven dialogs, 14 px titles inside the type scale,
 exactly one accent button per action dialog and `danger` on the OS-trash confirmation, a facts row in
 mono 11 for the numbers, the export report in mono 11 with a copy button, and the last two English
-words of the Russian window through `t()`) — 2026-11-25.
+words of the Russian window through `t()`) — 2026-11-25; M22.11 (the light theme pass: the WCAG 2.1
+ratio of every pair the screens paint is a test now, the light accent became the design system's
+`amber-focus` `#b45309` — 2.91:1 → 4.58:1 on the panel — the active navigation row moved to the
+`card` tone with a 2 px accent edge, the two `danger` values rose one step, and every screen renders
+in both palettes without a colour of its own) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
@@ -1060,6 +1064,10 @@ words of the Russian window through `t()`) — 2026-11-25.
    274 px coast after a 1200 px/s flick, 145–152 fps at p95 on the corpus).
 8. Every task ends with a measurement or a look at the result, `cargo test`, `clippy`, `check.sh`;
    `docs/UI.md` § Layout, § Metrics and § "What the interface will not have" follow the code.
+9. Every screen reads in both themes: body text and the accent words ≥ 4.5:1, dim hints ≥ 3.0:1
+   (checked by `both_themes_pass_the_contrast_ratio`), no screen writes a colour of its own in
+   either palette (checked per screen), the light ground is neutral, and dark stays the default —
+   M22.11 ✅.
 
 **Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/DECISIONS.md`, `plan/`.
 

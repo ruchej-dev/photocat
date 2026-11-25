@@ -1127,6 +1127,18 @@ a token the `Visuals` mapping does not cover calls `theme(ui)`. `docs/UI.md` § 
 § "What the interface will not have" are updated in the same change, and the task list for the
 remaining screens is `plan/M22-ui-spec.md` § 6.
 
+**Revision (M22.11).** The light palette took the rendered light `DESIGN.md`'s slate ground and its
+amber `#d97706`; the contrast pass showed that amber at 2.91:1 on the panel, 3.19:1 on the card and
+2.86:1 on the selection fill — under the words it colours (the active navigation row, a picked chip,
+a picked year, a confident tag), which are body text. The palette now uses the same file's
+`amber-focus` `#b45309` (4.58 / 5.02 / 4.51:1), its `accent_hover` follows at `#92400e`, and the
+active navigation row sits on the `card` tone with a 2 px accent edge — the tone the specification's
+§2.5 always named — instead of the `field` tone. The dark and light `danger` values moved one step
+for the same reason (4.34:1 on the card and 4.41:1 on the panel). Everything else of the decision
+stands: the same tokens, one accent, no colour written by a screen. The revision adds a rule that is
+a test and not a taste — `both_themes_pass_the_contrast_ratio` computes the WCAG 2.1 ratio of every
+pair the screens paint, so a token can no longer drift below AA unnoticed.
+
 ## 0045. Previews follow the EXIF orientation; a stale preview is overwritten, not deleted
 
 `derive::analyze_image` decoded a snapshot with `ImageReader::decode`, which ignores the EXIF

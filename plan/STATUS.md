@@ -7,7 +7,7 @@
 
 STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
 the parts of the main screen), M22.10 (dialogs and reports: one card frame, one accent button, mono
-numbers) → next:M22.11 (the light theme pass), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -156,6 +156,21 @@ facts row of its own in mono 11 ("2 files" per folder root, "1 file · 18.4 MiB"
 "export: 3/8") instead of inside a translated sentence, and the export report is a mono 11 body in a
 scroll area with a copy button. Measured on a copy of the real DB: folder list p50 0.03 ms, export
 with a 500-line plan p50 0.18 ms, the other dialogs 0.02–0.08 ms.
+Since M22.11 both themes are measured, not eyeballed. The light palette took the drawn screen's amber
+`#d97706`, which reads 2.91:1 on the panel and 2.86:1 on the selection fill — under the active
+navigation row, a picked chip, a picked year and a confident tag, all body text. The light accent is
+now the light design system's own `amber-focus` `#b45309` (4.58:1 on the panel, 5.02:1 on the card,
+4.51:1 on the selection fill) with `#92400e` for its hover, and the active navigation row sits on the
+`card` tone with a 2 px accent edge — the tone the specification's §2.5 always named — instead of the
+`field` tone (4.07:1 → 5.02:1). The two `danger` values rose one step for the same reason (dark
+`#ef4444` was 4.34:1 on the card, now `#f45c5c` 5.07:1; light `#dc2626` 4.41:1 on the panel, now the
+design system's error `#ba1a1a` 5.90:1). Everything else held: every screen writes no colour of its
+own in either palette, the light ground is the cool `canvas-base` `#f8fafc` with no warm cast (a tile's
+frame is painted in `canvas`), dark stays the default and the choice survives a restart. Three tests
+hold it: `both_themes_pass_the_contrast_ratio` (WCAG 2.1 over every pair the screens paint),
+`the_light_ground_is_neutral_and_the_tile_frame_is_the_canvas`, and
+`every_screen_paints_only_the_tokens_of_its_theme` (grid, four calendar layers, albums, full screen —
+plus the four screens without a mock-up and all seven dialogs in their own tests).
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
@@ -2662,3 +2677,62 @@ storage 0.02 ms; album delete 0.02 ms; export p50 0.18 ms, p95 0.32; trash 0.02 
 button, the facts row, the report body); `plan/M22-ui-spec.md` §2.4 names the dialog frame and §6
 M22.10 carries the result; `docs/ARCHITECTURE.md` § Measurements gets the row; this file and
 `plan/BACKLOG.md` count M22.10 as done.
+
+## M22.11 — the light theme pass (2026-11-25) ✅
+
+Spec §6 M22.11 asks for the pass that was never done after the palettes arrived in M22.1: every screen
+looked at in both themes, body text and dim hints above the AA floor, an untinted preview ground, and
+dark still the default. The pass found two genuine failures — both in the palette, none in a screen
+(no screen wrote a colour of its own in either theme, which is what §6 M22.10's and M22.9's checks
+had already bought).
+
+**The light accent.** The light palette took the drawn mock-up's amber `#d97706`; on the light slate it
+reads 2.91:1 on the panel, 3.19:1 on the card and 2.86:1 on the selection fill. That tone colours the
+active navigation row, a picked chip, a picked year and the confident tag — body text at 11–13 px — and
+it also fills a primary button whose word is white on it (3.19:1). The same light `DESIGN.md` names
+`amber-focus: #b45309`; that tone reads 4.58 / 5.02 / 4.51:1, and white on it 5.02:1. The light accent
+is `#b45309` now, `accent_hover` `#92400e` (white on it 7.09:1). The active row of the left panel moved
+from the `field` tone (4.07:1 under the light accent) to the `card` tone with a 2 px accent edge —
+the tone spec §2.5 always named and the mark the settings section list already carried — so the whole
+navigation reads the same in both themes.
+
+**The danger word.** "Empty the trash" and "To trash" are body text too: the dark red `#ef4444` read
+4.34:1 on the card, the light `#dc2626` 4.41:1 on the panel. They are `#f45c5c` (5.07:1 on the card,
+5.31 on the panel, 6.01 on the canvas) and the light design system's error `#ba1a1a` (5.90–6.46:1).
+`danger` still means only the path to the OS trash, and still no more than one such word per screen.
+
+**The neutral ground.** The light `canvas` was already the cool `canvas-base` `#f8fafc`, not the warm
+Material `background` `#fff8f5` of the same file (ADR 0044 chose that deliberately). The pass makes it
+a rule with a test rather than a note: every ground token keeps `r ≤ g ≤ b`, and a tile's frame is
+painted in `canvas`, so the letterbox around a photograph is the neutral ground and the only warm tone
+on screen is `accent_soft`, which always means "selected".
+
+**Checks.** `both_themes_pass_the_contrast_ratio` computes the WCAG 2.1 luminance ratio over the pairs
+the screens actually paint: `text`/`text_med` ≥ 4.5 and `text_dim` ≥ 3.0 on `canvas`/`panel`/`card`/
+`field`; the accent ≥ 4.5 on canvas, panel, card and the selection fill; the danger word ≥ 4.5 on its
+three grounds; `on_accent` ≥ 4.5 on the idle and hovered accent fill. The dark selection fill is
+composited (egui keeps colours premultiplied: amber 15 % over the card), which is 4.59:1 under the
+accent. `the_light_ground_is_neutral_and_the_tile_frame_is_the_canvas` holds the ground and the frame
+in both themes; a fresh install opens dark (`db::Settings::default`). `every_screen_paints_only_the_
+tokens_of_its_theme` renders the grid, all four calendar layers, the albums and the full screen in
+both palettes and fails on a word, fill or line off the palette; the four screens without a mock-up
+and all seven dialogs check both themes in their own tests (`assert_palette` and `dialog_parts` now
+take the theme from the app, the dialog helper applies it itself).
+
+**Measured** (WCAG 2.1, both palettes, the numbers also in `docs/ARCHITECTURE.md` § Measurements):
+`text` 14.97/13.22/12.64 dark and 17.06/16.30/17.85 light on canvas/panel/card; `text_med`
+8.32/7.35/7.03 and 7.24/6.92/7.58; `text_dim` 4.88/4.31/4.12 and 4.55/4.34/4.76; the accent on the
+panel/card/selection 7.94/7.60/4.59 dark and 4.58/5.02/4.51 light; the danger word 5.31/5.07 dark and
+5.90/6.46 light on panel/card; `on_accent` 8.66 idle and 5.84 hovered in dark, 5.02 and 7.09 in light.
+`cargo test` 278 passed, `cargo test --test source_language` 3 passed, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. On the real DB of 2232 files
+the four screens without a mock-up cost the same in the light palette as in the dark one (p50
+duplicates 5.93 vs 5.72 ms, faces 8.46 vs 8.41, trash 5.25 vs 5.23, integrity 4.88 vs 4.90, 40 frames
+each), and no word, fill or line fell off either palette on real previews, tags and faces.
+
+**Documents.** `docs/UI.md` § Layout gets the contrast rule with its numbers, the "looked at in both
+themes" rule, the neutral-ground rule and the navigation row in the metrics table;
+`plan/M22-ui-spec.md` §2.1 carries the new token values and §6 M22.11 the result;
+`docs/DECISIONS.md` ADR 0044 gets the revision paragraph (the palette change and the test that now
+guards it); `docs/ARCHITECTURE.md` § Measurements gets the row; this file and `plan/BACKLOG.md` count
+M22.11 and the M22 block as done.
