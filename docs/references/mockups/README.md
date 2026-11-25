@@ -22,7 +22,7 @@ with no network shows the structure but not the final look. The `screen.png` fil
 | `photocat_1/` | main screen: top strip, search, left panel, month grid, inspector, settings dialog | M22.1/M22.2, the main screen of to-day |
 | `photocat_2/` | calendar, month layer: week grid with thumbnails, day list | M21.4b, fully since M22.5 |
 | `photocat_12/` | calendar, year layer: 12 months with counts, a month list below | M22.5 |
-| `photocat_3/` | albums: card grid, filters, sorting, the selection bar | the albums screen of to-day, partly |
+| `photocat_3/` | albums: card grid, filters, sorting, the selection bar | the albums screen of to-day: the card look inside the tree (M22.6); the tree stays, the floating bar is refused |
 | `photocat_5/`, `photocat_6/` | full-screen viewer: header, zoom/tools row, series strip, player controls, inspector (two variants) | M13/M21.5, the viewer of to-day, partly |
 | `photocat_4/` | an older shell: top navigation, a settings dialog with autostart, GPU and backup | refused — see `plan/M22-ui-spec.md` §5 |
 

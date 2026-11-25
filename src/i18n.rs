@@ -1540,6 +1540,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("expand the sub-albums", "раскрыть подальбомы"),
     ("open the album; the cover is the first photo in its order", "открыть альбом; обложка — первый снимок в его порядке"),
     ("open the album", "открыть альбом"),
+    ("{} · {} · {} — open the album", "{} · {} · {} — открыть альбом"),
     ("{} files", "файлов {}"),
     ("photocat — a media archive cataloguer", "photocat — каталог медиаархива"),
     ("{} files in the index, {}", "в индексе {} файлов, {}"),

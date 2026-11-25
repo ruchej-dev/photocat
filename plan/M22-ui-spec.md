@@ -112,7 +112,7 @@ reason is written in ADR 0044.
 | Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 ✅ |
-| Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 |
+| Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 ✅ |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 |
 | Duplicates | — | no mock-up: same strips, header, chips row, `draw_cell`, amber "keep", red-free everywhere | M22.9 |
 | Faces | — | same panels, face tile metrics unchanged, accent only on a picked face | M22.9 |
@@ -404,13 +404,26 @@ so its day list sits below the fold and is reached by the same scroll as the gri
 **Files.** `src/app.rs` (`cal_cell`, `cal_bar`, `day_title`, `day_heading`, `day_strip`, `caption_date`,
 `Cells::time_only`, the four layers), `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
-### M22.6 — albums
+### M22.6 — albums ✅ (this change)
 
 1. The tree keeps its metrics; the open album gets the card header (name 14 px, "N files · M
    subalbums · size" mono 11) and the same action row.
 2. Subalbum tiles get the card look of the mock-up (canvas cover area, name, counts), one tile model.
 3. The selection bar is the chips row; `Album order` keeps its place.
 4. No new screen: "Album cards instead of a tree" is an owner's decision (q. 7).
+
+**Result.** The view heading is "Albums" with the count of albums; the open album's header
+(`album_header`) carries the name at 14 px and "N files · M sub-albums · size" in mono 11 plus " · N in
+the trash", above the unchanged action row, and "+ New album" became the view's accent button. A
+sub-album card (`draw_album_cell`, `album_card_size`) is the width of the "Tiles" slider, a 16:10
+`canvas` cover with the sub-album's first snapshot fitted whole (a folder mark when it has none), the
+name at 13 px clipped to the card, "N files" and the size in mono 10, the card tone with a 1 px border
+and the accent line under the cursor — 105 px at 100, 205 px at 260, one model for every sub-album. The
+cards take one row, two at most, the rest scrolls, and the snapshot grid keeps 220 px: measured before
+the cap, eight cards at 150 px pushed the grid out of a 840 px window. The album chip stays in the chips
+row (no floating bar) and "Album order" stays in the Sort menu. Measured on a copy of the real DB (2232
+files, release): the Albums view p50 6.94–7.51 ms (133–144 fps), p95 7.18–7.99 ms. Four headless tests;
+`cargo test` 254, `clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors.
 
 ### M22.7 — full-screen viewer
 

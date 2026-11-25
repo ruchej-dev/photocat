@@ -1022,7 +1022,9 @@ tag chips, the panel budget measured at 840 px) — 2026-11-25; M22.4 (the month
 group is on screen, which folds in the former M13e) — 2026-11-25; M22.5 (the calendar after
 `photocat_2`/`photocat_12`: the year layer of twelve month cards with counters, covers and sizes, the
 month layer with the caps weekday row and the volume bars, the day list with the time, name and size,
-the accent frame on the picked cell) — 2026-11-25.
+the accent frame on the picked cell) — 2026-11-25; M22.6 (albums: the view heading "Albums", the open
+album's card header at 14 px with its facts in mono 11, sub-album cards with a 16:10 cover, the name and
+the counts from the "Tiles" slider, one scroll area so the cards never push the grid out) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

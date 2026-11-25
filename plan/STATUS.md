@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.6 (the albums' cards inside the tree), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them) → next:M22.7 (the full-screen viewer), then M22.8–M22.11 and M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -95,6 +95,16 @@ selected day is a list with the time, the name and the size (the shared `draw_li
 `Cells::time_only`), and an empty month leads to the nearest month with files. Measured on the real
 DB (2232 files, release): the year layer p50 5.56 ms (180 fps), the month layer p50 5.85 ms (171 fps),
 and the whole year layer fits a 1240×840 window.
+Since M22.6 the albums screen follows `photocat_3` inside its tree (the owner's decision, spec §5 q. 7):
+the view heading is "Albums" with the count, and the open album has its own card header — the name at
+14 px with "N files · M sub-albums · size" in mono 11 and the app trash after it — over the same action
+row; the primary "+ New album" carries the accent. A sub-album is a card of the width of the "Tiles"
+slider: a 16:10 canvas cover with the sub-album's first snapshot fitted whole (a folder mark when it has
+none), the name at 13 px, the count of files and the size in mono 10, the card tone with a 1 px border
+and the accent line under the cursor. The cards scale with the slider, so they take one row, two at
+most, the rest scrolls, and the snapshot grid keeps 220 px — measured before the cap: eight cards pushed
+the grid out of a 840 px window. The album chip stays in the chips row, there is no floating selection
+bar, and "Album order" keeps its place in the Sort menu.
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
@@ -2386,3 +2396,42 @@ Screens, § States, and the stale paragraph claiming that colours come from `ui.
 `docs/references/mockups/README.md` marks `photocat_12` as built, and `plan/I18N.md` gets the new
 labels. Still open, outside this task: `highlight_job` (the OCR match in the card and the search
 snippet) still paints the old blue — it belongs to M22.9's pass over the screens without a mock-up.
+
+## M22.6 — the albums' cards inside the tree (2026-11-25) ✅
+
+The albums screen was the last one of the M22 set with the old look: the open album lost its name into
+the heading of the grid and repeated it in the tree, the sub-albums were 96 px folder plates painted
+from `ui.visuals()` with a `selected_fill` band and no preview at all. M22.6 gives the screen the
+mock-up's card (spec §6 M22.6) and keeps the tree — the owner's answer to spec §5 q. 7.
+
+**How.** The view heading stays "Albums" with the count of albums; the open album carries its own card
+header — `album_header` draws the name at 14 px strong and "N files · M sub-albums · size" in mono 11
+next to it, with " · N in the trash" when the app trash is not empty — and the action row follows it
+unchanged ("+ Sub-album", "Rename", "Move to…", "Up / Down", "Delete the album"). "+ New album" is the
+view's main action and carries the accent (`primary_button`, the mock-up's `+`). A sub-album is a card
+(`draw_album_cell`, `album_card_size`): the width from the "Tiles" slider, a 16:10 `canvas` cover with
+the sub-album's first snapshot fitted whole (`paint_thumb` with the shared texture cache and the decode
+budget — no second loader), a folder mark when it has no snapshot, the name at 13 px cut with an
+ellipsis and clipped to the card, "N files" on the left and the size on the right in mono 10, the card
+tone, a 1 px `border`, the accent line under the cursor and a pointing hand. The sub-album count cannot
+fit a 100 px card, so it lives in the tree and in the card's hint. The cards scale with the slider, so
+`ui.available_height() − 220` (never less than one card row, never more than two, plus the 10 px gap)
+bounds a scroll area: the album's snapshots keep 220 px and are never pushed off the window. The album
+chip stays in the chips row — there is no floating selection bar — and "Album order" keeps its place in
+the Sort menu.
+
+**Checks.** Three headless tests: `the_album_card_follows_the_tiles_slider` (100 → 105 px,
+260 → 205 px, the 16:10 cover inside); `the_album_card_draws_at_the_model_height` (the same numbers on
+the real drawing code, as M22.2a did for the list); `the_open_album_gets_a_card_header` ("Albums" and
+"2 albums" in the heading, the name printed once, "3 files · 1 sub-album · 2.0 MiB" next to it, "May",
+"12 files" and "2.0 MiB" on the card) and `many_sub_albums_keep_the_grid_visible` (twelve cards at
+260 px: the snapshot names are still drawn — without the cap the grid was pushed out, which the test
+reproduces). `cargo test` 254 passed (250 + 4), `cargo clippy --all-targets` clean, `check.sh` 55
+checks, `rust-analyzer diagnostics .` 0 errors.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, a copy of the real DB of 2232 files, release,
+1240×840 headless frames): the Albums view with eight sub-album cards over real previews — p50
+6.94–7.51 ms (133–144 fps), p95 7.18–7.99 ms over four runs; the cards end above the grid and three
+snapshot tiles are drawn under them. `docs/UI.md` § Metrics and § Screens follow (the "Album header" and
+"Sub-album card" rows), `plan/M22-ui-spec.md` §3 and §6 M22.6 carry the result, `plan/BACKLOG.md`
+counts M22.6 as done and `plan/I18N.md` gets the one new label.

@@ -1501,62 +1501,130 @@ fn draw_album_tree(
     chosen
 }
 
-/// A sub-album tile: a folder with a name and counters, a click opens it.
+/// The header of an open album (M22.6): the name at 14 px and the facts of its card next to it —
+/// "N files · M sub-albums · size" in mono 11, with the app trash after them when it is not empty.
+fn album_header(ui: &mut egui::Ui, node: &db::AlbumNode, lang: i18n::Lang) {
+    let th = theme(ui);
+    let mut facts = format!(
+        "{} · {} · {}",
+        i18n::count(lang, node.files as usize, "file"),
+        i18n::count(lang, node.subalbums as usize, "sub_album"),
+        db::human_in(lang, node.bytes)
+    );
+    if node.trashed > 0 {
+        facts.push_str(&i18n::fill(
+            lang,
+            " · {} in the trash",
+            &[node.trashed.to_string()],
+        ));
+    }
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(&node.name)
+                .size(14.0)
+                .strong()
+                .color(th.text),
+        );
+        ui.label(num(ui, facts, 11.0).color(th.text_med));
+    });
+}
+
+/// The size of a sub-album card (M22.6): the width from the "Tiles" slider, a 16:10 canvas cover,
+/// the name at 13 px and the mono facts at 10 px — one card model for every sub-album.
+fn album_card_size(tile: f32) -> egui::Vec2 {
+    const PAD: f32 = 8.0;
+    let w = tile.clamp(100.0, 260.0);
+    let cover = ((w - 2.0 * PAD) * 10.0 / 16.0).round();
+    egui::vec2(w, PAD + cover + 6.0 + 16.0 + 14.0 + PAD)
+}
+
+/// A sub-album card (M22.6): the mock-up's card — a canvas cover with the preview of the album's
+/// first snapshot fitted whole, the name, the count of files and the size; a click opens the album.
 fn draw_album_cell(
     ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
     node: &db::AlbumNode,
+    cover: Option<&FileRow>,
     tile: f32,
     lang: i18n::Lang,
 ) -> bool {
-    let w = tile.clamp(100.0, 260.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 96.0), egui::Sense::click());
+    const PAD: f32 = 8.0;
+    let th = theme(ui);
+    let size = album_card_size(tile);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     if ui.is_rect_visible(rect) {
-        ui.painter()
-            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
-        let folder = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 10.0, rect.top() + 10.0),
-            egui::vec2(w - 20.0, 34.0),
+        let painter = ui.painter();
+        painter.rect_filled(rect, RADIUS_CARD, th.card);
+        // A 1 px line on every card, the accent one under the cursor (the mock-up's hover).
+        painter.rect_stroke(
+            rect,
+            RADIUS_CARD,
+            egui::Stroke::new(1.0, if resp.hovered() { th.accent } else { th.border }),
+            egui::StrokeKind::Inside,
         );
-        ui.painter().rect_filled(folder, 3.0, selected_fill(ui));
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.top() + 22.0),
-            egui::Align2::LEFT_CENTER,
-            "▸",
-            egui::FontId::proportional(14.0),
-            accent(ui),
+        // The cover area: a 16:10 canvas with the snapshot fitted whole — a preview is never cropped.
+        let cover_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + PAD, rect.top() + PAD),
+            egui::vec2(size.x - 2.0 * PAD, size.y - 2.0 * PAD - 36.0),
         );
-        ui.painter().text(
-            egui::pos2(rect.left() + 28.0, rect.top() + 22.0),
-            egui::Align2::LEFT_CENTER,
-            shorten(&node.name, 20),
+        painter.rect_filled(cover_rect, RADIUS_CTRL, th.canvas);
+        let drawn = cover.is_some_and(|f| paint_thumb(ui, ctx, cs, f, cover_rect));
+        if !drawn {
+            // An album without a snapshot keeps the empty canvas and a folder mark, not a placeholder.
+            painter.text(
+                cover_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "▸",
+                egui::FontId::proportional(18.0),
+                th.text_dim,
+            );
+        }
+        let inner = size.x - 2.0 * PAD;
+        let name_top = cover_rect.bottom() + 6.0;
+        let facts_top = name_top + 17.0;
+        // The texts are clipped to the card: a long name is cut with an ellipsis, not spilling out.
+        let clipped = painter.with_clip_rect(rect.shrink(1.0));
+        clipped.text(
+            egui::pos2(rect.left() + PAD, name_top),
+            egui::Align2::LEFT_TOP,
+            shorten(&node.name, (inner / 7.0).max(6.0) as usize),
             egui::FontId::proportional(13.0),
-            ui.visuals().text_color(),
+            th.text,
         );
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.top() + 54.0),
+        clipped.text(
+            egui::pos2(rect.left() + PAD, facts_top),
             egui::Align2::LEFT_TOP,
-            i18n::fill(lang, "{}", &[i18n::count(lang, node.files as usize, "file")]),
-            egui::FontId::proportional(11.0),
-            dim(ui),
+            i18n::count(lang, node.files as usize, "file"),
+            egui::FontId::monospace(10.0),
+            th.text_med,
         );
-        ui.painter().text(
-            egui::pos2(rect.left() + 10.0, rect.top() + 72.0),
-            egui::Align2::LEFT_TOP,
+        clipped.text(
+            egui::pos2(rect.right() - PAD, facts_top),
+            egui::Align2::RIGHT_TOP,
             db::human_in(lang, node.bytes),
-            egui::FontId::proportional(11.0),
-            dim(ui),
+            egui::FontId::monospace(10.0),
+            th.text_dim,
         );
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            ui.painter().rect_stroke(
-                rect,
-                4.0,
-                egui::Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color),
-                egui::StrokeKind::Inside,
-            );
         }
     }
-    resp.clicked()
+    // The sub-albums cannot be counted on a 100 px card: they are in the tree and in the hint.
+    let hint = if !node.note.trim().is_empty() {
+        node.note.clone()
+    } else {
+        i18n::fill(
+            lang,
+            "{} · {} · {} — open the album",
+            &[
+                i18n::count(lang, node.files as usize, "file"),
+                i18n::count(lang, node.subalbums as usize, "sub_album"),
+                db::human_in(lang, node.bytes).to_string(),
+            ],
+        )
+    };
+    resp.on_hover_text(hint).clicked()
 }
 
 /// The progress row of a background pass: `done/total`, "Stop" next to it.
@@ -9784,48 +9852,13 @@ impl eframe::App for App {
                         }
                 },
             ),
-            View::Albums => {
-                let node = self
-                    .album_selected
-                    .and_then(|id| albums.iter().find(|n| n.id == id));
-                match node {
-                    Some(node) => {
-                        let size = db::human_in(lang, node.bytes);
-                        let title = i18n::fill(lang, "Album “{}”", std::slice::from_ref(&node.name));
-                        let count = match lang {
-                            i18n::Lang::En => {
-                                let mut s = format!(
-                                    "{} · {} · {size}",
-                                    files_n(node.files as usize),
-                                    i18n::count(
-                                        lang,
-                                        node.subalbums as usize,"sub_album"),
-                                );
-                                if node.trashed > 0 {
-                                    s.push_str(&format!(" · {} in trash", node.trashed));
-                                }
-                                s
-                            }
-                            i18n::Lang::Ru => format!(
-                                "{} files · {} subalbums · {}{}",
-                                node.files,
-                                node.subalbums,
-                                size,
-                                if node.trashed > 0 {
-                                    format!(" · {} in the trash", node.trashed)
-                                } else {
-                                    String::new()
-                                }
-                            ),
-                        };
-                        (title, count)
-                    }
-                    None => (
-                        t(lang, "Albums").to_string(),
-                        i18n::count(lang, albums.len(),"album"),
-                    ),
-                }
-            }
+            // M22.6: the heading names the view, not the open album — the album's own card header
+            // (the name at 14 px and its facts) is drawn above its sub-albums, so the name is not
+            // printed twice on one screen.
+            View::Albums => (
+                t(lang, "Albums").to_string(),
+                i18n::count(lang, albums.len(), "album"),
+            ),
             View::Dupes => {
                 let waste: i64 = groups.iter().map(|g| g.waste).sum();
                 (
@@ -10089,7 +10122,9 @@ impl eframe::App for App {
                 // The tree (M19): indents and collapsing. A click opens an album, the triangle expands
                 // the sub-albums without changing the selection.
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button(t(lang, "+ New album")).clicked() {
+                    // The main action of the view carries the accent (M22.6, the mock-up's "+").
+                    let new_album = primary_button(ui, t(lang, "+ New album"));
+                    if ui.add(new_album).clicked() {
                         album_dialog_request = Some(AlbumDialog::New);
                     }
                     if albums.is_empty() {
@@ -10129,6 +10164,11 @@ impl eframe::App for App {
                     return;
                 };
                 let node = node.clone();
+                // M22.6: the open album is a card header — the name at 14 px and the facts of the
+                // card in mono 11 — over the same action row as before.
+                ui.add_space(4.0);
+                album_header(ui, &node, lang);
+                ui.add_space(2.0);
                 ui.horizontal_wrapped(|ui| {
                     if ui.button(t(lang, "+ Sub-album")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Sub);
@@ -10172,13 +10212,41 @@ impl eframe::App for App {
                 if !children.is_empty() {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new(t(lang, "Sub-albums")).size(11.0).color(dim(ui)));
-                    ui.horizontal_wrapped(|ui| {
-                        for child in &children {
-                            if draw_album_cell(ui, child, self.tile_size, lang) {
-                                album_action = Some(AlbumAction::Select(child.id));
-                            }
-                        }
-                    });
+                    // The cards scale with the "Tiles" slider, so a row of them can outgrow the
+                    // window: one row is always whole, two rows at most, the rest scrolls, and the
+                    // grid below keeps 220 px — many sub-albums must not hide the album's files.
+                    let card_h = album_card_size(self.tile_size).y;
+                    let room =
+                        (ui.available_height() - 220.0).clamp(card_h, card_h * 2.0 + TILE_GAP);
+                    egui::ScrollArea::vertical()
+                        .id_salt("album-cards")
+                        .max_height(room)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+                                for child in &children {
+                                    // The cover is the first snapshot of the sub-album in its order:
+                                    // the very preview the grid would show first.
+                                    let cover = child.cover.as_ref().and_then(|sha| {
+                                        items
+                                            .iter()
+                                            .find(|f| f.thumb.as_deref() == Some(sha.as_str()))
+                                    });
+                                    if draw_album_cell(
+                                        ui,
+                                        ctx,
+                                        &mut cells,
+                                        child,
+                                        cover,
+                                        self.tile_size,
+                                        lang,
+                                    ) {
+                                        album_action = Some(AlbumAction::Select(child.id));
+                                    }
+                                }
+                            });
+                        });
                 }
                 ui.add_space(6.0);
                 ui.separator();
@@ -11525,7 +11593,8 @@ mod tests {
     use super::{
         App, COAST_DECAY_S, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan, KindFilter,
         PickClick, Scroll, SettingsTab, StorageAction, View, Viewer, WHEEL_NOTCH_PTS, clamp_pan,
-        days_in_month, db, first_weekday_monday, fit_rect, list_meta_px, list_name_px,
+        album_card_size, days_in_month, db, first_weekday_monday, fit_rect, list_meta_px,
+        list_name_px,
         list_row_height, monday_of, month_groups, nearest_file_month, parse_date, pick_kind,
         score_percentile, shift_month, shift_to_file_month,
     };
@@ -12383,6 +12452,115 @@ mod tests {
             .map(|(_, pos)| *pos);
         println!(
             "{} files, year layer at 1240×840: December at {december:?}",
+            app.items.len()
+        );
+    }
+
+    /// The albums screen on the real DB: a root album with eight sub-albums whose covers are real
+    /// previews, sixteen 1240×840 frames. The numbers go to `docs/ARCHITECTURE.md` § Measurements.
+    /// `PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored albums_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn albums_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        let ids: Vec<i64> = app.items.iter().map(|f| f.id).collect();
+        let covers: Vec<String> = app
+            .items
+            .iter()
+            .filter_map(|f| f.thumb.clone())
+            .take(8)
+            .collect();
+        let mut albums = vec![db::AlbumNode {
+            id: 1,
+            parent_id: 0,
+            position: 0,
+            name: "Summer 2024".into(),
+            note: String::new(),
+            depth: 0,
+            files: ids.len() as i64,
+            trashed: 0,
+            subalbums: covers.len() as i64,
+            bytes: app.items.iter().map(|f| f.size).sum(),
+            cover: covers.first().cloned(),
+        }];
+        for (i, cover) in covers.iter().enumerate() {
+            albums.push(db::AlbumNode {
+                id: i as i64 + 2,
+                parent_id: 1,
+                position: i as i64,
+                name: format!("Month {}", i + 1),
+                note: String::new(),
+                depth: 1,
+                files: 12,
+                trashed: 0,
+                subalbums: 0,
+                bytes: 12 * 1024 * 1024,
+                cover: Some(cover.clone()),
+            });
+        }
+        app.albums = albums;
+        app.album_selected = Some(1);
+        app.album_set = ids.into_iter().collect();
+        app.album_browse_all = false;
+        app.view = View::Albums;
+
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let size = egui::vec2(1240.0, 840.0);
+        let mut drive = |app: &mut App, t: f64| -> f32 {
+            let raw = egui::RawInput {
+                time: Some(t),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let start = Instant::now();
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+            let ms = start.elapsed().as_secs_f32() * 1000.0;
+            out.drop_without_applying_deltas();
+            ms
+        };
+        let mut t = 0.0_f64;
+        for _ in 0..4 {
+            drive(&mut app, t);
+            t += 1.0 / 60.0;
+        }
+        let mut times = Vec::new();
+        for _ in 0..16 {
+            times.push(drive(&mut app, t));
+            t += 1.0 / 60.0;
+        }
+        times.sort_by(|a, b| a.total_cmp(b));
+        let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+        println!(
+            "corpus {n} files, albums: p50 {:.2} ms ({:.0} fps), p95 {:.2} ms, p99 {:.2} ms",
+            p(0.50),
+            1000.0 / p(0.50),
+            p(0.95),
+            p(0.99)
+        );
+        let drawn = window_layout(&mut app, &ctx, size);
+        let card = drawn
+            .iter()
+            .find(|(text, _)| text == "Month 1")
+            .map(|(_, pos)| *pos);
+        // The grid stays on screen under the cards: the album's snapshots are drawn, not pushed out.
+        let snapshots = drawn
+            .iter()
+            .filter(|(text, _)| {
+                let low = text.to_lowercase();
+                low.ends_with(".jpg") || low.ends_with(".jpeg") || low.ends_with(".png") || low.ends_with(".mp4")
+            })
+            .count();
+        println!(
+            "{} files, albums at 1240×840: the first sub-album card at {card:?}, {snapshots} snapshot tiles on screen",
             app.items.len()
         );
     }
@@ -15009,4 +15187,140 @@ mod tests {
         assert_eq!(s.verify_last_at, old_at);
         assert!(s.verify_last_ok);
     }
+    fn album_node(id: i64, parent: i64, name: &str, files: i64, subs: i64) -> db::AlbumNode {
+        db::AlbumNode {
+            id,
+            parent_id: parent,
+            position: 0,
+            name: name.into(),
+            note: String::new(),
+            depth: usize::from(parent != 0),
+            files,
+            trashed: 0,
+            subalbums: subs,
+            bytes: 2 * 1024 * 1024,
+            cover: None,
+        }
+    }
+
+    /// M22.6: a sub-album card is one model — the width from the "Tiles" slider, a 16:10 canvas
+    /// cover, the name at 13 px and the mono facts at 10 px below it.
+    #[test]
+    fn the_album_card_follows_the_tiles_slider() {
+        let small = album_card_size(100.0);
+        let big = album_card_size(260.0);
+        assert_eq!(small.x, 100.0);
+        assert_eq!(big.x, 260.0);
+        // 8 px pad + a 53 px cover (84 × 10/16) + 6 px + the name + the facts + 8 px pad.
+        assert!((small.y - 105.0).abs() < 0.01, "{}", small.y);
+        // 8 + a 153 px cover (244 × 10/16) + 6 + 16 + 14 + 8.
+        assert!((big.y - 205.0).abs() < 0.01, "{}", big.y);
+    }
+
+    /// Draws one sub-album card in a frame without a window and returns the height it took: the
+    /// card model is checked on the real drawing code, not on the formula alone.
+    fn album_card_frame_height(tile: f32) -> f32 {
+        let ctx = egui::Context::default();
+        let node = album_node(2, 1, "May", 12, 0);
+        let picked = BTreeSet::new();
+        let mut textures = std::collections::HashMap::new();
+        let mut missing = std::collections::HashSet::new();
+        let mut cells = super::Cells {
+            bg: egui::Color32::BLACK,
+            cell_style: db::CellStyle::Tiles,
+            textures: &mut textures,
+            missing: &mut missing,
+            thumbs_dir: std::path::Path::new("/nonexistent/thumbs"),
+            selected: None,
+            picked: &picked,
+            clicked: None,
+            open_clicked: None,
+            show_keep: false,
+            keep_clicked: None,
+            trash_mode: false,
+            restore_clicked: None,
+            tile,
+            lang: i18n::Lang::En,
+            budget: 4,
+            time_only: false,
+        };
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let mut used = 0.0;
+        let out = ctx.run_ui(raw, |ui| {
+            let ctx = ui.ctx().clone();
+            super::draw_album_cell(ui, &ctx, &mut cells, &node, None, tile, i18n::Lang::En);
+            used = ui.min_rect().height();
+        });
+        out.drop_without_applying_deltas();
+        used
+    }
+
+    /// M22.6: the card grows with the slider: a 105 px card at 100, a 205 px one at 260, and the
+    /// drawn height is the model's.
+    #[test]
+    fn the_album_card_draws_at_the_model_height() {
+        let small = album_card_frame_height(100.0);
+        let big = album_card_frame_height(260.0);
+        assert!((small - 105.0).abs() < 0.01, "a card at 100: {small}");
+        assert!((big - 205.0).abs() < 0.01, "a card at 260: {big}");
+    }
+
+    /// M22.6: the cards scale with the slider, so twelve of them at 260 must not push the grid out
+    /// of the window: the sub-albums scroll and the snapshots of the open album stay visible.
+    #[test]
+    fn many_sub_albums_keep_the_grid_visible() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.tile_size = 260.0;
+        app.view = View::Albums;
+        app.albums = vec![album_node(1, 0, "Summer 2024", 4, 12)];
+        for i in 0..12 {
+            app.albums
+                .push(album_node(i as i64 + 2, 1, &format!("Month {}", i + 1), 3, 0));
+        }
+        app.album_selected = Some(1);
+        app.album_set = app.items.iter().map(|f| f.id).collect();
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t.starts_with("may-")),
+            "the snapshots of the album are pushed out by its sub-albums: {texts:?}"
+        );
+    }
+
+    /// M22.6: the open album is a card header — the name at 14 px with "N files · M sub-albums ·
+    /// size" next to it — and the heading of the view stays "Albums", so the name is printed once.
+    #[test]
+    fn the_open_album_gets_a_card_header() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        app.albums = vec![
+            album_node(1, 0, "Summer 2024", 3, 1),
+            album_node(2, 1, "May", 12, 0),
+        ];
+        app.album_selected = Some(1);
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(texts.iter().any(|t| t == "Albums"), "{texts:?}");
+        assert!(
+            !texts.iter().any(|t| t == "Album “Summer 2024”"),
+            "the album name is printed twice: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "2 albums"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Summer 2024"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t == "3 files · 1 sub-album · 2.0 MiB"),
+            "the card header lost its facts: {texts:?}"
+        );
+        // The sub-album card: the name, the count of files and the size on the card itself.
+        assert!(texts.iter().any(|t| t == "May"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "12 files"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "2.0 MiB"), "{texts:?}");
+    }
+
 }
