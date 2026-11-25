@@ -853,6 +853,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Storage", "Хранилище"),
     ("External tools", "Внешние программы"),
     ("Interface", "Интерфейс"),
+    ("Settings sections", "Разделы настроек"),
     (
         "Changes are saved immediately; originals are never modified.",
         "Изменения сохраняются сразу; оригиналы не меняются.",

@@ -26,6 +26,11 @@ with no network shows the structure but not the final look. The `screen.png` fil
 | `photocat_5/`, `photocat_6/` | full-screen viewer: header, zoom/tools row, series strip, player controls, inspector (two variants) | M13/M21.5, the viewer of to-day, partly |
 | `photocat_4/` | an older shell: top navigation, a settings dialog with autostart, GPU and backup | refused — see `plan/M22-ui-spec.md` §5 |
 
+**The icons.** The mock-ups are Material Symbols throughout; photocat adopts the *choices* — which
+sign stands for which action — and draws every glyph as geometry in `src/app.rs` (`app::Icon`,
+`app::paint_icon`). No font and no image file is taken from this set, so the binary does not grow
+(ADR 0048, M22.8).
+
 **Do not "fix" the mock-ups.** They are the owner's design, kept as exported; the difference between
 them and the window is recorded in `plan/M22-ui-spec.md`, and the mock-up wins only where the spec
 says it does. A function that a mock-up shows but photocat refuses (autostart, GPU settings, backups,

@@ -1253,3 +1253,36 @@ check (`check.sh` §4) now enforces: no second HTTP client in `Cargo.toml`, `ure
 network still works, as before — the download is the only thing that fails, and it says so.
 **Forbids:** an HTTP client other than the downloader's, a request carrying owner data, a background
 download without a human action.
+
+## 0048. Icons are drawn geometry, not a font and not an image
+
+**Decision (the owner, 2026-11-25).** "Take the icons from the mock-up." The mock-up is Material
+Symbols throughout (q. 11 of `plan/M22-ui-spec.md`); photocat adopts its **choices** — which sign
+stands for which action — and draws every glyph itself in `app::paint_icon`, as it already drew the
+player signs since M13.
+
+**Why not the font.** The font is an external dependency of ~300 KB (a variable font) plus a glyph
+range, a licence entry in `NOTICE`, a second text family and a rasterisation path whose metrics
+change with the font version. The owner's answer to the fonts question (q. 2 of the spec) was "no
+external dependency; the built-in fonts, the binary must not grow", and an icon font is exactly
+that. The same holds for a texture atlas of SVG icons: it is a file, a decode step and a second
+drawing pipeline for 60 signs of 14 px.
+
+**Why not emoji.** `docs/UI.md` forbids them: they differ per system font, they carry colour of
+their own and they are the only things on the screen that the theme cannot recolour.
+
+**What it costs.** ~50 glyphs of 5–20 lines each in one `match`, written and looked at once. A new
+action needs a glyph: the test `every_button_of_the_window_has_an_icon` fails while a button is
+built without one, and `the_icon_inventory_covers_the_enum` fails while a variant of `Icon` has no
+contact-sheet entry. A glyph is 1.5 px stroked geometry, so it is legible at 12 px and takes the
+colour of its word in both themes and in the disabled state — no second palette, no second drawing.
+
+**What it looks like.** The icon sits 6 px before the word inside one `WordButton` (14 px icon, 26 px
+button, the mock-up's radius and padding). An icon is never the only path: the rule of `docs/UI.md`
+§ Layout stands unchanged. Four kinds of 20 px target keep their word alone — the per-tile actions
+placed into a fixed rect, the "×" of a chip, the album tree's collapse triangle and the "×" of an
+album row — and menus keep words, because an egui menu button takes text or a texture and a texture
+is the second pipeline this ADR refuses.
+
+**Forbids:** an icon font or icon package, an SVG/PNG icon asset, an emoji as an icon, a button whose
+only content is an icon, a per-screen colour for an icon.

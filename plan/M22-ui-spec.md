@@ -97,8 +97,10 @@ reason is written in ADR 0044.
 - Left panel: `CATALOG` block → navigation (two groups, numbers on the right, the active row has a
   2 px accent edge and the card tone) → `FILTER` block → view context → model and text blocks →
   pinned summary.
-- Content: view title 18 px + facts 12 px mono; on the right "Tiles" slider, "By months / Flat",
-  "Sort"; a chip row that never disappears; the month heading 14 px + facts 11 px mono, pinned at
+- Content: view title 18 px + facts 12 px mono with the "Tiles" slider on the right (M22.8: the
+  controls — the cell views, "By months / Flat", "Sort" — take a row of their own under the heading,
+  because with an icon on each button they no longer fit beside the title); a chip row that never
+  disappears; the month heading 14 px + facts 11 px mono, pinned at
   the top edge of the grid area while its group is on screen (M22.4).
 - Tile: card frame 1 px, preview, caption band 22 px with the file name (mono 10, left) and the date
   (mono 10, `text_dim`, right). A video keeps the `▶ M:SS` strip. Selected/keep/picked — accent.
@@ -118,7 +120,7 @@ reason is written in ADR 0044.
 | Faces | — | same panels, face tile metrics unchanged, accent only on a picked face | M22.9 |
 | Trash | — | same, `danger` only on "Empty the trash" | M22.9 |
 | Integrity | — | form fields and report in mono, one accent button, no new colour | M22.9 |
-| Settings | `photocat_4` (partial) | the section list and the row rhythm; **the content stays ours**, plus "Interface → theme" | M22.8 |
+| Settings | `photocat_4` (partial) | the section list (caps heading, icons, the accent edge of the active row, the mono value at the right) and the row rhythm; **the content stays ours**, plus "Interface → theme" | M22.8 ✅ |
 | Dialogs (folders, picker, export, storage, album) | `photocat_4` (settings only) | card tone, 1 px border, 8 px radius, mono numbers | M22.10 |
 
 **Rule for a screen without a mock-up.** A new or unfinished screen is built from the same parts and
@@ -184,7 +186,10 @@ allowed only for the OS-trash path.
     photographs and duplicates the chips row.* **Answer: keep ours for now, look again later.**
 11. **Icons.** The mock-up is Material Symbols throughout. We have a geometric `paint_icon` for the
     player only and forbid emoji. *Recommendation: keep words + the existing geometric glyphs; an
-    icon set is a separate decision (font dependency).*
+    icon set is a separate decision (font dependency).* **Answer (2026-11-25): take the mock-up's
+    icons — as geometry, next to the word.** Every action button becomes one `WordButton` with a
+    14 px glyph before its word; no icon font and no image file (ADR 0048), so §5 q. 2 stands and
+    the binary does not grow. Done in M22.8 for every button of the window.
 
 ## 6. Tasks
 
@@ -458,12 +463,51 @@ labels); `cargo test` 261, `clippy` clean, `check.sh` 55 checks, `rust-analyzer 
 
 **Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
-### M22.8 — settings dialog
+### M22.8 — settings dialog, and the icons of the mock-up ✅ (this change)
 
 1. The section list in caps 10 px, the active row with the accent edge; fields up to 520 px.
 2. The groups of the mock-up that correspond to real functions stay in their panes; the ones that do
    not exist (autostart, tray, GPU, updates, metadata backup) are **not** added.
 3. `Interface`: language + theme; the hint about what the theme does not change.
+
+**Result.** The section list now speaks the mock-up's `photocat_4`: a caps 10 px line "SETTINGS
+SECTIONS" over seven rows of 28 px — a 14 px icon, the 13 px label, and a mono 10 value at the right
+edge that gives the state before a click (the interface language, the model's dimensions, the files
+in the index, the enabled tags, the face threshold, `2/3` of the external programs). The active row
+sits on the `accent_soft` fill with a **2 px accent edge** on the left; the value is dropped when it
+would touch the word (the widest label — the Russian "Индексация и дубли" — keeps its room). The
+groups the mock-up shows but photocat does not have (autostart, tray, GPU, backup) are not added; the
+Interface pane keeps the language and the theme with the hint that the theme changes neither files
+nor the database (M22.1). **The icons are taken from the mock-up for every button of the window**, as
+the owner asked: `paint_icon` grew from the five player signs to 62 glyphs of the Material Symbols
+family by name, and every action button became one `WordButton` — a 14 px glyph and the word, the
+accent for the one main action, the danger border for the OS-trash path, a 20 px compact variant
+for a strip switch. 97 `ui.button`/`Button::new` call sites went through it; the four kinds of 20 px
+target that cannot hold both (per-tile `keep`/`restore`/`pick`/`not him`, the "×" of a chip, the
+album tree's triangle, the "×" of an album row) keep their word alone, and menus keep words (an egui
+menu button takes text or a texture; a texture is a second pipeline — ADR 0048). Seven tests:
+every glyph paints inside its box, the contact sheet covers the enum, a word button puts the icon
+before the word, the settings list is caps + icons + the accent edge, the section list holds both
+languages, the content controls keep their own row, and a source scan fails on a button built
+without an icon.
+
+The icons also pushed the controls of the content panel into the title: right-aligned, they began at
+x 288 on a 1240 px window with the details panel open and ran over "All files · 2232 files". The
+heading now has a row of its own (title + facts + the "Tiles" slider on the right) and the controls
+sit on a second row of 20 px buttons — the three cell views, "By months / Flat", "Sort" — which wraps
+instead of clipping, and the group-by switch uses `add_enabled` rather than `add_enabled_ui`, because
+a child UI reports its size only after it is drawn and the wrapped row could not see it. The height is
+constant across views, so M22.2a holds.
+
+**Measured** (the real DB, 2232 files, release, 1240×840 frames): the settings dialog p50 6.89–8.01
+ms (125–145 fps), p95 ≤ 8.13 ms across the seven sections — the tag dictionary is the heaviest pane;
+the section list's caps line sits at y 168. The grid pass of M22.2b repeats over four runs: p50
+6.73–6.84 ms (146–149 fps), p95 ≤ 7.18 ms, one noisy run at p95 8.50 — against 6.4–6.7 ms before the
+icons, below the noise. `cargo test` 268, `clippy` clean, `check.sh` 55 checks, `rust-analyzer
+diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`Icon`, `paint_icon`, `WordButton`, `settings_nav_item`, `SettingsTab::icon`,
+the button sweep), `src/i18n.rs`, `docs/UI.md`, `docs/DECISIONS.md` (ADR 0048), `plan/`.
 
 ### M22.9 — screens without a mock-up
 
@@ -489,5 +533,5 @@ labels); `cargo test` 261, `clippy` clean, `check.sh` 55 checks, `rust-analyzer 
 
 - A third theme, an accent picker, a "compact mode".
 - Bundled fonts until the owner's decision (q. 2).
-- Cropped 4:3 previews, a floating selection bar, an icon font.
+- Cropped 4:3 previews, a floating selection bar, an icon font (icons are geometry, M22.8, ADR 0048).
 - Any function from §5 q. 5; any network call; any file operation.

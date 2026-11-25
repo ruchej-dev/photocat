@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside) → next:M22.8 (the settings dialog), then M22.9–M22.11 and M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048) → next:M22.9 (the screens without a mock-up), then M22.10–M22.11 and M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -121,6 +121,29 @@ second copy. Measured on the real DB (2232 files, release, 1240×840 headless fr
 neighbours and a face chip: p50 6.91–8.65 ms (116–145 fps), p95
 7.73–10.45 ms; with the inspector on p50 6.89–7.89 ms, p95 9.47–11.46 ms over four runs — the
 series is computed on a file change, not every frame (it cost 9.66 ms before).
+Since M22.8 the settings dialog is the mock-up's `photocat_4` and the window has the mock-up's icons.
+The section list sits under a caps 10 px line "SETTINGS SECTIONS": seven rows of 28 px with a 14 px
+icon, the 13 px label and a mono 10 value at the right edge that shows the state before a click (the
+interface language, the model's dimensions, the files in the index, the enabled tags, the face
+threshold, `2/3` of the external programs); the active row carries the `accent_soft` fill and a 2 px
+accent edge on the left, and a value is dropped when it would touch its word (the widest Russian
+label keeps its room). The panes keep their content — the mock-up's autostart, tray, GPU and backup
+are still refused (spec §5 q. 5) — and "Interface" keeps the language and the theme with the hint
+that the theme changes neither files nor the database. The owner asked for the mock-up's icons on
+every button: `paint_icon` grew from the five player signs to 62 glyphs of the Material Symbols
+family by name, drawn as geometry — no icon font, no image, the binary does not grow (ADR 0048). Every
+action button is one `WordButton`: a 14 px icon, 6 px, the word, the accent on the one main action of
+a screen and the danger border on the OS-trash path. The four kinds of 20 px target that cannot hold
+both keep their word alone (per-tile `keep`/`restore`/`pick`/`not him`, the "×" of a chip, the album
+tree's triangle, the "×" of an album row) and menus keep words; a source test fails on a button built
+outside `WordButton`. The wider buttons pushed the controls of the content panel into the heading —
+right-aligned they began at x 288 and ran over "All files · 2232 files" on a 1240 px window with the
+details panel open — so the heading keeps its row (title, facts, "Tiles" slider on the right) and the
+controls (three cell views, "By months / Flat", "Sort") take a second row of 20 px buttons that wraps
+instead of clipping, with a constant height across views (M22.2a holds). Measured on the real DB
+(2232 files, release, 1240×840): the settings dialog p50 6.89–8.01 ms (125–145 fps), p95 ≤ 8.13 ms
+over the seven sections; the grid pass p50 6.73–6.84 ms (146–149 fps), unchanged against M22.2b's
+6.4–6.7 ms.
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
@@ -2451,3 +2474,73 @@ checks, `rust-analyzer diagnostics .` 0 errors.
 snapshot tiles are drawn under them. `docs/UI.md` § Metrics and § Screens follow (the "Album header" and
 "Sub-album card" rows), `plan/M22-ui-spec.md` §3 and §6 M22.6 carry the result, `plan/BACKLOG.md`
 counts M22.6 as done and `plan/I18N.md` gets the one new label.
+
+## M22.8 — the settings dialog and the mock-up's icons (2026-11-25) ✅
+
+Two things in one change, because the owner asked for both: the settings dialog after `photocat_4`
+(spec §6 M22.8) and the icons of the mock-up on every button of the window. The dialog had its panes
+but no mock-up look; the window had no icons at all, only the five player signs drawn by `paint_icon`.
+
+**The section list.** Above the list a caps 10 px line "SETTINGS SECTIONS"; each section is a 28 px row
+with a 14 px icon (`SettingsTab::icon` — `settings`, `psychology`, `folder_supervised`, `label`,
+`face`, `inventory_2`, `terminal` of the mock-up), the 13 px label and a mono 10 value at the right
+edge. The value is the state before a click, as the mock-up's "ViT-B/32" and "4.8 GB": the interface
+language, the model's dimensions, the files in the index, the enabled tags, the face threshold, the
+programs found. The active row sits on the `accent_soft` fill with a **2 px accent edge** on the left
+(the mock-up's 3 px bar rounded down to the line of our layout) and its value in the accent. The value
+is dropped when `10 + 14 + 6 + label + 8 + value + 8` does not fit the 200 px list, so the widest
+Russian label ("Индексация и дубли") never collides with its counter. The pane title stays 16 px over a
+1 px rule, the fields stay 520 px, and the groups the mock-up shows but photocat does not have
+(autostart, tray, GPU, update checks, metadata backup) are not added — spec §5 q. 5 holds.
+
+**The icons.** `Icon` went from 5 variants to 62 and `paint_icon` from 110 lines to ~600 of geometry:
+the Material Symbols of the mock-up by name, drawn with lines, closed paths, circles, blocks and
+arrowheads in an `s` box (14 px in a button, 12 px in a compact one, a 1.5 px stroke — not 1.0, which
+the calendar check reads as a selection frame). A 62-cell contact sheet was rendered from the shapes
+(as SVG, then PNG) and looked at twice: the first pass showed a gear that reads as a sun at 14 px, so
+`Settings` became the mock-up's `tune` (three rails with a knob), and the face had no visible eyes;
+both were fixed before the sweep. One widget replaced four builders: `WordButton` with `Normal`,
+`Primary`, `Danger` and `picked` roles, a 20 px compact variant for a strip switch and a 20 px small
+one for a dense row. It keeps the geometry of `egui::Button` (26 px, 10 px padding, 4 px radius, the
+style's interact tones) and adds the icon 6 px before the word; the icon takes the colour of the word,
+so both themes and the disabled state need no second drawing. 97 call sites moved: the top strip, the
+left panel (the folder block, seven navigation rows with icons and the year/tag blocks untouched), the
+content header (three cell views, "By months / Flat"), the duplicates, faces, trash and integrity
+panes, the albums action row, the calendar ("Today", the chevron arrows), the folder list and the
+picker (folder glyphs on the rows), the storage, export and album dialogs, the settings panes, the
+inspector, the full-screen header, tools and playback row, and the face naming row. Four kinds of
+20 px target keep their word alone — the per-tile actions placed into a fixed rect (`keep`,
+`restore`, `pick`, `not him`), the "×" of a filter chip, the album tree's collapse triangle and the
+"×" of an album row — and menus ("Sort", the model and language pickers) keep words: an egui menu
+button takes text or a texture, and a texture is the second pipeline ADR 0048 refuses.
+
+**Checks.** Six new tests, all headless. `every_icon_paints_inside_its_box` paints all 62 glyphs and
+asserts a shape inside the 14 px box; `the_icon_inventory_covers_the_enum` reads the enum out of the
+source and compares it with the list, so a new glyph cannot stay untested;
+`a_word_button_draws_the_icon_before_the_word` (the word is drawn, the icon is left of it and inside
+the button); `the_settings_sections_are_caps_with_icons_and_an_accent_edge` (the caps line, four
+section labels, exactly one 2 × 28 px accent fill in the dialog — the modal fades in, so the hue is
+compared and not the alpha); `the_settings_section_list_holds_both_languages` (all seven labels inside
+the 200 px list under both languages); `every_button_of_the_window_has_an_icon` scans the 16 000 lines
+of `src/app.rs` for `ui.button(`, `.small_button(`, `egui::Button::new(`, `primary_button(` and
+`danger_button(` and fails on any hit outside the four documented exceptions. The seventh covers the
+regression the icons caused: `the_content_controls_keep_their_own_row` draws the whole window at
+1240×840 and checks that the five controls are one row below the title, that no control runs over the
+title or past x 900 into the details panel, and that the size slider stays in the heading row.
+`cargo test` 268 passed (261 + 7), `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, the real DB of 2232 files, release, 1240×840
+headless frames): the settings dialog p50 6.94 ms (Interface), 6.94 (AI model), 6.90 (Indexing),
+8.01 (Tags — the dictionary list is the heaviest pane), 6.89 (People), 7.06 (Storage), 6.92 (External
+programs), p95 ≤ 8.13 ms; the section list's caps line stands at y 168. The M22.2b grid pass repeats
+after the icons over four runs: p50 6.73–6.84 ms (146–149 fps), p95 ≤ 7.18 ms against 6.4–6.7 ms
+before — below the noise of a 160-frame run (one run with a busy machine gave p95 8.50 ms).
+
+**Documents.** `docs/UI.md` § Layout gets the icons paragraph (the set, the size, the colour, the four
+exceptions, the player) and loses the old "player exception"; § Metrics gets "Action button" and
+"Icon" rows, the new look of the navigation item, of the settings dialog and of its section list, and
+the two rows of the content panel; § Screens follows. `docs/DECISIONS.md` ADR 0048 records the decision and what we would do without it (the
+same sentence as the fonts: nothing is bundled). `plan/M22-ui-spec.md` §5 q. 11 gets the owner's answer,
+§3 and §6 M22.8 the result; `plan/I18N.md` gets the one new label ("Settings sections"); this file and
+`plan/BACKLOG.md` count M22.8 as done.

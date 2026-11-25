@@ -352,7 +352,7 @@ struct StripItem {
 }
 
 /// A section of the "Settings" dialog: rare settings do not take the screen from the grid.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SettingsTab {
     Interface,
     Model,
@@ -373,6 +373,20 @@ impl SettingsTab {
         SettingsTab::Storage,
         SettingsTab::Tools,
     ];
+
+    /// The icon of the section: the mock-up's Material Symbols by name (`settings`,
+    /// `psychology`, `folder_supervised`, `label`, `face`, `inventory_2`, `terminal`).
+    fn icon(self) -> Icon {
+        match self {
+            SettingsTab::Interface => Icon::Settings,
+            SettingsTab::Model => Icon::Psychology,
+            SettingsTab::Index => Icon::FolderSpecial,
+            SettingsTab::Tags => Icon::Label,
+            SettingsTab::Faces => Icon::Face,
+            SettingsTab::Storage => Icon::Inventory,
+            SettingsTab::Tools => Icon::Terminal,
+        }
+    }
 
     fn label(self, lang: i18n::Lang) -> &'static str {
         t(
@@ -566,6 +580,8 @@ const TILE_GAP: f32 = 10.0;
 const CELL_CAPTION_H: f32 = 22.0;
 /// The height of a navigation item and of a filter row.
 const NAV_H: f32 = 28.0;
+/// The icon of a navigation row and of a settings section (M22.8).
+const NAV_ICON: f32 = 14.0;
 const RIGHT_W: f32 = 280.0;
 /// The top bar is 32 px and the bottom one 28 px — mock-up metrics, not a matter of taste.
 const TOP_H: f32 = 32.0;
@@ -679,22 +695,6 @@ fn date_source(src: &str, lang: i18n::Lang) -> &'static str {
         "mtime" => t(lang, "file time"),
         _ => t(lang, "source not set"),
     }
-}
-
-/// The primary button of a screen: filled with the accent, the text in the background colour of the palette.
-fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Button<'static> {
-    let t = theme(ui);
-    egui::Button::new(egui::RichText::new(text).color(t.on_accent).strong())
-        .fill(t.accent)
-}
-
-/// A dangerous action: an error-coloured border, no fill; a faint tint on hover. The word
-/// "delete" remains only for the OS trash and an album row in the DB (AGENTS.md §1).
-fn danger_button(ui: &egui::Ui, text: &str) -> egui::Button<'static> {
-    let t = theme(ui);
-    egui::Button::new(egui::RichText::new(text).color(t.danger))
-        .fill(egui::Color32::TRANSPARENT)
-        .stroke(egui::Stroke::new(1.0, t.danger))
 }
 
 /// The GitHub theme of egui is not used: the palette is entirely ours (M22).
@@ -990,6 +990,7 @@ fn nav_item(
     ui: &mut egui::Ui,
     current: &mut View,
     view: View,
+    icon: Icon,
     text: &str,
     count: Option<String>,
 ) {
@@ -1016,8 +1017,15 @@ fn nav_item(
         } else {
             th.text_med
         };
+        paint_icon(
+            ui.painter(),
+            rect.left_center() + egui::vec2(8.0 + NAV_ICON * 0.5, 0.0),
+            NAV_ICON * 0.32,
+            icon,
+            color,
+        );
         ui.painter().text(
-            rect.left_center() + egui::vec2(8.0, 0.0),
+            rect.left_center() + egui::vec2(8.0 + NAV_ICON + 6.0, 0.0),
             egui::Align2::LEFT_CENTER,
             text,
             egui::FontId::proportional(13.0),
@@ -1101,11 +1109,21 @@ fn year_row(ui: &mut egui::Ui, width: f32, text: &str, count: Option<usize>, sel
     resp.clicked()
 }
 
-/// An item of the left list in the "Settings" dialog: the same geometry as the navigation.
-fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
+/// An item of the left list in the "Settings" dialog (M22.8): the icon and the word of the
+/// section, the active row on the accent fill with a 2 px accent edge (`photocat_4`'s
+/// `border-l-[3px]`, rounded down to the 2 px line of our layout), a mono value at the right edge —
+/// the state of the section before a click, as the mock-up's "ViT-B/32" and "4.8 GB".
+fn settings_nav_item(
+    ui: &mut egui::Ui,
+    selected: bool,
+    icon: Icon,
+    text: &str,
+    value: Option<&str>,
+) -> bool {
     let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_H), egui::Sense::click());
     if ui.is_rect_visible(rect) {
+        let th = theme(ui);
         let fill = if selected {
             selected_fill(ui)
         } else if resp.hovered() {
@@ -1115,17 +1133,56 @@ fn settings_nav_item(ui: &mut egui::Ui, selected: bool, text: &str) -> bool {
         };
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(RADIUS_ITEM as u8), fill);
+        let color = if selected {
+            th.accent
+        } else if resp.hovered() {
+            th.text
+        } else {
+            th.text_med
+        };
+        if selected {
+            // The edge of the active row: a 2 px accent bar on the left, inside the fill.
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(rect.left_top(), egui::vec2(2.0, rect.height())),
+                0.0,
+                th.accent,
+            );
+        }
+        paint_icon(
+            ui.painter(),
+            rect.left_center() + egui::vec2(10.0 + NAV_ICON * 0.5, 0.0),
+            NAV_ICON * 0.32,
+            icon,
+            color,
+        );
         ui.painter().text(
-            rect.left_center() + egui::vec2(8.0, 0.0),
+            rect.left_center() + egui::vec2(10.0 + NAV_ICON + 6.0, 0.0),
             egui::Align2::LEFT_CENTER,
             text,
             egui::FontId::proportional(13.0),
-            if selected {
-                accent(ui)
-            } else {
-                theme(ui).text_med
-            },
+            color,
         );
+        // The value stands at the right edge only when it does not touch the word: a long section
+        // name must not collide with its counter.
+        if let Some(value) = value {
+            let width = |text: &str, font: egui::FontId| {
+                ui.painter()
+                    .layout_no_wrap(text.to_string(), font, color)
+                    .size()
+                    .x
+            };
+            let label_w = width(text, egui::FontId::proportional(13.0));
+            let value_w = width(value, egui::FontId::monospace(10.0));
+            if 10.0 + NAV_ICON + 6.0 + label_w + 8.0 + value_w + 8.0 <= rect.width() {
+                ui.painter().text(
+                    rect.right_center() + egui::vec2(-8.0, 0.0),
+                    egui::Align2::RIGHT_CENTER,
+                    value,
+                    egui::FontId::monospace(10.0),
+                    if selected { th.accent } else { th.text_dim },
+                );
+            }
+        }
     }
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1294,12 +1351,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
             if chips.pickable {
                 if chips.picked > 0
                     && ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(t(lang, "Clear selection")).size(11.0),
-                            )
-                            .small(),
-                        )
+                        .add(WordButton::small(Icon::Remove, t(lang, "Clear selection")))
                         .on_hover_text(t(
                             lang,
                             "clears the selection in this grid; Esc does the same",
@@ -1309,12 +1361,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
                     clear.clear_pick = true;
                 }
                 if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(i18n::select_all(lang, found.0)).size(11.0),
-                        )
-                        .small(),
-                    )
+                    .add(WordButton::small(Icon::Check, i18n::select_all(lang, found.0)))
                     .on_hover_text(t(
                         lang,
                         "marks everything visible now; Ctrl+A does the same",
@@ -1688,7 +1735,7 @@ fn progress_row(ui: &mut egui::Ui, name: &str, p: &Arc<Progress>, running: bool)
                     p.msg()
                 }),
         );
-        if running && ui.button("Stop").clicked() {
+        if running && word_button(ui, Icon::Stop, "Stop").clicked() {
             stop = true;
         }
     });
@@ -2882,7 +2929,7 @@ impl App {
         let mut copy = false;
         let mut copy_last = false;
         ui.horizontal(|ui| {
-            let b = primary_button(ui, t(lang, "Compare the copies"));
+            let b = WordButton::primary(Icon::CompareArrows, t(lang, "Compare the copies"));
             if ui
                 .add_enabled(!running, b)
                 .on_hover_text(t(lang, "compare folder A and folder B byte by byte"))
@@ -2891,20 +2938,25 @@ impl App {
                 verify_clicked = true;
             }
             if ui
-                .add_enabled(!running, egui::Button::new(manifest_label))
+                .add_enabled(!running, WordButton::new(Icon::Description, manifest_label))
                 .on_hover_text(t(lang, "sha256 of every file in folder A into the manifest"))
                 .clicked()
             {
                 manifest_clicked = true;
             }
             if ui
-                .add_enabled(!running, egui::Button::new(t(lang, "Check against the manifest")))
+                .add_enabled(
+                    !running,
+                    WordButton::new(Icon::Verified, t(lang, "Check against the manifest")),
+                )
                 .on_hover_text(t(lang, "compare folder A with the saved manifest"))
                 .clicked()
             {
                 check_clicked = true;
             }
-            if self.integrity_overwrite && ui.button(t(lang, "Cancel")).clicked() {
+            if self.integrity_overwrite
+                && word_button(ui, Icon::Close, t(lang, "Cancel")).clicked()
+            {
                 cancel_overwrite = true;
             }
         });
@@ -3016,7 +3068,7 @@ impl App {
                     .size(11.0)
                     .color(dim(ui)),
                 );
-                if ui.button(t(lang, "Copy the last report")).clicked() {
+                if word_button(ui, Icon::ContentCopy, t(lang, "Copy the last report")).clicked() {
                     copy_last = true;
                 }
             });
@@ -3053,7 +3105,7 @@ impl App {
                     .color(color),
             );
             ui.horizontal(|ui| {
-                if ui.button(t(lang, "Copy the report")).clicked() {
+                if word_button(ui, Icon::ContentCopy, t(lang, "Copy the report")).clicked() {
                     copy = true;
                 }
                 ui.label(
@@ -3227,6 +3279,35 @@ impl App {
         }
         let mut close = false;
         let mut tab = self.settings_tab;
+        // What every section holds right now — the mono value at the right edge of its row.
+        let mut section_notes: std::collections::BTreeMap<SettingsTab, String> =
+            std::collections::BTreeMap::new();
+        section_notes.insert(
+            SettingsTab::Interface,
+            self.settings.lang.code().to_uppercase(),
+        );
+        let entry = embed::active_entry(&self.settings);
+        section_notes.insert(
+            SettingsTab::Model,
+            format!("{} {}", entry.dim, t(lang, "dims")),
+        );
+        section_notes.insert(SettingsTab::Index, self.items.len().to_string());
+        section_notes.insert(
+            SettingsTab::Tags,
+            self.tag_defs.iter().filter(|d| d.enabled).count().to_string(),
+        );
+        section_notes.insert(
+            SettingsTab::Faces,
+            format!("{:.2}", self.settings.face_threshold),
+        );
+        section_notes.insert(
+            SettingsTab::Tools,
+            format!(
+                "{}/{}",
+                self.tool_states.iter().filter(|s| !s.is_empty()).count(),
+                tools::ALL.len()
+            ),
+        );
         let resp = egui::Modal::new(egui::Id::unique("photocat-settings")).show(ctx, |ui| {
             ui.allocate_ui_with_layout(
                 egui::vec2(760.0, 620.0),
@@ -3255,7 +3336,8 @@ impl App {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.add_space(12.0);
-                                    if ui.button(t(lang, "Close")).clicked() {
+                                    if word_button(ui, Icon::Close, t(lang, "Close")).clicked()
+                                    {
                                         close = true;
                                     }
                                 },
@@ -3268,9 +3350,17 @@ impl App {
                         .resizable(false)
                         .show(ui, |ui| {
                             ui.add_space(8.0);
-                            for t in SettingsTab::ALL {
-                                if settings_nav_item(ui, tab == t, t.label(lang)) {
-                                    tab = t;
+                            caps_label(ui, t(lang, "Settings sections"));
+                            ui.add_space(4.0);
+                            for section in SettingsTab::ALL {
+                                if settings_nav_item(
+                                    ui,
+                                    tab == section,
+                                    section.icon(),
+                                    section.label(lang),
+                                    section_notes.get(&section).map(String::as_str),
+                                ) {
+                                    tab = section;
                                 }
                             }
                         });
@@ -3336,7 +3426,10 @@ impl App {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     if ui
-                                        .small_button(t(lang, "Remove from the index"))
+                                        .add(WordButton::small(
+                                            Icon::Remove,
+                                            t(lang, "Remove from the index"),
+                                        ))
                                         .on_hover_text(t(lang, "files on disk are not deleted"))
                                         .clicked()
                                     {
@@ -3349,17 +3442,17 @@ impl App {
                 });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button(t(lang, "Add a folder…")).clicked() {
+                if word_button(ui, Icon::CreateNewFolder, t(lang, "Add a folder…")).clicked() {
                     add = true;
                 }
-                let b = primary_button(ui, t(lang, "Index all"));
+                let b = WordButton::primary(Icon::Sync, t(lang, "Index all"));
                 if ui
                     .add_enabled(!roots.is_empty(), b)
                     .clicked()
                 {
                     index_all = true;
                 }
-                if ui.button(t(lang, "Close")).clicked() {
+                if word_button(ui, Icon::Close, t(lang, "Close")).clicked() {
                     close = true;
                 }
             });
@@ -3450,11 +3543,11 @@ impl App {
             }
             ui.horizontal(|ui| {
                 if let Some(parent) = current.parent()
-                    && ui.button(t(lang, "Up")).clicked()
+                    && word_button(ui, Icon::ArrowUp, t(lang, "Up")).clicked()
                 {
                     nav = Some(parent.to_path_buf());
                 }
-                let b = primary_button(ui, t(lang, "Add and index"));
+                let b = WordButton::primary(Icon::Add, t(lang, "Add and index"));
                 if ui
                     .add(b)
                     .clicked()
@@ -3462,10 +3555,10 @@ impl App {
                     add = true;
                     add_and_index = true;
                 }
-                if ui.button(t(lang, "Add without indexing")).clicked() {
+                if word_button(ui, Icon::Add, t(lang, "Add without indexing")).clicked() {
                     add = true;
                 }
-                if ui.button(t(lang, "Cancel")).clicked() {
+                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
                     close = true;
                 }
             });
@@ -3479,7 +3572,7 @@ impl App {
                     }
                     for p in &entries {
                         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("?");
-                        if ui.button(format!("{name}/")).clicked() {
+                        if word_button(ui, Icon::Folder, format!("{name}/")).clicked() {
                             nav = Some(p.clone());
                         }
                     }
@@ -3552,11 +3645,15 @@ impl App {
             ui.label(text);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let b = primary_button(ui, button);
+                let icon = match action {
+                    StorageAction::Index => Icon::Delete,
+                    StorageAction::Thumbs | StorageAction::Faces => Icon::Cleaning,
+                };
+                let b = WordButton::primary(icon, button);
                 if ui.add(b).clicked() {
                     confirmed = true;
                 }
-                if ui.button(t(lang, "Cancel")).clicked() {
+                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
                     cancel = true;
                 }
             });
@@ -3665,11 +3762,17 @@ impl App {
                     AlbumDialog::Move => t(lang, "Move"),
                     AlbumDialog::Delete => t(lang, "Delete the album"),
                 };
-                let b = primary_button(ui, label);
+                let icon = match dialog {
+                    AlbumDialog::New | AlbumDialog::Sub => Icon::CreateNewFolder,
+                    AlbumDialog::Rename => Icon::Edit,
+                    AlbumDialog::Move => Icon::MoveTo,
+                    AlbumDialog::Delete => Icon::Delete,
+                };
+                let b = WordButton::primary(icon, label);
                 if ui.add(b).clicked() {
                     confirm = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
                     cancel = true;
                 }
             });
@@ -3768,20 +3871,23 @@ impl App {
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button(t(lang, "Show the plan")).clicked() {
+                if word_button(ui, Icon::Preview, t(lang, "Show the plan")).clicked() {
                     show_plan = true;
                 }
                 if ui
                     .add_enabled(
                         !running,
-                        egui::Button::new(i18n::fill(lang, "Export {} files", &[files.to_string()])),
+                        WordButton::new(
+                            Icon::Download,
+                            i18n::fill(lang, "Export {} files", &[files.to_string()]),
+                        ),
                     )
                     .on_hover_text(t(lang, "copies, not links; a repeated pass duplicates nothing"))
                     .clicked()
                 {
                     start = true;
                 }
-                if ui.button("Close").clicked() {
+                if word_button(ui, Icon::Close, "Close").clicked() {
                     close = true;
                 }
             });
@@ -3821,7 +3927,7 @@ impl App {
                 for line in errors.iter().take(5) {
                     ui.label(egui::RichText::new(line).size(11.0).color(dim(ui)));
                 }
-                if ui.button("Copy the report").clicked() {
+                if word_button(ui, Icon::ContentCopy, "Copy the report").clicked() {
                     copy = true;
                 }
             }
@@ -3876,14 +3982,14 @@ impl App {
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let b = primary_button(ui, t(lang, "Move to the OS trash"));
+                let b = WordButton::primary(Icon::Delete, t(lang, "Move to the OS trash"));
                 if ui
                     .add(b)
                     .clicked()
                 {
                     confirmed = true;
                 }
-                if ui.button(t(lang, "Cancel")).clicked() {
+                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
                     cancel = true;
                 }
             });
@@ -4078,7 +4184,7 @@ impl App {
                 dim(ui)
             },
         ));
-        if ui.button(t(lang, "Check the model")).clicked() {
+        if word_button(ui, Icon::CheckCircle, t(lang, "Check the model")).clicked() {
             match embed::check_model(&self.settings) {
                 Ok(()) => {
                     self.status = i18n::fill(lang, "the model {} is verified: the sha256 matches", &[t(lang, embed::active_entry(&self.settings).title).to_string()])
@@ -4100,7 +4206,7 @@ impl App {
                     .hint_text(t(lang, "where to download the weights"))
                     .desired_width(380.0),
             );
-            if ui.button(t(lang, "Apply the path")).clicked() {
+            if word_button(ui, Icon::Check, t(lang, "Apply the path")).clicked() {
                 let p = self.models_dir_input.trim();
                 if p.is_empty() {
                     self.status = t(lang, "the model path is empty").into();
@@ -4192,7 +4298,7 @@ impl App {
         ui.add_space(8.0);
         let busy = self.download_rx.is_some();
         ui.horizontal(|ui| {
-            let b = primary_button(ui, t(lang, "Download the model"));
+            let b = WordButton::primary(Icon::Download, t(lang, "Download the model"));
             if ui
                 .add_enabled(self.download_consent && !busy, b)
                 .clicked()
@@ -4202,7 +4308,7 @@ impl App {
             if ui
                 .add_enabled(
                     self.embed_rx.is_none() && embed::model_present(&self.settings),
-                    egui::Button::new(t(lang, "Compute tags")),
+                    WordButton::new(Icon::AutoAwesome, t(lang, "Compute tags")),
                 )
                 .clicked()
             {
@@ -4434,7 +4540,8 @@ impl App {
                     d.min_percentile = pct;
                     edited = Some(d.clone());
                 }
-                if ui.button(t(lang, "Remove from the dictionary")).clicked() {
+                if word_button(ui, Icon::Delete, t(lang, "Remove from the dictionary")).clicked()
+                {
                     removed = Some(d.id.clone());
                 }
             });
@@ -4488,7 +4595,7 @@ impl App {
             add = ui
                 .add_enabled(
                     !self.tag_new_label.trim().is_empty(),
-                    egui::Button::new(t(lang, "Add to the dictionary")),
+                    WordButton::new(Icon::Add, t(lang, "Add to the dictionary")),
                 )
                 .on_hover_text(t(
                     lang,
@@ -4502,28 +4609,28 @@ impl App {
                 t(lang, "Recompute tags").to_string()
             };
             retag = ui
-                .add_enabled(can, egui::Button::new(title))
+                .add_enabled(can, WordButton::new(Icon::Refresh, title))
                 .on_hover_text(t(
                     lang,
                     "recompute the tag weights from the vectors already stored, without running CLIP over the photos again",
                 ))
                 .clicked();
             export = ui
-                .button(t(lang, "Export JSON"))
+                .add(WordButton::new(Icon::Download, t(lang, "Export JSON")))
                 .on_hover_text(t(
                     lang,
                     "the dictionary without paths or photos — it can be moved to another machine",
                 ))
                 .clicked();
             import = ui
-                .button(t(lang, "Import JSON"))
+                .add(WordButton::new(Icon::Upload, t(lang, "Import JSON")))
                 .on_hover_text(t(
                     lang,
                     "replace the model dictionary with a file; the old weights disappear after a recompute",
                 ))
                 .clicked();
             reset = ui
-                .button(t(lang, "Restore the defaults"))
+                .add(WordButton::new(Icon::Restore, t(lang, "Restore the defaults")))
                 .on_hover_text(t(
                     lang,
                     "the 14 general tags from the code; your edits will be replaced",
@@ -4795,7 +4902,7 @@ impl App {
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            let b = primary_button(ui, t(lang, "Download the face model"));
+            let b = WordButton::primary(Icon::Download, t(lang, "Download the face model"));
             if ui
                 .add_enabled(
                     self.face_download_consent && self.face_download_rx.is_none(),
@@ -4805,7 +4912,7 @@ impl App {
             {
                 self.start_face_download();
             }
-            if ui.button(t(lang, "Check the face model")).clicked() {
+            if word_button(ui, Icon::CheckCircle, t(lang, "Check the face model")).clicked() {
                 match faces::check_model(&self.settings) {
                     Ok(()) => {
                         self.status =
@@ -4885,7 +4992,7 @@ impl App {
             ),
         );
         ui.add_space(8.0);
-        if ui.button(t(lang, "Compute the used space")).clicked() {
+        if word_button(ui, Icon::Calculate, t(lang, "Compute the used space")).clicked() {
             self.storage_usage = Some(storage::usage(&self.db_path, &self.settings.models_dir));
         }
         if let Some(u) = &self.storage_usage {
@@ -4902,14 +5009,14 @@ impl App {
                 .color(dim(ui)),
         );
         if ui
-            .button(t(lang, "Clear the previews…"))
+            .add(WordButton::new(Icon::Cleaning, t(lang, "Clear the previews…")))
             .on_hover_text(t(lang, "only <cache>/photocat/thumbs; the archive is untouched"))
             .clicked()
         {
             self.storage_confirm = Some(StorageAction::Thumbs);
         }
         if ui
-            .button(t(lang, "Clear the face crops…"))
+            .add(WordButton::new(Icon::Cleaning, t(lang, "Clear the face crops…")))
             .on_hover_text(t(
                 lang,
                 "the crops and the face rows; after that “Find faces” runs again",
@@ -4919,7 +5026,7 @@ impl App {
             self.storage_confirm = Some(StorageAction::Faces);
         }
         if ui
-            .button(t(lang, "Reset the index…"))
+            .add(WordButton::new(Icon::Delete, t(lang, "Reset the index…")))
             .on_hover_text(t(
                 lang,
                 "DB rows: files, tags, OCR, vectors, faces; the originals are intact",
@@ -4976,7 +5083,10 @@ impl App {
             ui.add_space(8.0);
         }
         if ui
-            .add(egui::Button::new(t(lang, "Check and save the programs")))
+            .add(WordButton::new(
+                Icon::CheckCircle,
+                t(lang, "Check and save the programs"),
+            ))
             .clicked()
         {
             self.apply_tools();
@@ -5019,15 +5129,20 @@ impl App {
             // The search mode is a compact switch before the field (PhotoPrism).
             let mut text_mode = self.search_ocr;
             if ui
-                .selectable_label(!text_mode, egui::RichText::new(t(lang, "Semantic")).size(11.0))
-                .on_hover_text(t(lang, t(lang, "search by the content of the photos")))
+                .add(
+                    WordButton::picked(Icon::Search, t(lang, "Semantic"), !text_mode)
+                        .compact(),
+                )
+                .on_hover_text(t(lang, "search by the content of the photos"))
                 .clicked()
             {
                 text_mode = false;
             }
             if ui
-                .selectable_label(text_mode, egui::RichText::new(t(lang, "By text")).size(11.0))
-                .on_hover_text(t(lang, t(lang, "search the recognized text")))
+                .add(
+                    WordButton::picked(Icon::TextFields, t(lang, "By text"), text_mode).compact(),
+                )
+                .on_hover_text(t(lang, "search the recognized text"))
                 .clicked()
             {
                 text_mode = true;
@@ -5058,14 +5173,17 @@ impl App {
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if ui
-                .add_enabled(ready, egui::Button::new(t(lang, "Search")))
+                .add_enabled(ready, WordButton::new(Icon::Search, t(lang, "Search")))
                 .clicked()
                 || (enter && ready)
             {
                 self.start_search();
             }
             if ui
-                .add_enabled(self.semantic_hits.is_some(), egui::Button::new(t(lang, "Reset")))
+                .add_enabled(
+                    self.semantic_hits.is_some(),
+                    WordButton::new(Icon::Close, t(lang, "Reset")),
+                )
                 .clicked()
             {
                 self.semantic_hits = None;
@@ -5093,22 +5211,28 @@ impl App {
             // On the right — the state and the way into the service windows. The numbers are monospaced so
             // that the counter does not jostle its neighbours during indexing.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(t(lang, "Settings")).clicked() {
+                if word_button(ui, Icon::Settings, t(lang, "Settings")).clicked() {
                     self.settings_open = true;
                 }
                 if ui
-                    .button(if self.details_open {
-                        t(lang, "Hide details")
-                    } else {
-                        t(lang, "Details")
-                    })
+                    .add(WordButton::new(
+                        Icon::DockToRight,
+                        if self.details_open {
+                            t(lang, "Hide details")
+                        } else {
+                            t(lang, "Details")
+                        },
+                    ))
                     .on_hover_text(t(lang, "right panel with date, camera, tags and text"))
                     .clicked()
                 {
                     self.details_open = !self.details_open;
                 }
                 if ui
-                    .button(format!("{} ({})", t(lang, "Folders"), self.roots.len()))
+                    .add(WordButton::new(
+                        Icon::FolderSpecial,
+                        format!("{} ({})", t(lang, "Folders"), self.roots.len()),
+                    ))
                     .on_hover_text(t(
                         lang,
                         "add several folders, drop a folder from the index",
@@ -5349,12 +5473,12 @@ impl App {
         );
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.add_space(4.0);
-        let index = primary_button(ui, t(lang, "Start indexing"));
+        let index = WordButton::primary(Icon::Sync, t(lang, "Start indexing"));
         ui.horizontal(|ui| {
             if ui.add(index).clicked() || enter {
                 self.start_index();
             }
-            if ui.button(t(lang, "Refresh")).clicked() {
+            if word_button(ui, Icon::Refresh, t(lang, "Refresh")).clicked() {
                 self.reload();
             }
         });
@@ -5369,6 +5493,7 @@ impl App {
             ui,
             &mut self.view,
             View::Grid,
+            Icon::PhotoLibrary,
             t(lang, "All files"),
             Some(self.items.len().to_string()),
         );
@@ -5376,14 +5501,23 @@ impl App {
             ui,
             &mut self.view,
             View::Albums,
+            Icon::CollectionsBookmark,
             t(lang, "Albums"),
             Some(self.albums.len().to_string()),
         );
-        nav_item(ui, &mut self.view, View::Calendar, t(lang, "Calendar"), None);
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Calendar,
+            Icon::CalendarMonth,
+            t(lang, "Calendar"),
+            None,
+        );
         nav_item(
             ui,
             &mut self.view,
             View::Faces,
+            Icon::Face,
             t(lang, "People"),
             Some(self.face_clusters.len().to_string()),
         );
@@ -5392,14 +5526,23 @@ impl App {
             ui,
             &mut self.view,
             View::Dupes,
+            Icon::BurstMode,
             t(lang, "Duplicates & series"),
             Some(self.groups.len().to_string()),
         );
-        nav_item(ui, &mut self.view, View::Integrity, t(lang, "Integrity"), None);
+        nav_item(
+            ui,
+            &mut self.view,
+            View::Integrity,
+            Icon::Verified,
+            t(lang, "Integrity"),
+            None,
+        );
         nav_item(
             ui,
             &mut self.view,
             View::Trash,
+            Icon::Delete,
             t(lang, "Trash"),
             Some(self.trash_items.len().to_string()),
         );
@@ -5432,11 +5575,15 @@ impl App {
         ui.add_space(4.0);
         // The format is one choice instead of a checkbox: everything, photos or video (PhotoPrism: Images/Video).
         ui.horizontal(|ui| {
-            for kind in [KindFilter::All, KindFilter::Images, KindFilter::Videos] {
+            for (kind, icon) in [
+                (KindFilter::All, Icon::Apps),
+                (KindFilter::Images, Icon::Photo),
+                (KindFilter::Videos, Icon::Videocam),
+            ] {
                 if ui
-                    .selectable_label(
-                        self.kind_filter == kind,
-                        egui::RichText::new(kind.label(lang)).size(12.0),
+                    .add(
+                        WordButton::picked(icon, kind.label(lang), self.kind_filter == kind)
+                            .compact(),
                     )
                     .clicked()
                 {
@@ -5578,7 +5725,7 @@ impl App {
                 self.settings.max_dist = self.max_dist;
                 self.save_settings();
             }
-            let b = primary_button(ui, t(lang, "Find groups"));
+            let b = WordButton::primary(Icon::BurstMode, t(lang, "Find groups"));
             if ui
                 .add(b)
                 .clicked()
@@ -5594,7 +5741,7 @@ impl App {
             let has_groups = !self.groups.is_empty();
             ui.add_space(4.0);
             if ui
-                .add_enabled(has_groups, egui::Button::new(t(lang, "Export the plan")))
+                .add_enabled(has_groups, WordButton::new(Icon::Download, t(lang, "Export the plan")))
                 .on_hover_text(t(
                     lang,
                     "write a CSV into the app cache: group, keep_path, drop_path, reason, wasted_bytes; a list to review, not a deletion",
@@ -5620,7 +5767,7 @@ impl App {
                 }
             }
             if ui
-                .add_enabled(has_groups, egui::Button::new(t(lang, "Copy the list")))
+                .add_enabled(has_groups, WordButton::new(Icon::ContentCopy, t(lang, "Copy the list")))
                 .on_hover_text(t(lang, "the whole CSV plan to the clipboard"))
                 .clicked()
             {
@@ -5690,7 +5837,7 @@ impl App {
                         .size(11.0)
                         .color(dim(ui)),
                 );
-                if ui.button(t(lang, "Face settings")).clicked() {
+                if word_button(ui, Icon::Settings, t(lang, "Face settings")).clicked() {
                     self.settings_open = true;
                     self.settings_tab = SettingsTab::Faces;
                 }
@@ -5705,7 +5852,7 @@ impl App {
             if self.face_rx.is_some() {
                 ui.label(t(lang, "reclustering…"));
                 if let Some(p) = &self.face_progress
-                    && ui.button(t(lang, "Stop")).clicked()
+                    && word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
                 {
                     p.cancel();
                     self.status = t(lang, "people: stopping after the current photos…").into();
@@ -5717,7 +5864,17 @@ impl App {
                     format!("{} ({})", t(lang, "Find faces"), self.face_todo)
                 };
                 if ui
-                    .add_enabled(model && self.face_todo > 0, egui::Button::new(scan_label))
+                    .add_enabled(
+                        model && self.face_todo > 0,
+                        WordButton::new(
+                            if self.face_todo < self.face_images {
+                                Icon::Play
+                            } else {
+                                Icon::Face
+                            },
+                            scan_label,
+                        ),
+                    )
                     .on_hover_text(t(
                         lang,
                         "a long pass: detection and embeddings run locally, no network; photos already scanned are skipped by sha256",
@@ -5729,7 +5886,7 @@ impl App {
                 if ui
                     .add_enabled(
                         self.face_faces > 0,
-                        egui::Button::new(t(lang, "Rebuild groups")),
+                        WordButton::new(Icon::Refresh, t(lang, "Rebuild groups")),
                     )
                     .on_hover_text(t(
                         lang,
@@ -5811,11 +5968,14 @@ impl App {
                 if ui
                     .add_enabled(
                         n > 0,
-                        egui::Button::new(if self.face_together {
-                            format!("{} ({n})", t(lang, "Show the photos (together)"))
-                        } else {
-                            format!("{} ({n})", t(lang, "Photos with everyone together"))
-                        }),
+                        WordButton::new(
+                            Icon::Face,
+                            if self.face_together {
+                                format!("{} ({n})", t(lang, "Show the photos (together)"))
+                            } else {
+                                format!("{} ({n})", t(lang, "Photos with everyone together"))
+                            },
+                        ),
                     )
                     .on_hover_text(t(
                         lang,
@@ -5868,7 +6028,7 @@ impl App {
                 if ui
                     .add_enabled(
                         self.embed_rx.is_none(),
-                        egui::Button::new(t(lang, "Compute tags")),
+                        WordButton::new(Icon::AutoAwesome, t(lang, "Compute tags")),
                     )
                     .on_hover_text(hint)
                     .clicked()
@@ -5944,7 +6104,7 @@ impl App {
                         .color(dim(ui)),
                 );
             }
-            if ui.button(t(lang, "Model settings")).clicked() {
+            if word_button(ui, Icon::Settings, t(lang, "Model settings")).clicked() {
                 self.settings_open = true;
                 self.settings_tab = SettingsTab::Model;
             }
@@ -5982,7 +6142,7 @@ impl App {
             ui.label(egui::RichText::new(candidates).size(11.0).color(dim(ui)));
             ui.add_space(4.0);
             if self.ocr_rx.is_some() {
-                if ui.button(t(lang, "Stop")).clicked()
+                if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
                     && let Some(p) = &self.ocr_progress
                 {
                     p.cancel();
@@ -6001,7 +6161,14 @@ impl App {
                 if ui
                     .add_enabled(
                         self.tesseract.is_some() && self.ocr_remaining > 0,
-                        egui::Button::new(label),
+                        WordButton::new(
+                            if self.ocr_remaining < self.ocr_candidates {
+                                Icon::Play
+                            } else {
+                                Icon::TextFields
+                            },
+                            label,
+                        ),
                     )
                     .on_hover_text(t(
                         lang,
@@ -6060,7 +6227,7 @@ impl App {
             ui.label(egui::RichText::new(t(lang, "File details")).size(14.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .small_button(t(lang, "Hide"))
+                    .add(WordButton::small(Icon::DockToRight, t(lang, "Hide")))
                     .on_hover_text(t(lang, "free up room for the grid and calendar"))
                     .clicked()
                 {
@@ -6173,7 +6340,7 @@ impl App {
             {
                 self.open_viewer(id);
             }
-            let b = danger_button(ui, t(lang, "To trash"));
+            let b = WordButton::danger(Icon::Delete, t(lang, "To trash"));
             if ui
                 .add(b)
                 .on_hover_text(t(
@@ -6367,7 +6534,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tag).size(12.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(t(lang, "remove")).clicked() {
+                    if ui.add(WordButton::small(Icon::Remove, t(lang, "remove"))).clicked() {
                         remove_own = Some(tag.clone());
                     }
                 });
@@ -6390,7 +6557,7 @@ impl App {
                     .hint_text(t(lang, "your own tag, e.g. furniture"))
                     .desired_width(150.0),
             );
-            if ui.button(t(lang, "Add tag")).clicked() {
+            if word_button(ui, Icon::Add, t(lang, "Add tag")).clicked() {
                 let tag = self.user_tag_input.trim().to_string();
                 if !tag.is_empty() {
                     match db::add_user_tag(&self.db_path, id, &tag) {
@@ -6420,7 +6587,14 @@ impl App {
             if ui
                 .add_enabled(
                     self.tesseract.is_some() && self.ocr_rx.is_none(),
-                    egui::Button::new(label),
+                    WordButton::new(
+                        if self.ocr_text.get(&id).is_some_and(|t| !t.trim().is_empty()) {
+                            Icon::Refresh
+                        } else {
+                            Icon::TextFields
+                        },
+                        label,
+                    ),
                 )
                 .on_hover_text(t(lang, "this photo only; the original is unchanged"))
                 .clicked()
@@ -7157,7 +7331,7 @@ impl App {
                 // accent (M22.7).
                 ui.horizontal(|ui| {
                     if ui
-                        .button(t(lang, "Back to the grid"))
+                        .add(WordButton::new(Icon::ArrowBack, t(lang, "Back to the grid")))
                         .on_hover_text(t(lang, "close the full screen — Esc"))
                         .clicked()
                     {
@@ -7188,7 +7362,7 @@ impl App {
                 // The tools row: a word and a hint for every tool, no icon-only path (M22.7).
                 ui.horizontal_wrapped(|ui| {
                     if ui
-                        .button(t(lang, "Zoom out"))
+                        .add(WordButton::new(Icon::ZoomOut, t(lang, "Zoom out")))
                         .on_hover_text(t(lang, "100 % fits the frame into the window"))
                         .clicked()
                     {
@@ -7196,14 +7370,14 @@ impl App {
                     }
                     ui.label(num(ui, format!("{:.0} %", v.zoom * 100.0), 11.0));
                     if ui
-                        .button(t(lang, "Zoom in"))
+                        .add(WordButton::new(Icon::ZoomIn, t(lang, "Zoom in")))
                         .on_hover_text(t(lang, "above 100 % the frame is dragged with the mouse"))
                         .clicked()
                     {
                         new_zoom = (v.zoom + 0.25).min(MAX_ZOOM);
                     }
                     if ui
-                        .button(t(lang, "Fit"))
+                        .add(WordButton::new(Icon::FitScreen, t(lang, "Fit")))
                         .on_hover_text(t(lang, "the whole frame in the window"))
                         .clicked()
                     {
@@ -7211,14 +7385,17 @@ impl App {
                         new_pan = egui::Vec2::ZERO;
                     }
                     if ui
-                        .add_enabled(full_tex.is_some(), egui::Button::new(t(lang, "1:1")))
+                        .add_enabled(
+                            full_tex.is_some(),
+                            WordButton::new(Icon::OneToOne, t(lang, "1:1")),
+                        )
                         .on_hover_text(t(lang, "one image pixel per screen pixel"))
                         .clicked()
                     {
                         want_one_to_one = true;
                     }
                     if ui
-                        .button(t(lang, "Rotate"))
+                        .add(WordButton::new(Icon::Rotate, t(lang, "Rotate")))
                         .on_hover_text(t(
                             lang,
                             "turn the view by 90°; the file on disk is unchanged",
@@ -7235,17 +7412,27 @@ impl App {
                         );
                     }
                     if ui
-                        .selectable_label(v.show_text, t(lang, "Text on the photo"))
+                        .add(WordButton::picked(
+                            Icon::TextFields,
+                            t(lang, "Text on the photo"),
+                            v.show_text,
+                        ))
                         .clicked()
                     {
                         new_text = !v.show_text;
                     }
-                    if f.kind != "video" && ui.button(t(lang, "In the system viewer")).clicked()
+                    if f.kind != "video"
+                        && word_button(ui, Icon::OpenInNew, t(lang, "In the system viewer"))
+                            .clicked()
                     {
                         open_video = true;
                     }
                     if ui
-                        .selectable_label(v.inspector, t(lang, "Inspector"))
+                        .add(WordButton::picked(
+                            Icon::Info,
+                            t(lang, "Inspector"),
+                            v.inspector,
+                        ))
                         .on_hover_text(t(lang, "the file card next to the frame — I"))
                         .clicked()
                     {
@@ -7450,7 +7637,11 @@ impl App {
                                 }
                                 if video_active
                                     && ui
-                                        .selectable_label(true, t(lang, "Stop the video"))
+                                        .add(WordButton::picked(
+                                            Icon::Stop,
+                                            t(lang, "Stop the video"),
+                                            true,
+                                        ))
                                         .on_hover_text(t(
                                             lang,
                                             "stop and go back to the poster frame",
@@ -7461,14 +7652,15 @@ impl App {
                                 }
                             } else {
                                 if ui
-                                    .selectable_label(
-                                        v.slideshow,
+                                    .add(WordButton::picked(
+                                        Icon::Slideshow,
                                         if v.slideshow {
                                             t(lang, "Stop the slideshow")
                                         } else {
                                             t(lang, "Slideshow")
                                         },
-                                    )
+                                        v.slideshow,
+                                    ))
                                     .on_hover_text(t(
                                         lang,
                                         "space — start/stop; walks the current list",
@@ -8564,7 +8756,7 @@ fn tag_row(
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .small_button(t(lang, "remove"))
+                .add(WordButton::small(Icon::Remove, t(lang, "remove")))
                 .on_hover_text(t(lang, t(lang, "remove the tag from this photo; the original does not change")))
                 .clicked()
             {
@@ -8874,16 +9066,87 @@ fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     job
 }
 
-/// A playback bar icon. The shapes are drawn by the painter, not by a font: emoji are
-/// forbidden in the interface, and "▶" and "‖" differ in width and height between fonts.
-#[derive(Clone, Copy)]
+/// A geometric icon of the window (M22.8). The names are the mock-up's Material Symbols, the
+/// shapes are drawn by the painter: photocat bundles no icon font and no image, the binary does
+/// not grow, and an icon always stands next to its word (docs/UI.md § Icons). The playback signs
+/// (`Play`, `Pause`, `Prev`, `Next`, `Volume`) were the first of them and keep their geometry.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Icon {
+    // Actions of the shell.
+    Search,
+    Close,
+    Settings,
+    DockToRight,
+    Folder,
+    FolderSpecial,
+    CreateNewFolder,
+    Sync,
+    Refresh,
+    // The map of the application.
+    PhotoLibrary,
+    Photo,
+    Videocam,
+    CollectionsBookmark,
+    CalendarMonth,
+    CalendarToday,
+    Face,
+    BurstMode,
+    Verified,
+    // Views and lists.
+    Apps,
+    GridView,
+    ViewAgenda,
+    ViewList,
+    // Words that repeat everywhere.
+    Add,
+    Remove,
+    Edit,
+    MoveTo,
+    ContentCopy,
+    Download,
+    Upload,
+    Check,
+    CheckCircle,
+    Delete,
+    Restore,
+    Stop,
+    ArrowUp,
+    ArrowDown,
+    ArrowBack,
+    ChevronLeft,
+    ChevronRight,
+    // The full screen and the files.
+    ZoomIn,
+    ZoomOut,
+    FitScreen,
+    OneToOne,
+    Rotate,
+    OpenInNew,
+    Info,
+    Slideshow,
+    TextFields,
+    Preview,
+    CompareArrows,
+    Description,
+    // Sections of the settings and the model.
+    Psychology,
+    Label,
+    Inventory,
+    Terminal,
+    AutoAwesome,
+    Calculate,
+    Cleaning,
+    // The player.
     Prev,
     Next,
     Play,
     Pause,
     Volume,
 }
+
+/// The stroke of a drawn icon. Not 1 px: a 1 px line of accent would be read as a selection
+/// frame by the calendar check, and it is too thin to see at 14 px.
+const ICON_W: f32 = 1.5;
 
 /// An icon button of the playback bar: 32 px, the tooltip is mandatory.
 fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Response {
@@ -8893,7 +9156,13 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Re
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     let visuals = ui.style().interact(&resp);
     ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
-    paint_icon(ui.painter(), rect.center(), size * 0.30, icon, visuals.fg_stroke.color);
+    paint_icon(
+        ui.painter(),
+        rect.center(),
+        size * 0.30,
+        icon,
+        visuals.fg_stroke.color,
+    );
     resp
 }
 
@@ -8909,74 +9178,607 @@ fn icon_mark(ui: &mut egui::Ui, icon: Icon, size: f32) {
     );
 }
 
-/// The geometry of an icon: `s` is half the height of the shape, `c` its centre.
-fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui::Color32) {
-    match icon {
-        Icon::Play => {
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    egui::pos2(c.x - s * 0.7, c.y - s),
-                    egui::pos2(c.x - s * 0.7, c.y + s),
-                    egui::pos2(c.x + s, c.y),
-                ],
-                color,
-                egui::Stroke::NONE,
-            ));
+/// Which accent a word button carries: the ordinary field tone, the one main action of the
+/// screen (the accent fill), the OS-trash path (the danger tone) or a picked segment of a switch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WordKind {
+    Normal,
+    Primary,
+    Danger,
+}
+
+/// A button with an icon and a word: one widget for every action of the window (M22.8). The
+/// button keeps the geometry of `egui::Button` (26 px high, 10 px padding, 4 px radius) and adds
+/// a 14 px icon 6 px before the word; the word stays, an icon is never the only path
+/// (docs/UI.md § Layout).
+struct WordButton {
+    icon: Icon,
+    text: String,
+    kind: WordKind,
+    selected: bool,
+    small: bool,
+}
+
+impl WordButton {
+    fn new(icon: Icon, text: impl Into<String>) -> Self {
+        Self {
+            icon,
+            text: text.into(),
+            kind: WordKind::Normal,
+            selected: false,
+            small: false,
         }
-        Icon::Pause => {
-            let w = s * 0.44;
-            for dx in [-s * 0.42, s * 0.42] {
-                p.rect_filled(
-                    egui::Rect::from_center_size(
-                        egui::pos2(c.x + dx, c.y),
-                        egui::vec2(w, s * 2.0),
-                    ),
-                    1.0,
-                    color,
-                );
-            }
+    }
+
+    /// The one main action of the screen: the accent fill, the text on the accent.
+    fn primary(icon: Icon, text: impl Into<String>) -> Self {
+        Self {
+            kind: WordKind::Primary,
+            ..Self::new(icon, text)
         }
-        Icon::Prev | Icon::Next => {
-            let dir = if matches!(icon, Icon::Next) { 1.0 } else { -1.0 };
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    egui::pos2(c.x - dir * s * 0.9, c.y - s),
-                    egui::pos2(c.x - dir * s * 0.9, c.y + s),
-                    egui::pos2(c.x + dir * s * 0.4, c.y),
-                ],
-                color,
+    }
+
+    /// A destructive path: the danger border, no fill (the OS trash only, AGENTS.md §1).
+    fn danger(icon: Icon, text: impl Into<String>) -> Self {
+        Self {
+            kind: WordKind::Danger,
+            ..Self::new(icon, text)
+        }
+    }
+
+    /// A segment of a switch or a filter: picked means the accent, the width follows the word
+    /// and not the state, so the row never moves on a click.
+    fn picked(icon: Icon, text: impl Into<String>, selected: bool) -> Self {
+        Self {
+            selected,
+            ..Self::new(icon, text)
+        }
+    }
+
+    /// A 20 px button of a dense row (the section list of the settings dialog).
+    fn small(icon: Icon, text: impl Into<String>) -> Self {
+        Self {
+            small: true,
+            ..Self::new(icon, text)
+        }
+    }
+
+    /// The same button in the 20 px rhythm of a strip switch.
+    fn compact(mut self) -> Self {
+        self.small = true;
+        self
+    }
+
+    fn size(&self, ui: &egui::Ui) -> (f32, f32, f32, f32) {
+        let font = if self.small { 11.0 } else { 13.0 };
+        let icon = if self.small { 12.0 } else { 14.0 };
+        let pad = if self.small { 6.0 } else { 10.0 };
+        let h = if self.small { 20.0 } else { 26.0 };
+        let w = ui
+            .painter()
+            .layout_no_wrap(
+                self.text.clone(),
+                egui::FontId::proportional(font),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x;
+        (pad + icon + 6.0 + w + pad, h, icon, font)
+    }
+}
+
+impl egui::Widget for WordButton {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let (w, h, icon_size, font) = self.size(ui);
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+        let th = theme(ui);
+        let visuals = if self.selected {
+            ui.style().interact_selectable(&resp, true)
+        } else {
+            *ui.style().interact(&resp)
+        };
+        // Every role reads its tones from the palette, never from a literal colour.
+        let (fill, stroke, color) = match self.kind {
+            WordKind::Primary => (
+                if resp.hovered() {
+                    th.accent_hover
+                } else {
+                    th.accent
+                },
                 egui::Stroke::NONE,
-            ));
-            p.rect_filled(
-                egui::Rect::from_center_size(
-                    egui::pos2(c.x + dir * s * 0.95, c.y),
-                    egui::vec2(s * 0.36, s * 2.0),
-                ),
-                1.0,
+                th.on_accent,
+            ),
+            WordKind::Danger => (
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(1.0, th.danger),
+                th.danger,
+            ),
+            WordKind::Normal if self.selected => (
+                ui.visuals().selection.bg_fill,
+                egui::Stroke::NONE,
+                ui.visuals().selection.stroke.color,
+            ),
+            WordKind::Normal => (visuals.weak_bg_fill, visuals.bg_stroke, visuals.fg_stroke.color),
+        };
+        let color = if ui.is_enabled() {
+            color
+        } else {
+            th.text_dim
+        };
+        if ui.is_rect_visible(rect) {
+            let p = ui.painter();
+            p.rect(
+                rect,
+                egui::CornerRadius::same(RADIUS_CTRL as u8),
+                fill,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            let pad = if self.small { 6.0 } else { 10.0 };
+            let icon_c = egui::pos2(rect.left() + pad + icon_size * 0.5, rect.center().y);
+            paint_icon(p, icon_c, icon_size * 0.34, self.icon, color);
+            p.text(
+                egui::pos2(icon_c.x + icon_size * 0.5 + 6.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &self.text,
+                egui::FontId::proportional(font),
                 color,
             );
         }
+        if resp.hovered() && ui.is_enabled() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        resp
+    }
+}
+
+/// A plain button with an icon: `word_button(ui, Icon::Add, "Add tag")`.
+fn word_button(ui: &mut egui::Ui, icon: Icon, text: impl Into<String>) -> egui::Response {
+    ui.add(WordButton::new(icon, text))
+}
+
+/// The geometry of an icon: `s` is half the height of the shape, `c` its centre.
+fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui::Color32) {
+    let pt = |x: f32, y: f32| egui::pos2(c.x + x * s, c.y + y * s);
+    let st = egui::Stroke::new(ICON_W, color);
+    let line = |a: egui::Pos2, b: egui::Pos2| {
+        p.line_segment([a, b], st);
+    };
+    let seg = |pts: Vec<egui::Pos2>| {
+        p.add(egui::Shape::line(pts, st));
+    };
+    let frame = |pts: Vec<egui::Pos2>| {
+        p.add(egui::Shape::closed_line(pts, st));
+    };
+    let fill = |pts: Vec<egui::Pos2>| {
+        p.add(egui::Shape::convex_polygon(
+            pts,
+            color,
+            egui::Stroke::NONE,
+        ));
+    };
+    let boxed = |x0: f32, y0: f32, x1: f32, y1: f32| {
+        p.rect_stroke(
+            egui::Rect::from_min_max(pt(x0, y0), pt(x1, y1)),
+            1.0,
+            st,
+            egui::StrokeKind::Inside,
+        );
+    };
+    let block = |x0: f32, y0: f32, x1: f32, y1: f32| {
+        p.rect_filled(egui::Rect::from_min_max(pt(x0, y0), pt(x1, y1)), 1.0, color);
+    };
+    let disc = |x: f32, y: f32, r: f32| {
+        p.circle_filled(pt(x, y), r * s, color);
+    };
+    let ring = |x: f32, y: f32, r: f32| {
+        p.circle_stroke(pt(x, y), r * s, st);
+    };
+    let arc = |cx: f32, cy: f32, r: f32, a0: f32, a1: f32| {
+        let pts: Vec<egui::Pos2> = (0..=20)
+            .map(|i| {
+                let a = a0 + (a1 - a0) * i as f32 / 20.0;
+                pt(cx + r * a.cos(), cy + r * a.sin())
+            })
+            .collect();
+        seg(pts)
+    };
+    // An arrowhead whose tip is `a` and which points along `d` (in icon units).
+    let head = |a: egui::Pos2, d: egui::Vec2| {
+        let len = d.length().max(0.001);
+        let d = d / len;
+        let n = egui::vec2(-d.y, d.x);
+        fill(vec![
+            a,
+            a - d * s * 0.62 + n * s * 0.42,
+            a - d * s * 0.62 - n * s * 0.42,
+        ]);
+    };
+    let head_at = |radius: f32, angle: f32, dir: f32| {
+        let a = pt(radius * angle.cos(), radius * angle.sin());
+        head(a, egui::vec2(-angle.sin() * dir, angle.cos() * dir));
+    };
+    let folder = |plus: bool, sparkle: bool| {
+        frame(vec![
+            pt(-0.95, -0.5),
+            pt(-0.3, -0.5),
+            pt(-0.12, -0.25),
+            pt(0.95, -0.25),
+            pt(0.95, 0.75),
+            pt(-0.95, 0.75),
+        ]);
+        if plus {
+            line(pt(0.0, -0.02), pt(0.0, 0.52));
+            line(pt(-0.28, 0.25), pt(0.28, 0.25));
+        }
+        if sparkle {
+            fill(vec![
+                pt(0.0, -0.02),
+                pt(0.16, 0.25),
+                pt(0.0, 0.52),
+                pt(-0.16, 0.25),
+            ]);
+        }
+    };
+    match icon {
+        Icon::Search => {
+            ring(-0.15, -0.15, 0.62);
+            line(pt(0.32, 0.32), pt(0.95, 0.95));
+        }
+        Icon::ZoomIn | Icon::ZoomOut => {
+            ring(-0.1, -0.1, 0.6);
+            line(pt(0.36, 0.36), pt(0.95, 0.95));
+            line(pt(-0.42, -0.1), pt(0.22, -0.1));
+            if matches!(icon, Icon::ZoomIn) {
+                line(pt(-0.1, -0.42), pt(-0.1, 0.22));
+            }
+        }
+        Icon::Close => {
+            line(pt(-0.7, -0.7), pt(0.7, 0.7));
+            line(pt(-0.7, 0.7), pt(0.7, -0.7));
+        }
+        Icon::Add => {
+            line(pt(0.0, -0.85), pt(0.0, 0.85));
+            line(pt(-0.85, 0.0), pt(0.85, 0.0));
+        }
+        Icon::Remove => {
+            line(pt(-0.85, 0.0), pt(0.85, 0.0));
+        }
+        Icon::Check => seg(vec![pt(-0.85, 0.05), pt(-0.25, 0.65), pt(0.9, -0.7)]),
+        Icon::CheckCircle => {
+            ring(0.0, 0.0, 0.92);
+            seg(vec![pt(-0.45, 0.02), pt(-0.12, 0.38), pt(0.5, -0.38)]);
+        }
+        // The mock-up's `tune` (the icon of the settings dialog there): three rails with a knob
+        // each. A 14 px gear reads as a sun, a rail reads at once.
+        Icon::Settings => {
+            for (y, x) in [(-0.6, -0.3), (0.0, 0.25), (0.6, -0.1)] {
+                line(pt(-0.95, y), pt(x - 0.26, y));
+                line(pt(x + 0.26, y), pt(0.95, y));
+                disc(x, y, 0.22);
+            }
+        }
+        Icon::DockToRight => {
+            boxed(-0.95, -0.8, 0.95, 0.8);
+            block(0.3, -0.8, 0.95, 0.8);
+        }
+        Icon::Folder => folder(false, false),
+        Icon::FolderSpecial => folder(false, true),
+        Icon::CreateNewFolder => folder(true, false),
+        Icon::Sync => {
+            arc(0.0, 0.0, 0.8, 0.15 * std::f32::consts::PI, 0.85 * std::f32::consts::PI);
+            head_at(0.8, 0.85 * std::f32::consts::PI, 1.0);
+            arc(0.0, 0.0, 0.8, 1.15 * std::f32::consts::PI, 1.85 * std::f32::consts::PI);
+            head_at(0.8, 1.85 * std::f32::consts::PI, 1.0);
+        }
+        Icon::Refresh | Icon::Rotate => {
+            arc(0.0, 0.0, 0.8, 0.2 * std::f32::consts::PI, 1.9 * std::f32::consts::PI);
+            head_at(0.8, 1.9 * std::f32::consts::PI, 1.0);
+        }
+        Icon::Restore => {
+            arc(0.0, 0.0, 0.8, 0.1 * std::f32::consts::PI, 1.8 * std::f32::consts::PI);
+            head_at(0.8, 0.1 * std::f32::consts::PI, -1.0);
+        }
+        Icon::PhotoLibrary => {
+            boxed(-0.95, -0.85, 0.45, 0.35);
+            boxed(-0.45, -0.35, 0.95, 0.85);
+            disc(-0.15, -0.05, 0.13);
+            seg(vec![pt(-0.35, 0.72), pt(0.05, 0.32), pt(0.4, 0.6), pt(0.85, 0.15)]);
+        }
+        Icon::Photo => {
+            boxed(-0.95, -0.75, 0.95, 0.75);
+            disc(-0.42, -0.28, 0.16);
+            seg(vec![
+                pt(-0.9, 0.55),
+                pt(-0.25, -0.1),
+                pt(0.15, 0.3),
+                pt(0.45, 0.0),
+                pt(0.9, 0.45),
+            ]);
+        }
+        Icon::Videocam => {
+            boxed(-0.95, -0.55, 0.3, 0.55);
+            fill(vec![pt(0.35, -0.15), pt(0.95, -0.6), pt(0.95, 0.6), pt(0.35, 0.15)]);
+        }
+        Icon::CollectionsBookmark => {
+            block(-0.85, -0.8, -0.45, 0.85);
+            block(-0.2, -0.8, 0.2, 0.85);
+            block(0.45, -0.8, 0.85, 0.4);
+        }
+        Icon::CalendarMonth | Icon::CalendarToday => {
+            boxed(-0.95, -0.75, 0.95, 0.9);
+            block(-0.95, -0.75, 0.95, -0.4);
+            if matches!(icon, Icon::CalendarToday) {
+                disc(0.0, 0.25, 0.24);
+            } else {
+                for x in [-0.5, 0.0, 0.5] {
+                    disc(x, 0.1, 0.15);
+                    disc(x, 0.55, 0.15);
+                }
+            }
+        }
+        Icon::Face => {
+            ring(0.0, 0.0, 0.92);
+            disc(-0.33, -0.25, 0.16);
+            disc(0.33, -0.25, 0.16);
+            arc(0.0, -0.05, 0.48, 0.6, std::f32::consts::PI - 0.6);
+        }
+        Icon::BurstMode => {
+            boxed(-0.95, -0.95, 0.25, 0.25);
+            boxed(-0.55, -0.55, 0.65, 0.65);
+            boxed(-0.15, -0.15, 0.95, 0.95);
+        }
+        Icon::Verified => {
+            frame(vec![
+                pt(0.0, -0.95),
+                pt(0.85, -0.6),
+                pt(0.75, 0.3),
+                pt(0.0, 0.95),
+                pt(-0.75, 0.3),
+                pt(-0.85, -0.6),
+            ]);
+            seg(vec![pt(-0.4, 0.0), pt(-0.1, 0.32), pt(0.45, -0.35)]);
+        }
+        Icon::Delete => {
+            line(pt(-0.85, -0.55), pt(0.85, -0.55));
+            line(pt(-0.3, -0.55), pt(-0.3, -0.85));
+            line(pt(0.3, -0.55), pt(0.3, -0.85));
+            frame(vec![
+                pt(-0.65, -0.55),
+                pt(-0.5, 0.9),
+                pt(0.5, 0.9),
+                pt(0.65, -0.55),
+            ]);
+            line(pt(-0.2, -0.25), pt(-0.2, 0.6));
+            line(pt(0.2, -0.25), pt(0.2, 0.6));
+        }
+        Icon::Apps => {
+            block(-0.85, -0.85, -0.15, -0.15);
+            block(0.15, -0.85, 0.85, -0.15);
+            block(-0.85, 0.15, -0.15, 0.85);
+            block(0.15, 0.15, 0.85, 0.85);
+        }
+        Icon::GridView => {
+            boxed(-0.85, -0.85, -0.15, -0.15);
+            boxed(0.15, -0.85, 0.85, -0.15);
+            boxed(-0.85, 0.15, -0.15, 0.85);
+            boxed(0.15, 0.15, 0.85, 0.85);
+        }
+        Icon::ViewAgenda => {
+            block(-0.9, -0.9, 0.9, -0.38);
+            block(-0.9, -0.26, 0.9, 0.26);
+            block(-0.9, 0.38, 0.9, 0.9);
+        }
+        Icon::ViewList => {
+            for y in [-0.6, 0.0, 0.6] {
+                disc(-0.75, y, 0.15);
+                line(pt(-0.4, y), pt(0.9, y));
+            }
+        }
+        Icon::Edit => {
+            fill(vec![
+                pt(-0.9, 0.45),
+                pt(0.45, -0.9),
+                pt(0.9, -0.45),
+                pt(-0.45, 0.9),
+            ]);
+            fill(vec![pt(-0.9, 0.45), pt(-0.45, 0.9), pt(-0.95, 0.95)]);
+            line(pt(-0.55, 0.7), pt(0.75, -0.6));
+        }
+        Icon::MoveTo => {
+            line(pt(-0.9, 0.0), pt(0.45, 0.0));
+            head(pt(0.9, 0.0), egui::vec2(1.0, 0.0));
+            line(pt(0.85, -0.8), pt(0.85, 0.8));
+        }
+        Icon::ContentCopy => {
+            boxed(-0.9, -0.9, 0.35, 0.35);
+            boxed(-0.35, -0.35, 0.9, 0.9);
+        }
+        Icon::Download => {
+            line(pt(0.0, -0.9), pt(0.0, 0.3));
+            head(pt(0.0, 0.7), egui::vec2(0.0, 1.0));
+            seg(vec![
+                pt(-0.9, 0.25),
+                pt(-0.9, 0.9),
+                pt(0.9, 0.9),
+                pt(0.9, 0.25),
+            ]);
+        }
+        Icon::Upload => {
+            line(pt(0.0, 0.85), pt(0.0, -0.3));
+            head(pt(0.0, -0.75), egui::vec2(0.0, -1.0));
+            seg(vec![
+                pt(-0.9, 0.25),
+                pt(-0.9, 0.9),
+                pt(0.9, 0.9),
+                pt(0.9, 0.25),
+            ]);
+        }
+        Icon::Stop => block(-0.72, -0.72, 0.72, 0.72),
+        Icon::ArrowUp | Icon::ArrowDown => {
+            let dir = if matches!(icon, Icon::ArrowUp) { -1.0 } else { 1.0 };
+            line(pt(0.0, -dir * 0.85), pt(0.0, dir * 0.85));
+            head(pt(0.0, dir * 0.95), egui::vec2(0.0, dir));
+        }
+        Icon::ArrowBack => {
+            line(pt(0.85, 0.0), pt(-0.5, 0.0));
+            head(pt(-0.9, 0.0), egui::vec2(-1.0, 0.0));
+        }
+        Icon::ChevronLeft => seg(vec![pt(0.4, -0.8), pt(-0.5, 0.0), pt(0.4, 0.8)]),
+        Icon::ChevronRight => seg(vec![pt(-0.4, -0.8), pt(0.5, 0.0), pt(-0.4, 0.8)]),
+        Icon::FitScreen => {
+            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                line(pt(sx * 0.9, sy * 0.4), pt(sx * 0.9, sy * 0.9));
+                line(pt(sx * 0.4, sy * 0.9), pt(sx * 0.9, sy * 0.9));
+            }
+        }
+        Icon::OneToOne => {
+            boxed(-0.9, -0.8, 0.9, 0.8);
+            line(pt(0.0, -0.8), pt(0.0, 0.8));
+        }
+        Icon::OpenInNew => {
+            seg(vec![
+                pt(-0.9, -0.3),
+                pt(-0.9, 0.9),
+                pt(0.3, 0.9),
+                pt(0.3, 0.4),
+            ]);
+            line(pt(-0.15, 0.15), pt(0.75, -0.75));
+            seg(vec![pt(0.25, -0.9), pt(0.9, -0.9), pt(0.9, -0.25)]);
+        }
+        Icon::Info => {
+            ring(0.0, 0.0, 0.92);
+            disc(0.0, -0.42, 0.15);
+            line(pt(0.0, -0.05), pt(0.0, 0.55));
+        }
+        Icon::Slideshow => {
+            boxed(-0.95, -0.75, 0.95, 0.75);
+            fill(vec![pt(-0.2, -0.35), pt(-0.2, 0.35), pt(0.4, 0.0)]);
+        }
+        Icon::TextFields => {
+            line(pt(-0.7, -0.8), pt(0.7, -0.8));
+            line(pt(0.0, -0.8), pt(0.0, 0.85));
+            line(pt(-0.35, 0.85), pt(0.35, 0.85));
+        }
+        Icon::Preview => {
+            let eye = |up: f32| {
+                let pts: Vec<egui::Pos2> = (0..=20)
+                    .map(|i| {
+                        let u = i as f32 / 20.0;
+                        let x = -0.95 + 1.9 * u;
+                        // A quadratic curve through the tips: 0 at the ends, `up` in the middle.
+                        let y = up * 4.0 * u * (1.0 - u);
+                        pt(x, y)
+                    })
+                    .collect();
+                seg(pts)
+            };
+            eye(-0.75);
+            eye(0.75);
+            disc(0.0, 0.0, 0.24);
+        }
+        Icon::CompareArrows => {
+            line(pt(-0.9, -0.38), pt(0.55, -0.38));
+            head(pt(0.92, -0.38), egui::vec2(1.0, 0.0));
+            line(pt(0.9, 0.38), pt(-0.55, 0.38));
+            head(pt(-0.92, 0.38), egui::vec2(-1.0, 0.0));
+        }
+        Icon::Description => {
+            frame(vec![
+                pt(-0.7, -0.95),
+                pt(0.35, -0.95),
+                pt(0.7, -0.55),
+                pt(0.7, 0.95),
+                pt(-0.7, 0.95),
+            ]);
+            line(pt(0.35, -0.95), pt(0.35, -0.55));
+            line(pt(0.35, -0.55), pt(0.7, -0.55));
+            line(pt(-0.4, -0.1), pt(0.4, -0.1));
+            line(pt(-0.4, 0.3), pt(0.4, 0.3));
+            line(pt(-0.4, 0.7), pt(0.1, 0.7));
+        }
+        Icon::Psychology => {
+            ring(0.0, -0.2, 0.62);
+            line(pt(-0.5, 0.15), pt(-0.22, 0.45));
+            line(pt(0.5, 0.15), pt(0.22, 0.45));
+            line(pt(-0.25, 0.55), pt(0.25, 0.55));
+            line(pt(-0.2, 0.8), pt(0.2, 0.8));
+        }
+        Icon::Label => {
+            frame(vec![
+                pt(-0.9, -0.7),
+                pt(0.1, -0.7),
+                pt(0.9, 0.0),
+                pt(0.1, 0.7),
+                pt(-0.9, 0.7),
+            ]);
+            disc(-0.45, 0.0, 0.16);
+        }
+        Icon::Inventory => {
+            boxed(-0.9, -0.75, 0.9, 0.9);
+            line(pt(-0.9, -0.3), pt(0.9, -0.3));
+            line(pt(-0.25, -0.75), pt(-0.25, -0.3));
+            line(pt(0.25, -0.75), pt(0.25, -0.3));
+        }
+        Icon::Terminal => {
+            boxed(-0.95, -0.8, 0.95, 0.8);
+            seg(vec![pt(-0.55, -0.35), pt(-0.2, 0.0), pt(-0.55, 0.35)]);
+            line(pt(0.05, 0.35), pt(0.55, 0.35));
+        }
+        Icon::AutoAwesome => {
+            fill(vec![pt(0.0, -0.95), pt(0.26, 0.0), pt(0.0, 0.95), pt(-0.26, 0.0)]);
+            fill(vec![pt(-0.95, 0.0), pt(0.0, 0.26), pt(0.95, 0.0), pt(0.0, -0.26)]);
+            disc(0.7, -0.7, 0.16);
+        }
+        Icon::Calculate => {
+            boxed(-0.7, -0.95, 0.7, 0.95);
+            line(pt(-0.7, -0.4), pt(0.7, -0.4));
+            for y in [0.0, 0.45] {
+                for x in [-0.35, 0.0, 0.35] {
+                    disc(x, y, 0.13);
+                }
+            }
+        }
+        Icon::Cleaning => {
+            line(pt(0.9, -0.9), pt(0.15, -0.15));
+            fill(vec![
+                pt(-0.05, 0.05),
+                pt(0.3, 0.4),
+                pt(-0.4, 0.95),
+                pt(-0.85, 0.5),
+            ]);
+        }
+        Icon::Play => {
+            fill(vec![pt(-0.7, -1.0), pt(-0.7, 1.0), pt(1.0, 0.0)]);
+        }
+        Icon::Pause => {
+            block(-0.64, -1.0, -0.2, 1.0);
+            block(0.2, -1.0, 0.64, 1.0);
+        }
+        Icon::Prev | Icon::Next => {
+            let dir = if matches!(icon, Icon::Next) { 1.0 } else { -1.0 };
+            fill(vec![
+                pt(-dir * 0.9, -1.0),
+                pt(-dir * 0.9, 1.0),
+                pt(dir * 0.4, 0.0),
+            ]);
+            block(
+                if dir > 0.0 { 0.62 } else { -0.98 },
+                -1.0,
+                if dir > 0.0 { 0.98 } else { -0.62 },
+                1.0,
+            );
+        }
         Icon::Volume => {
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    egui::pos2(c.x - s, c.y - s * 0.35),
-                    egui::pos2(c.x - s * 0.5, c.y - s * 0.35),
-                    egui::pos2(c.x - s * 0.05, c.y - s),
-                    egui::pos2(c.x - s * 0.05, c.y + s),
-                    egui::pos2(c.x - s * 0.5, c.y + s * 0.35),
-                    egui::pos2(c.x - s, c.y + s * 0.35),
-                ],
-                color,
-                egui::Stroke::NONE,
-            ));
-            p.add(egui::Shape::line(
-                vec![
-                    egui::pos2(c.x + s * 0.2, c.y - s * 0.5),
-                    egui::pos2(c.x + s * 0.6, c.y),
-                    egui::pos2(c.x + s * 0.2, c.y + s * 0.5),
-                ],
-                egui::Stroke::new(1.5, color),
-            ));
+            fill(vec![
+                pt(-1.0, -0.35),
+                pt(-0.5, -0.35),
+                pt(-0.05, -1.0),
+                pt(-0.05, 1.0),
+                pt(-0.5, 0.35),
+                pt(-1.0, 0.35),
+            ]);
+            seg(vec![pt(0.2, -0.5), pt(0.6, 0.0), pt(0.2, 0.5)]);
         }
     }
 }
@@ -10440,57 +11242,66 @@ impl eframe::App for App {
                 .fill(theme(ui).canvas)
                 .inner_margin(egui::Margin::symmetric(12, 6))
                 .show(ui, |ui| {
+            // The heading: the title and the facts on the left, the size of a cell on the right
+            // (M22.8). The icons made the row of controls wide enough to reach the title on a
+            // 1240 px window with the details panel open, so the controls moved to a row of their
+            // own instead of pushing the title out of the panel.
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(title).size(18.0).strong());
                 ui.label(num(ui, count, 12.0).color(dim(ui)));
-                // PhotoPrism: the tile size lives in the content panel, not in the left one.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // The size sets the tile, the row height or the list row — but the slider is always
-                    // visible (M22.2a): the heading does not jump on a view change, and a list of 2000 rows
-                    // has something to scale.
-                    {
-                        let size = ui.add(
-                            egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
-                                .step_by(10.0)
-                                .show_value(false),
-                        );
-                        if size.drag_stopped() || size.lost_focus() {
-                            tile_save = true;
-                        }
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} {:.0}",
-                                t(lang, "Tiles"),
-                                self.tile_size
-                            ))
-                            .size(11.0)
-                            .color(dim(ui)),
-                        )
-                        .on_hover_text(t(lang, tile_hint(self.settings.cell_style)));
+                    // The size sets the tile, the row height or the list row — the slider is always
+                    // visible (M22.2a): the heading does not jump on a view change, and a list of
+                    // 2000 rows has something to scale.
+                    let size = ui.add(
+                        egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
+                            .step_by(10.0)
+                            .show_value(false),
+                    );
+                    if size.drag_stopped() || size.lost_focus() {
+                        tile_save = true;
                     }
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} {:.0}",
+                            t(lang, "Tiles"),
+                            self.tile_size
+                        ))
+                        .size(11.0)
+                        .color(dim(ui)),
+                    )
+                    .on_hover_text(t(lang, tile_hint(self.settings.cell_style)));
+                });
+            });
+            // The controls of the panel: the cell view, the grouping and the order. One row of
+            // 20 px buttons, wrapping instead of clipping in a narrow window; the height does not
+            // depend on the view, so nothing jumps on a switch (M22.2a).
+            ui.horizontal_wrapped(|ui| {
                     // The cell view (M22): the mock-up tile is the main one, the rows and the list come second.
                     let mut style = self.settings.cell_style;
-                    for (value, label, hint) in [
+                    for (value, icon, label, hint) in [
                         (
                             db::CellStyle::Tiles,
+                            Icon::GridView,
                             t(lang, "Tile"),
                             t(lang, "as in the mock-up: a 4:3 frame, the snapshot fitted whole"),
                         ),
                         (
                             db::CellStyle::Rows,
+                            Icon::ViewAgenda,
                             t(lang, "Rows"),
                             t(lang, "proportion rows: the tile width follows the frame"),
                         ),
                         (
                             db::CellStyle::List,
+                            Icon::ViewList,
                             t(lang, "List"),
                             t(lang, "a list: name, date and size in one row"),
                         ),
                     ] {
                         if ui
-                            .selectable_label(
-                                style == value,
-                                egui::RichText::new(label).size(11.0),
+                            .add(
+                                WordButton::picked(icon, label, style == value).compact(),
                             )
                             .on_hover_text(hint)
                             .clicked()
@@ -10502,6 +11313,7 @@ impl eframe::App for App {
                         self.settings.cell_style = style;
                         view_save = true;
                     }
+                    ui.add_space(4.0);
                     // The order is available in the grid and inside an album (M19), but not in the tree.
                     let album_scope_now =
                         view == View::Albums && self.album_selected.is_some();
@@ -10544,17 +11356,25 @@ impl eframe::App for App {
                         }
                         if view == View::Grid {
                             let mut layout = self.settings.grid_layout;
-                            for (value, label) in [
-                                (db::GridLayout::Flat, t(lang, "Flat")),
-                                (db::GridLayout::Months, t(lang, "By months")),
+                            for (value, icon, label) in [
+                                (db::GridLayout::Flat, Icon::ViewAgenda, t(lang, "Flat")),
+                                (
+                                    db::GridLayout::Months,
+                                    Icon::CalendarMonth,
+                                    t(lang, "By months"),
+                                ),
                             ] {
-                                let r = ui.add_enabled_ui(!searching, |ui| {
-                                    ui.selectable_label(layout == value, label)
-                                });
-                                if r.inner.clicked() {
+                                // `add_enabled`, not `add_enabled_ui`: a child ui reports its
+                                // size only after it is drawn, so the row could not wrap it and
+                                // the last button left the panel (M22.8).
+                                let r = ui.add_enabled(
+                                    !searching,
+                                    WordButton::picked(icon, label, layout == value).compact(),
+                                );
+                                if r.clicked() {
                                     layout = value;
                                 }
-                                r.inner.on_disabled_hover_text(t(lang, "the search sets the order"));
+                                r.on_disabled_hover_text(t(lang, "the search sets the order"));
                             }
                             if layout != self.settings.grid_layout {
                                 self.settings.grid_layout = layout;
@@ -10562,7 +11382,6 @@ impl eframe::App for App {
                             }
                         }
                     }
-                });
             });
             ui.add_space(4.0);
             if matches!(view, View::Grid | View::Calendar | View::Albums) {
@@ -10594,7 +11413,7 @@ impl eframe::App for App {
                         )),
                         None => ui.label(t(lang, "nothing found")),
                     };
-                    if ui.button(t(lang, "Reset the filter")).clicked() {
+                    if word_button(ui, Icon::Close, t(lang, "Reset the filter")).clicked() {
                         reset = true;
                     }
                     return;
@@ -10651,7 +11470,7 @@ impl eframe::App for App {
                 // the sub-albums without changing the selection.
                 ui.horizontal_wrapped(|ui| {
                     // The main action of the view carries the accent (M22.6, the mock-up's "+").
-                    let new_album = primary_button(ui, t(lang, "+ New album"));
+                    let new_album = WordButton::primary(Icon::CreateNewFolder, t(lang, "+ New album"));
                     if ui.add(new_album).clicked() {
                         album_dialog_request = Some(AlbumDialog::New);
                     }
@@ -10698,17 +11517,20 @@ impl eframe::App for App {
                 album_header(ui, &node, lang);
                 ui.add_space(2.0);
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button(t(lang, "+ Sub-album")).clicked() {
+                    if word_button(ui, Icon::Add, t(lang, "+ Sub-album")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Sub);
                     }
-                    if ui.button(t(lang, "Rename")).clicked() {
+                    if word_button(ui, Icon::Edit, t(lang, "Rename")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Rename);
                     }
-                    if ui.button(t(lang, "Move to…")).clicked() {
+                    if word_button(ui, Icon::MoveTo, t(lang, "Move to…")).clicked() {
                         album_dialog_request = Some(AlbumDialog::Move);
                     }
                     if ui
-                        .add_enabled(node.position > 0, egui::Button::new(t(lang, "Up")))
+                        .add_enabled(
+                            node.position > 0,
+                            WordButton::new(Icon::ArrowUp, t(lang, "Up")),
+                        )
                         .on_hover_text(t(lang, "move the album up among its siblings"))
                         .clicked()
                     {
@@ -10717,7 +11539,7 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             node.position + 1 < albums.iter().filter(|n| n.parent_id == node.parent_id).count() as i64,
-                            egui::Button::new(t(lang, "Down")),
+                            WordButton::new(Icon::ArrowDown, t(lang, "Down")),
                         )
                         .on_hover_text(t(lang, "move the album down among its siblings"))
                         .clicked()
@@ -10725,7 +11547,7 @@ impl eframe::App for App {
                         album_action = Some(AlbumAction::Down);
                     }
                     if ui
-                        .button(t(lang, "Delete the album"))
+                        .add(WordButton::new(Icon::Delete, t(lang, "Delete the album")))
                         .on_hover_text(t(lang, "delete the rows of the album and its sub-albums; the files on disk stay"))
                         .clicked()
                     {
@@ -10782,14 +11604,22 @@ impl eframe::App for App {
                     // "All files" inside an album — a temporary look to gather photos into an album:
                     // otherwise the selection lives only in that grid (M18).
                     if ui
-                        .selectable_label(!album_browse, t(lang, "In the album"))
+                        .add(WordButton::picked(
+                            Icon::CollectionsBookmark,
+                            t(lang, "In the album"),
+                            !album_browse,
+                        ))
                         .on_hover_text(t(lang, "the photos of this album in its order"))
                         .clicked()
                     {
                         album_browse = false;
                     }
                     if ui
-                        .selectable_label(album_browse, "All files")
+                        .add(WordButton::picked(
+                            Icon::PhotoLibrary,
+                            "All files",
+                            album_browse,
+                        ))
                         .on_hover_text(
                             t(
                                 lang,
@@ -10805,7 +11635,14 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             picked_now > 0,
-                            egui::Button::new(i18n::fill(lang, "Add the picked ones ({})", &[picked_now.to_string()])),
+                            WordButton::new(
+                                Icon::Add,
+                                i18n::fill(
+                                    lang,
+                                    "Add the picked ones ({})",
+                                    &[picked_now.to_string()],
+                                ),
+                            ),
                         )
                         .on_hover_text(t(lang, "add the marked photos to the end of the album; a repeat does not duplicate rows"))
                         .clicked()
@@ -10820,7 +11657,14 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             in_album > 0,
-                            egui::Button::new(i18n::fill(lang, "Remove from the album ({})", &[in_album.to_string()])),
+                            WordButton::new(
+                                Icon::Remove,
+                                i18n::fill(
+                                    lang,
+                                    "Remove from the album ({})",
+                                    &[in_album.to_string()],
+                                ),
+                            ),
                         )
                         .on_hover_text(t(lang, "the album rows go away; the files on disk do not change"))
                         .clicked()
@@ -10830,21 +11674,24 @@ impl eframe::App for App {
                     let file_in_album =
                         self.selected.is_some_and(|id| self.album_set.contains(&id));
                     if ui
-                        .add_enabled(file_in_album, egui::Button::new(t(lang, "File up")))
+                        .add_enabled(file_in_album, WordButton::new(Icon::ArrowUp, t(lang, "File up")))
                         .on_hover_text(t(lang, "move the selected photo up in the album order"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::FileUp);
                     }
                     if ui
-                        .add_enabled(file_in_album, egui::Button::new(t(lang, "File down")))
+                        .add_enabled(
+                            file_in_album,
+                            WordButton::new(Icon::ArrowDown, t(lang, "File down")),
+                        )
                         .on_hover_text(t(lang, "move the selected photo down in the album order"))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::FileDown);
                     }
                     if ui
-                        .button(t(lang, "Export to disk…"))
+                        .add(WordButton::new(Icon::Download, t(lang, "Export to disk…")))
                         .on_hover_text(
                             t(
                                 lang,
@@ -10990,7 +11837,7 @@ impl eframe::App for App {
                                     cal_scale = scale;
                                 }
                             }
-                            if ui.button(t(lang, "Today")).clicked() {
+                            if word_button(ui, Icon::CalendarToday, t(lang, "Today")).clicked() {
                                 let today = chrono::Local::now().date_naive();
                                 cal_year = today.year();
                                 cal_month = today.month();
@@ -11036,7 +11883,10 @@ impl eframe::App for App {
                                 }
                             };
                             if ui
-                                .add_enabled(prev_enabled, egui::Button::new("←"))
+                                .add_enabled(
+                                    prev_enabled,
+                                    WordButton::new(Icon::ChevronLeft, ""),
+                                )
                                 .on_hover_text(t(lang, prev_label))
                                 .clicked()
                             {
@@ -11074,7 +11924,10 @@ impl eframe::App for App {
                             };
                             ui.heading(title);
                             if ui
-                                .add_enabled(next_enabled, egui::Button::new("→"))
+                                .add_enabled(
+                                    next_enabled,
+                                    WordButton::new(Icon::ChevronRight, ""),
+                                )
                                 .on_hover_text(t(lang, next_label))
                                 .clicked()
                             {
@@ -11766,7 +12619,7 @@ impl eframe::App for App {
                                 .hint_text(t(lang, "e.g. Lisa"))
                                 .desired_width(220.0),
                         );
-                        if ui.button(t(lang, "Save the name")).clicked() {
+                        if word_button(ui, Icon::Check, t(lang, "Save the name")).clicked() {
                             face_save_label = Some(face_label_input.trim().to_string());
                         }
                     });
@@ -11804,7 +12657,7 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             !face_picked.is_empty(),
-                            egui::Button::new(t(lang, "Name the picked people")),
+                            WordButton::new(Icon::Label, t(lang, "Name the picked people")),
                         )
                         .on_hover_text(t(
                             lang,
@@ -11817,7 +12670,7 @@ impl eframe::App for App {
                     if ui
                         .add_enabled(
                             !face_picked.is_empty(),
-                            egui::Button::new(t(lang, "Unpick")),
+                            WordButton::new(Icon::Remove, t(lang, "Unpick")),
                         )
                         .clicked()
                     {
@@ -11861,12 +12714,12 @@ impl eframe::App for App {
                             files_n(trash_items.len()),
                             db::human_in(lang, bytes)
                         ));
-                        if ui.button(t(lang, "Restore all")).clicked() {
+                        if word_button(ui, Icon::Restore, t(lang, "Restore all")).clicked() {
                             trash_restore_all = true;
                         }
-                        let b = primary_button(
-                            ui,
-                            &format!(
+                        let b = WordButton::primary(
+                            Icon::Delete,
+                            format!(
                                 "{} ({})",
                                 t(lang, "Empty the trash"),
                                 trash_items.len()
@@ -12180,6 +13033,64 @@ mod tests {
         }
     }
 
+    /// The bounding box of every painted non-text shape: an icon is geometry, so "is there an
+    /// icon and where does it sit" is answered by the shapes and not by pixels (M22.8).
+    fn collect_bounds(shape: &egui::Shape, out: &mut Option<egui::Rect>) {
+        let mut add = |r: egui::Rect| {
+            *out = Some(out.map_or(r, |b: egui::Rect| b.union(r)));
+        };
+        match shape {
+            egui::Shape::Rect(r) => add(r.rect),
+            egui::Shape::Circle(c) => add(egui::Rect::from_center_size(
+                c.center,
+                egui::vec2(c.radius * 2.0, c.radius * 2.0),
+            )),
+            egui::Shape::Path(p) => {
+                for pt in &p.points {
+                    add(egui::Rect::from_min_max(*pt, *pt));
+                }
+            }
+            egui::Shape::LineSegment { points, .. } => {
+                for pt in points {
+                    add(egui::Rect::from_min_max(*pt, *pt));
+                }
+            }
+            egui::Shape::QuadraticBezier(q) => {
+                for pt in [q.points[0], q.points[1], q.points[2]] {
+                    add(egui::Rect::from_min_max(pt, pt));
+                }
+            }
+            egui::Shape::CubicBezier(c) => {
+                for pt in c.points {
+                    add(egui::Rect::from_min_max(pt, pt));
+                }
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_bounds(s, out);
+                }
+            }
+            // Text is not an icon; a mesh or a callback is not used by `paint_icon`.
+            _ => {}
+        }
+    }
+
+    /// Every filled rectangle of a frame with its colour: the 2 px accent edge of the active
+    /// settings section is a fill, not a stroke (M22.8).
+    fn collect_fills(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Rect(r) if r.fill != egui::Color32::TRANSPARENT => {
+                out.push((r.rect, r.fill));
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_fills(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Every outlined rectangle of a frame with its stroke: the calendar check needs to know which
     /// cell carries the accent frame, and that nothing else does (M22.5).
     fn collect_strokes(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Stroke)>) {
@@ -12216,6 +13127,27 @@ mod tests {
         }
         out.drop_without_applying_deltas();
         rects
+    }
+
+    /// One frame of the whole window with every filled rectangle: the accent edge of the active
+    /// section of the settings dialog is a 2 px fill, and a fill is not a stroke (M22.8).
+    fn window_fills(app: &mut App, ctx: &egui::Context) -> Vec<(egui::Rect, egui::Color32)> {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1240.0, 840.0),
+            )),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut fills = Vec::new();
+        for c in &out.shapes {
+            collect_fills(&c.shape, &mut fills);
+        }
+        out.drop_without_applying_deltas();
+        fills
     }
 
     /// One frame of the whole window at a given size with the position of every word: that is how
@@ -16189,4 +17121,401 @@ mod tests {
         assert!(texts.iter().any(|t| t == "2.0 MiB"), "{texts:?}");
     }
 
+    /// The inventory of the icon set: every glyph paints inside its box. `Icon` has no `ALL` in the
+    /// production code (the compiler would warn it is never read), so the list lives here and the
+    /// test below compares it with the variants of the enum in the source: a new glyph cannot be
+    /// added without being drawn by a test (M22.8).
+    fn all_icons() -> Vec<super::Icon> {
+        use super::Icon::*;
+        vec![
+            Search, Close, Settings, DockToRight, Folder, FolderSpecial, CreateNewFolder, Sync,
+            Refresh, PhotoLibrary, Photo, Videocam, CollectionsBookmark, CalendarMonth,
+            CalendarToday, Face, BurstMode, Verified, Apps, GridView, ViewAgenda, ViewList, Add,
+            Remove, Edit, MoveTo, ContentCopy, Download, Upload, Check, CheckCircle, Delete,
+            Restore, Stop, ArrowUp, ArrowDown, ArrowBack, ChevronLeft, ChevronRight, ZoomIn,
+            ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Slideshow, TextFields,
+            Preview, CompareArrows, Description, Psychology, Label, Inventory, Terminal,
+            AutoAwesome, Calculate, Cleaning, Prev, Next, Play, Pause, Volume,
+        ]
+    }
+
+    /// M22.8: every icon of the set is geometry, and the geometry stays inside the 2s box of the
+    /// glyph. An empty arm would leave a button with a hole where the mock-up has a sign.
+    #[test]
+    fn every_icon_paints_inside_its_box() {
+        let ctx = egui::Context::default();
+        let centre = egui::pos2(100.0, 100.0);
+        for icon in all_icons() {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(200.0, 200.0),
+                )),
+                ..Default::default()
+            };
+            let out = ctx.run_ui(raw, |ui| {
+                super::paint_icon(ui.painter(), centre, 6.0, icon, egui::Color32::WHITE);
+            });
+            let mut bounds = None;
+            for c in &out.shapes {
+                collect_bounds(&c.shape, &mut bounds);
+            }
+            out.drop_without_applying_deltas();
+            let bounds = bounds.unwrap_or_else(|| panic!("{icon:?} paints nothing"));
+            let glyph_box =
+                egui::Rect::from_center_size(centre, egui::vec2(14.0, 14.0)).expand(1.0);
+            assert!(
+                glyph_box.contains_rect(bounds),
+                "{icon:?} leaves its box: {bounds:?} outside {glyph_box:?}"
+            );
+        }
+    }
+
+    /// The list above is the whole enum: a variant added to `Icon` without a line here fails, so
+    /// nobody can add an icon that no test ever paints.
+    #[test]
+    fn the_icon_inventory_covers_the_enum() {
+        let src = include_str!("app.rs");
+        let head = src.find("enum Icon {").expect("the Icon enum is gone");
+        let body = &src[head + "enum Icon {".len()..];
+        let body = &body[..body.find("\n}").expect("an unterminated enum")];
+        let mut declared = Vec::new();
+        for line in body.lines() {
+            let word = line.trim().trim_end_matches(',');
+            if word.is_empty() || word.starts_with("//") || !word.starts_with(|c: char| c.is_ascii_uppercase()) {
+                continue;
+            }
+            declared.push(word.to_string());
+        }
+        let mut drawn: Vec<String> = all_icons().iter().map(|i| format!("{i:?}")).collect();
+        declared.sort();
+        drawn.sort();
+        assert_eq!(declared, drawn, "the icon inventory and the enum disagree");
+    }
+
+    /// M22.8: a button keeps its word and puts the icon before it — the icon never replaces the
+    /// word, and the word is still drawn by the same call, so every frame test keeps reading it.
+    #[test]
+    fn a_word_button_draws_the_icon_before_the_word() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(300.0, 120.0),
+            )),
+            ..Default::default()
+        };
+        let mut rect = egui::Rect::NOTHING;
+        let out = ctx.run_ui(raw, |ui| {
+            rect = ui
+                .add(super::WordButton::new(super::Icon::Search, "Find"))
+                .rect;
+        });
+        // The icon is every shape of the frame except the button's own background rect.
+        fn icon_bounds(shape: &egui::Shape, frame: egui::Rect, out: &mut Option<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(r) if r.rect == frame => {}
+                egui::Shape::Vec(v) => {
+                    for s in v {
+                        icon_bounds(s, frame, out);
+                    }
+                }
+                s => collect_bounds(s, out),
+            }
+        }
+        let mut texts = Vec::new();
+        let mut icon = None;
+        for c in &out.shapes {
+            collect_text_pos(&c.shape, &mut texts);
+            icon_bounds(&c.shape, rect, &mut icon);
+        }
+        out.drop_without_applying_deltas();
+        let (word, pos) = texts
+            .iter()
+            .find(|(text, _)| text == "Find")
+            .expect("the word of the button is not drawn");
+        assert!(!word.is_empty());
+        let icon = icon.expect("no icon next to the word");
+        assert!(
+            icon.left() >= rect.left() - 0.5 && icon.right() <= pos.x,
+            "the icon is not left of the word: {icon:?} vs {pos:?}"
+        );
+        assert!(
+            rect.width() > 40.0,
+            "a button with an icon is wider than its word: {:?}",
+            rect.width()
+        );
+        assert!(
+            rect.contains_rect(icon),
+            "the icon left the button: {icon:?} outside {rect:?}"
+        );
+    }
+
+    /// M22.8: the section list of the settings dialog is a caps line over the sections, each with
+    /// its icon, and the active row carries the 2 px accent edge of the mock-up.
+    #[test]
+    fn the_settings_sections_are_caps_with_icons_and_an_accent_edge() {
+        let mut app = calendar_app();
+        app.settings_open = true;
+        app.settings_tab = SettingsTab::Interface;
+        let ctx = egui::Context::default();
+        // A modal does not know its size on the first frame, so the dialog is drawn twice.
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "SETTINGS SECTIONS"),
+            "no caps heading over the section list: {texts:?}"
+        );
+        for section in ["Interface", "AI model", "Storage", "External tools"] {
+            assert!(
+                texts.iter().any(|t| t == section),
+                "section {section} is missing: {texts:?}"
+            );
+        }
+        let _ = window_fills(&mut app, &ctx);
+        let fills = window_fills(&mut app, &ctx);
+        // The modal fades in, so the edge arrives with a multiplied alpha: the hue is what the
+        // accent is, the alpha is the animation of the dialog.
+        let accent = super::DARK.accent.to_srgba_unmultiplied();
+        let same_hue = |c: egui::Color32| {
+            let u = c.to_srgba_unmultiplied();
+            (0..3).all(|i| (u[i] as i16 - accent[i] as i16).abs() <= 2)
+        };
+        let mut edges: Vec<egui::Rect> = fills
+            .iter()
+            .filter(|(r, c)| {
+                (r.width() - 2.0).abs() < 0.01
+                    && (r.height() - super::NAV_H).abs() < 0.01
+                    && same_hue(*c)
+            })
+            .map(|(r, _)| *r)
+            .collect();
+        edges.dedup();
+        assert_eq!(edges.len(), 1, "the accent edge of the active section: {edges:?}");
+        assert!(
+            edges[0].left() > 200.0,
+            "the edge is outside the section list: {:?}",
+            edges[0]
+        );
+    }
+
+    /// M22.8: every action of the window goes through `WordButton`, so every button carries an
+    /// icon next to its word. The exceptions are named with their reason: a 20 px target inside a
+    /// tile or a row cannot hold both, and the "×" of a chip is part of the chip.
+    #[test]
+    fn every_button_of_the_window_has_an_icon() {
+        let src = include_str!("app.rs");
+        // Only the production code: the test module constructs widgets of its own.
+        let production = &src[..src.find("mod tests {").expect("no test module")];
+        const ALLOWED: &[&str] = &[
+            // The "×" of a filter chip is part of the chip word, not a button of its own.
+            "format!(\"{text} ×\")",
+            // The collapse triangle of the album tree: a glyph inside a 20 px row.
+            "if open { \"▾\" } else { \"▸\" }",
+            // "×" removes a row from an album: a 20 px target in the inspector.
+            ".small_button(\"×\")",
+            // Per-tile actions are placed into a fixed 20 px rect (`ui.place`): a word and an
+            // icon do not fit there, so the word stays alone.
+            "t(lang, \"not him\")",
+            "if is_picked { \"picked\" } else { \"pick\" }",
+            "t(cs.lang, \"keep\")",
+            "t(cs.lang, \"restore\")",
+        ];
+        let mut offenders = Vec::new();
+        for marker in [
+            "egui::Button::new(",
+            "ui.button(",
+            ".small_button(",
+            "primary_button(",
+            "danger_button(",
+        ] {
+            let mut rest = production;
+            while let Some(i) = rest.find(marker) {
+                let line_start = rest[..i].rfind('\n').map_or(0, |n| n + 1);
+                let line = &rest[line_start..];
+                let line = &line[..line.find('\n').unwrap_or(line.len())];
+                rest = &rest[i + marker.len()..];
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                let near = format!("{marker}{}", &rest[..rest.len().min(120)]);
+                if !ALLOWED.iter().any(|a| near.contains(a)) {
+                    offenders.push(line.to_string());
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a button without an icon: {}",
+            offenders.join(" | ")
+        );
+    }
+
+    /// The settings dialog on the real DB: sixteen 1240×840 frames with the section list, the
+    /// icons and the mono values. The numbers go to `docs/ARCHITECTURE.md` § Measurements (M22.8).
+    /// `PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored settings_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn settings_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        app.settings_open = true;
+        for section in SettingsTab::ALL {
+            app.settings_tab = section;
+            let ctx = egui::Context::default();
+            super::style(&ctx);
+            let mut frame = eframe::Frame::_new_kittest();
+            let size = egui::vec2(1240.0, 840.0);
+            let mut drive = |app: &mut App, t: f64| -> f32 {
+                let raw = egui::RawInput {
+                    time: Some(t),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                };
+                let start = Instant::now();
+                let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+                let ms = start.elapsed().as_secs_f32() * 1000.0;
+                out.drop_without_applying_deltas();
+                ms
+            };
+            let mut t = 0.0_f64;
+            // A modal knows its size on the second frame: three warm-up frames.
+            for _ in 0..3 {
+                drive(&mut app, t);
+                t += 1.0 / 60.0;
+            }
+            let mut times = Vec::new();
+            for _ in 0..16 {
+                times.push(drive(&mut app, t));
+                t += 1.0 / 60.0;
+            }
+            times.sort_by(|a, b| a.total_cmp(b));
+            let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+            println!(
+                "corpus {n} files, settings «{}»: p50 {:.2} ms ({:.0} fps), p95 {:.2} ms, p99 {:.2} ms",
+                section.label(app.settings.lang),
+                p(0.50),
+                1000.0 / p(0.50),
+                p(0.95),
+                p(0.99)
+            );
+        }
+        // The list keeps its width and the pane its 520 px: the dialog is 760×620 as the spec says.
+        app.settings_tab = SettingsTab::Interface;
+        let ctx = egui::Context::default();
+        // A modal knows its size only on the second frame.
+        let _ = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+        let _ = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+        let drawn = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+        let caps = i18n::t(app.settings.lang, "Settings sections").to_uppercase();
+        let heading = drawn
+            .iter()
+            .find(|(text, _)| *text == caps)
+            .map(|(_, pos)| *pos);
+        println!("section list heading at {heading:?}");
+    }
+    /// M22.8: the section list of the settings dialog is translated in both languages, and the mono
+    /// value of a section never touches its word: the widest label of the list makes the value be
+    /// dropped when it does not fit.
+    #[test]
+    fn the_settings_section_list_holds_both_languages() {
+        let ctx = egui::Context::default();
+        for lang in i18n::Lang::ALL {
+            let mut app = calendar_app();
+            app.settings.lang = lang;
+            app.settings_open = true;
+            app.settings_tab = SettingsTab::Interface;
+            let _ = window_frame(&mut app, &ctx);
+            let drawn = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+            let words: Vec<&str> = drawn.iter().map(|(text, _)| text.as_str()).collect();
+            for section in SettingsTab::ALL {
+                let label = section.label(lang);
+                // The list starts at the left edge of the 760 px dialog and the icon takes 30 px,
+                // so a row's word lies past x 240; the same word in the left panel does not count.
+                let pos = drawn
+                    .iter()
+                    .find(|(text, pos)| text == label && pos.x > 240.0)
+                    .map(|(_, pos)| *pos)
+                    .unwrap_or_else(|| panic!("section {label} is missing from the list: {words:?}"));
+                assert!(
+                    pos.x < 440.0,
+                    "the word of {label} left the section list: {pos:?}"
+                );
+            }
+            assert!(
+                drawn
+                    .iter()
+                    .any(|(text, _)| *text == i18n::t(lang, "Settings sections").to_uppercase()),
+                "the caps heading is missing under {lang:?}"
+            );
+        }
+    }
+    /// M22.8: the controls of the content panel (three cell views, the grouping, the order) have
+    /// their own row under the title. With an icon on every button the group grew wide enough to
+    /// reach the title and the facts on a 1240 px window with the details panel open, so the
+    /// heading keeps its row and nothing is drawn over anything.
+    #[test]
+    fn the_content_controls_keep_their_own_row() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Grid;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let drawn = window_layout(&mut app, &ctx, size);
+        let at = |word: &str| -> egui::Pos2 {
+            drawn
+                .iter()
+                .find(|(text, _)| text == word)
+                .map(|(_, pos)| *pos)
+                .unwrap_or_else(|| panic!("“{word}” is not drawn"))
+        };
+        let title = drawn
+            .iter()
+            .find(|(text, pos)| text == "All files" && pos.x > super::LEFT_W)
+            .map(|(_, pos)| *pos)
+            .expect("the view title is not drawn");
+        let tile = at("Tile");
+        let rows = at("Rows");
+        let list = at("List");
+        let sort = at("Sort");
+        let months = at("By months");
+        let tiles = at("Tiles 150");
+        // The controls are one row of their own, a line below the title.
+        for word in [tile, rows, list, sort, months] {
+            assert!(
+                (word.y - tile.y).abs() <= 3.0,
+                "the controls are not one row: {tile:?} vs {word:?}"
+            );
+            assert!(
+                word.y > title.y + 10.0,
+                "a control stands on the title's row: {title:?} vs {word:?}"
+            );
+        }
+        // The size of a cell stays in the heading row, on the right.
+        assert!(
+            (tiles.y - title.y).abs() < 12.0,
+            "the size slider left the heading row: {tiles:?} vs {title:?}"
+        );
+        // Nothing reaches into the right panel (it starts at 1240 − 280) and nothing runs over
+        // the title: the old right-aligned group began at x 288, inside the title.
+        let widest = [tile, rows, list, sort, months]
+            .iter()
+            .map(|p| p.x)
+            .fold(0.0f32, f32::max);
+        assert!(
+            widest < 900.0,
+            "the controls run into the details panel: the last one starts at {widest}"
+        );
+        assert!(
+            tile.x > title.x,
+            "the controls start left of the title: {tile:?} vs {title:?}"
+        );
+    }
 }
