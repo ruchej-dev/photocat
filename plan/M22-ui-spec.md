@@ -98,7 +98,8 @@ reason is written in ADR 0044.
   2 px accent edge and the card tone) → `FILTER` block → view context → model and text blocks →
   pinned summary.
 - Content: view title 18 px + facts 12 px mono; on the right "Tiles" slider, "By months / Flat",
-  "Sort"; a chip row that never disappears; the month heading 14 px + facts 11 px mono.
+  "Sort"; a chip row that never disappears; the month heading 14 px + facts 11 px mono, pinned at
+  the top edge of the grid area while its group is on screen (M22.4).
 - Tile: card frame 1 px, preview, caption band 22 px with the file name (mono 10, left) and the date
   (mono 10, `text_dim`, right). A video keeps the `▶ M:SS` strip. Selected/keep/picked — accent.
 - Inspector: title `FILE DETAILS`, preview, name, path, `label — value` rows, albums, AI tags, my
@@ -108,7 +109,7 @@ reason is written in ADR 0044.
 
 | Screen | Mock-up | What is adopted | Task |
 |---|---|---|---|
-| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅ |
+| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 |
@@ -325,13 +326,39 @@ passes the threshold" as before.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
 
-### M22.4 — month headings pinned while scrolling (folds in M13e)
+### M22.4 — month headings pinned while scrolling (folds in M13e) ✅ (this change)
 
 1. The current month heading stays at the top of the grid area while its group is on screen; the
    next group's heading pushes it out.
 2. No nested `ScrollArea`; the heading is drawn over the grid area with the canvas background.
 3. A headless test: after scrolling by one group's height, the heading text is still drawn.
 4. `docs/UI.md` debt item 7 is closed.
+
+**Result.** Each frame the grid records where every group heading landed (`MonthHead`: the top, the
+height, the key, the counts); after the one `ScrollArea` returns its viewport, `draw_sticky_month`
+picks the last heading above the top edge, paints a canvas-toned rect over the tiles and draws the
+same row (`month_labels` + `month_row`, shared with the group heading, so the pinned row and the
+natural one cannot drift apart) in a child UI that does not advance the grid's cursor. The row slides
+up out of the viewport as the next heading approaches: `y = min(top, next_top − height)`, and it is
+not drawn at all before the group's own heading has gone above the edge. "Flat" and a semantic search
+have no group headings, so nothing is pinned there.
+
+Two tests, both headless. `the_month_heading_stays_pinned_while_its_group_is_on_screen` runs the whole
+window at 1240×840 over two months of 25 snapshots with the wheel turned over the grid (egui smooths a
+notch over ~10 frames, so the clock has to run): after one notch the caption of the top tile has moved
+yet exactly one "May 2024" is drawn, at the same y as before the scroll, and after four more notches
+"April 2024" stands there and "May 2024" is gone. `the_next_month_heading_pushes_the_pinned_one_out`
+draws the row alone with synthetic headings: with the next heading far below it sits on the top edge,
+with a 6 px overlap it moves up by exactly 6 px.
+
+**Measured** (the real DB, 2232 files, release): the group heading "октябрь 2026" is drawn at y 132 on
+the first screen and at y 132 after a wheel notch — pinned at the top edge of the grid area (the
+owner's settings keep "Flat", so the bench switches to "By months" itself); the 160-frame scrolling
+measurement of M22.2b repeats it: p50 6.9–7.0 ms, p95 8.9–9.6 ms, p99 11.2–13.7 ms against p50
+6.77 ms on the code before the change — one rect and one text row per frame are below the noise.
+
+**Files.** `src/app.rs` (`month_labels`, `month_row`, `MonthHead`, `draw_sticky_month`, the grid loop
+and the benchmark), `docs/UI.md`, `plan/`.
 
 ### M22.5 — calendar (month, year)
 

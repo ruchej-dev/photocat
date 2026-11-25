@@ -52,7 +52,7 @@ met or not; "generally fine" does not count.
   accent per tile.
 - **Peak rule:** the end of a pass is an honest summary with numbers, not "Success!".
 
-## 4. What is already violated (an honest list as of 2026-11-24)
+## 4. What is already violated (an honest list as of 2026-11-25)
 
 Checked against the code and `plan/STATUS.md`, not from memory:
 
@@ -63,9 +63,7 @@ Checked against the code and `plan/STATUS.md`, not from memory:
    if the operation is still running.
 3. **A folder path error** is written into the status, but the field is not highlighted: the
    "error ↔ field" link is text only.
-4. **The month heading does not stick** while scrolling: `ScrollArea` in egui does not provide a
-   sticky row without manual drawing. Recorded in `docs/UI.md` §Debt, item 7.
-5. **The calendar**: the selected day is reset when flipping the month — deliberately, stated in
+4. **The calendar**: the selected day is reset when flipping the month — deliberately, stated in
    `docs/UI.md` §Debt, item 4.
 
 The rule: an item from this list is either fixed or gets an exception row in `docs/UI.md` with the

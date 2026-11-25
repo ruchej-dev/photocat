@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.4 (the month heading pinned while scrolling, which folds in M13e), then M22.5 (calendar), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.5 (the calendar after `photocat_2`/`photocat_12`), then M22.6 (the albums' cards inside the tree), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -2130,9 +2130,9 @@ no bundled fonts (the built-in families, the binary must not grow), previews kee
 become a later task, albums keep the nested tree, the selection stays in the chips row.
 
 **Not done, deliberately.** Screens other than the main one keep the old visual details until their
-task (M22.3–M22.11); the sticky month heading is M22.4; bundled fonts, cropped 4:3 previews, a
-floating selection bar, favourites, ratings, share/delete and the mock-up's non-existent EXIF, GPU,
-tray and update functions are refused (§5 of the spec, with the recommendation to the owner).
+task (M22.5–M22.11); bundled fonts, cropped 4:3 previews, a floating selection bar, favourites,
+ratings, share/delete and the mock-up's non-existent EXIF, GPU, tray and update functions are refused
+(§5 of the spec, with the recommendation to the owner).
 
 ## M23.6 — the corpus pass after the English conversion (2026-11-24) ✅
 
@@ -2278,3 +2278,42 @@ difference is recorded in the spec, not smoothed out of the picture.
 **Checks.** `check.sh` — 55 checks, 0 violations (the HTML lives in `docs/`, no `src/` module sees it);
 `cargo test` unchanged at 239 passed; the folder is documentation, so nothing in the binary or the
 schema moved.
+
+## M22.4 — the month heading pinned while scrolling (2026-11-25) ✅
+
+The owner's remark after M22.3 and the debt item 7 of `docs/UI.md`: in the grouped grid the month is
+named only at the start of its group, so after a screen of scrolling there is no telling which month
+the snapshots belong to. M22.4 pins that heading; it also closes the former M13e, which was folded
+into it.
+
+**How.** The grid loop records where every group heading landed (`MonthHead`: the top in window
+coordinates, the height with its spacing, the key, the counts). After the single `ScrollArea` returns
+its viewport, `draw_sticky_month` takes the last heading above the top edge, fills a band on the
+canvas tone over the tiles — opaque, so nothing shows through the words — and draws the same row
+through `month_labels`/`month_row`, shared with the group heading so the two cannot drift apart. The
+row lives in a child UI that does not advance the grid's cursor, and it slides up by the overlap when
+the next group's heading arrives (`y = min(top, next_top − height)`); before the group's own heading
+has gone above the edge nothing is pinned. No nested `ScrollArea`; "Flat" and a semantic search have
+no groups, so nothing is pinned there either.
+
+**Checks.** Two headless tests. `the_month_heading_stays_pinned_while_its_group_is_on_screen` runs the
+whole window at 1240×840 over two months of 25 snapshots with the wheel turned over the grid: after
+one notch the top caption has moved yet exactly one "May 2024" is drawn at the y it had before the
+scroll, and after four more notches "April 2024" stands there while "May 2024" is gone (with the pin
+disabled the test fails, as it should).
+`the_next_month_heading_pushes_the_pinned_one_out` draws the row alone with synthetic headings: on the
+top edge when the next heading is far below, and exactly 6 px higher when it overlaps by 6 px.
+`cargo test` 246 passed (244 + 2), `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements). On the real DB (2232 files, release) the group
+heading "октябрь 2026" is drawn at y 132 on the first screen and at y 132 after a wheel notch — pinned
+at the top edge of the grid area; the owner's settings keep "Flat", so the bench switches to "By
+months" itself. The 160-frame scrolling measurement of M22.2b repeated on the same DB: p50 6.9–7.0 ms
+(142–148 fps), p95 8.9–9.6 ms, p99 11.2–13.7 ms, against p50 6.77 ms / p95 9.75 ms / p99 12.24 ms on
+the stashed code before the change — one rect and one text row per frame are below the noise.
+
+**Documents.** `docs/UI.md` § Layout and § Metrics describe the pinned row, debt item 7 is closed and
+the list renumbered (the duplicated entry 8 became 7); `docs/UI.ru.md` and the honest list of the
+`ui-design` skill (`revu.md`/`.ru.md`) follow; `plan/M22-ui-spec.md` §2.5, §3 and §6 M22.4 carry the
+result and the numbers. No new interface strings, so `plan/I18N.md` does not change.

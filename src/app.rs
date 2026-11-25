@@ -1290,6 +1290,13 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) ->
 /// A grid group heading: the month at 14 px, the file count and the volume at 11 px (as in PhotoPrism).
 /// A month without a date is a separate last group, not a junk key at the top of the list.
 fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i18n::Lang) {
+    month_row(ui, key, files, bytes, lang);
+    ui.add_space(4.0);
+}
+
+/// The month title and its facts, without the spacing around: the group heading and the pinned
+/// heading (M22.4) draw the same words, so they cannot drift apart.
+fn month_labels(key: &str, files: usize, bytes: i64, lang: i18n::Lang) -> (String, String) {
     let title = if key == "no date" {
         t(lang, "No date").to_string()
     } else {
@@ -1308,11 +1315,77 @@ fn month_header(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i1
         "· {}, {}",
         &[i18n::count(lang, files, "file"), db::human_in(lang, bytes)],
     );
+    (title, summary)
+}
+
+/// One heading row: the month at 14 px strong, the facts at 11 px in the numeric family.
+fn month_row(ui: &mut egui::Ui, key: &str, files: usize, bytes: i64, lang: i18n::Lang) {
+    let (title, summary) = month_labels(key, files, bytes, lang);
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(title).size(14.0).strong());
         ui.label(num(ui, summary, 11.0).color(dim(ui)));
     });
-    ui.add_space(4.0);
+}
+
+/// A group heading as it was drawn this frame: where it lies and what it says. The pinned heading
+/// (M22.4) needs the places to know which group is under the top edge of the grid area.
+struct MonthHead {
+    /// The top of the heading in window coordinates (it moves up with the scroll).
+    top: f32,
+    /// The heading with its spacing: the height the pinned heading takes.
+    height: f32,
+    key: String,
+    files: usize,
+    bytes: i64,
+}
+
+/// The month heading pinned at the top of the grid area (M22.4, the former M13e): while a group is
+/// on screen its heading stays at the top edge, and the next group's heading pushes it out. It is
+/// drawn over the grid on the canvas tone — not in a nested `ScrollArea`, so the grid keeps one
+/// scroll of its own.
+fn draw_sticky_month(ui: &mut egui::Ui, viewport: egui::Rect, heads: &[MonthHead], lang: i18n::Lang) {
+    if heads.is_empty() || viewport.height() <= 1.0 {
+        return;
+    }
+    let top = viewport.top();
+    // The group whose heading has already gone above the top edge; the next group's heading is the
+    // one that will push it out.
+    let mut current: Option<&MonthHead> = None;
+    let mut next_top = None;
+    for head in heads {
+        if head.top <= top + 0.5 {
+            current = Some(head);
+        } else {
+            next_top = Some(head.top);
+            break;
+        }
+    }
+    let Some(current) = current else {
+        return;
+    };
+    // The heading is still drawn in its own place (the first line of the group): nothing to pin yet.
+    if current.top >= top - 0.5 {
+        return;
+    }
+    let mut y = top;
+    if let Some(next_top) = next_top {
+        y = y.min(next_top - current.height);
+    }
+    // The next group's heading has pushed this one out completely.
+    if y + current.height <= top {
+        return;
+    }
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(viewport.left(), y),
+        egui::vec2(viewport.width(), current.height),
+    );
+    // The tiles scroll under the heading: the canvas tone is opaque, so nothing shows through it.
+    ui.painter()
+        .with_clip_rect(viewport.intersect(ui.clip_rect()))
+        .rect_filled(rect, 0.0, theme(ui).canvas);
+    // The same row as the group heading, in a child area that does not advance the grid's cursor.
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    month_row(&mut child, &current.key, current.files, current.bytes, lang);
 }
 
 /// The album path in the tree over the loaded nodes: "Dacha 2024 / May".
@@ -9847,7 +9920,8 @@ impl eframe::App for App {
                     egui::Id::unique("grid-empty"),
                     egui::Sense::click(),
                 );
-                egui::ScrollArea::vertical()
+                let mut heads: Vec<MonthHead> = Vec::new();
+                let grid_out = egui::ScrollArea::vertical()
                     .id_salt("grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -9866,12 +9940,22 @@ impl eframe::App for App {
                         let ascend = self.settings.grid_sort == db::GridSort::DateAsc;
                         for (key, ids) in month_groups(&ordered, &items, ascend) {
                             let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
+                            let head_top = ui.cursor().top();
                             month_header(ui, &key, ids.len(), bytes, lang);
+                            heads.push(MonthHead {
+                                top: head_top,
+                                height: ui.cursor().top() - head_top,
+                                key,
+                                files: ids.len(),
+                                bytes,
+                            });
                             let row: Vec<&FileRow> = ids.iter().map(|&i| &items[i]).collect();
                             draw_files(ui, ctx, &mut cells, &row);
                             ui.add_space(24.0);
                         }
                     });
+                // M22.4: the heading of the group under the top edge stays in view.
+                draw_sticky_month(ui, grid_out.inner_rect, &heads, lang);
                 if bg.clicked() && cells.clicked.is_none() {
                     empty_click = true;
                 }
@@ -11473,6 +11557,43 @@ mod tests {
         texts
     }
 
+    /// The whole window with the wheel turned over the grid: egui smooths a notch over ~10 frames,
+    /// so the clock has to run and several frames are needed for the grid to move (M22.4). The
+    /// clock is shared between the calls: egui reads a step backwards as no time at all.
+    fn scrolled_grid(
+        app: &mut App,
+        ctx: &egui::Context,
+        clock: &mut f64,
+        notches: f32,
+    ) -> Vec<(String, egui::Pos2)> {
+        super::style(ctx);
+        let size = egui::vec2(1240.0, 840.0);
+        let mut drawn = Vec::new();
+        for pass in 0..24 {
+            let mut events = Vec::new();
+            if pass == 0 && notches != 0.0 {
+                // The wheel moves the area under the pointer, so it has to lie over the grid.
+                events.push(egui::Event::PointerMoved(egui::pos2(700.0, 400.0)));
+                events.push(wheel_event(-notches));
+            }
+            let raw = egui::RawInput {
+                time: Some(*clock),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            };
+            let mut window = eframe::Frame::_new_kittest();
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut window));
+            drawn.clear();
+            for c in &out.shapes {
+                collect_text_pos(&c.shape, &mut drawn);
+            }
+            out.drop_without_applying_deltas();
+            *clock += 1.0 / 60.0;
+        }
+        drawn
+    }
+
     /// A key press without modifiers — for the headless check of Esc and Ctrl+A.
     fn key_event(key: egui::Key) -> egui::Event {
         egui::Event::Key {
@@ -11874,6 +11995,58 @@ mod tests {
             p(0.95),
             1000.0 / p(0.95),
             p(0.99)
+        );
+    }
+
+    /// A month heading as `month_header` draws it: a month name, a space, a four-digit year.
+    fn is_month_heading(text: &str, lang: i18n::Lang) -> bool {
+        let year = text.split_whitespace().last().unwrap_or("");
+        year.len() == 4
+            && year.chars().all(|c| c.is_ascii_digit())
+            && (1..=12).any(|m| text.starts_with(&format!("{} ", i18n::month_name(lang, m))))
+    }
+
+    /// The M22.4 pinning on the real corpus: after a wheel notch the month heading of the group
+    /// under the top edge is still drawn in the same place. `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
+    /// cargo test --release -- --ignored sticky_heading_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn sticky_heading_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        let lang = app.settings.lang;
+        let ctx = egui::Context::default();
+        let mut clock = 0.0_f64;
+        // The owner may keep "Flat": the heading exists only in the grouped layout.
+        app.settings.grid_layout = db::GridLayout::Months;
+        let start = scrolled_grid(&mut app, &ctx, &mut clock, 0.0);
+        let (first, top) = start
+            .iter()
+            .find(|(text, _)| is_month_heading(text, lang))
+            .cloned()
+            .expect("no month heading on the first screen");
+        let began = Instant::now();
+        let scrolled = scrolled_grid(&mut app, &ctx, &mut clock, 1.0);
+        let frames = began.elapsed();
+        let (pinned, placed) = scrolled
+            .iter()
+            .find(|(text, pos)| is_month_heading(text, lang) && (pos.y - top.y).abs() < 1.5)
+            .cloned()
+            .unwrap_or_else(|| panic!("no heading is pinned after a notch: {scrolled:?}"));
+        println!(
+            "corpus: {n} files; the first heading “{first}” at y {:.1}; after a wheel notch “{pinned}” \
+             is drawn at y {:.1} ({}); 24 frames in {:.1} ms ({:.1} ms/frame)",
+            top.y,
+            placed.y,
+            if pinned == first { "the same group" } else { "the next group" },
+            frames.as_secs_f32() * 1000.0,
+            frames.as_secs_f32() * 1000.0 / 24.0
         );
     }
 
@@ -13521,6 +13694,145 @@ mod tests {
         assert!(
             picked.iter().any(|(t, _)| t == "all tags"),
             "no way back to all tags: {picked:?}"
+        );
+    }
+
+    // ---- M22.4: the month heading pinned while scrolling ---------------------------------
+
+    /// Two months of snapshots, each taller than one screen and shorter than three.
+    fn sticky_rows() -> Vec<db::FileRow> {
+        let mut rows = Vec::new();
+        let mut id = 1;
+        for month in ["05", "04"] {
+            for n in 0..25 {
+                let mut r = file_row(id, "image", &format!("m{month}-{n:02}.jpg"));
+                r.taken_at = Some(format!("2024-{month}-{:02}T08:00", 1 + n % 28));
+                r.size = 1024;
+                rows.push(r);
+                id += 1;
+            }
+        }
+        rows
+    }
+
+    /// M22.4: the heading of the group under the top edge stays at the top of the grid area. After
+    /// less than one group of scrolling the first month is still named there (its own heading has
+    /// gone above the edge, the pinned one is drawn instead); after a whole group the next month
+    /// has taken its place and the first one is gone.
+    #[test]
+    fn the_month_heading_stays_pinned_while_its_group_is_on_screen() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-sticky.db"));
+        app.items = sticky_rows();
+        app.settings.lang = i18n::Lang::En;
+        app.settings.grid_layout = db::GridLayout::Months;
+        let ctx = egui::Context::default();
+        let mut clock = 0.0_f64;
+        let at_top = |drawn: &[(String, egui::Pos2)], needle: &str| {
+            drawn
+                .iter()
+                .filter(|(t, _)| t == needle)
+                .map(|(_, pos)| *pos)
+                .min_by(|a, b| a.y.total_cmp(&b.y))
+        };
+        // The heading of the first group as drawn in its own place: the top edge of the grid area.
+        let start = scrolled_grid(&mut app, &ctx, &mut clock, 0.0);
+        let may_top = at_top(&start, "May 2024").expect("no May heading in the first frame");
+        let top_caption = |drawn: &[(String, egui::Pos2)]| {
+            drawn
+                .iter()
+                .filter(|(t, _)| t.ends_with(".jpg"))
+                .min_by(|a, b| a.1.y.total_cmp(&b.1.y))
+                .cloned()
+        };
+        let first_caption = top_caption(&start).expect("no caption is drawn in the first frame");
+        // Less than one group: the May heading is drawn pinned at the top edge although the tiles
+        // have moved — and it is the only “May 2024” on the screen, so the pinned row is the one.
+        let scrolled = scrolled_grid(&mut app, &ctx, &mut clock, 1.0);
+        let moved_caption = top_caption(&scrolled).expect("no caption is drawn after a scroll");
+        assert!(
+            moved_caption.0 != first_caption.0 || moved_caption.1.y < first_caption.1.y - 1.0,
+            "the grid did not scroll: {first_caption:?} vs {moved_caption:?}"
+        );
+        let may: Vec<egui::Pos2> = scrolled
+            .iter()
+            .filter(|(t, _)| t == "May 2024")
+            .map(|(_, pos)| *pos)
+            .collect();
+        assert_eq!(may.len(), 1, "expected exactly one pinned heading: {scrolled:?}");
+        assert!(
+            (may[0].y - may_top.y).abs() <= 1.5,
+            "the pinned heading is not at the top edge: {:?} vs {may_top:?}",
+            may[0]
+        );
+        // A whole group further: April's heading has pushed May's out and is pinned itself.
+        let further = scrolled_grid(&mut app, &ctx, &mut clock, 4.0);
+        let april = at_top(&further, "April 2024").expect("no April heading after a scroll");
+        assert!(
+            (april.y - may_top.y).abs() <= 1.5,
+            "April is not pinned at the top edge: {april:?} vs {may_top:?}"
+        );
+        assert!(
+            !further.iter().any(|(t, _)| t == "May 2024"),
+            "the May heading did not give way to the next group: {further:?}"
+        );
+    }
+
+    /// M22.4: the next group's heading pushes the pinned one out instead of taking its place at
+    /// once: the pinned row slides up by exactly the overlap and disappears under the top edge.
+    #[test]
+    fn the_next_month_heading_pushes_the_pinned_one_out() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let may_y = |next_top: f32| -> f32 {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..Default::default()
+            };
+            let out = ctx.run_ui(raw, |ui| {
+                let viewport = egui::Rect::from_min_size(
+                    egui::pos2(100.0, 200.0),
+                    egui::vec2(600.0, 300.0),
+                );
+                let heads = [
+                    super::MonthHead {
+                        top: -40.0,
+                        height: 21.0,
+                        key: "2024-05".into(),
+                        files: 2,
+                        bytes: 1024,
+                    },
+                    super::MonthHead {
+                        top: next_top,
+                        height: 21.0,
+                        key: "2024-04".into(),
+                        files: 2,
+                        bytes: 1024,
+                    },
+                ];
+                super::draw_sticky_month(ui, viewport, &heads, i18n::Lang::En);
+            });
+            let mut texts = Vec::new();
+            for c in &out.shapes {
+                collect_text_pos(&c.shape, &mut texts);
+            }
+            out.drop_without_applying_deltas();
+            texts
+                .iter()
+                .find(|(t, _)| t == "May 2024")
+                .map(|(_, pos)| pos.y)
+                .unwrap_or_else(|| panic!("no pinned heading: {texts:?}"))
+        };
+        // The next heading is far below: the pinned one sits on the top edge (200 px).
+        let pinned = may_y(400.0);
+        assert!((pinned - 200.0).abs() < 8.0, "not on the top edge: {pinned}");
+        // The next heading overlaps the last 6 px of the pinned row: it is pushed up by 6 px.
+        let pushed = may_y(215.0);
+        assert!(
+            (pushed - (pinned - 6.0)).abs() < 0.6,
+            "the heading did not slide out by the overlap: {pinned} → {pushed}"
         );
     }
 

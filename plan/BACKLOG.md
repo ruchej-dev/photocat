@@ -1018,7 +1018,8 @@ map, the rules for an unsupported screen, the disputed questions and the full ta
 mock-up, three cell views) — 2026-11-24; M22.2a (the list view scales with the size slider, the slider
 is always visible) — 2026-11-24; M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad
 swipe coasts after the fingers lift) — 2026-11-24; M22.3 (the left panel: the five newest years and the
-tag chips, the panel budget measured at 840 px) — 2026-11-25.
+tag chips, the panel budget measured at 840 px) — 2026-11-25; M22.4 (the month heading pinned while its
+group is on screen, which folds in the former M13e) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
@@ -1035,7 +1036,7 @@ tag chips, the panel budget measured at 840 px) — 2026-11-25.
    one accent and red only on the OS-trash path.
 5. The settings dialog gets the section list and the theme control; the mock-up's non-existent
    functions (autostart, tray, GPU, updates, metadata backup) are not added.
-6. The sticky month heading (the former M13e) is closed in M22.4.
+6. The sticky month heading (the former M13e) is closed in M22.4. ✅
 7. The list view keeps the size slider and scales with it (row, thumbnail, name); the header never
    jumps when the cell view changes — M22.2a ✅. Trackpad and wheel scrolling is smooth and fast in
    every region — M22.2b ✅ (one profile in `apply_theme` + `Scroll`, 280 px per wheel notch, a

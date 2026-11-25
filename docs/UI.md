@@ -80,6 +80,11 @@ the interface rules at the end of the file.
 - **The grid is grouped by month** (M16): the heading "May 2024" at 14 px + "· 132 files · 5.4 GiB"
   at 11 px, from the newest to the oldest; inside a month the snapshots also go newest first. "No
   date" is the last group.
+- **The month heading is pinned** (M22.4): while a group runs under the top edge of the grid area,
+  its heading stands at that edge, drawn over the tiles on the canvas tone so nothing shows through;
+  the next group's heading pushes it up and out instead of taking its place at once. The grid keeps
+  one `ScrollArea` — the pinned row is painted over the area, not put into a second one. In "Flat"
+  there are no headings and nothing is pinned.
 - **The owner chooses the layout and the order** (M17): in the view header, next to "Tiles N", two
   buttons "By months / Flat" and a "Sort" menu ("Date: newest first" by default, "Date: oldest
   first", "Name", "Size: largest first"). "Flat" is one continuous ribbon without month headings.
@@ -244,7 +249,7 @@ a rare one.
 | Cell view "Rows" | the row height comes from the slider and never falls below 70 % of it; the row fills the available width, so a tile's width follows its frame's aspect; the preview fills the tile (no crop, no margins) | `app.rs::draw_flow`, `row_fit` |
 | Cell view "List" | the row height `24 + 0.16 × slider` (40 px at 100, 66 px at 260), a 4:3 thumbnail `row − 8` high, the name at 12–14 px, the date · size in mono 10–12, the kind/duration on the right in mono; the two text lines are centred as one block and never leave the row; gap 4 px | `app.rs::draw_list`, `list_row_height` |
 | Grid step | 10 px between tiles inside a row and between rows (the mock-up's `gap-2.5`); other screens live on the common `item_spacing` 8×6 | `app.rs::draw_tiles`, `draw_flow` |
-| Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group | `app.rs::month_header` |
+| Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group; the heading of the group under the top edge of the grid area is pinned there on the canvas tone and pushed out by the next group's heading (M22.4) | `app.rs::month_header`, `draw_sticky_month` |
 | Content panel | view title 18 px + facts 12 px; on the right "Tiles" 11 px and a 120 px slider — present in all three cell views, its tooltip names what it scales (tile width, row height, list row); next to it the "By months / Flat" buttons and the "Sort" menu (11 px label); the chips row 26 px high | `ui()` → `draw_filter_chips` |
 | Navigation item | 28 px high, 14 px label on the left, 11 px number on the right; the selected one — accent fill 40/255 and accent text | `app.rs::nav_item` |
 | Details row | an 11 px label on the left in a 72 px column, a 12 px value with wrapping | `app.rs::meta_row` |
@@ -583,7 +588,7 @@ are what the owner sees in English mode. See `plan/I18N.md`.
 
 ## Debt against the interface rules
 
-An honest list as of 2026-11-23: the rules above are in force, but the code does not follow them
+An honest list as of 2026-11-25: the rules above are in force, but the code does not follow them
 everywhere yet. An item is either fixed or gets an exception line here with a reason.
 
 1. There is no keyboard navigation in the grid: the arrows work only in the full screen; the Tab
@@ -599,9 +604,6 @@ everywhere yet. An item is either fixed or gets an exception line here with a re
 6. The end of a video on the last file does not page round: the view stays on the cover frame, so
    that watching does not start over from the first snapshot. On the other files the end of a video
    opens the next one — that is "change the file automatically".
-7. The month heading is not pinned when scrolling: `ScrollArea` in egui gives no sticky row without
-   manual drawing over the area. The month is visible at the start of the group; pinning it is M22.4
-   (it folded in the former M13e).
-8. Duplicate decisions are made one tile at a time: the multi-selection (M18) works in the grid,
+7. Duplicate decisions are made one tile at a time: the multi-selection (M18) works in the grid,
    in albums and in the trash, but marking N snapshots of a group as "spare" at once is not possible
    — batch actions over duplicates are not promised, that is a separate task.
