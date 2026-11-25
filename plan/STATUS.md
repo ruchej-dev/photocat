@@ -5,7 +5,7 @@
 > From M21 on this file is written in English; the older entries were translated from the Russian
 > original in M21.8 and the numbers were kept. See `plan/I18N.md`.
 
-STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.5 (the calendar after `photocat_2`/`photocat_12`), then M22.6 (the albums' cards inside the tree), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`) → next:M22.6 (the albums' cards inside the tree), then M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -82,6 +82,19 @@ headless frame at 1240×840: the scrolling part starts at 560 px, the years end 
 tests: the year click narrows the filter (and drops a semantic search), the drawn rows carry the
 counts while an empty year is absent, all five rows stand above the summary in a frame at 840 px, and
 two chip frames hold the same words in the same places.
+Since M22.5 the calendar is drawn from the mock-ups `photocat_2`/`photocat_12`: the year layer is
+twelve month cards (4×3, 92 px, a 6 px gap) with the mono number and the month's name, the counter,
+a 16:10 cover of the month's first snapshot fitted whole, the volume bar and the size, above a caps
+line "12 MONTHS OF 2024" with the facts of the year in mono on the right; the month layer is the
+caps weekday row and 96 px day cells with the number in mono 11, the counter as a badge on
+`accent_soft`, up to three thumbnails and a bar against the busiest day. A cell that holds files
+keeps the card tone and a 1 px line, an empty one the panel tone, a picked one the `accent_soft` fill
+and a 1 px accent frame — one helper (`cal_cell`) owns all three states, so the old `faint_bg_color`,
+the `from_gray` numbers and the blue 2 px stroke are gone. Under the year, month and week layers the
+selected day is a list with the time, the name and the size (the shared `draw_list` with
+`Cells::time_only`), and an empty month leads to the nearest month with files. Measured on the real
+DB (2232 files, release): the year layer p50 5.56 ms (180 fps), the month layer p50 5.85 ms (171 fps),
+and the whole year layer fits a 1240×840 window.
 Since M16 the GUI shell is rebuilt after the PhotoPrism model: side navigation in two groups with
 counters, search in the top bar, a content panel with filter chips and a tile size, the grid
 grouped by months from the newest, an inspector with the file name and "label — value" rows
@@ -2317,3 +2330,59 @@ the stashed code before the change — one rect and one text row per frame are b
 the list renumbered (the duplicated entry 8 became 7); `docs/UI.ru.md` and the honest list of the
 `ui-design` skill (`revu.md`/`.ru.md`) follow; `plan/M22-ui-spec.md` §2.5, §3 and §6 M22.4 carry the
 result and the numbers. No new interface strings, so `plan/I18N.md` does not change.
+
+## M22.5 — the calendar after `photocat_2`/`photocat_12` (2026-11-25) ✅
+
+The calendar was the last screen still painted in the pre-M22 way: `faint_bg_color` cells, `from_gray`
+numbers, a 2 px blue selection stroke and a `gamma_multiply(0.25)` fill — colours that the token
+palette replaced everywhere else in M22.1–M22.4. M22.5 brings the year, month, week and day layers to
+the mock-ups' rules and builds the day list the month layer was missing.
+
+**How.** `cal_cell` is the one way to paint a calendar cell: the card tone and a 1 px line while the
+cell holds files, the `panel` tone while it is empty (the month stays a grid — the gaps of the archive
+are seen, not searched for), the `accent_soft` fill and a 1 px accent frame while it is picked; it
+returns the palette, so the number, the counter and the bar inside are drawn in the same tones.
+`cal_bar` draws the volume share of the busiest month of the year or the busiest day of the month. The
+**year layer** gets the mock-up's line — a caps "12 MONTHS OF 2024" with the facts of the year in mono
+10 — and 4×3 cards of 92 px with a 6 px gap: the mono number and the month's name, the counter at the
+right edge, a 16:10 cover of the month's first snapshot fitted whole, the volume bar and the size. The
+**month layer** gets the caps weekday row and cells of 96 px: the day number in mono 11, the counter as
+a badge (accent on `accent_soft`), up to three thumbnails and the bar, and the picked day is framed in
+1 px of accent. The **day list** under the upper layers is the shared `draw_list` with
+`Cells::time_only`: a row reads "18:27 · 1.6 MiB" instead of repeating the same date on every line
+(`caption_date` also does it in a tile caption on the "Day" layer), under a heading "Wed, 01.05.2024"
+at 14 px with the facts in mono (`day_heading`, `day_title`). An empty month now leads to the nearest
+month with files — `nearest_file_month` had been dead code since M21.4b and points the button
+"Go to April 2024" — and the arrows still skip empty months. The view's facts name the layer (a year, a
+month, a week or a day) instead of always the same month.
+
+**Checks.** Four headless tests. `the_year_layer_draws_twelve_months_with_counts_and_sizes` (the caps
+line, the facts of the year, all twelve month names, ten empty zeros, the sizes of the months with
+files); `the_picked_month_and_day_are_framed_in_the_accent` (a stroke scan of the frame: exactly one
+1 px accent rect in the content area with a month picked and exactly one with a day picked, none with
+nothing picked — that is how the old blue stroke would have failed); `the_day_strip_shows_the_time_name_and_size`
+("09:10 · 2.0 KiB", "14:23 · 3.0 KiB", the names, the day heading, and no repeated "2024-05-01 09:10");
+`an_empty_month_offers_the_nearest_month_with_files` (backwards first, then forwards). `cargo test`
+250 passed (246 + 4), `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer
+diagnostics .` 0 errors.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, the real DB of 2232 files, release, headless
+frames at 1240×840): the year layer p50 5.56 ms (180 fps), p95 and p99 5.65; the month layer p50
+5.85–5.90 ms (169–171 fps), p95 6.26–7.39 ms — twelve covers, 31 day cells and the preview budget stay
+inside the 16.7 ms of 60 fps. The whole year layer fits a 1240×840 window (December's card at y 442); a
+month grid of five weeks is 510 px tall, so its day list sits below the fold and is reached by the same
+scroll as the grid.
+
+**Looked at.** Both layers were opened in the window on the owner's screen for a few seconds and
+screenshotted: the 4×3 cards with the accent frame on the picked month, the caps weekday row, the
+counter badges, the thumbnails and volume bars, and the day list under the month grid. The first look
+found the empty cells invisible on the dark canvas, which is why an empty cell now keeps the panel
+tone.
+
+**Documents.** `docs/UI.md` § Metrics (the calendar cell and the new "Calendar day list" row), §
+Screens, § States, and the stale paragraph claiming that colours come from `ui.visuals()` with a blue
+`rgb(90,170,255)` accent — a defect left from M22.1, now the tokens only. `plan/M22-ui-spec.md` §3 and
+§6 M22.5 carry the result and the numbers, `plan/BACKLOG.md` counts M22.5 as done,
+`docs/references/mockups/README.md` marks `photocat_12` as built, and `plan/I18N.md` gets the new
+labels. Still open, outside this task: `highlight_job` (the OCR match in the card and the search
+snippet) still paints the old blue — it belongs to M22.9's pass over the screens without a mock-up.

@@ -1019,7 +1019,10 @@ mock-up, three cell views) — 2026-11-24; M22.2a (the list view scales with the
 is always visible) — 2026-11-24; M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad
 swipe coasts after the fingers lift) — 2026-11-24; M22.3 (the left panel: the five newest years and the
 tag chips, the panel budget measured at 840 px) — 2026-11-25; M22.4 (the month heading pinned while its
-group is on screen, which folds in the former M13e) — 2026-11-25.
+group is on screen, which folds in the former M13e) — 2026-11-25; M22.5 (the calendar after
+`photocat_2`/`photocat_12`: the year layer of twelve month cards with counters, covers and sizes, the
+month layer with the caps weekday row and the volume bars, the day list with the time, name and size,
+the accent frame on the picked cell) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

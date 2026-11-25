@@ -110,8 +110,8 @@ reason is written in ADR 0044.
 | Screen | Mock-up | What is adopted | Task |
 |---|---|---|---|
 | Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅ |
-| Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 |
-| Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 |
+| Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
+| Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 ✅ |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 |
 | Duplicates | — | no mock-up: same strips, header, chips row, `draw_cell`, amber "keep", red-free everywhere | M22.9 |
@@ -360,7 +360,7 @@ measurement of M22.2b repeats it: p50 6.9–7.0 ms, p95 8.9–9.6 ms, p99 11.2�
 **Files.** `src/app.rs` (`month_labels`, `month_row`, `MonthHead`, `draw_sticky_month`, the grid loop
 and the benchmark), `docs/UI.md`, `plan/`.
 
-### M22.5 — calendar (month, year)
+### M22.5 — calendar (month, year) ✅ (this change)
 
 1. Year: 4×3 month cells, each with a count and a size (mono), a selected month in accent, a double
    click drills down.
@@ -369,7 +369,40 @@ and the benchmark), `docs/UI.md`, `plan/`.
 3. Week and day layers: the same tokens; the day layer uses `draw_cell`.
 4. Empty month: "No files this month" + "Go to YYYY-MM"; arrows skip empty months.
 
-**Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`.
+**Result.** One helper pair now owns the calendar's look: `cal_cell` paints a cell (the card tone and a
+1 px line when it holds files, the `panel` tone when it is empty, the `accent_soft` fill and a 1 px
+accent frame when it is picked) and returns the palette for the number, the counter and the bar inside
+it; `cal_bar` draws the volume share of the busiest month or day. The old per-cell `faint_bg_color`,
+`from_gray(190/150)` and the blue `rgb(90,170,255)` 2 px strokes are gone from the calendar. **Year**:
+a caps line "12 MONTHS OF 2024" with the facts of the year in mono 10 on the right, then 4×3 cards of
+92 px and a 6 px gap (`CAL_GAP`): the mono number and the month's name, the counter at the right edge,
+a 16:10 cover of the month's first snapshot fitted whole, the volume bar and the size. **Month**: the
+caps weekday row, then cells of `CAL_DAY_H` = 96 px — the day number in mono 11, the counter as a badge
+(accent on `accent_soft`), up to three thumbnails and the bar against the busiest day of the month.
+Empty days keep the panel tone, so the month reads as a grid and the gaps of the archive are seen. A
+click selects a day or a month, a double click goes one layer down; the day list under the upper
+layers is the shared `draw_list` forced to the list view with `Cells::time_only`, so a row shows
+"18:27 · 1.6 MiB" instead of repeating the same date on every line (`caption_date`), and the heading
+is "Wed, 01.05.2024" at 14 px with the facts in mono (`day_heading`, `day_title`). On the "Day" layer
+the owner's cell view is kept (`draw_cell`), the caption showing the time. An empty month leads to the
+nearest month with files (`nearest_file_month` was dead code since M21.4b and is used now); the arrows
+still skip empty months. The title facts name the layer (a year, a month, a week or a day).
+
+Four tests, all headless: `the_year_layer_draws_twelve_months_with_counts_and_sizes` (the caps line,
+the year's facts, all month names, ten empty zeros and the sizes),
+`the_picked_month_and_day_are_framed_in_the_accent` (exactly one accent-stroked 1 px rect in the
+content area with a month picked and one with a day picked, none with nothing picked — a stroke scan
+of the frame), `the_day_strip_shows_the_time_name_and_size` ("09:10 · 2.0 KiB", the names, the day
+heading, no repeated date) and `an_empty_month_offers_the_nearest_month_with_files` (backwards first,
+then forwards).
+
+**Measured** (the real DB, 2232 files, release, headless frames at 1240×840): year layer p50 5.56 ms
+(180 fps), p95 5.65; month layer p50 5.85 ms (171 fps), p95 6.26 — well inside the 16.7 ms of 60 fps.
+The whole year layer fits the window (December's card at y 442); a month grid of five weeks is 510 px,
+so its day list sits below the fold and is reached by the same scroll as the grid.
+
+**Files.** `src/app.rs` (`cal_cell`, `cal_bar`, `day_title`, `day_heading`, `day_strip`, `caption_date`,
+`Cells::time_only`, the four layers), `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
 
 ### M22.6 — albums
 

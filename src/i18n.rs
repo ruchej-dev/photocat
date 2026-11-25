@@ -634,6 +634,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("No files in this month.", "В этом месяце файлов нет."),
     ("No files on this day.", "В этот день файлов нет."),
     ("Go to", "Перейти к"),
+    ("12 months of {}", "12 месяцев {}"),
+    ("{} in the year · {}", "{} за год · {}"),
     (
         "Pick a day in the calendar — its photos appear below.",
         "Выберите день в календаре — ниже появятся снимки.",

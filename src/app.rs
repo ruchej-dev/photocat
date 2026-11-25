@@ -535,6 +535,13 @@ const RADIUS_ITEM: f32 = 6.0;
 const RADIUS_CARD: f32 = 8.0;
 /// Below this window width the details move into the left panel: the grid needs 4 columns.
 const DETAILS_MIN_W: f32 = 1200.0;
+/// The gap inside the calendar grids: between the month cards of the year layer and between the
+/// day cells of the month and week layers (the mock-up's `gap-1.5` / `gap-2`).
+const CAL_GAP: f32 = 6.0;
+/// A month card of the year layer: the header, the cover and the footer with the volume and the size.
+const CAL_CARD_H: f32 = 92.0;
+/// A day cell of the month layer: the number, the counter, up to three previews and the volume bar.
+const CAL_DAY_H: f32 = 96.0;
 
 // Scrolling (M22.2b). Below is the only place its profile is set: the wheel, the touchpad
 // and the coast after the fingers lift. No `ScrollArea` sets values of its own.
@@ -6004,6 +6011,7 @@ impl App {
             budget: 4,
             bg: ui.visuals().extreme_bg_color,
             cell_style: db::CellStyle::Tiles,
+            time_only: false,
         };
         if !paint_thumb(ui, &ctx, &mut cells, &f, rect.shrink(1.0)) {
             let txt = match f.kind.as_str() {
@@ -8192,6 +8200,9 @@ struct Cells<'a> {
     bg: egui::Color32,
     /// How the files are shown: the mock-up tile, rows by proportion or a list (M22).
     cell_style: db::CellStyle,
+    /// A day strip in the calendar: every row falls on one date, so the caption shows the time
+    /// instead of the date — the only thing that tells the snapshots of a day apart (M22.5).
+    time_only: bool,
     textures: &'a mut HashMap<i64, egui::TextureHandle>,
     missing: &'a mut HashSet<i64>,
     thumbs_dir: &'a Path,
@@ -8338,7 +8349,6 @@ fn shift_to_file_month(
 }
 
 /// The nearest month with files to the given one (backwards first, then forwards).
-#[allow(dead_code)]
 fn nearest_file_month(months: &BTreeSet<String>, year: i32, month: u32) -> Option<(i32, u32)> {
     for d in 0..1200 {
         let back = shift_month(year, month, -d);
@@ -8351,6 +8361,96 @@ fn nearest_file_month(months: &BTreeSet<String>, year: i32, month: u32) -> Optio
         }
     }
     None
+}
+
+/// A calendar cell: the card tone with a 1 px line while the cell holds files, the accent fill and
+/// a 1 px accent frame while it is picked (the month, the day), nothing while it is empty — so the
+/// archive's shape is visible without reading the numbers (M22.5). Returns the palette of the
+/// frame, because the number, the counter and the bar inside are drawn in its tones.
+fn cal_cell(ui: &egui::Ui, rect: egui::Rect, radius: f32, has_files: bool, picked: bool) -> Theme {
+    let th = theme(ui);
+    let corners = egui::CornerRadius::same(radius as u8);
+    let (fill, stroke) = if picked {
+        (th.accent_soft, egui::Stroke::new(1.0, th.accent))
+    } else if has_files {
+        (th.card, egui::Stroke::new(1.0, th.border))
+    } else {
+        // An empty cell keeps the panel tone instead of vanishing: the month stays a grid, and the
+        // gaps of the archive are seen instead of searched for.
+        (th.panel, egui::Stroke::NONE)
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter().rect_filled(rect, corners, fill);
+    }
+    if stroke != egui::Stroke::NONE {
+        ui.painter()
+            .rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
+    }
+    th
+}
+
+/// The volume of a calendar cell as a bar: the share of the fullest month of the year or the
+/// fullest day of the month — the mock-up's 4 px strip under the cell.
+fn cal_bar(ui: &egui::Ui, rect: egui::Rect, share: f32) {
+    let th = theme(ui);
+    let corners = egui::CornerRadius::same(2);
+    ui.painter().rect_filled(rect, corners, th.field);
+    let w = rect.width() * share.clamp(0.0, 1.0);
+    if w >= 1.0 {
+        let filled = egui::Rect::from_min_size(rect.min, egui::vec2(w, rect.height()));
+        ui.painter().rect_filled(filled, corners, th.accent);
+    }
+}
+
+/// The title of a day: "Wed, 01.05.2024"; a key that is not a date is shown as it is.
+fn day_title(lang: i18n::Lang, key: &str) -> String {
+    match parse_date(key) {
+        Some(d) => format!(
+            "{}, {}",
+            i18n::weekday(lang, d.weekday().num_days_from_monday() as usize),
+            d.format("%d.%m.%Y")
+        ),
+        None => key.to_string(),
+    }
+}
+
+/// The heading of a day: the date at 14 px and its facts at 11 px in the numeric family — the same
+/// words as a month heading, so the calendar and the grid speak alike.
+fn day_heading(ui: &mut egui::Ui, title: &str, files: usize, bytes: i64, lang: i18n::Lang) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(title).size(14.0).strong());
+        let facts = i18n::fill(
+            lang,
+            "· {}, {}",
+            &[i18n::count(lang, files, "file"), db::human_in(lang, bytes)],
+        );
+        ui.label(num(ui, facts, 11.0).color(dim(ui)));
+    });
+    ui.add_space(4.0);
+}
+
+/// The snapshots of one day under the calendar (M22.5): the date and its facts, then the files as
+/// a list with the time instead of the full date. Within one day the date part is noise, and the
+/// list is the view that shows the time and the size side by side; the owner's cell view is
+/// overridden for this strip only, so every other screen keeps his choice.
+fn day_strip(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    key: &str,
+    idxs: &[usize],
+    items: &[FileRow],
+    lang: i18n::Lang,
+) {
+    let bytes: i64 = idxs.iter().map(|&i| items[i].size).sum();
+    day_heading(ui, &day_title(lang, key), idxs.len(), bytes, lang);
+    let style = cs.cell_style;
+    cs.cell_style = db::CellStyle::List;
+    cs.time_only = true;
+    let row: Vec<&FileRow> = idxs.iter().map(|&i| &items[i]).collect();
+    draw_files(ui, ctx, cs, &row);
+    cs.time_only = false;
+    cs.cell_style = style;
 }
 
 /// A text fragment with the matches: FTS5 marks them with « », the UI paints them with the accent.
@@ -8741,6 +8841,22 @@ fn tile_hint(style: db::CellStyle) -> &'static str {
     }
 }
 
+/// The caption date of a file: `YYYY-MM-DD HH:MM`, or only `HH:MM` in a day strip of the
+/// calendar, where the date is the same for every row (M22.5). A file without a time keeps its
+/// date: an empty caption would say nothing.
+fn caption_date(f: &FileRow, time_only: bool, lang: i18n::Lang) -> String {
+    match f.taken_at.as_deref() {
+        Some(raw) => {
+            let text = raw.replace('T', " ");
+            match text.get(11..16) {
+                Some(time) if time_only => time.to_string(),
+                _ => text.chars().take(16).collect(),
+            }
+        }
+        None => t(lang, "no date").to_string(),
+    }
+}
+
 /// The list: a row of the height from the "Tiles" slider (`list_row_height`) — a 4:3
 /// thumbnail as tall as `row − 8`, the name, the date and the size. A dense view of names
 /// and dates when the photos are known already; the duplicate and trash decisions use the same buttons.
@@ -8790,11 +8906,7 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             );
         }
         let name = file_name(&f.path);
-        let date = f
-            .taken_at
-            .as_deref()
-            .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-            .unwrap_or_else(|| t(cs.lang, "no date").to_string());
+        let date = caption_date(f, cs.time_only, cs.lang);
         let kind = if f.kind == "video" {
             match f.duration_s {
                 Some(d) => format!("▶ {}", db::duration(d)),
@@ -8973,11 +9085,7 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
         // The caption: the file name on the left, the date on the right in monospaced digits (M22).
         // The name is cut at the edge of the date rather than running onto the neighbouring tile.
         let name = file_name(&f.path);
-        let date = f
-            .taken_at
-            .as_deref()
-            .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-            .unwrap_or_else(|| t(cs.lang, "no date").to_string());
+        let date = caption_date(f, cs.time_only, cs.lang);
         let chosen = cs.picked.contains(&f.id) || cs.selected == Some(f.id);
         let name_col = if chosen { th.accent } else { th.text_med };
         let font = egui::FontId::monospace(10.0);
@@ -9608,6 +9716,7 @@ impl eframe::App for App {
             lang: self.settings.lang,
             budget: 8,
             cell_style: self.settings.cell_style,
+            time_only: false,
             // The background a tile lies on: the corner cuts of the preview paint exactly it.
             bg: if self.view == View::Dupes {
                 ui.visuals().faint_bg_color
@@ -9726,9 +9835,25 @@ impl eframe::App for App {
                         },
                 )
             }
+            // The facts of the calendar name the layer: a year, a month or a day — the title of the
+            // screen stays "Calendar", so the tabs above the grid do not have to be read twice.
             View::Calendar => (
                 t(lang, "Calendar").to_string(),
-                format!("{} {cal_year}", i18n::month_name(lang, cal_month as usize)),
+                match cal_scale {
+                    CalScale::Year => format!("{cal_year}"),
+                    CalScale::Month => {
+                        format!("{} {cal_year}", i18n::month_name(lang, cal_month as usize))
+                    }
+                    CalScale::Week => format!(
+                        "{} — {}",
+                        cal_week.format("%d.%m"),
+                        (cal_week + chrono::Duration::days(6)).format("%d.%m.%Y")
+                    ),
+                    CalScale::Day => cal_day
+                        .as_deref()
+                        .map(|d| day_title(lang, d))
+                        .unwrap_or_else(|| t(lang, "no day selected").to_string()),
+                },
             ),
             View::Faces => (
                 t(lang, "People").to_string(),
@@ -10400,78 +10525,155 @@ impl eframe::App for App {
 
                         match cal_scale {
                             CalScale::Year => {
-                                let cell_w = ((ui.available_width() - 14.0) / 4.0).max(40.0);
+                                // The month cards of the year: their counters, their volumes and
+                                // the first snapshot of each for the cover.
+                                let mut per_month = Vec::with_capacity(12);
+                                for m in 1..=12u32 {
+                                    let key = month_key(cal_year, m);
+                                    let mut count = 0usize;
+                                    let mut bytes = 0i64;
+                                    let mut first: Option<usize> = None;
+                                    for (day, ids) in by_day.range(key.clone()..) {
+                                        if !day.starts_with(&key) {
+                                            break;
+                                        }
+                                        count += ids.len();
+                                        bytes += ids.iter().map(|&i| items[i].size).sum::<i64>();
+                                        if first.is_none() {
+                                            first = ids.first().copied();
+                                        }
+                                    }
+                                    per_month.push((count, bytes, first));
+                                }
+                                let year_n: usize = per_month.iter().map(|(n, _, _)| *n).sum();
+                                let year_bytes: i64 = per_month.iter().map(|(_, b, _)| *b).sum();
+                                let busiest = per_month.iter().map(|(n, _, _)| *n).max().unwrap_or(0);
+                                ui.horizontal(|ui| {
+                                    caps_label(
+                                        ui,
+                                        &i18n::fill(
+                                            lang,
+                                            "12 months of {}",
+                                            &[cal_year.to_string()],
+                                        ),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let facts = i18n::fill(
+                                                lang,
+                                                "{} in the year · {}",
+                                                &[
+                                                    i18n::count(lang, year_n, "file"),
+                                                    db::human_in(lang, year_bytes),
+                                                ],
+                                            );
+                                            ui.label(num(ui, facts, 10.0).color(dim(ui)));
+                                        },
+                                    );
+                                });
+                                ui.add_space(6.0);
+                                let cell_w =
+                                    ((ui.available_width() - 3.0 * CAL_GAP) / 4.0).max(40.0);
                                 for row in 0..3u32 {
                                     ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = CAL_GAP;
                                         for col in 0..4u32 {
                                             let m = row * 4 + col + 1;
-                                            let key = format!("{cal_year:04}-{m:02}");
-                                            let count: usize = by_day
-                                                .iter()
-                                                .filter(|(d, _)| d.starts_with(&key))
-                                                .map(|(_, v)| v.len())
-                                                .sum();
+                                            let (count, bytes, first) = per_month[(m - 1) as usize];
                                             let (rect, resp) = ui.allocate_exact_size(
-                                                egui::vec2(cell_w, 92.0),
+                                                egui::vec2(cell_w, CAL_CARD_H),
                                                 egui::Sense::click(),
                                             );
-                                            let resp = resp
-                                                .on_hover_text(t(lang, "double-click to open the month"));
+                                            let resp = resp.on_hover_text(t(
+                                                lang,
+                                                "double-click to open the month",
+                                            ));
                                             if ui.is_rect_visible(rect) {
                                                 let selected = cal_month == m;
-                                                let fill = if selected {
-                                                    ui.visuals()
-                                                        .selection
-                                                        .bg_fill
-                                                        .gamma_multiply(0.25)
-                                                } else {
-                                                    ui.visuals().faint_bg_color
-                                                };
-                                                ui.painter().rect_filled(
-                                                    rect.shrink(1.0),
-                                                    4.0,
-                                                    fill,
+                                                let r = rect.shrink(1.0);
+                                                let th = cal_cell(
+                                                    ui,
+                                                    r,
+                                                    RADIUS_CARD,
+                                                    count > 0,
+                                                    selected,
+                                                );
+                                                let pad = 8.0;
+                                                // "01 January" — the mono number and the month's
+                                                // name, the counter at the right edge.
+                                                ui.painter().text(
+                                                    egui::pos2(r.left() + pad, r.top() + 6.0),
+                                                    egui::Align2::LEFT_TOP,
+                                                    format!("{m:02}"),
+                                                    egui::FontId::monospace(10.0),
+                                                    th.text_dim,
                                                 );
                                                 ui.painter().text(
-                                                    rect.left_top() + egui::vec2(8.0, 6.0),
+                                                    egui::pos2(r.left() + pad + 18.0, r.top() + 4.0),
                                                     egui::Align2::LEFT_TOP,
                                                     i18n::month_name(lang, m as usize),
-                                                    egui::FontId::proportional(13.0),
-                                                    egui::Color32::from_gray(190),
+                                                    egui::FontId::proportional(12.0),
+                                                    if selected {
+                                                        th.accent
+                                                    } else if count > 0 {
+                                                        th.text
+                                                    } else {
+                                                        th.text_dim
+                                                    },
                                                 );
                                                 ui.painter().text(
-                                                    rect.right_top() + egui::vec2(-8.0, 6.0),
+                                                    egui::pos2(r.right() - pad, r.top() + 5.0),
                                                     egui::Align2::RIGHT_TOP,
                                                     format!("{count}"),
-                                                    egui::FontId::proportional(11.0),
-                                                    dim(ui),
+                                                    egui::FontId::monospace(10.0),
+                                                    if selected { th.accent } else { th.text_med },
                                                 );
-                                                let ids: Vec<usize> = by_day
-                                                    .iter()
-                                                    .filter(|(d, _)| d.starts_with(&key))
-                                                    .flat_map(|(_, v)| v.iter().copied())
-                                                    .take(4)
-                                                    .collect();
-                                                if !ids.is_empty() {
-                                                    let area = egui::Rect::from_min_max(
-                                                        rect.left_top() + egui::vec2(6.0, 26.0),
-                                                        rect.right_bottom() - egui::vec2(6.0, 6.0),
+                                                // The cover: the first snapshot of the month,
+                                                // fitted whole — a preview is never cropped.
+                                                let cover = egui::Rect::from_min_max(
+                                                    egui::pos2(
+                                                        r.left() + pad,
+                                                        r.top() + 23.0,
+                                                    ),
+                                                    egui::pos2(
+                                                        r.right() - pad,
+                                                        r.bottom() - 17.0,
+                                                    ),
+                                                );
+                                                if cover.height() > 8.0 {
+                                                    ui.painter().rect_filled(
+                                                        cover,
+                                                        egui::CornerRadius::same(
+                                                            RADIUS_CTRL as u8,
+                                                        ),
+                                                        th.canvas,
                                                     );
-                                                    let tw = ((area.width() - 6.0) / 4.0)
-                                                        .max(8.0);
-                                                    for (k, &i) in ids.iter().enumerate() {
-                                                        let r = egui::Rect::from_min_size(
-                                                            egui::pos2(
-                                                                area.left()
-                                                                    + k as f32 * (tw + 2.0),
-                                                                area.top(),
-                                                            ),
-                                                            egui::vec2(tw, area.height()),
-                                                        );
+                                                    if let Some(i) = first {
                                                         paint_thumb(
-                                                            ui, ctx, &mut cells, &items[i], r,
+                                                            ui, ctx, &mut cells, &items[i], cover,
                                                         );
                                                     }
+                                                }
+                                                // The footer: the volume at the left edge and
+                                                // the size of the month at the right one.
+                                                let bar = egui::Rect::from_min_size(
+                                                    egui::pos2(r.left() + pad, r.bottom() - 9.0),
+                                                    egui::vec2(44.0, 4.0),
+                                                );
+                                                if count > 0 && busiest > 0 {
+                                                    cal_bar(
+                                                        ui,
+                                                        bar,
+                                                        count as f32 / busiest as f32,
+                                                    );
+                                                    ui.painter().text(
+                                                        egui::pos2(r.right() - pad, r.bottom() - 5.0),
+                                                        egui::Align2::RIGHT_BOTTOM,
+                                                        db::human_in(lang, bytes),
+                                                        egui::FontId::monospace(10.0),
+                                                        th.text_dim,
+                                                    );
                                                 }
                                             }
                                             if resp.double_clicked() {
@@ -10486,7 +10688,7 @@ impl eframe::App for App {
                                             }
                                         }
                                     });
-                                    ui.add_space(2.0);
+                                    ui.add_space(CAL_GAP);
                                 }
                             }
                             CalScale::Month => {
@@ -10502,59 +10704,71 @@ impl eframe::App for App {
                                     .flat_map(|(_, v)| v.iter())
                                     .map(|&i| items[i].size)
                                     .sum();
-                                ui.label(i18n::fill(
+                                // The busiest day of the month: the day counters are drawn as the
+                                // mock-up's bar, so the shape of the month is visible at a glance.
+                                let busiest = by_day
+                                    .iter()
+                                    .filter(|(d, _)| d.starts_with(&key))
+                                    .map(|(_, v)| v.len())
+                                    .max()
+                                    .unwrap_or(0);
+                                let facts = i18n::fill(
                                     lang,
                                     "{} this month, {}",
                                     &[
                                         i18n::count(lang, month_n, "file"),
                                         db::human_in(lang, month_bytes),
                                     ],
-                                ));
+                                );
+                                ui.label(num(ui, facts, 11.0).color(dim(ui)));
                                 if month_n == 0 {
-                                    ui.add_space(12.0);
+                                    ui.add_space(8.0);
                                     ui.label(t(lang, "No files in this month."));
-                                    if let Some(last) = months.iter().next_back()
-                                        && let (Some(y), Some(m)) =
-                                            (last.get(0..4), last.get(5..7))
-                                        && let (Ok(y), Ok(m)) =
-                                            (y.parse::<i32>(), m.parse::<u32>())
-                                        && ui
+                                    // The nearest month with files, so an empty month is a
+                                    // stop on the way, not a dead end.
+                                    if let Some((y, m)) =
+                                        nearest_file_month(&months, cal_year, cal_month)
+                                    {
+                                        ui.add_space(4.0);
+                                        if ui
                                             .button(format!(
-                                                "{} {last}",
-                                                t(lang, "Go to")
+                                                "{} {} {}",
+                                                t(lang, "Go to"),
+                                                i18n::month_name(lang, m as usize),
+                                                y
                                             ))
                                             .clicked()
-                                    {
-                                        cal_year = y;
-                                        cal_month = m;
-                                        cal_day = None;
+                                        {
+                                            cal_year = y;
+                                            cal_month = m;
+                                            cal_day = None;
+                                        }
                                     }
                                     return;
                                 }
 
                                 ui.add_space(4.0);
+                                // The weekday row of the mock-up: caps labels over the columns.
                                 ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    let wd_w = (ui.available_width() - 6.0 * 4.0) / 7.0;
+                                    ui.spacing_mut().item_spacing.x = CAL_GAP;
+                                    let wd_w =
+                                        (ui.available_width() - 6.0 * CAL_GAP) / 7.0;
                                     for wd in 0..7u32 {
-                                        ui.allocate_ui(
-                                            egui::vec2(wd_w, 18.0),
-                                            |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(i18n::weekday(
-                                                        lang,
-                                                        wd as usize,
-                                                    ))
-                                                        .small()
-                                                        .color(egui::Color32::from_gray(150)),
-                                                );
-                                            },
-                                        );
+                                        ui.allocate_ui(egui::vec2(wd_w, 16.0), |ui| {
+                                            ui.label(
+                                                egui::RichText::new(
+                                                    i18n::weekday(lang, wd as usize)
+                                                        .to_uppercase(),
+                                                )
+                                                .size(10.0)
+                                                .color(dim(ui)),
+                                            );
+                                        });
                                     }
                                 });
-                                let cell_w = ((ui.available_width() - 6.0 * 4.0 - 2.0) / 7.0)
+                                let cell_w = ((ui.available_width() - 6.0 * CAL_GAP) / 7.0)
                                     .max(32.0);
-                                let cell_h = 96.0;
+                                let cell_h = CAL_DAY_H;
                                 let first = first_weekday_monday(cal_year, cal_month);
                                 let n_days = days_in_month(cal_year, cal_month);
                                 let mut day = 1u32;
@@ -10563,7 +10777,7 @@ impl eframe::App for App {
                                         break;
                                     }
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui.spacing_mut().item_spacing.x = CAL_GAP;
                                         for wd in 0..7u32 {
                                             if day > n_days {
                                                 ui.allocate_space(egui::vec2(cell_w, cell_h));
@@ -10575,88 +10789,115 @@ impl eframe::App for App {
                                             }
                                             let date =
                                                 format!("{cal_year:04}-{cal_month:02}-{day:02}");
-                                            let idxs = by_day.get(&date);
+                                            let ids: &[usize] = by_day
+                                                .get(&date)
+                                                .map_or(&[], |v| v.as_slice());
                                             let (rect, resp) = ui.allocate_exact_size(
                                                 egui::vec2(cell_w, cell_h),
                                                 egui::Sense::click(),
                                             );
-                                            let resp = resp
-                                                .on_hover_text(t(lang, "double-click to open the week"));
+                                            let resp = resp.on_hover_text(t(
+                                                lang,
+                                                "double-click to open the week",
+                                            ));
                                             if ui.is_rect_visible(rect) {
                                                 let selected = cal_day.as_deref()
                                                     == Some(date.as_str());
-                                                let fill = if selected {
-                                                    ui.visuals()
-                                                        .selection
-                                                        .bg_fill
-                                                        .gamma_multiply(0.25)
-                                                } else {
-                                                    ui.visuals().faint_bg_color
-                                                };
-                                                ui.painter().rect_filled(
+                                                let n = ids.len();
+                                                let th = cal_cell(
+                                                    ui,
                                                     rect.shrink(1.0),
-                                                    4.0,
-                                                    fill,
+                                                    RADIUS_CTRL,
+                                                    n > 0,
+                                                    selected,
                                                 );
-                                                if selected {
-                                                    ui.painter().rect_stroke(
-                                                        rect.shrink(1.0),
-                                                        4.0,
-                                                        egui::Stroke::new(
-                                                            2.0,
-                                                            egui::Color32::from_rgb(90, 170, 255),
-                                                        ),
-                                                        egui::StrokeKind::Inside,
-                                                    );
-                                                }
+                                                let r = rect.shrink(1.0);
+                                                let pad = 5.0;
                                                 ui.painter().text(
-                                                    rect.left_top() + egui::vec2(6.0, 4.0),
+                                                    egui::pos2(r.left() + pad, r.top() + 4.0),
                                                     egui::Align2::LEFT_TOP,
                                                     day.to_string(),
-                                                    egui::FontId::proportional(12.0),
-                                                    egui::Color32::from_gray(190),
+                                                    egui::FontId::monospace(11.0),
+                                                    if selected {
+                                                        th.accent
+                                                    } else if n > 0 {
+                                                        th.text
+                                                    } else {
+                                                        th.text_dim
+                                                    },
                                                 );
-                                                if let Some(ids) = idxs {
+                                                if n > 0 {
+                                                    // The counter as a badge, as on the mock-up's
+                                                    // day cell: digit on a soft accent pill.
+                                                    let label = n.to_string();
+                                                    let badge = egui::Rect::from_min_size(
+                                                        egui::pos2(
+                                                            r.right() - pad - 6.0 * label.len() as f32 - 4.0,
+                                                            r.top() + 3.0,
+                                                        ),
+                                                        egui::vec2(
+                                                            6.0 * label.len() as f32 + 8.0,
+                                                            13.0,
+                                                        ),
+                                                    );
+                                                    ui.painter().rect_filled(
+                                                        badge,
+                                                        egui::CornerRadius::same(
+                                                            RADIUS_CTRL as u8,
+                                                        ),
+                                                        th.accent_soft,
+                                                    );
                                                     ui.painter().text(
-                                                        rect.right_top()
-                                                            + egui::vec2(-6.0, 4.0),
-                                                        egui::Align2::RIGHT_TOP,
-                                                        ids.len().to_string(),
-                                                        egui::FontId::proportional(11.0),
-                                                        dim(ui),
+                                                        badge.center(),
+                                                        egui::Align2::CENTER_CENTER,
+                                                        label,
+                                                        egui::FontId::monospace(10.0),
+                                                        th.accent,
                                                     );
                                                     let area = egui::Rect::from_min_max(
-                                                        rect.left_top()
-                                                            + egui::vec2(4.0, 22.0),
-                                                        rect.right_bottom()
-                                                            - egui::vec2(4.0, 4.0),
+                                                        egui::pos2(r.left() + 4.0, r.top() + 22.0),
+                                                        egui::pos2(
+                                                            r.right() - 4.0,
+                                                            r.bottom() - 10.0,
+                                                        ),
                                                     );
-                                                    let n = ids.len().min(3);
+                                                    let shown = n.min(3);
                                                     let tw = ((area.width()
-                                                        - (n as f32 - 1.0) * 2.0)
-                                                        / n as f32)
+                                                        - (shown as f32 - 1.0) * 2.0)
+                                                        / shown as f32)
                                                         .max(8.0);
                                                     for (k, &i) in
-                                                        ids.iter().take(n).enumerate()
+                                                        ids.iter().take(shown).enumerate()
                                                     {
-                                                        let r = egui::Rect::from_min_size(
+                                                        let tr = egui::Rect::from_min_size(
                                                             egui::pos2(
                                                                 area.left()
-                                                                    + k as f32
-                                                                        * (tw + 2.0),
+                                                                    + k as f32 * (tw + 2.0),
                                                                 area.top(),
                                                             ),
                                                             egui::vec2(tw, area.height()),
                                                         );
                                                         ui.painter().rect_filled(
-                                                            r,
+                                                            tr,
                                                             2.0,
-                                                            ui.visuals().extreme_bg_color,
+                                                            th.canvas,
                                                         );
                                                         paint_thumb(
-                                                            ui, ctx, &mut cells, &items[i], r,
+                                                            ui, ctx, &mut cells, &items[i], tr,
                                                         );
                                                     }
+                                                    // The volume of the day against the busiest
+                                                    // day of the month.
+                                                    let bar = egui::Rect::from_min_size(
+                                                        egui::pos2(r.left() + 4.0, r.bottom() - 7.0),
+                                                        egui::vec2((r.width() - 8.0).max(4.0), 3.0),
+                                                    );
+                                                    let share = if busiest > 0 {
+                                                        n as f32 / busiest as f32
+                                                    } else {
+                                                        0.0
+                                                    };
+                                                    cal_bar(ui, bar, share);
                                                 }
                                             }
                                             if resp.double_clicked() {
@@ -10678,16 +10919,16 @@ impl eframe::App for App {
                                             day += 1;
                                         }
                                     });
-                                    ui.add_space(2.0);
+                                    ui.add_space(CAL_GAP);
                                 }
                             }
                             CalScale::Week => {
-                                let cell_w = ((ui.available_width() - 6.0 * 4.0 - 2.0) / 7.0)
+                                let cell_w = ((ui.available_width() - 6.0 * CAL_GAP) / 7.0)
                                     .max(32.0);
                                 let cell_h = 190.0;
                                 ui.add_space(4.0);
                                 ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    ui.spacing_mut().item_spacing.x = CAL_GAP;
                                     for d in 0..7i64 {
                                         let date = cal_week + chrono::Duration::days(d);
                                         let key = date.format("%Y-%m-%d").to_string();
@@ -10696,59 +10937,51 @@ impl eframe::App for App {
                                             egui::vec2(cell_w, cell_h),
                                             egui::Sense::click(),
                                         );
-                                        let resp = resp
-                                            .on_hover_text(t(lang, "double-click to open the day"));
+                                        let resp = resp.on_hover_text(t(
+                                            lang,
+                                            "double-click to open the day",
+                                        ));
                                         if ui.is_rect_visible(rect) {
                                             let selected = cal_day.as_deref()
                                                 == Some(key.as_str());
-                                            let fill = if selected {
-                                                ui.visuals()
-                                                    .selection
-                                                    .bg_fill
-                                                    .gamma_multiply(0.25)
-                                            } else {
-                                                ui.visuals().faint_bg_color
-                                            };
-                                            ui.painter().rect_filled(
+                                            let n = idxs.map_or(0, |ids| ids.len());
+                                            let th = cal_cell(
+                                                ui,
                                                 rect.shrink(1.0),
-                                                4.0,
-                                                fill,
+                                                RADIUS_CTRL,
+                                                n > 0,
+                                                selected,
                                             );
-                                            if selected {
-                                                ui.painter().rect_stroke(
-                                                    rect.shrink(1.0),
-                                                    4.0,
-                                                    egui::Stroke::new(
-                                                        2.0,
-                                                        egui::Color32::from_rgb(90, 170, 255),
-                                                    ),
-                                                    egui::StrokeKind::Inside,
-                                                );
-                                            }
+                                            let r = rect.shrink(1.0);
+                                            let pad = 5.0;
                                             ui.painter().text(
-                                                rect.left_top() + egui::vec2(6.0, 4.0),
+                                                egui::pos2(r.left() + pad, r.top() + 4.0),
                                                 egui::Align2::LEFT_TOP,
-                                                format!(
-                                                    "{} {}",
-                                                    i18n::weekday(lang, d as usize),
-                                                    date.format("%d.%m")
+                                                i18n::weekday(lang, d as usize),
+                                                egui::FontId::proportional(11.0),
+                                                if selected { th.accent } else { th.text_med },
+                                            );
+                                            ui.painter().text(
+                                                egui::pos2(
+                                                    r.left() + pad + 26.0,
+                                                    r.top() + 5.0,
                                                 ),
-                                                egui::FontId::proportional(12.0),
-                                                egui::Color32::from_gray(190),
+                                                egui::Align2::LEFT_TOP,
+                                                date.format("%d.%m").to_string(),
+                                                egui::FontId::monospace(10.0),
+                                                th.text_dim,
+                                            );
+                                            ui.painter().text(
+                                                egui::pos2(r.right() - pad, r.top() + 5.0),
+                                                egui::Align2::RIGHT_TOP,
+                                                n.to_string(),
+                                                egui::FontId::monospace(10.0),
+                                                if selected { th.accent } else { th.text_med },
                                             );
                                             if let Some(ids) = idxs {
-                                                ui.painter().text(
-                                                    rect.right_top()
-                                                        + egui::vec2(-6.0, 4.0),
-                                                    egui::Align2::RIGHT_TOP,
-                                                    ids.len().to_string(),
-                                                    egui::FontId::proportional(11.0),
-                                                    dim(ui),
-                                                );
                                                 let area = egui::Rect::from_min_max(
-                                                    rect.left_top() + egui::vec2(4.0, 24.0),
-                                                    rect.right_bottom()
-                                                        - egui::vec2(4.0, 4.0),
+                                                    egui::pos2(r.left() + 4.0, r.top() + 22.0),
+                                                    egui::pos2(r.right() - 4.0, r.bottom() - 4.0),
                                                 );
                                                 let rows = 3usize;
                                                 let cols = 2usize;
@@ -10756,28 +10989,26 @@ impl eframe::App for App {
                                                     - (cols as f32 - 1.0) * 2.0)
                                                     / cols as f32)
                                                     .max(8.0);
-                                                let th = ((area.height()
+                                                let th_h = ((area.height()
                                                     - (rows as f32 - 1.0) * 2.0)
                                                     / rows as f32)
                                                     .max(8.0);
-                                                for (k, &i) in ids
-                                                    .iter()
-                                                    .take(rows * cols)
-                                                    .enumerate()
+                                                for (k, &i) in
+                                                    ids.iter().take(rows * cols).enumerate()
                                                 {
-                                                    let r = egui::Rect::from_min_size(
+                                                    let tr = egui::Rect::from_min_size(
                                                         egui::pos2(
                                                             area.left()
                                                                 + (k % cols) as f32
                                                                     * (tw + 2.0),
                                                             area.top()
                                                                 + (k / cols) as f32
-                                                                    * (th + 2.0),
+                                                                    * (th_h + 2.0),
                                                         ),
-                                                        egui::vec2(tw, th),
+                                                        egui::vec2(tw, th_h),
                                                     );
                                                     paint_thumb(
-                                                        ui, ctx, &mut cells, &items[i], r,
+                                                        ui, ctx, &mut cells, &items[i], tr,
                                                     );
                                                 }
                                             }
@@ -10810,14 +11041,21 @@ impl eframe::App for App {
                                     Some(idxs) if !idxs.is_empty() => {
                                         let bytes: i64 =
                                             idxs.iter().map(|&i| items[i].size).sum();
-                                        ui.heading(format!(
-                                            "{}, {}",
-                                            files_n(idxs.len()),
-                                            db::human_in(lang, bytes)
-                                        ));
+                                        day_heading(
+                                            ui,
+                                            &day_title(lang, &day),
+                                            idxs.len(),
+                                            bytes,
+                                            lang,
+                                        );
+                                        // The day layer keeps the owner's cell view (`draw_cell`):
+                                        // only the caption shows the time, the date is the same for
+                                        // every tile of the day.
+                                        cells.time_only = true;
                                         let row: Vec<&FileRow> =
                                             idxs.iter().map(|&i| &items[i]).collect();
                                         draw_files(ui, ctx, &mut cells, &row);
+                                        cells.time_only = false;
                                     }
                                     _ => {
                                         ui.label(t(lang, "No files on this day."));
@@ -10826,38 +11064,26 @@ impl eframe::App for App {
                             }
                         }
                         if cal_scale != CalScale::Day {
-                            ui.separator();
-                            if let Some(day) = &cal_day {
-                                match by_day.get(day) {
-                                    Some(idxs) => {
-                                        let bytes: i64 =
-                                            idxs.iter().map(|&i| items[i].size).sum();
-                                        ui.heading(i18n::fill(
-                                            lang,
-                                            "{} — {} files, {}",
-                                            &[
-                                                day.to_string(),
-                                                idxs.len().to_string(),
-                                                db::human_in(lang, bytes),
-                                            ],
-                                        ));
-                                        let row: Vec<&FileRow> =
-                                            idxs.iter().map(|&i| &items[i]).collect();
-                                        draw_files(ui, ctx, &mut cells, &row);
-                                    }
-                                    None => {
-                                        ui.label(t(lang, "No files on this day."));
-                                    }
+                            hairline(ui);
+                            ui.add_space(8.0);
+                            match cal_day.as_deref().map(|d| (d, by_day.get(d))) {
+                                Some((day, Some(idxs))) if !idxs.is_empty() => {
+                                    day_strip(ui, ctx, &mut cells, day, idxs, &items, lang);
                                 }
-                            } else {
-                                ui.label(t(
-                                    lang,
-                                    "Pick a day in the calendar — its photos appear below.",
-                                ));
+                                Some(_) => {
+                                    ui.label(t(lang, "No files on this day."));
+                                }
+                                None => {
+                                    ui.label(t(
+                                        lang,
+                                        "Pick a day in the calendar — its photos appear below.",
+                                    ));
+                                }
                             }
                         }
                         if let Some(idxs) = by_day.get("no date") {
-                            ui.separator();
+                            hairline(ui);
+                            ui.add_space(8.0);
                             egui::CollapsingHeader::new(i18n::fill(lang, "No date — {} files", &[idxs.len().to_string()]))
                             .id_salt("no-date")
                             .show(ui, |ui| {
@@ -11354,6 +11580,44 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    /// Every outlined rectangle of a frame with its stroke: the calendar check needs to know which
+    /// cell carries the accent frame, and that nothing else does (M22.5).
+    fn collect_strokes(shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Stroke)>) {
+        match shape {
+            egui::Shape::Rect(r) if r.stroke != egui::Stroke::NONE => {
+                out.push((r.rect, r.stroke));
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_strokes(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// One frame of the whole window with every outlined rectangle: the accent frame of a picked
+    /// calendar cell is a 1 px stroke of the palette accent, so its colour and width are checkable.
+    fn window_strokes(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(egui::Rect, egui::Stroke)> {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut rects = Vec::new();
+        for c in &out.shapes {
+            collect_strokes(&c.shape, &mut rects);
+        }
+        out.drop_without_applying_deltas();
+        rects
     }
 
     /// One frame of the whole window at a given size with the position of every word: that is how
@@ -12050,6 +12314,79 @@ mod tests {
         );
     }
 
+    /// The M22.5 measurement on the real corpus: how much a calendar frame costs in the year and the
+    /// month layers, and that the year layer fits a 1240×840 window. `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
+    /// cargo test --release -- --ignored calendar_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn calendar_measurement() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let size = egui::vec2(1240.0, 840.0);
+        app.view = View::Calendar;
+        fn drive(
+            app: &mut App,
+            ctx: &egui::Context,
+            frame: &mut eframe::Frame,
+            size: egui::Vec2,
+            t: f64,
+        ) -> f32 {
+            let raw = egui::RawInput {
+                time: Some(t),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let start = Instant::now();
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, frame));
+            let ms = start.elapsed().as_secs_f32() * 1000.0;
+            out.drop_without_applying_deltas();
+            ms
+        }
+        let mut t = 0.0_f64;
+        for (scale, word) in [(CalScale::Year, "year"), (CalScale::Month, "month")] {
+            app.cal_scale = scale;
+            for _ in 0..4 {
+                drive(&mut app, &ctx, &mut frame, size, t);
+                t += 1.0 / 60.0;
+            }
+            let mut times = Vec::new();
+            for _ in 0..16 {
+                times.push(drive(&mut app, &ctx, &mut frame, size, t));
+                t += 1.0 / 60.0;
+            }
+            times.sort_by(|a, b| a.total_cmp(b));
+            let p = |q: f32| times[((times.len() - 1) as f32 * q) as usize];
+            println!(
+                "corpus {n} files, {word} layer: p50 {:.2} ms ({:.0} fps), p95 {:.2} ms, p99 {:.2} ms",
+                p(0.50),
+                1000.0 / p(0.50),
+                p(0.95),
+                p(0.99)
+            );
+        }
+        // The year layer fits: the last card of December and the day strip below are on the screen.
+        app.cal_scale = CalScale::Year;
+        let drawn = window_layout(&mut app, &ctx, size);
+        let last_month = i18n::month_name(app.settings.lang, 12);
+        let december = drawn
+            .iter()
+            .find(|(text, _)| text == last_month)
+            .map(|(_, pos)| *pos);
+        println!(
+            "{} files, year layer at 1240×840: December at {december:?}",
+            app.items.len()
+        );
+    }
+
     fn viewer_with(ids: Vec<i64>, idx: usize) -> Viewer {
         Viewer {
             ids,
@@ -12239,7 +12576,8 @@ mod tests {
                 "missing “{needle}”: {texts:?}"
             );
         }
-        for needle in ["Mon", "Sun"] {
+        // The weekday row of the month layer is a row of caps labels (M22.5), so it is upper case.
+        for needle in ["MON", "SUN"] {
             assert!(
                 texts.iter().any(|t| t == needle),
                 "no weekday “{needle}”: {texts:?}"
@@ -12250,7 +12588,7 @@ mod tests {
             "the month summary is not translated: {texts:?}"
         );
         for ru in [
-            "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая",
+            "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая", "ПН", "ВС",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
@@ -13147,6 +13485,177 @@ mod tests {
         assert_eq!(CalScale::Day.deeper(), None);
     }
 
+    // ---- M22.5: the calendar after `photocat_2` / `photocat_12` -----------------------------
+    //
+    // A month grid of five weeks is 510 px tall, so the day list under it falls below the fold of an
+    // 840 px window: the frames below are 1200 px tall, as if the owner had scrolled — the list is
+    // in the same one scroll area as the grid.
+
+    /// Two files on one day of May, one in April and nothing else in 2024.
+    fn calendar_app() -> App {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-cal-m22.db"));
+        let mut first = file_row(1, "image", "breakfast.jpg");
+        first.taken_at = Some("2024-05-01T09:10".into());
+        first.size = 2048;
+        let mut second = file_row(2, "image", "walk.jpg");
+        second.taken_at = Some("2024-05-01T14:23".into());
+        second.size = 3072;
+        let mut april = file_row(3, "image", "garden.jpg");
+        april.taken_at = Some("2024-04-30T18:05".into());
+        april.size = 1024;
+        app.items = vec![first, second, april];
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Calendar;
+        app.cal_year = 2024;
+        app.cal_month = 5;
+        app
+    }
+
+    /// M22.5: the year layer is 12 month cards, each with a counter and a size in mono digits, and
+    /// a line above them saying what the whole year holds. An empty month is drawn, so the gaps of
+    /// the archive are visible instead of hidden.
+    #[test]
+    fn the_year_layer_draws_twelve_months_with_counts_and_sizes() {
+        let mut app = calendar_app();
+        app.cal_scale = CalScale::Year;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t == "12 MONTHS OF 2024"),
+            "no year heading: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "3 files in the year · 6.0 KiB"),
+            "no facts of the year: {texts:?}"
+        );
+        for month in ["January", "May", "December"] {
+            assert!(
+                texts.iter().any(|t| t == month),
+                "no card “{month}”: {texts:?}"
+            );
+        }
+        // The counter of May is two, the others are zero; the size of May is the sum of its files.
+        // Both are painted as plain numbers, so their presence is what is checked.
+        assert!(
+            texts.iter().filter(|t| *t == "2").count() >= 1,
+            "no counter on the May card: {texts:?}"
+        );
+        assert!(
+            texts.iter().filter(|t| *t == "0").count() >= 10,
+            "an empty month lost its zero counter: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "5.0 KiB") && texts.iter().any(|t| t == "1.0 KiB"),
+            "no size under the month cards: {texts:?}"
+        );
+    }
+
+    /// M22.5: the picked month carries the accent frame and no other card does; the frame is 1 px of
+    /// the palette accent, not the blue of the old calendar.
+    #[test]
+    fn the_picked_month_and_day_are_framed_in_the_accent() {
+        let mut app = calendar_app();
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let accent = super::DARK.accent;
+        let framed = |app: &mut App| -> Vec<egui::Rect> {
+            window_strokes(app, &ctx, size)
+                .into_iter()
+                .filter(|(r, s)| {
+                    s.color == accent && (s.width - 1.0).abs() < 0.01 && r.left() > super::LEFT_W
+                })
+                .map(|(r, _)| r)
+                .collect()
+        };
+        app.cal_scale = CalScale::Year;
+        app.cal_month = 5;
+        let year_frames = framed(&mut app);
+        assert_eq!(year_frames.len(), 1, "one picked month, not {year_frames:?}");
+        // The frame of the picked month sits at the middle of the second row of four columns:
+        // January starts at the left edge of the grid, May is the fifth card.
+        app.cal_scale = CalScale::Month;
+        app.cal_day = None;
+        assert!(
+            framed(&mut app).is_empty(),
+            "a day cell is framed while no day is picked"
+        );
+        app.cal_day = Some("2024-05-01".into());
+        let day_frames = framed(&mut app);
+        assert_eq!(day_frames.len(), 1, "one picked day, not {day_frames:?}");
+        assert!(
+            day_frames[0].width() > 60.0 && day_frames[0].height() > 80.0,
+            "the framed day is a cell: {:?}",
+            day_frames[0]
+        );
+    }
+
+    /// M22.5: the day list under the calendar is a list with the time, the name and the size — one
+    /// date for every row, so the date part is not repeated. The heading names the day itself.
+    #[test]
+    fn the_day_strip_shows_the_time_name_and_size() {
+        let mut app = calendar_app();
+        app.cal_scale = CalScale::Month;
+        app.cal_day = Some("2024-05-01".into());
+        let ctx = egui::Context::default();
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1200.0));
+        assert!(
+            texts.iter().any(|t| t == "Wed, 01.05.2024"),
+            "no heading of the day: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "· 2 files, 5.0 KiB"),
+            "no facts of the day: {texts:?}"
+        );
+        for needle in [
+            "09:10 · 2.0 KiB",
+            "14:23 · 3.0 KiB",
+            "breakfast.jpg",
+            "walk.jpg",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "no row “{needle}” in the day list: {texts:?}"
+            );
+        }
+        // The full date would be the caption of a grid tile; inside one day it is noise.
+        assert!(
+            !texts.iter().any(|t| t.contains("2024-05-01 09:10")),
+            "the day list repeats the date: {texts:?}"
+        );
+        // A day without files says so instead of drawing an empty list.
+        app.cal_day = Some("2024-05-03".into());
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1200.0));
+        assert!(
+            texts.iter().any(|t| t == "No files on this day."),
+            "an empty day is silent: {texts:?}"
+        );
+    }
+
+    /// M22.5: an empty month is a stop on the way, not a dead end: the button names the nearest
+    /// month that has files (backwards first, as `nearest_file_month`).
+    #[test]
+    fn an_empty_month_offers_the_nearest_month_with_files() {
+        let mut app = calendar_app();
+        app.cal_scale = CalScale::Month;
+        app.cal_month = 3;
+        app.cal_day = None;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t == "No files in this month."),
+            "no message of an empty month: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Go to April 2024"),
+            "the way out of an empty month is not named: {texts:?}"
+        );
+        // June lies forward: with nothing behind it, that is where the button leads.
+        app.cal_month = 6;
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t == "Go to May 2024"),
+            "no forward way out of an empty month: {texts:?}"
+        );
+    }
+
     /// The grid is "moments": the fresh month first, inside a month the fresh ones on top, the
     /// files without a date in the last group (M16, ADR 0033).
     #[test]
@@ -13451,6 +13960,7 @@ mod tests {
             tile,
             lang: i18n::Lang::Ru,
             budget: 4,
+            time_only: false,
         };
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(

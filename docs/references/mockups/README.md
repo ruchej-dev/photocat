@@ -20,8 +20,8 @@ with no network shows the structure but not the final look. The `screen.png` fil
 | `functional_precision_desktop/` | dark palette, type scale, spacing, components | `docs/DECISIONS.md` ADR 0044, the `DARK` palette |
 | `functional_precision_light/` | the light palette, the same components | ADR 0044, the `LIGHT` palette |
 | `photocat_1/` | main screen: top strip, search, left panel, month grid, inspector, settings dialog | M22.1/M22.2, the main screen of to-day |
-| `photocat_2/` | calendar, month layer: week grid with thumbnails, day list | M21.4b + M22.3 (the left panel), partly |
-| `photocat_12/` | calendar, year layer: 12 months with counts, a month list below | M22.3, not yet built |
+| `photocat_2/` | calendar, month layer: week grid with thumbnails, day list | M21.4b, fully since M22.5 |
+| `photocat_12/` | calendar, year layer: 12 months with counts, a month list below | M22.5 |
 | `photocat_3/` | albums: card grid, filters, sorting, the selection bar | the albums screen of to-day, partly |
 | `photocat_5/`, `photocat_6/` | full-screen viewer: header, zoom/tools row, series strip, player controls, inspector (two variants) | M13/M21.5, the viewer of to-day, partly |
 | `photocat_4/` | an older shell: top navigation, a settings dialog with autostart, GPU and backup | refused — see `plan/M22-ui-spec.md` §5 |
