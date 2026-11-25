@@ -18,7 +18,8 @@ Nothing that needs to be learned.
   "files 1". Since M21.5 every visible surface of the window goes through `t()` — including the
   full screen, the player controls, the folder dialogs and the storage confirmation; the position
   in the full screen comes from `i18n::position`, the slideshow interval from `i18n::seconds`. CLI
-  reports were translated in M21.6.
+  reports were translated in M21.6. The first status line is built from the settings just read, not
+  from the frame before them, so a fresh window opens in its own language (M22.12).
 - **Not a single action that deletes or renames anything.** The words "delete", "clear", "move" do
   not appear in the main scenario; at most "mark as spare", "remove the tag" (hide the label in the
   DB, the original does not change) and "export the plan". The exception requested by the owner: "To
@@ -157,6 +158,14 @@ the interface rules at the end of the file.
   own.
 - **The right panel:** "File details" is pinned on top, the rest scrolls. Nothing is selected by
   itself: while there is no file, the panel says "Pick a snapshot in the grid".
+- **A row never widens a panel** (M22.12): the width of a panel is the rule, the row is the content.
+  A long field takes what the word button leaves (the own-tag field is `available − 140 px`, never
+  below 60 px), a long name is shortened or wrapped, and no row may push the card past the 280 px.
+  egui widens a panel to fit an overflowing row and remembers the wider size, so the defect outlives
+  the file that caused it: the card is shifted right and clipped on both sides, and the canvas of the
+  central panel paints over its left margin. `app::tests::the_file_card_fits_the_right_panel` draws
+  the whole window at 1240×840 with a file selected and fails on any painted rectangle outside the
+  window or on a title that left the panel's left edge.
 - **Forms:** input fields 380–420 px, long paths 520 px, a line no longer than 80 characters.
 - **A dialog is a card** (M22.10): the `card` tone, a 1 px `border` line, the 8 px radius and 16 px
   of air inside, its title at 14 px (a dialog had 16 px, which is outside the type scale) and at most
@@ -320,6 +329,7 @@ a rare one.
 | Tag chip | 20 px high, mono 11, the word and the count of snapshots after a middle dot ("furniture · 669"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — accent fill, accent 1 px border and accent text; the width follows the text and never the state, so a click does not move the row | `app.rs::tag_chip` |
 | Right panel | 280 px; closed by "Hide" and by "Details" in the top bar; hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right` |
 | Preview in the card | the panel width, 4:3, no higher than 210 px, the frame fitted entirely; below the file name 14 px and the path 11 px | `App::file_card` |
+| Own-tag row | one line, 26 px high: the field takes `available − 140 px` (never below 60) and the word button keeps its 140 px, so the row always fits the 280 px panel and never widens it (M22.12) | `App::file_card` |
 | "Settings" dialog | 760×620 px of content inside the dialog frame, a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 14 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
 | Dialog | one `dialog_frame` for all seven: the `card` tone, a 1 px `border`, the 8 px radius and 16 px of air inside; the title 14 px, the body 13 px, hints 11–12 px; at most one accent button — the dialog's main action — and no accent at all on the settings dialog, where every change is saved at once; the trash confirmation is the one dialog whose button moves files, so it carries the `danger` border and no fill; a number stands in a facts row of its own in mono 11, never inside a translated sentence; a report body is mono 11 in its own scroll area with a copy button (M22.10) | `app.rs::dialog_frame`, the `*_modal` functions |
 | Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |

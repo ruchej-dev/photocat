@@ -7,7 +7,7 @@
 
 STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
 the parts of the main screen), M22.10 (dialogs and reports: one card frame, one accent button, mono
-numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -2736,3 +2736,42 @@ themes" rule, the neutral-ground rule and the navigation row in the metrics tabl
 `docs/DECISIONS.md` ADR 0044 gets the revision paragraph (the palette change and the test that now
 guards it); `docs/ARCHITECTURE.md` § Measurements gets the row; this file and `plan/BACKLOG.md` count
 M22.11 and the M22 block as done.
+
+## M22.12 — the right panel keeps its width (2026-11-25) ✅
+
+The owner's review after M22.11: the inspector's card came out of its 280 px panel. The first letters
+of "Сведения о файле", "Дата", "Камера", "Размер" and the other captions were cut on the left, the
+preview and "Добавить тег" ran over the window's right edge, and the bottom status line stayed in
+English inside a Russian window.
+
+**The cause of the shift.** The row of an own tag was a fixed 150 px field plus the word button —
+13 px wider than the card. egui widened the right panel to fit the row, the panel's stored size kept
+the wider frame, the panel grew past the window edge and the central panel painted its canvas over
+the panel's left margin: the whole card was shifted right and clipped on both sides. The wider left
+border looked like a broken layout, not like a too-wide row, which is why it survived the mock-up
+pass unseen.
+
+**The fix.** The field takes what the button leaves (240 px reserved for it in the card, never below
+60 px), so it shrinks with the panel and the button always ends inside the card; the row keeps its
+26 px height in both languages. The load path also builds the first status line from the settings it
+has just read (`settings.lang`), not from the previous frame's language: a fresh Russian window now
+opens with "в индексе 2232 файла, 21.2 ГиБ" instead of "2232 files in the index".
+
+**Checks.** `the_file_card_fits_the_right_panel` draws the whole window at 1240×840 with one file
+selected in Russian and asserts three things: the own-tag button stays inside the panel, the panel
+title stands on the panel's left edge (not shifted), and no painted frame leaves the window. On the
+old code it fails with a frame at x 1253.5 in a 1240 px window — the 13.5 px that were visible on the
+owner's screen. Two test helpers are new: `collect_text_rects` (a galley may be anchored by its right
+edge in a right-to-left row, so the recorded position is not always the top-left) and
+`collect_rect_bounds`/`window_rects_at`, which collect every painted rectangle.
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, the real DB of 2232 files, headless frames):
+the farthest painted edge is 1240.0 in a 1240 px window and 1691.0 in a 1691 px one — nothing is
+painted outside the window in either; on the old code the card's frame reached 1253.5 at 1240. The
+same frame keeps the field and the button on one line. `cargo test` 279 passed,
+`cargo test --test source_language` 3 passed, `cargo clippy --all-targets` clean, `check.sh` 55
+checks, `rust-analyzer diagnostics .` 0 errors.
+
+**Documents.** `docs/UI.md` § Layout gets the rule (a row never widens its panel; a long field takes
+what the button leaves) and § Metrics the own-tag row; `plan/M22-ui-spec.md` §6 M22.12 carries the
+result; `docs/ARCHITECTURE.md` § Measurements the row; this file and `plan/BACKLOG.md` count M22.12.

@@ -2269,12 +2269,16 @@ impl App {
                 face_images,
                 face_todo,
             )) => {
+                // The language comes from the settings that have just been read: the `lang` of
+                // this frame is still the default one on the first load, and the first status line
+                // stayed English in a Russian window (M22.12).
+                let loaded_lang = settings.lang;
                 self.status = i18n::fill(
-                    lang,
+                    loaded_lang,
                     "{} in the index, {}",
                     &[
-                        i18n::count(lang, rows.len(), "file"),
-                        db::human_in(settings.lang, rows.iter().map(|r| r.size).sum()),
+                        i18n::count(loaded_lang, rows.len(), "file"),
+                        db::human_in(loaded_lang, rows.iter().map(|r| r.size).sum()),
                     ],
                 );
                 self.settings = settings;
@@ -6670,31 +6674,40 @@ impl App {
                 Err(e) => self.status = format!("{}: {e}", t(lang, "tag not removed")),
             }
         }
+        // The row has to fit the 280 px panel: the field takes what the button leaves. A fixed
+        // 150 px field plus the word button were wider than the card; egui then widened the whole
+        // right panel past the window and the card was shifted right and clipped on both sides
+        // (M22.12).
+        let mut add_tag = false;
         ui.horizontal(|ui| {
+            // The button is a 14 px icon, 6 px, a word of 13 px and 10 px of padding on each
+            // side; the widest label of the row needs 140 px together with the gap.
+            const TAG_BUTTON_W: f32 = 140.0;
+            let width = (ui.available_width() - TAG_BUTTON_W).max(60.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.user_tag_input)
                     .hint_text(t(lang, "your own tag, e.g. furniture"))
-                    .desired_width(150.0),
+                    .desired_width(width),
             );
-            if word_button(ui, Icon::Add, t(lang, "Add tag")).clicked() {
-                let tag = self.user_tag_input.trim().to_string();
-                if !tag.is_empty() {
-                    match db::add_user_tag(&self.db_path, id, &tag) {
-                        Ok(()) => {
-                            let tags = self.user_tags.entry(id).or_default();
-                            tags.push(tag.clone());
-                            tags.sort();
-                            self.user_tag_input.clear();
-                            self.status =
-                                format!("{}: «{tag}»", t(lang, "own tag added"));
-                        }
-                        Err(e) => {
-                            self.status = format!("{}: {e}", t(lang, "tag not added"))
-                        }
+            add_tag = word_button(ui, Icon::Add, t(lang, "Add tag")).clicked();
+        });
+        if add_tag {
+            let tag = self.user_tag_input.trim().to_string();
+            if !tag.is_empty() {
+                match db::add_user_tag(&self.db_path, id, &tag) {
+                    Ok(()) => {
+                        let tags = self.user_tags.entry(id).or_default();
+                        tags.push(tag.clone());
+                        tags.sort();
+                        self.user_tag_input.clear();
+                        self.status = format!("{}: «{tag}»", t(lang, "own tag added"));
+                    }
+                    Err(e) => {
+                        self.status = format!("{}: {e}", t(lang, "tag not added"))
                     }
                 }
             }
-        });
+        }
 
         if f.kind == "image" {
             section_label(ui, t(lang, "Text on the photo"));
@@ -13203,6 +13216,34 @@ mod tests {
         }
     }
 
+    /// The drawn text with its rectangle: a row wider than its panel pushes the panel out of the
+    /// window, and the words are the first thing to tell (M22.12).
+    fn collect_text_rects(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(t) => {
+                // A galley may be anchored at its left, its right or its centre: a right-to-left
+                // row places the words by their right edge, and `pos` is that edge, not the left
+                // one.
+                let size = t.galley.size();
+                let rect = match t.galley.job.halign {
+                    egui::Align::Min => egui::Rect::from_min_size(t.pos, size),
+                    egui::Align::Max => egui::Rect::from_min_size(t.pos - egui::vec2(size.x, 0.0), size),
+                    egui::Align::Center => egui::Rect::from_center_size(
+                        t.pos + egui::vec2(0.0, size.y * 0.5),
+                        size,
+                    ),
+                };
+                out.push((t.galley.text().to_owned(), rect));
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_text_rects(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Every drawn text section with its font and colour: the screens without a mock-up must put
     /// their numbers in the numeric family and take their colours from the palette (M22.9).
     fn collect_text_formats(
@@ -13735,6 +13776,66 @@ mod tests {
         let mut texts = Vec::new();
         for c in &out.shapes {
             collect_text_formats(&c.shape, &mut texts);
+        }
+        out.drop_without_applying_deltas();
+        texts
+    }
+
+    /// The rectangles of the frame (fills and strokes): a row that does not fit its panel paints
+    /// past the window, and a word alone can hide inside the padding of a button (M22.12).
+    fn collect_rect_bounds(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(r) => out.push(r.rect),
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_rect_bounds(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// One frame of the whole window with every rectangle it painted.
+    fn window_rects_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<egui::Rect> {
+        super::style(ctx);
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let first = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut rects = Vec::new();
+        for c in &out.shapes {
+            collect_rect_bounds(&c.shape, &mut rects);
+        }
+        out.drop_without_applying_deltas();
+        rects
+    }
+
+    /// One frame of the whole window with every word and where it landed, at any window size.
+    fn window_word_rects_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::Rect)> {
+        super::style(ctx);
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let first = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut texts = Vec::new();
+        for c in &out.shapes {
+            collect_text_rects(&c.shape, &mut texts);
         }
         out.drop_without_applying_deltas();
         texts
@@ -16005,6 +16106,53 @@ mod tests {
             texts.iter().any(|t| t == "a.jpg"),
             "the header keeps the name: {texts:?}"
         );
+    }
+
+    /// The row of an own tag has to fit the 280 px panel: the field takes what the button leaves.
+    /// A fixed 150 px field plus the word button were wider than the card, egui widened the panel
+    /// past the window edge, the panel was shifted right and the card was clipped on both sides
+    /// (M22.12).
+    #[test]
+    fn the_file_card_fits_the_right_panel() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-card-fit.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        // In Russian the own-tag button carries the widest label of the row — the one that used
+        // to widen the panel (M22.12).
+        app.settings.lang = i18n::Lang::Ru;
+        app.selected = Some(1);
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let words = window_word_rects_at(&mut app, &ctx, size);
+        let panel_left = size.x - 280.0;
+        let add = words
+            .iter()
+            .find(|(w, _)| w == "Добавить тег")
+            .unwrap_or_else(|| panic!("the own-tag row is on screen: {words:?}"));
+        assert!(
+            add.1.left() >= panel_left && add.1.right() <= size.x,
+            "the own-tag button stays in the panel: {:?} in [{panel_left}, {}]",
+            add.1,
+            size.x
+        );
+        let title = words
+            .iter()
+            .find(|(w, _)| w == "Сведения о файле")
+            .expect("the panel title is on screen");
+        // The panel keeps its 280 px: a row wider than the card widens it past the window and
+        // shifts the whole card right, so the title leaves its edge.
+        assert!(
+            title.1.left() <= panel_left + 12.0,
+            "the card is not shifted right: the title at {:?}, the panel at {panel_left}",
+            title.1
+        );
+        // Nothing is painted past the window edge: the frame of the own-tag button used to be
+        // 13 px wider than the card and the whole panel was pushed out (M22.12).
+        for rect in window_rects_at(&mut app, &ctx, size) {
+            assert!(
+                rect.left() >= -0.5 && rect.right() <= size.x + 0.5,
+                "a frame leaves the window: {rect:?} in {size:?}"
+            );
+        }
     }
 
     #[test]

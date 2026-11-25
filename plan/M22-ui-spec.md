@@ -663,6 +663,31 @@ settings row was already there.
 **Files.** `src/app.rs` (`LIGHT`, `DARK`, `nav_item`, `palette`, `contrast`, `over`, `window_parts_in`,
 `assert_palette`, the three tests), `docs/UI.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `plan/`.
 
+### M22.12 — the right panel keeps its width ✅
+
+The owner's review of the finished block: the card of the inspector left its 280 px. Every caption
+lost its first letters on the left ("ата" instead of "Дата"), the preview and "Добавить тег" were cut
+on the right, and the first status line of a Russian window spoke English.
+
+1. No row of the card may be wider than the panel: a long field takes the width the word button
+   leaves (140 px reserved for the button, at least 60 px for the field). A row that does not fit
+   widens the panel, and egui then remembers the wider size, so the defect outlives the file that
+   caused it.
+2. The load path builds the first status line from the settings it has read, not from the previous
+   frame's language.
+3. A headless frame of the whole window with a selected file asserts that no painted rectangle
+   leaves the window and that the panel title keeps its left edge.
+
+**Result.** The field of an own tag shrinks with the panel; the button ends inside the card. The
+first status line follows `settings.lang` ("в индексе 2232 файла, 21.2 ГиБ"). The new
+`the_file_card_fits_the_right_panel` fails on the old code with a frame at x 1253.5 in a 1240 px
+window — the 13.5 px seen on screen — and passes now. Measured (the real DB, headless frames): the
+farthest painted edge is 1240.0 at 1240 and 1691.0 at 1691; nothing is painted outside the window.
+`cargo test` 279, `clippy` clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`file_card`, the load path, `collect_text_rects`, `collect_rect_bounds`,
+`window_rects_at`, the test), `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".

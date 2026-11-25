@@ -1040,7 +1040,10 @@ words of the Russian window through `t()`) — 2026-11-25; M22.11 (the light the
 ratio of every pair the screens paint is a test now, the light accent became the design system's
 `amber-focus` `#b45309` — 2.91:1 → 4.58:1 on the panel — the active navigation row moved to the
 `card` tone with a 2 px accent edge, the two `danger` values rose one step, and every screen renders
-in both palettes without a colour of its own) — 2026-11-25.
+in both palettes without a colour of its own) — 2026-11-25; M22.12 (the right panel keeps its
+280 px: the own-tag row takes the width the button leaves and no longer widens the panel past the
+window, a headless frame of the whole window fails on any rectangle outside it, and the first status
+line is built from the settings language) — 2026-11-25.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
