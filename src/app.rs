@@ -590,9 +590,20 @@ const NAV_H: f32 = 28.0;
 /// The icon of a navigation row and of a settings section (M22.8).
 const NAV_ICON: f32 = 14.0;
 const RIGHT_W: f32 = 280.0;
+/// The header band of the right panel and the air around the file card: the mock-up's 44 px
+/// `h-11` row and its `p-3.5` (M22.16).
+const PANEL_HEAD_H: f32 = 44.0;
+const PANEL_PAD: f32 = 12.0;
 /// The top bar is 32 px and the bottom one 28 px — mock-up metrics, not a matter of taste.
 const TOP_H: f32 = 32.0;
 const STATUS_H: f32 = 28.0;
+/// The search field of the top bar is never wider than the mock-up's `max-w-xl` (576 px);
+/// below that it takes the room between the mark and the tools.
+const SEARCH_MAX_W: f32 = 576.0;
+/// The "Tiles" slider of the top bar: the mock-up's compact pill, not the whole panel width.
+const TILE_SLIDER_W: f32 = 84.0;
+/// The row of the content panel above the grid: the mock-up's `h-11`.
+const RIBBON_H: f32 = 44.0;
 /// The mock-up radii (Tailwind in the drawn screens): `rounded` = 4 — buttons, chips,
 /// badges; `rounded-md` = 6 — navigation items, menus; `rounded-lg` = 8 — tile cards,
 /// search fields, dialogs. The prose of `DESIGN.md` about 0 px loses to the drawn screens —
@@ -968,6 +979,13 @@ fn hairline(ui: &mut egui::Ui) {
         .rect_filled(rect, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
 }
 
+/// A 1 × 16 px divider between the groups of one strip: a line, not an eyeballed gap.
+fn hairline_vertical(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 16.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+}
+
 /// A caps heading of a card block with a mono value at the right edge — "ALBUMS 2",
 /// "AI TAGS CLIP 84%" (the mock-up's section rows).
 fn caps_row(ui: &mut egui::Ui, text: &str, right: &str, accent_word: bool) {
@@ -982,18 +1000,54 @@ fn caps_row(ui: &mut egui::Ui, text: &str, right: &str, accent_word: bool) {
     });
 }
 
-/// A chip of the file card: the mock-up's tag and album chip — 20 px high, mono 11, the accent
-/// when the tag is confident, the "×" inside removes it. Returns `true` when it was clicked.
-fn card_chip(ui: &mut egui::Ui, text: &str, selected: bool, hint: &str) -> bool {
+/// What a click on a chip of the file card asked for (M22.17): the word acts on the tag, the "×"
+/// on its right edge removes it. One 20 px target with two zones, so a tag is never removed by a
+/// click that meant "show me the others".
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum ChipClick {
+    #[default]
+    None,
+    /// The word: the caller shows the photos that carry the tag or opens the album.
+    Body,
+    /// The "×": the caller removes the tag from the photo, from the album or the own tag.
+    Remove,
+}
+
+/// A chip of the file card: the mock-up's tag and album chip — 20 px high, mono 11, an optional
+/// 12 px glyph before the word (the album's folder, M22.16), the accent when it is the tag the grid
+/// is filtered by. The word and the "×" on the right edge are two targets with their own hints
+/// (M22.17).
+fn card_chip(
+    ui: &mut egui::Ui,
+    text: &str,
+    lead: Option<Icon>,
+    selected: bool,
+    body_hint: &str,
+    remove_hint: &str,
+) -> ChipClick {
     let th = theme(ui);
     let font = egui::FontId::monospace(11.0);
-    let galley = ui
+    let word = ui
         .painter()
-        .layout_no_wrap(format!("{text} ×"), font, th.text_med);
+        .layout_no_wrap(text.to_owned(), font.clone(), th.text_med);
+    let cross = ui.painter().layout_no_wrap("×".to_owned(), font, th.text_med);
+    let lead_w = if lead.is_some() { 12.0 + 5.0 } else { 0.0 };
+    const PAD: f32 = 7.0;
+    const GAP: f32 = 4.0;
     let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + 14.0, 20.0),
+        egui::vec2(
+            PAD + lead_w + word.size().x + GAP + cross.size().x + PAD,
+            20.0,
+        ),
         egui::Sense::click(),
     );
+    // The zone of the "×": the glyph, the gap before it and 2 px around it — 16 px of a 20 px chip,
+    // so the two targets never overlap and the removal is not a mis-click away (M22.17).
+    let cross_left = rect.right() - PAD - cross.size().x - 2.0;
+    let over_cross = ui
+        .ctx()
+        .pointer_hover_pos()
+        .is_some_and(|p| p.x >= cross_left && rect.contains(p));
     if ui.is_rect_visible(rect) {
         let (fill, border, color) = if selected {
             (th.accent_soft, th.accent, th.accent)
@@ -1010,13 +1064,36 @@ fn card_chip(ui: &mut egui::Ui, text: &str, selected: bool, hint: &str) -> bool 
             egui::Stroke::new(1.0, border),
             egui::StrokeKind::Inside,
         );
+        let word_x = rect.left() + PAD + lead_w;
+        if let Some(icon) = lead {
+            paint_icon(
+                ui.painter(),
+                egui::pos2(rect.left() + PAD + 6.0, rect.center().y),
+                12.0 * 0.30,
+                icon,
+                color,
+            );
+        }
+        let y = rect.center().y - word.size().y / 2.0;
+        let word_w = word.size().x;
+        ui.painter().galley(egui::pos2(word_x, y), word, color);
+        // The "×" turns red under the pointer: the only target of the chip that removes something.
+        let cross_color = if over_cross { th.danger } else { color };
         ui.painter()
-            .galley(rect.center() - galley.size() / 2.0, galley, color);
+            .galley(egui::pos2(word_x + word_w + GAP, y), cross, cross_color);
     }
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    resp.on_hover_text(hint).clicked()
+    let hint = if over_cross { remove_hint } else { body_hint };
+    let resp = resp.on_hover_text(hint);
+    if !resp.clicked() {
+        return ChipClick::None;
+    }
+    match resp.interact_pointer_pos() {
+        Some(at) if at.x >= cross_left => ChipClick::Remove,
+        _ => ChipClick::Body,
+    }
 }
 
 /// A "caption on the left — number on the right" row: numbers always at the right edge of the column.
@@ -1380,6 +1457,18 @@ struct Chips {
     pickable: bool,
 }
 
+impl Chips {
+    /// Whether anything narrows the grid: an empty row of chips costs height and says nothing
+    /// (M22.19 — the row is drawn only while a filter is on).
+    fn any(&self) -> bool {
+        !self.query.is_empty()
+            || self.tag.is_some()
+            || self.album.is_some()
+            || self.kind != KindFilter::All
+            || self.hits.is_some()
+    }
+}
+
 /// Which filters a click on a chip asks to remove.
 #[derive(Default, Clone, Copy)]
 struct FilterClear {
@@ -1404,92 +1493,57 @@ fn shorten(text: &str, max: usize) -> String {
     }
 }
 
-/// The row of chips above the grid: what is on is visible, "×" removes exactly that, the total is on the right.
-/// The row always exists ("no filters" when the filter is empty), so the view heading does not jump.
-fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips, found: (usize, usize)) -> FilterClear {
+/// The row of the filters that are on: the "×" of a chip removes exactly that, "Reset" clears
+/// them all. The row is drawn only while something is on (M22.19): an empty row costs height
+/// and says nothing. The selection lives in its own floating bar at the bottom of the grid.
+fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
     let lang = chips.lang;
     let mut clear = FilterClear::default();
-    let mut any = false;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
         if !chips.query.is_empty() {
-            any = true;
             let text = format!("{} {}", t(lang, "path/date:"), shorten(&chips.query, 24));
             if filter_chip(ui, &text, lang) {
                 clear.query = true;
             }
         }
         if let Some(tag) = &chips.tag {
-            any = true;
             let text = format!("{} {}", t(lang, "tag:"), shorten(tag, 24));
             if filter_chip(ui, &text, lang) {
                 clear.tag = true;
             }
         }
         if let Some(album) = &chips.album {
-            any = true;
             let name = shorten(album, 22);
             let text = i18n::fill(lang, "Album “{}”", &[name]);
             if filter_chip(ui, &text, lang) {
                 clear.album = true;
             }
         }
-        if let Some(label) = chips.kind.chip(chips.lang) {
-            any = true;
-            if filter_chip(ui, label, lang) {
-                clear.kind = true;
-            }
+        if let Some(label) = chips.kind.chip(chips.lang)
+            && filter_chip(ui, label, lang)
+        {
+            clear.kind = true;
         }
-        if let Some(n) = chips.hits {
-            any = true;
-            if filter_chip(ui, &i18n::relevance(lang, n), lang) {
-                clear.hits = true;
-            }
+        if let Some(n) = chips.hits
+            && filter_chip(ui, &i18n::relevance(lang, n), lang)
+        {
+            clear.hits = true;
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(if any {
-                    i18n::found(lang, found.0, found.1)
-                } else {
-                    t(lang, "no filters").to_string()
-                })
-                .size(11.0)
-                .color(dim(ui)),
-            );
-            // The multi-select (M18): the count and the two buttons are always in one place, so
-            // that the chip row does not jump on clicks.
-            if chips.pickable {
-                if chips.picked > 0
-                    && ui
-                        .add(WordButton::small(Icon::Remove, t(lang, "Clear selection")))
-                        .on_hover_text(t(
-                            lang,
-                            "clears the selection in this grid; Esc does the same",
-                        ))
-                        .clicked()
-                {
-                    clear.clear_pick = true;
-                }
-                if ui
-                    .add(WordButton::small(Icon::Check, i18n::select_all(lang, found.0)))
-                    .on_hover_text(t(
-                        lang,
-                        "marks everything visible now; Ctrl+A does the same",
-                    ))
-                    .clicked()
-                {
-                    clear.pick_all = true;
-                }
-                if chips.picked > 0 {
-                    let size = db::human_in(lang, chips.picked_bytes);
-                    let text = i18n::fill(
-                        lang,
-                        "{} selected · {}",
-                        &[chips.picked.to_string(), size.to_string()],
-                    );
-                    ui.label(egui::RichText::new(text).size(11.0).color(accent(ui)));
-                }
-            }
-        });
+        if ui
+            .add(WordButton::small(Icon::Close, t(lang, "Reset")))
+            .on_hover_text(t(lang, "removes every filter and the search"))
+            .clicked()
+        {
+            clear = FilterClear {
+                query: true,
+                tag: true,
+                kind: true,
+                hits: true,
+                album: true,
+                ..FilterClear::default()
+            };
+        }
     });
     clear
 }
@@ -5288,155 +5342,296 @@ impl App {
         self.status = t(lang, "the filters are reset").into();
     }
 
-    /// The 32 px top bar: the mark, the search, the state and the way into "Settings".
-    /// The folder and "Start indexing" live in the left panel: they are work with the archive, not a search.
+    /// The top bar of `photocat_1`: the mark on the left, one search field in the middle (the
+    /// mode switch, the query, "Search", "×") and the tools on the right — the tile size, the
+    /// state of the archive, the details toggle and "Settings". The folder and "Index" live in
+    /// the left panel: they are work with the archive, not a search (M22.19).
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let th = theme(ui);
-        // The bar does not wrap: at 1240 px the search shrinks, and a long state counter
-        // (EXIF, syncing) is shown only in a wide window.
-        let wide = ui.available_width() >= 1400.0;
-        let field_w = if wide { 340.0 } else { 240.0 };
-        ui.horizontal(|ui| {
-            ui.set_min_height(TOP_H - 6.0);
-            ui.label(egui::RichText::new("photocat").size(14.0).strong());
-            ui.label(
-                egui::RichText::new(t(lang, "family archive"))
-                    .size(10.0)
-                    .color(th.text_dim),
-            );
-            // The separator between the mark and the search is a 1 px line, not an eyeballed gap.
-            let (bar, _) =
-                ui.allocate_exact_size(egui::vec2(1.0, 16.0), egui::Sense::hover());
-            ui.painter().rect_filled(bar, 0.0, th.border_strong);
-            ui.add_space(2.0);
+        let row = ui.max_rect();
+        let row_h = TOP_H - 6.0;
+        let gap = 8.0;
 
-            // The search mode is a compact switch before the field (PhotoPrism).
-            let mut text_mode = self.search_ocr;
-            if ui
-                .add(
-                    WordButton::picked(Icon::Search, t(lang, "Semantic"), !text_mode)
-                        .compact(),
-                )
-                .on_hover_text(t(lang, "search by the content of the photos"))
-                .clicked()
-            {
-                text_mode = false;
-            }
-            if ui
-                .add(
-                    WordButton::picked(Icon::TextFields, t(lang, "By text"), text_mode).compact(),
-                )
-                .on_hover_text(t(lang, "search the recognized text"))
-                .clicked()
-            {
-                text_mode = true;
-            }
-            if text_mode != self.search_ocr {
-                self.search_ocr = text_mode;
-                self.semantic_hits = None;
-                self.ocr_snippets.clear();
-                self.status = if text_mode {
-                    t(lang, "search by text recognized on photos").into()
-                } else {
-                    t(lang, "semantic search over photo content").into()
-                };
-            }
-            let ready = if self.search_ocr {
-                self.ocr_files > 0
-            } else {
-                embed::model_present(&self.settings)
-            };
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.semantic_query)
-                    .hint_text(if self.search_ocr {
-                        t(lang, "receipt, invoice, 2024")
-                    } else {
-                        t(lang, "cake, sea, furniture, document")
-                    })
-                    .desired_width(field_w),
-            );
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui
-                .add_enabled(ready, WordButton::new(Icon::Search, t(lang, "Search")))
-                .clicked()
-                || (enter && ready)
-            {
-                self.start_search();
-            }
-            if ui
-                .add_enabled(
-                    self.semantic_hits.is_some(),
-                    WordButton::new(Icon::Close, t(lang, "Reset")),
-                )
-                .clicked()
-            {
-                self.semantic_hits = None;
-                self.ocr_snippets.clear();
-                self.status = t(lang, "search cleared").into();
-            }
-            if self.search_rx.is_some() {
-                ui.label(
-                    egui::RichText::new(t(lang, "loading model…"))
-                        .size(11.0)
-                        .color(dim(ui)),
-                );
-            } else if !ready {
-                ui.label(
-                    egui::RichText::new(if self.search_ocr {
-                        t(lang, "no recognized text yet")
-                    } else {
-                        t(lang, "model not downloaded")
-                    })
-                    .size(11.0)
-                    .color(dim(ui)),
-                );
-            }
+        // The three sectors are measured, not guessed: whatever the language, the search stays in
+        // the middle and the tools keep to the right edge.
+        let brand_w = 20.0 + 8.0 + text_width(ui, "photocat", 14.0);
+        let settings_w = WordButton::new(Icon::Settings, t(lang, "Settings")).size(ui).0;
+        let state = self.sync_word(lang);
+        let status_w = 8.0 + 6.0 + 6.0 + text_width(ui, &state, 11.0) + 8.0;
+        let zoom_w = 8.0 + 14.0 + 6.0 + TILE_SLIDER_W + 8.0;
+        let with_state = row.width() >= 1100.0;
+        let mut right_w = settings_w + 28.0 + zoom_w + 2.0 * gap;
+        if with_state {
+            right_w += status_w + gap;
+        }
 
-            // On the right — the state and the way into the service windows. The numbers are monospaced so
-            // that the counter does not jostle its neighbours during indexing.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if word_button(ui, Icon::Settings, t(lang, "Settings")).clicked() {
-                    self.settings_open = true;
-                }
-                if ui
-                    .add(WordButton::new(
-                        Icon::DockToRight,
-                        if self.details_open {
-                            t(lang, "Hide details")
-                        } else {
-                            t(lang, "Details")
-                        },
-                    ))
-                    .on_hover_text(t(lang, "right panel with date, camera, tags and text"))
-                    .clicked()
-                {
-                    self.details_open = !self.details_open;
-                }
-                if ui
-                    .add(WordButton::new(
-                        Icon::FolderSpecial,
-                        format!("{} ({})", t(lang, "Folders"), self.roots.len()),
-                    ))
-                    .on_hover_text(t(
-                        lang,
-                        "add several folders, drop a folder from the index",
-                    ))
-                    .clicked()
-                {
-                    self.roots_open = true;
-                }
-                if wide {
-                    let facts = i18n::fill(lang, "{} files · {} with EXIF · synced", &[self.items.len().to_string(), self.items
-                                .iter()
-                                .filter(|r| r.taken_src == "exif")
-                                .count().to_string()]);
-                    ui.label(num(ui, facts, 10.0).color(dim(ui)));
-                }
+        // Left: the mark.
+        let left = egui::Rect::from_min_max(
+            row.min,
+            egui::pos2(row.left() + brand_w + 4.0, row.bottom()),
+        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                icon_mark_color(ui, Icon::PhotoLibrary, 20.0, th.accent);
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new("photocat").size(14.0).strong());
             });
         });
 
-        // Progress is the only third row: it exists only while a pass is running.
+        // Right: the tools, from the right edge (Settings, details, state, tile size).
+        let right = egui::Rect::from_min_max(
+            egui::pos2(row.right() - right_w, row.top()),
+            egui::pos2(row.right(), row.bottom()),
+        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.set_min_height(row_h);
+                if word_button(ui, Icon::Settings, t(lang, "Settings")).clicked() {
+                    self.settings_open = true;
+                }
+                let hint = if self.details_open {
+                    t(lang, "Hide details")
+                } else {
+                    t(lang, "Details")
+                };
+                if toggle_icon_button(ui, Icon::DockToRight, 28.0, self.details_open, hint).clicked()
+                {
+                    self.details_open = !self.details_open;
+                }
+                if with_state {
+                    let facts = i18n::fill(
+                        lang,
+                        "{} files · {} with EXIF",
+                        &[
+                            self.items.len().to_string(),
+                            self.items
+                                .iter()
+                                .filter(|r| r.taken_src == "exif")
+                                .count()
+                                .to_string(),
+                        ],
+                    );
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(status_w, 28.0), egui::Sense::hover());
+                    ui.painter().rect(
+                        rect,
+                        egui::CornerRadius::same(RADIUS_CTRL as u8),
+                        th.card,
+                        egui::Stroke::new(1.0, th.border),
+                        egui::StrokeKind::Inside,
+                    );
+                    let dot = egui::pos2(rect.left() + 11.0, rect.center().y);
+                    ui.painter().circle_filled(dot, 3.0, th.accent);
+                    ui.painter().text(
+                        egui::pos2(dot.x + 9.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        &state,
+                        egui::FontId::proportional(11.0),
+                        th.text_med,
+                    );
+                    resp.on_hover_text(facts);
+                }
+                self.tile_pill(ui);
+            });
+        });
+
+        // The middle: one search field, `max-w-xl`, centred between the mark and the tools.
+        let x0 = row.left() + brand_w + 16.0;
+        let x1 = row.right() - right_w - 16.0;
+        if x1 - x0 > 180.0 {
+            let avail = x1 - x0;
+            let w = avail.min(SEARCH_MAX_W);
+            let x = x0 + (avail - w) * 0.5;
+            let rect = egui::Rect::from_min_max(
+                egui::pos2(x, row.top()),
+                egui::pos2(x + w, row.bottom()),
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(w, row.height()),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| self.search_field(ui, w),
+                );
+            });
+        }
+        self.pass_rows(ui);
+        let r = ui.max_rect();
+        ui.painter()
+            .hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, th.border));
+    }
+
+    /// One word for the state of the archive: a pass is running or everything is indexed. The
+    /// numbers live in the hint of the pill, the dot says "working" without a sentence.
+    fn sync_word(&self, lang: i18n::Lang) -> String {
+        if self.busy() {
+            t(lang, "Syncing").to_string()
+        } else {
+            t(lang, "Synced").to_string()
+        }
+    }
+
+    /// Whether a background pass is running: any of them makes the top pill say "Syncing".
+    fn busy(&self) -> bool {
+        self.rx.is_some()
+            || self.embed_rx.is_some()
+            || self.ocr_rx.is_some()
+            || self.face_rx.is_some()
+            || self.trash_rx.is_some()
+            || self.export_rx.is_some()
+            || self.integrity_rx.is_some()
+    }
+
+    /// The search field of the top bar: the mock-up's one rounded well with the search glyph, the
+    /// mode switch, the query, "Search" and "×", instead of a row of separate buttons.
+    fn search_field(&mut self, ui: &mut egui::Ui, w: f32) {
+        let lang = self.settings.lang;
+        let th = theme(ui);
+        let (mode_icon, mode_text) = if self.search_ocr {
+            (Icon::TextFields, t(lang, "By text"))
+        } else {
+            (Icon::AutoAwesome, t(lang, "Semantic"))
+        };
+        let mode_w = WordButton::new(mode_icon, mode_text).compact().size(ui).0 + 12.0;
+        let search_w = WordButton::primary(Icon::Search, t(lang, "Search"))
+            .compact()
+            .size(ui)
+            .0;
+        let inner = (w - 14.0).max(80.0);
+        let field_w = (inner - 14.0 - 6.0 - mode_w - 6.0 - search_w - 6.0 - 20.0).max(40.0);
+        let ready = if self.search_ocr {
+            self.ocr_files > 0
+        } else {
+            embed::model_present(&self.settings)
+        };
+        let hint = if self.search_ocr {
+            if self.ocr_files > 0 {
+                t(lang, "receipt, invoice, 2024")
+            } else {
+                t(lang, "no recognized text yet")
+            }
+        } else if ready {
+            t(lang, "cake, sea, furniture, document")
+        } else {
+            t(lang, "model not downloaded")
+        };
+        let mut text_mode = self.search_ocr;
+        let mut submit = false;
+        let mut clear = false;
+        let mut enter = false;
+        egui::Frame::new()
+            .fill(th.canvas)
+            .stroke(egui::Stroke::new(1.0, th.border))
+            .corner_radius(RADIUS_CARD)
+            .inner_margin(egui::Margin::symmetric(6, 5))
+            .show(ui, |ui| {
+                ui.set_width(inner);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.spacing_mut().interact_size.y = 20.0;
+                    icon_mark_color(ui, Icon::Search, 14.0, th.text_dim);
+                    let mode = ui
+                        .add(WordButton::new(mode_icon, mode_text).compact())
+                        .on_hover_text(if text_mode {
+                            t(lang, "search the recognized text")
+                        } else {
+                            t(lang, "search by the content of the photos")
+                        });
+                    egui::Popup::menu(&mode).show(|ui| {
+                        if ui
+                            .selectable_label(!text_mode, t(lang, "Semantic"))
+                            .clicked()
+                        {
+                            text_mode = false;
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_label(text_mode, t(lang, "By text"))
+                            .clicked()
+                        {
+                            text_mode = true;
+                            ui.close();
+                        }
+                    });
+                    icon_mark_color(ui, Icon::ArrowDown, 10.0, th.text_dim);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.semantic_query)
+                            .hint_text(hint)
+                            .desired_width(field_w),
+                    );
+                    enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui
+                        .add_enabled(
+                            ready,
+                            WordButton::primary(Icon::Search, t(lang, "Search")).compact(),
+                        )
+                        .clicked()
+                    {
+                        submit = true;
+                    }
+                    if icon_button(ui, Icon::Close, 20.0, t(lang, "Clear the search")).clicked() {
+                        clear = true;
+                    }
+                });
+            });
+        if text_mode != self.search_ocr {
+            self.search_ocr = text_mode;
+            self.semantic_hits = None;
+            self.ocr_snippets.clear();
+            self.status = if text_mode {
+                t(lang, "search by text recognized on photos").into()
+            } else {
+                t(lang, "semantic search over photo content").into()
+            };
+        }
+        if clear {
+            self.semantic_query.clear();
+            self.semantic_hits = None;
+            self.ocr_snippets.clear();
+            self.status = t(lang, "search cleared").into();
+        }
+        if submit || (enter && ready) {
+            self.start_search();
+        }
+    }
+
+    /// The compact "Tiles" pill of the top bar: the glyph and the slider, no number (the value is
+    /// in the hint), so the control costs about 120 px of the strip (M22.19).
+    fn tile_pill(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        let th = theme(ui);
+        let hint = t(lang, tile_hint(self.settings.cell_style));
+        egui::Frame::new()
+            .fill(th.card)
+            .stroke(egui::Stroke::new(1.0, th.border))
+            .corner_radius(egui::CornerRadius::same(RADIUS_CTRL as u8))
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                // The pill sits in a right-to-left tool row; the glyph and the slider of the
+                // mock-up read left to right, and a 26 px slider would make the pill 36 px tall.
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.spacing_mut().interact_size.y = 16.0;
+                    ui.spacing_mut().slider_width = TILE_SLIDER_W;
+                    icon_mark_color(ui, Icon::GridView, 14.0, th.text_dim);
+                    let size = ui.add(
+                        egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
+                            .step_by(10.0)
+                            .show_value(false),
+                    );
+                    if size.drag_stopped() || size.lost_focus() {
+                        self.settings.tile_size = self.tile_size;
+                        self.save_settings();
+                    }
+                    size.on_hover_text(hint);
+                });
+            });
+    }
+
+    /// The passes of the archive are the only third row: it exists only while one is running.
+    fn pass_rows(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
         if let Some(p) = &self.progress {
             let running = self.rx.is_some();
             if progress_row(ui, t(lang, "Indexing"), p, running) {
@@ -5480,9 +5675,6 @@ impl App {
             }
         }
         self.verify_banner(ui);
-        let r = ui.max_rect();
-        ui.painter()
-            .hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, th.border));
     }
 
     /// The "Time to check the archive" banner (M10). It starts nothing by itself: "Check" is a
@@ -5558,8 +5750,10 @@ impl App {
         self.integrity_start(IntegrityJob::Check);
     }
 
-    /// The 28 px bottom bar: the fact of the last action on the left, the counters and the selection on the right.
-    /// The numbers are monospaced: a counter does not jostle its neighbours during indexing (mock-up: process deck).
+    /// The 28 px bottom bar: the dot and the last fact on the left, the counters of the index and
+    /// the selected file (name · resolution · size) on the right — the mock-up's status line
+    /// (M22.19). The numbers are monospaced, so a counter does not jostle its neighbours while
+    /// indexing.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let th = theme(ui);
@@ -5568,42 +5762,60 @@ impl App {
             .hline(top.x_range(), top.top() + 0.5, egui::Stroke::new(1.0, th.border));
         ui.horizontal(|ui| {
             ui.set_min_height(STATUS_H - 6.0);
+            let (dot, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
+            ui.painter().circle_filled(dot.center(), 3.0, th.accent);
             ui.label(
                 egui::RichText::new(if self.status.is_empty() {
-                    "—"
+                    t(lang, "Ready")
                 } else {
                     &self.status
                 })
                 .size(11.0)
                 .color(th.text_med),
             );
+            ui.add_space(4.0);
+            hairline_vertical(ui);
+            ui.add_space(4.0);
+            let total = i18n::count(lang, self.items.len(), "file");
+            let bytes: i64 = self.items.iter().map(|r| r.size).sum();
+            let facts = format!("{total} · {}", db::human_in(lang, bytes));
+            ui.label(num(ui, facts, 10.0).color(th.text_dim));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(f) = self
                     .selected
                     .and_then(|id| self.items.iter().find(|r| r.id == id))
                 {
-                    let date = f
-                        .taken_at
-                        .as_deref()
-                        .map(|d| d.replace('T', " ").chars().take(16).collect::<String>())
-                        .unwrap_or_else(|| t(lang, "no date").into());
-                    let text = if self.picked.len() > 1 {
-                        format!(
-                            "{} {} · {} · {date}",
-                            t(lang, t(lang, "Picked")),
-                            self.picked.len(),
-                            file_name(&f.path)
-                        )
+                    // The selected file: the name, the frame, the size — the three facts the
+                    // mock-up puts in its footer.
+                    let resolution = if f.width > 0 && f.height > 0 {
+                        format!(" · {}×{}", f.width, f.height)
                     } else {
-                        format!("{}: {} · {date}", t(lang, t(lang, "Picked")), file_name(&f.path))
+                        String::new()
                     };
+                    let text = format!(
+                        "{}{} · {}",
+                        file_name(&f.path),
+                        resolution,
+                        db::human_in(lang, f.size)
+                    );
                     ui.label(num(ui, text, 10.0).color(th.text_med));
-                    let (bar, _) =
-                        ui.allocate_exact_size(egui::vec2(1.0, 14.0), egui::Sense::hover());
-                    ui.painter().rect_filled(bar, 0.0, th.border_strong);
+                } else if !self.picked.is_empty() {
+                    let picked: i64 = self
+                        .items
+                        .iter()
+                        .filter(|r| self.picked.contains(&r.id))
+                        .map(|r| r.size)
+                        .sum();
+                    let text = i18n::fill(
+                        lang,
+                        "{} selected · {}",
+                        &[
+                            self.picked.len().to_string(),
+                            db::human_in(lang, picked).to_string(),
+                        ],
+                    );
+                    ui.label(num(ui, text, 10.0).color(th.text_dim));
                 }
-                let total = i18n::fill(lang, "{}", &[i18n::count(lang, self.items.len(), "file")]);
-                ui.label(num(ui, total, 10.0).color(th.text_dim));
             });
         });
     }
@@ -5648,12 +5860,28 @@ impl App {
         let lang = self.settings.lang;
         // The folder and "Start indexing" are work with the archive, not a search: they live here, while
         // the top bar stays a single 32 px row (mock-up: working folder block).
-        ui.add_space(6.0);
-        caps_label(ui, t(lang, "Folder"));
+        ui.add_space(2.0);
+        // The mock-up's catalog block: the caps heading with a bare "+" on the right — the way
+        // to several folders and to dropping one from the index (the worded path is the dialog).
+        ui.horizontal(|ui| {
+            caps_label(ui, t(lang, "Folder"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button(
+                    ui,
+                    Icon::Add,
+                    20.0,
+                    t(lang, "add several folders, drop a folder from the index"),
+                )
+                .clicked()
+                {
+                    self.roots_open = true;
+                }
+            });
+        });
         ui.add_space(2.0);
         let resp = ui.add(
             egui::TextEdit::singleline(&mut self.path_input)
-                .hint_text(t(lang, "path to a folder; several — with the “Folders” button"))
+                .hint_text(t(lang, "path to a folder; several — with the “+” button"))
                 .desired_width(f32::INFINITY),
         );
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -5830,9 +6058,9 @@ impl App {
     fn years_block(&mut self, ui: &mut egui::Ui, years: &[(String, usize)]) {
         let lang = self.settings.lang;
         let picked = self.picked_year();
-        // Two columns of three rows: a single column of five years costs 130 px and pushes the
-        // model block out of the panel on the default 840 px window. Six cells are three rows
-        // whether or not a year is picked, so the block never changes height on a click.
+        // Three columns of two rows (M22.19): five years in two columns cost three rows and left
+        // the oldest one under the pinned summary at 840 px; with three columns six cells (five
+        // years and "All years") are always two rows, so the block never changes height.
         // text, count, selected, the year the click sets (None — "All years", an empty filter)
         let mut cells: Vec<(String, Option<usize>, bool, Option<String>)> = Vec::new();
         if picked.is_some() {
@@ -5843,9 +6071,9 @@ impl App {
             cells.push((year.clone(), Some(*count), selected, Some(year.clone())));
         }
         let gap = 4.0;
-        let w = ((ui.available_width() - gap) / 2.0).max(60.0);
+        let w = ((ui.available_width() - 2.0 * gap) / 3.0).max(50.0);
         let mut set: Option<Option<String>> = None;
-        for row in cells.chunks(2) {
+        for row in cells.chunks(3) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for (text, count, selected, year) in row {
@@ -6403,25 +6631,48 @@ impl App {
         ui.add_space(4.0);
     }
 
-    /// The right panel: details and actions for the selected file.
+    /// The right panel: details and actions for the selected file, in the composition of
+    /// `photocat_12` (M22.16): a 44 px header band closed by a line and the card below it.
     fn details_panel(&mut self, ui: &mut egui::Ui) {
         panel_edge(ui, true);
         let lang = self.settings.lang;
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            icon_mark(ui, Icon::Info, 14.0);
-            ui.label(egui::RichText::new(t(lang, "File details")).size(14.0));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(WordButton::small(Icon::DockToRight, t(lang, "Hide")))
-                    .on_hover_text(t(lang, "free up room for the grid and calendar"))
-                    .clicked()
-                {
-                    self.details_open = false;
-                }
-            });
-        });
-        ui.add_space(4.0);
+        let th = theme(ui);
+        // The mock-up's header: the card tone, a 1 px line under it, the info glyph and the
+        // title of 12 px. The close target is the mock-up's "×"; the worded way back is
+        // "Details" in the top bar (docs/UI.md § Layout).
+        let w = ui.available_width();
+        let (band, _) = ui.allocate_exact_size(egui::vec2(w, PANEL_HEAD_H), egui::Sense::hover());
+        ui.painter().rect_filled(band, 0.0, th.card);
+        ui.painter().hline(
+            band.x_range(),
+            band.bottom() - 0.5,
+            egui::Stroke::new(1.0, th.border),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(band.shrink2(egui::vec2(PANEL_PAD, 0.0))),
+            |ui| {
+                ui.horizontal_centered(|ui| {
+                    icon_mark(ui, Icon::Info, 14.0);
+                    ui.label(
+                        egui::RichText::new(t(lang, "File details"))
+                            .size(12.0)
+                            .strong(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icon_button(
+                            ui,
+                            Icon::Close,
+                            22.0,
+                            t(lang, "free up room for the grid and calendar"),
+                        )
+                        .clicked()
+                        {
+                            self.details_open = false;
+                        }
+                    });
+                });
+            },
+        );
         egui::ScrollArea::vertical()
             .id_salt("details-scroll")
             .auto_shrink([false, false])
@@ -6430,7 +6681,14 @@ impl App {
 
     /// The file card: a preview, metadata, tags and text. One for the whole interface:
     /// the right panel, the narrow window and the inspector of the full screen call it (M22.7).
+    /// The mock-up keeps 12 px of air around it, so no block touches the panel's lines (M22.16).
     fn file_card(&mut self, ui: &mut egui::Ui, shown: Option<i64>) {
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::same(PANEL_PAD as i8))
+            .show(ui, |ui| self.file_card_content(ui, shown));
+    }
+
+    fn file_card_content(&mut self, ui: &mut egui::Ui, shown: Option<i64>) {
         let lang = self.settings.lang;
         let Some(id) = shown else {
             ui.add_space(8.0);
@@ -6506,12 +6764,21 @@ impl App {
             egui::Stroke::new(1.0, th.border),
             egui::StrokeKind::Inside,
         );
-        // The badge of the mock-up in the corner of the preview: the duration of a video.
-        if f.kind == "video" {
-            let txt = match f.duration_s {
+        // The badge of the mock-up in the corner of the preview: the duration of a video, the
+        // format of a still ("JPG", "HEIC") — the mock-up's "CR2 RAW · 14-bit" without the
+        // RAW metadata the index does not read (M22.16).
+        let badge = if f.kind == "video" {
+            Some(match f.duration_s {
                 Some(d) => format!("▶ {}", db::duration(d)),
                 None => t(lang, "▶ video").to_string(),
-            };
+            })
+        } else {
+            Path::new(&f.path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_uppercase())
+        };
+        if let Some(txt) = badge {
             let galley = ui
                 .painter()
                 .layout_no_wrap(txt, egui::FontId::monospace(10.0), egui::Color32::from_gray(235));
@@ -6543,7 +6810,7 @@ impl App {
                 ui.label(num(ui, db::human_in(lang, f.size), 11.0).color(dim(ui)));
             });
         });
-        ui.add(egui::Label::new(num(ui, &f.path, 10.0).color(dim(ui))).wrap());
+        ui.add(egui::Label::new(num(ui, &f.path, 11.0).color(dim(ui))).wrap());
         if self.picked.len() > 1 {
             let bytes: i64 = self
                 .items
@@ -6564,14 +6831,17 @@ impl App {
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
+            // The mock-up puts the actions of the card right under the preview as compact
+            // buttons of 28 px; here they carry words and take the 20 px row, so both fit the
+            // 255 px of the card in either language (M22.16).
             if ui
-                .add(WordButton::new(Icon::FitScreen, t(lang, "Open full screen")))
+                .add(WordButton::small(Icon::FitScreen, t(lang, "Open full screen")))
                 .on_hover_text(t(lang, "double-clicking a tile does the same"))
                 .clicked()
             {
                 self.open_viewer(id);
             }
-            let b = WordButton::danger(Icon::Delete, t(lang, "To trash"));
+            let b = WordButton::danger(Icon::Delete, t(lang, "To trash")).compact();
             if ui
                 .add(b)
                 .on_hover_text(t(
@@ -6645,7 +6915,12 @@ impl App {
             if let (Some(a), Some(b)) = (f.lat, f.lon) {
                 ui.add_space(2.0);
                 caps_label(ui, t(lang, "Location"));
-                ui.add(egui::Label::new(num(ui, format!("{a:.5}, {b:.5}"), 11.0)).wrap());
+                // The mock-up puts the pin before the coordinates (M22.16); the place name of
+                // the mock-up needs a geocoder, which the offline rule forbids.
+                ui.horizontal(|ui| {
+                    icon_mark(ui, Icon::Location, 14.0);
+                    ui.add(egui::Label::new(num(ui, format!("{a:.5}, {b:.5}"), 11.0)).wrap());
+                });
             }
             ui.add_space(4.0);
             hairline(ui);
@@ -6668,17 +6943,27 @@ impl App {
             caps_row(ui, t(lang, "Albums"), &list.len().to_string(), false);
             ui.add_space(2.0);
             let mut remove_from: Option<i64> = None;
+            let mut open_album: Option<i64> = None;
             ui.horizontal_wrapped(|ui| {
                 for (album_id, path) in &list {
-                    let hint = t(
+                    let body = t(lang, "open the album in the Albums view");
+                    let remove = t(
                         lang,
                         "remove the photo from this album; the file on disk is unchanged",
                     );
-                    if card_chip(ui, &shorten(path, 30), false, hint) {
-                        remove_from = Some(*album_id);
+                    match card_chip(ui, &shorten(path, 30), Some(Icon::Folder), false, body, remove)
+                    {
+                        ChipClick::Body => open_album = Some(*album_id),
+                        ChipClick::Remove => remove_from = Some(*album_id),
+                        ChipClick::None => {}
                     }
                 }
             });
+            if let Some(album_id) = open_album {
+                // A click on the word goes to the album; only the "×" changes a row (M22.17).
+                self.view = View::Albums;
+                self.album_open(album_id);
+            }
             if let Some(album_id) = remove_from {
                 match db::open(&self.db_path)
                     .and_then(|c| db::remove_from_album(&c, album_id, &[id]))
@@ -6731,10 +7016,20 @@ impl App {
                 None => {}
             }
             ui.add_space(2.0);
-            let hint = t(
+            let remove_hint = t(
                 lang,
                 "remove the tag from this photo; the original does not change",
             );
+            // A click on the word filters the grid by the tag; the accent marks the tags the grid
+            // is filtered by, not "the confident one" (M22.17).
+            let mut filter: Option<Option<String>> = None;
+            let body_hint = |chosen: bool| {
+                if chosen {
+                    t(lang, "clear the tag filter")
+                } else {
+                    t(lang, "show only the photos that carry this tag")
+                }
+            };
             let top = if confident.is_some() { tags.len() } else { 3.min(tags.len()) };
             ui.horizontal_wrapped(|ui| {
                 for (tag, score) in tags.iter().take(top) {
@@ -6744,13 +7039,24 @@ impl App {
                         i18n::word(lang, tag),
                         score * 100.0
                     );
-                    let tip = match pct {
-                        Some(p) => format!("{hint} · {score:.2} · {p}%"),
-                        None => format!("{hint} · {score:.2}"),
+                    let chosen = self.tag_filter.as_deref() == Some(tag.as_str());
+                    let body = body_hint(chosen);
+                    let (body, remove) = match pct {
+                        Some(p) => (
+                            format!("{body} · {score:.2} · {p}%"),
+                            format!("{remove_hint} · {score:.2} · {p}%"),
+                        ),
+                        None => (
+                            format!("{body} · {score:.2}"),
+                            format!("{remove_hint} · {score:.2}"),
+                        ),
                     };
-                    let chosen = confident.as_deref() == Some(tag.as_str());
-                    if card_chip(ui, &label, chosen, &tip) {
-                        hide = Some(tag.clone());
+                    match card_chip(ui, &label, None, chosen, &body, &remove) {
+                        ChipClick::Body => {
+                            filter = Some(if chosen { None } else { Some(tag.clone()) })
+                        }
+                        ChipClick::Remove => hide = Some(tag.clone()),
+                        ChipClick::None => {}
                     }
                 }
             });
@@ -6766,16 +7072,32 @@ impl App {
                                     i18n::word(lang, tag),
                                     score * 100.0
                                 );
-                                let tip = match pct {
-                                    Some(p) => format!("{hint} · {score:.2} · {p}%"),
-                                    None => format!("{hint} · {score:.2}"),
+                                let chosen = self.tag_filter.as_deref() == Some(tag.as_str());
+                                let body = body_hint(chosen);
+                                let (body, remove) = match pct {
+                                    Some(p) => (
+                                        format!("{body} · {score:.2} · {p}%"),
+                                        format!("{remove_hint} · {score:.2} · {p}%"),
+                                    ),
+                                    None => (
+                                        format!("{body} · {score:.2}"),
+                                        format!("{remove_hint} · {score:.2}"),
+                                    ),
                                 };
-                                if card_chip(ui, &label, false, &tip) {
-                                    hide = Some(tag.clone());
+                                match card_chip(ui, &label, None, chosen, &body, &remove) {
+                                    ChipClick::Body => {
+                                        filter =
+                                            Some(if chosen { None } else { Some(tag.clone()) })
+                                    }
+                                    ChipClick::Remove => hide = Some(tag.clone()),
+                                    ChipClick::None => {}
                                 }
                             }
                         });
                     });
+            }
+            if let Some(pick) = filter {
+                self.tag_filter = pick;
             }
         } else {
             ui.add_space(8.0);
@@ -6828,14 +7150,28 @@ impl App {
             );
         }
         let mut remove_own: Option<String> = None;
-        let own_hint = t(lang, "remove");
+        let remove_hint = t(lang, "remove");
+        let mut own_filter: Option<Option<String>> = None;
         ui.horizontal_wrapped(|ui| {
             for tag in &own {
-                if card_chip(ui, tag, false, own_hint) {
-                    remove_own = Some(tag.clone());
+                let chosen = self.tag_filter.as_deref() == Some(tag.as_str());
+                let body = if chosen {
+                    t(lang, "clear the tag filter")
+                } else {
+                    t(lang, "show only the photos that carry this tag")
+                };
+                match card_chip(ui, tag, None, chosen, body, remove_hint) {
+                    ChipClick::Body => {
+                        own_filter = Some(if chosen { None } else { Some(tag.clone()) })
+                    }
+                    ChipClick::Remove => remove_own = Some(tag.clone()),
+                    ChipClick::None => {}
                 }
             }
         });
+        if let Some(pick) = own_filter {
+            self.tag_filter = pick;
+        }
         if let Some(tag) = remove_own {
             match db::remove_user_tag(&self.db_path, id, &tag) {
                 Ok(()) => {
@@ -6847,23 +7183,46 @@ impl App {
                 Err(e) => self.status = format!("{}: {e}", t(lang, "tag not removed")),
             }
         }
-        // The row has to fit the 280 px panel: the field takes what the button leaves. A fixed
-        // 150 px field plus the word button were wider than the card; egui then widened the whole
-        // right panel past the window and the card was shifted right and clipped on both sides
-        // (M22.12).
+        // The mock-up's inline field: the "#", the tag and a compact "+" in one framed row
+        // (M22.16). The row has to fit the 280 px panel: the field takes what the button leaves.
+        // The button is an icon-only 22 px square since M22.18 — a word took 140 px of the row and
+        // left the field short.
         let mut add_tag = false;
-        ui.horizontal(|ui| {
-            // The button is a 14 px icon, 6 px, a word of 13 px and 10 px of padding on each
-            // side; the widest label of the row needs 140 px together with the gap.
-            const TAG_BUTTON_W: f32 = 140.0;
-            let width = (ui.available_width() - TAG_BUTTON_W).max(60.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut self.user_tag_input)
-                    .hint_text(t(lang, "your own tag, e.g. furniture"))
-                    .desired_width(width),
-            );
-            add_tag = word_button(ui, Icon::Add, t(lang, "Add tag")).clicked();
-        });
+        egui::Frame::new()
+            .fill(th.field)
+            .stroke(egui::Stroke::new(1.0, th.border))
+            .corner_radius(egui::CornerRadius::same(RADIUS_CTRL as u8))
+            // 22 px of content, 2 px above and below and the 1 px line on each side: the
+            // mock-up's `h-7` (28 px) exactly (M22.18).
+            .inner_margin(egui::Margin::symmetric(8, 2))
+            .show(ui, |ui| {
+                // A frame hugs its content: the row has to take the whole card, or the field is
+                // narrower than the block above it.
+                let w = ui.available_width();
+                ui.set_width(w);
+                // The "#" glyph and the 8 px that egui puts before the field, the "+" and the gap
+                // before it: the field takes what is left and never widens the panel (M22.12).
+                const ADD_W: f32 = 22.0;
+                const HASH_W: f32 = 16.0;
+                const GAP: f32 = 8.0;
+                // The theme gives a text edit the height of a button (26 px) and aligns its text
+                // to the top: inside the framed row the text stuck to the upper edge and the
+                // field looked short and crooked (M22.18). The row sets its own floor and centres
+                // the text, so "#", the tag and the "+" share one line.
+                ui.spacing_mut().interact_size.y = ADD_W;
+                let width = (w - HASH_W - ADD_W - GAP).max(40.0);
+                ui.horizontal(|ui| {
+                    ui.label(num(ui, "#", 12.0).color(dim(ui)));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.user_tag_input)
+                            .frame(egui::Frame::NONE)
+                            .align(egui::Align2::LEFT_CENTER)
+                            .hint_text(t(lang, "your own tag, e.g. furniture"))
+                            .desired_width(width),
+                    );
+                    add_tag = icon_button(ui, Icon::Add, ADD_W, t(lang, "Add tag")).clicked();
+                });
+            });
         if add_tag {
             let tag = self.user_tag_input.trim().to_string();
             if !tag.is_empty() {
@@ -9448,6 +9807,7 @@ enum Icon {
     Rotate,
     OpenInNew,
     Info,
+    Location,
     Slideshow,
     TextFields,
     Preview,
@@ -9493,14 +9853,70 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Re
 
 /// An icon without an action — a caption next to the slider (the volume).
 fn icon_mark(ui: &mut egui::Ui, icon: Icon, size: f32) {
+    icon_mark_color(ui, icon, size, ui.visuals().text_color());
+}
+
+/// The same mark in a given tone: the brand glyph of the top bar is the accent.
+fn icon_mark_color(ui: &mut egui::Ui, icon: Icon, size: f32, color: egui::Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    paint_icon(
-        ui.painter(),
-        rect.center(),
-        size * 0.30,
-        icon,
-        ui.visuals().text_color(),
+    paint_icon(ui.painter(), rect.center(), size * 0.30, icon, color);
+}
+
+/// The width of a mono word: the selection bar and the status line are built of numbers.
+fn mono_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::monospace(size),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x
+}
+
+/// The width of a word in the UI family: the top bar centres the search between the mark and
+/// the tools, and the widths depend on the language.
+fn text_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(size),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x
+}
+
+/// A 28 px square that stays lit while the thing it toggles is on (the right panel): the
+/// mock-up's active state, and the only icon-only target of the top bar (docs/UI.md § Layout).
+fn toggle_icon_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    size: f32,
+    on: bool,
+    hint: &str,
+) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    let resp = resp
+        .on_hover_text(hint)
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let th = theme(ui);
+    let (fill, stroke, color) = if on {
+        (th.accent_soft, egui::Stroke::new(1.0, th.accent), th.accent)
+    } else if resp.hovered() {
+        (th.field, egui::Stroke::new(1.0, th.border_strong), th.text)
+    } else {
+        (th.card, egui::Stroke::new(1.0, th.border), th.text_med)
+    };
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(RADIUS_CTRL as u8),
+        fill,
+        stroke,
+        egui::StrokeKind::Inside,
     );
+    paint_icon(ui.painter(), rect.center(), size * 0.30, icon, color);
+    resp
 }
 
 /// Which accent a word button carries: the ordinary field tone, the one main action of the
@@ -9966,6 +10382,12 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui:
         Icon::OneToOne => {
             boxed(-0.9, -0.8, 0.9, 0.8);
             line(pt(0.0, -0.8), pt(0.0, 0.8));
+        }
+        Icon::Location => {
+            // The mock-up's `location_on`: a round head over a point.
+            ring(0.0, -0.22, 0.52);
+            line(pt(-0.37, 0.15), pt(0.0, 0.92));
+            line(pt(0.37, 0.15), pt(0.0, 0.92));
         }
         Icon::OpenInNew => {
             seg(vec![
@@ -11409,9 +11831,12 @@ impl eframe::App for App {
             .resizable(false)
             .show(ui, |ui| self.left_panel(ui, show_card));
         if details {
+            // The panel carries no margin of its own: the 1 px line stands on its edge and the
+            // file card keeps the mock-up's 12 px of air (M22.16).
             egui::Panel::right("details")
                 .exact_size(RIGHT_W)
                 .resizable(false)
+                .frame(egui::Frame::NONE.fill(theme(ui).panel))
                 .show(ui, |ui| self.details_panel(ui));
         }
 
@@ -11516,7 +11941,6 @@ impl eframe::App for App {
         let mut face_assign: Option<String> = None;
         let mut reset = false;
         let mut empty_click = false;
-        let mut tile_save = false;
         let mut view_save = false;
         let mut clear_chips = FilterClear::default();
         let view = self.view;
@@ -11599,151 +12023,140 @@ impl eframe::App for App {
                 .fill(theme(ui).canvas)
                 .inner_margin(egui::Margin::symmetric(12, 6))
                 .show(ui, |ui| {
-            // The heading: the title and the facts on the left, the size of a cell on the right
-            // (M22.8). The icons made the row of controls wide enough to reach the title on a
-            // 1240 px window with the details panel open, so the controls moved to a row of their
-            // own instead of pushing the title out of the panel.
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(title).size(18.0).strong());
-                ui.label(num(ui, count, 12.0).color(dim(ui)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // The size sets the tile, the row height or the list row — the slider is always
-                    // visible (M22.2a): the heading does not jump on a view change, and a list of
-                    // 2000 rows has something to scale.
-                    let size = ui.add(
-                        egui::Slider::new(&mut self.tile_size, 100.0..=260.0)
-                            .step_by(10.0)
-                            .show_value(false),
-                    );
-                    if size.drag_stopped() || size.lost_focus() {
-                        tile_save = true;
-                    }
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} {:.0}",
-                            t(lang, "Tiles"),
-                            self.tile_size
-                        ))
-                        .size(11.0)
-                        .color(dim(ui)),
-                    )
-                    .on_hover_text(t(lang, tile_hint(self.settings.cell_style)));
-                });
-            });
-            // The controls of the panel: the cell view, the grouping and the order. One row of
-            // 20 px buttons, wrapping instead of clipping in a narrow window; the height does not
-            // depend on the view, so nothing jumps on a switch (M22.2a).
-            ui.horizontal_wrapped(|ui| {
-                    // The cell view (M22): the mock-up tile is the main one, the rows and the list come second.
-                    let mut style = self.settings.cell_style;
-                    for (value, icon, label, hint) in [
-                        (
-                            db::CellStyle::Tiles,
-                            Icon::GridView,
-                            t(lang, "Tile"),
-                            t(lang, "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut"),
-                        ),
-                        (
-                            db::CellStyle::Rows,
-                            Icon::ViewAgenda,
-                            t(lang, "Rows"),
-                            t(lang, "proportion rows: the tile width follows the frame"),
-                        ),
-                        (
-                            db::CellStyle::List,
-                            Icon::ViewList,
-                            t(lang, "List"),
-                            t(lang, "a list: name, date and size in one row"),
-                        ),
-                    ] {
-                        if ui
-                            .add(
-                                WordButton::picked(icon, label, style == value).compact(),
-                            )
-                            .on_hover_text(hint)
-                            .clicked()
-                        {
-                            style = value;
+            // The content ribbon — one 44 px row, the mock-up's `h-11`: the view name and its
+            // facts on the left, the controls of the view on the right (M22.19). Before this the
+            // heading, the controls and the chips took three rows of the panel.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), RIBBON_H),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.label(egui::RichText::new(title).size(18.0).strong());
+                    ui.label(num(ui, count, 12.0).color(dim(ui)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        // The cell view (M22): the mock-up tile is the main one, the rows and the
+                        // list come second. The tile size is the pill of the top bar (M22.19).
+                        let mut style = self.settings.cell_style;
+                        for (value, icon, label, hint) in [
+                            (
+                                db::CellStyle::Tiles,
+                                Icon::GridView,
+                                t(lang, "Tile"),
+                                t(lang, "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut"),
+                            ),
+                            (
+                                db::CellStyle::Rows,
+                                Icon::ViewAgenda,
+                                t(lang, "Rows"),
+                                t(lang, "proportion rows: the tile width follows the frame"),
+                            ),
+                            (
+                                db::CellStyle::List,
+                                Icon::ViewList,
+                                t(lang, "List"),
+                                t(lang, "a list: name, date and size in one row"),
+                            ),
+                        ] {
+                            if ui
+                                .add(WordButton::picked(icon, label, style == value).compact())
+                                .on_hover_text(hint)
+                                .clicked()
+                            {
+                                style = value;
+                            }
                         }
-                    }
-                    if style != self.settings.cell_style {
-                        self.settings.cell_style = style;
-                        view_save = true;
-                    }
-                    ui.add_space(4.0);
-                    // The order is available in the grid and inside an album (M19), but not in the tree.
-                    let album_scope_now =
-                        view == View::Albums && self.album_selected.is_some();
-                    if view == View::Grid || album_scope_now {
-                        // M17: how to look (months or a run) and in which order.
-                        // While a semantic search runs the search sets the order — the switch is dimmed.
-                        let searching = self.semantic_hits.is_some();
-                        let mut sort = self.settings.grid_sort;
-                        let sort_resp = ui.add_enabled_ui(!searching, |ui| {
-                            let resp = ui.add(WordButton::new(Icon::Sort, t(lang, "Sort")));
-                            egui::Popup::menu(&resp).show(|ui| {
-                                if album_scope_now {
-                                    ui.selectable_value(
-                                        &mut sort,
-                                        db::GridSort::Album,
-                                        t(lang, "Album order"),
-                                    );
-                                }
-                                for (value, label) in GRID_SORTS {
-                                    ui.selectable_value(&mut sort, value, t(lang, label));
-                                }
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} {}",
-                                        t(lang, "now:"),
-                                        sort_label(sort, lang)
-                                    ))
-                                    .size(11.0)
-                                    .color(dim(ui)),
-                                );
-                            });
-                            resp
-                        });
-                        sort_resp
-                            .inner
-                            .on_disabled_hover_text(t(lang, "the search sets the order"))
-                            .on_hover_text(t(lang, "tile order: date, name or size"));
-                        if sort != self.settings.grid_sort {
-                            self.settings.grid_sort = sort;
+                        if style != self.settings.cell_style {
+                            self.settings.cell_style = style;
                             view_save = true;
                         }
-                        if view == View::Grid {
-                            let mut layout = self.settings.grid_layout;
-                            for (value, icon, label) in [
-                                (db::GridLayout::Flat, Icon::ViewAgenda, t(lang, "Flat")),
-                                (
-                                    db::GridLayout::Months,
-                                    Icon::CalendarMonth,
-                                    t(lang, "By months"),
-                                ),
-                            ] {
-                                // `add_enabled`, not `add_enabled_ui`: a child ui reports its
-                                // size only after it is drawn, so the row could not wrap it and
-                                // the last button left the panel (M22.8).
-                                let r = ui.add_enabled(
-                                    !searching,
-                                    WordButton::picked(icon, label, layout == value).compact(),
-                                );
-                                if r.clicked() {
-                                    layout = value;
-                                }
-                                r.on_disabled_hover_text(t(lang, "the search sets the order"));
-                            }
-                            if layout != self.settings.grid_layout {
-                                self.settings.grid_layout = layout;
+                        ui.add_space(6.0);
+                        hairline_vertical(ui);
+                        ui.add_space(6.0);
+                        // The order is available in the grid and inside an album (M19), but not
+                        // in the tree.
+                        let album_scope_now =
+                            view == View::Albums && self.album_selected.is_some();
+                        if view == View::Grid || album_scope_now {
+                            // M17: how to look (months or a run) and in which order.
+                            // While a semantic search runs the search sets the order — the switch
+                            // is dimmed.
+                            let searching = self.semantic_hits.is_some();
+                            let mut sort = self.settings.grid_sort;
+                            let sort_resp = ui.add_enabled_ui(!searching, |ui| {
+                                let resp =
+                                    ui.add(WordButton::new(Icon::Sort, t(lang, "Sort")));
+                                egui::Popup::menu(&resp).show(|ui| {
+                                    if album_scope_now {
+                                        ui.selectable_value(
+                                            &mut sort,
+                                            db::GridSort::Album,
+                                            t(lang, "Album order"),
+                                        );
+                                    }
+                                    for (value, label) in GRID_SORTS {
+                                        ui.selectable_value(&mut sort, value, t(lang, label));
+                                    }
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} {}",
+                                            t(lang, "now:"),
+                                            sort_label(sort, lang)
+                                        ))
+                                        .size(11.0)
+                                        .color(dim(ui)),
+                                    );
+                                });
+                                resp
+                            });
+                            sort_resp
+                                .inner
+                                .on_disabled_hover_text(t(lang, "the search sets the order"))
+                                .on_hover_text(t(lang, "tile order: date, name or size"));
+                            if sort != self.settings.grid_sort {
+                                self.settings.grid_sort = sort;
                                 view_save = true;
                             }
+                            if view == View::Grid {
+                                ui.add_space(6.0);
+                                hairline_vertical(ui);
+                                ui.add_space(6.0);
+                                let mut layout = self.settings.grid_layout;
+                                for (value, icon, label) in [
+                                    (db::GridLayout::Flat, Icon::ViewAgenda, t(lang, "Flat")),
+                                    (
+                                        db::GridLayout::Months,
+                                        Icon::CalendarMonth,
+                                        t(lang, "By months"),
+                                    ),
+                                ] {
+                                    // `add_enabled`, not `add_enabled_ui`: a child ui reports
+                                    // its size only after it is drawn, so the row could not wrap
+                                    // it and the last button left the panel (M22.8).
+                                    let r = ui.add_enabled(
+                                        !searching,
+                                        WordButton::picked(icon, label, layout == value)
+                                            .compact(),
+                                    );
+                                    if r.clicked() {
+                                        layout = value;
+                                    }
+                                    r.on_disabled_hover_text(t(
+                                        lang,
+                                        "the search sets the order",
+                                    ));
+                                }
+                                if layout != self.settings.grid_layout {
+                                    self.settings.grid_layout = layout;
+                                    view_save = true;
+                                }
+                            }
                         }
-                    }
-            });
-            ui.add_space(4.0);
-            if matches!(view, View::Grid | View::Calendar | View::Albums) {
-                clear_chips = draw_filter_chips(ui, &chips, (visible.len(), items.len()));
+                    });
+                },
+            );
+            if matches!(view, View::Grid | View::Calendar | View::Albums) && chips.any() {
+                ui.add_space(2.0);
+                clear_chips = draw_filter_chips(ui, &chips);
             }
             ui.add_space(2.0);
             ui.separator();
@@ -11753,7 +12166,7 @@ impl eframe::App for App {
                     ui.add_space(12.0);
                     ui.label(t(
                         lang,
-                        "Add a folder with the “Folders” button or type a path above, then press “Index”.",
+                        "Add a folder with the “+” button or type a path above, then press “Index”.",
                     ));
                     return;
                 }
@@ -13145,6 +13558,68 @@ impl eframe::App for App {
             // matched completely.
             View::Integrity => {}
             }
+            // The selection bar of the mock-up: a floating pill at the bottom edge of the grid,
+            // where the eye is after picking a tile (M22.19). The count and the volume are its
+            // left part; "Select all" and "Clear selection" are the actions the grid has.
+            if chips.pickable && chips.picked > 0 {
+                let picked_text = i18n::fill(
+                    lang,
+                    "{} selected · {}",
+                    &[
+                        chips.picked.to_string(),
+                        db::human_in(lang, chips.picked_bytes).to_string(),
+                    ],
+                );
+                let all = WordButton::small(Icon::Check, i18n::select_all(lang, visible.len()));
+                let clear = WordButton::small(Icon::Close, t(lang, "Clear selection"));
+                let w = 12.0 + 6.0 + 6.0 + mono_width(ui, &picked_text, 11.0) + 12.0 + 1.0 + 12.0
+                    + all.size(ui).0
+                    + 6.0
+                    + clear.size(ui).0
+                    + 12.0;
+                let view_rect = ui.max_rect();
+                let pos = egui::pos2(
+                    view_rect.center().x - w * 0.5,
+                    view_rect.bottom() - 12.0 - 32.0,
+                );
+                let bar = egui::Rect::from_min_size(pos, egui::vec2(w, 32.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
+                        egui::Frame::new()
+                            .fill(theme(ui).card)
+                            .stroke(egui::Stroke::new(1.0, theme(ui).border_strong))
+                            .corner_radius(egui::CornerRadius::same(RADIUS_CARD as u8))
+                            .inner_margin(egui::Margin::symmetric(12, 6))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    let (dot, _) = ui.allocate_exact_size(
+                                        egui::vec2(6.0, 6.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter()
+                                        .circle_filled(dot.center(), 3.0, theme(ui).accent);
+                                    ui.label(num(ui, picked_text, 11.0).color(theme(ui).accent));
+                                    ui.add_space(6.0);
+                                    hairline_vertical(ui);
+                                    ui.add_space(6.0);
+                                    if ui
+                                        .add(all)
+                                        .on_hover_text(t(lang, "marks everything visible now; Ctrl+A does the same"))
+                                        .clicked()
+                                    {
+                                        clear_chips.pick_all = true;
+                                    }
+                                    if ui
+                                        .add(clear)
+                                        .on_hover_text(t(lang, "clears the selection in this grid; Esc does the same"))
+                                        .clicked()
+                                    {
+                                        clear_chips.clear_pick = true;
+                                    }
+                                });
+                            });
+                });
+            }
                 });
         });
 
@@ -13180,11 +13655,6 @@ impl eframe::App for App {
         // Release the borrows of self.textures/missing before open_viewer/reload.
         #[allow(clippy::drop_non_drop)]
         drop(cells);
-        // The tile size is written to the settings when the slider is released, not on every frame.
-        if tile_save {
-            self.settings.tile_size = self.tile_size;
-            self.save_settings();
-        }
         if view_save {
             self.save_settings();
         }
@@ -13376,7 +13846,7 @@ mod tests {
         list_name_px,
         list_row_height, monday_of, month_groups, nearest_file_month, one_to_one_zoom, parse_date,
         pick_kind, rotate_rect, rotated_size, score_percentile, shift_month, shift_to_file_month,
-        MAX_ZOOM,
+        MAX_ZOOM, PANEL_HEAD_H, PANEL_PAD, RIGHT_W,
     };
     use crate::embed;
     use crate::i18n::{self, t};
@@ -16351,22 +16821,24 @@ mod tests {
     fn the_file_card_fits_the_right_panel() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-card-fit.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
-        // In Russian the own-tag button carries the widest label of the row — the one that used
-        // to widen the panel (M22.12).
+        // The own-tag row is the widest row of the card and the one that used to widen the panel
+        // (M22.12). Since M22.18 its button is an icon-only "+", so the hint of the field is the
+        // widest word of the row; the box of the button is covered by
+        // `the_file_card_keeps_the_mock_ups_band_and_air`.
         app.settings.lang = i18n::Lang::Ru;
         app.selected = Some(1);
         let ctx = egui::Context::default();
         let size = egui::vec2(1240.0, 840.0);
         let words = window_word_rects_at(&mut app, &ctx, size);
         let panel_left = size.x - 280.0;
-        let add = words
+        let field = words
             .iter()
-            .find(|(w, _)| w == "Добавить тег")
+            .find(|(w, _)| w == "свой тег, например мебель")
             .unwrap_or_else(|| panic!("the own-tag row is on screen: {words:?}"));
         assert!(
-            add.1.left() >= panel_left && add.1.right() <= size.x,
-            "the own-tag button stays in the panel: {:?} in [{panel_left}, {}]",
-            add.1,
+            field.1.left() >= panel_left && field.1.right() <= size.x,
+            "the own-tag row stays in the panel: {:?} in [{panel_left}, {}]",
+            field.1,
             size.x
         );
         let title = words
@@ -16389,6 +16861,305 @@ mod tests {
                 "a frame leaves the window: {rect:?} in {size:?}"
             );
         }
+    }
+
+    /// M22.18: the own-tag row keeps a wide field and a bare "+" — a word button took 140 px of
+    /// the 255 px card and left the field short.
+    #[test]
+    fn the_own_tag_row_keeps_a_wide_field_and_a_bare_plus() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-add-tag.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.selected = Some(1);
+        // The Russian hint of the field is the widest text of the row.
+        app.settings.lang = i18n::Lang::Ru;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let words = window_word_rects_at(&mut app, &ctx, size);
+        assert!(
+            !words.iter().any(|(w, _)| w == "Добавить тег"),
+            "the button keeps only the +: {words:?}"
+        );
+        let row = words
+            .iter()
+            .find(|(w, _)| w == "СВОИ ТЕГИ")
+            .expect("the own-tag block is on screen")
+            .1;
+        let hint = words
+            .iter()
+            .find(|(w, _)| w == "свой тег, например мебель")
+            .expect("the field of the own tag is on screen")
+            .1;
+        let plus = window_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|r| {
+                (r.width() - 22.0).abs() < 0.5
+                    && (r.height() - 22.0).abs() < 0.5
+                    && r.center().y > row.bottom()
+                    && r.left() > size.x - RIGHT_W
+            })
+            .expect("the + of the own-tag row is drawn");
+        assert!(
+            plus.left() - hint.left() >= 150.0,
+            "the field stays wide: the hint at {hint:?}, the + at {plus:?}"
+        );
+        assert!(plus.right() <= size.x, "the + stays in the window: {plus:?}");
+        // The row is the mock-up's 28 px, so the field is neither tight nor loose.
+        assert!(
+            window_rects_at(&mut app, &ctx, size).iter().any(|r| {
+                (r.height() - 28.0).abs() < 0.5 && r.width() > 200.0 && r.contains(plus.center())
+            }),
+            "the own-tag row is 28 px high: {plus:?}"
+        );
+        // M22.18: the text edit used to be a 26 px button-like box with its text at the top, so
+        // the hint stuck to the upper edge of the row and the field looked short. The "#", the tag
+        // and the "+" share one line now.
+        let hash = words
+            .iter()
+            .find(|(w, _)| w == "#")
+            .expect("the # of the own-tag row is on screen")
+            .1;
+        for (name, r) in [("#", hash), ("the hint", hint)] {
+            assert!(
+                (r.center().y - plus.center().y).abs() <= 1.0,
+                "the {name} sits on the line of the +: {r:?} against {plus:?}"
+            );
+        }
+    }
+
+    /// A press and a release at one point: egui registers a click on the release, so the two
+    /// frames are needed (M22.17).
+    fn click_at(app: &mut App, ctx: &egui::Context, at: egui::Pos2) {
+        for pressed in [true, false] {
+            window_frame_with(
+                app,
+                ctx,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    /// M22.17: the word of a card chip acts on the tag, the "×" on its right edge removes it. One
+    /// click must never hide a tag that the owner only wanted to look at.
+    #[test]
+    fn the_word_of_a_card_chip_acts_and_the_cross_removes() {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        let size = egui::vec2(300.0, 120.0);
+        let raw = |events: Vec<egui::Event>| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
+            ..Default::default()
+        };
+        // The box of the chip is known after a frame: it is the only 20 px-high rectangle here.
+        let first = ctx.run_ui(raw(Vec::new()), |ui| {
+            let _ = super::card_chip(ui, "beach 40%", None, false, "body", "remove");
+        });
+        let mut rects = Vec::new();
+        for c in &first.shapes {
+            collect_rect_bounds(&c.shape, &mut rects);
+        }
+        first.drop_without_applying_deltas();
+        let chip = *rects
+            .iter()
+            .find(|r| (r.height() - 20.0).abs() < 0.5)
+            .expect("the chip is drawn");
+        let hit = |at: egui::Pos2| {
+            let mut got = super::ChipClick::None;
+            for pressed in [true, false] {
+                let out = ctx.run_ui(
+                    raw(vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ]),
+                    |ui| {
+                        got = super::card_chip(ui, "beach 40%", None, false, "body", "remove");
+                    },
+                );
+                out.drop_without_applying_deltas();
+            }
+            got
+        };
+        assert_eq!(
+            hit(egui::pos2(chip.left() + 8.0, chip.center().y)),
+            super::ChipClick::Body,
+            "the word filters the photos: {chip:?}"
+        );
+        assert_eq!(
+            hit(egui::pos2(chip.right() - 8.0, chip.center().y)),
+            super::ChipClick::Remove,
+            "the × removes the tag: {chip:?}"
+        );
+    }
+
+    /// M22.17: a click on a tag in the card is a filter by that tag, not a removal; the accent
+    /// marks the tag the photos are filtered by, and a second click clears the filter.
+    #[test]
+    fn a_click_on_a_tag_in_the_card_filters_the_photos() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-tag-click.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.selected = Some(1);
+        app.tags.insert(
+            1,
+            vec![("beach".to_string(), 0.40), ("sea".to_string(), 0.30)],
+        );
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let chip = |app: &mut App| {
+            window_word_rects_at(app, &ctx, size)
+                .into_iter()
+                .find(|(w, _)| w == "beach 40%")
+                .unwrap_or_else(|| panic!("the tag chip is on screen"))
+                .1
+        };
+        // The accent marks the filter and nothing else: no chip is highlighted before a click,
+        // even though "beach" is the confident tag of the photo.
+        let accented_chip = |app: &mut App| {
+            window_fills(app, &ctx).into_iter().any(|(r, c)| {
+                (r.height() - 20.0).abs() < 0.5
+                    && r.left() > size.x - RIGHT_W
+                    && c == super::DARK.accent_soft
+            })
+        };
+        assert!(!accented_chip(&mut app), "no chip is accented before a click");
+        let r = chip(&mut app);
+        click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
+        assert_eq!(
+            app.tag_filter.as_deref(),
+            Some("beach"),
+            "a click on the tag filters the photos by it"
+        );
+        assert_eq!(app.tags.get(&1).map(Vec::len), Some(2), "nothing is removed");
+        assert!(
+            accented_chip(&mut app),
+            "the chip of the active filter is in the accent"
+        );
+        // A second click on the highlighted chip clears the filter.
+        let r = chip(&mut app);
+        click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
+        assert_eq!(app.tag_filter, None, "a second click clears the filter");
+        assert!(!accented_chip(&mut app), "no chip is accented after the reset");
+    }
+
+    /// M22.17: the same split on an album chip — the word opens the album, only the "×" removes
+    /// the photo from it.
+    #[test]
+    fn the_word_of_an_album_chip_opens_the_album_and_the_cross_removes_the_row() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-album-chip.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.settings.lang = i18n::Lang::En;
+        app.selected = Some(1);
+        // The album rows are taken as they are: no DB read on this path.
+        app.file_albums_for = Some(1);
+        app.file_albums = vec![(7, "/tmp/Album".into())];
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let r = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "/tmp/Album")
+            .expect("the album chip is on screen")
+            .1;
+        click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
+        assert!(app.view == View::Albums, "the word opens the album");
+        assert_eq!(app.album_selected, Some(7));
+        // The "×" removes the album row of the photo and does not navigate anywhere.
+        app.view = View::Grid;
+        let _ = window_frame(&mut app, &ctx);
+        let r = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "/tmp/Album")
+            .expect("the album chip is on screen")
+            .1;
+        click_at(&mut app, &ctx, egui::pos2(r.right() + 8.0, r.center().y));
+        assert!(app.view == View::Grid, "the × does not open the album");
+        assert_eq!(
+            app.file_albums_for, None,
+            "the row was removed: the list of the file is reloaded"
+        );
+    }
+
+    /// M22.16: the right panel follows the composition of `photocat_12` — a 44 px header band on
+    /// the panel's whole width with its close target at the right, and the file card on 12 px of
+    /// air, so the preview and the blocks never touch the panel's lines.
+    #[test]
+    fn the_file_card_keeps_the_mock_ups_band_and_air() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-card-air.db"));
+        app.items = vec![file_row(1, "image", "a.jpg")];
+        app.selected = Some(1);
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let panel_left = size.x - RIGHT_W;
+        let rects = window_rects_at(&mut app, &ctx, size);
+        let band = rects
+            .iter()
+            .find(|r| {
+                (r.height() - PANEL_HEAD_H).abs() < 0.5
+                    && (r.width() - RIGHT_W).abs() <= 1.5
+                    && r.left() >= panel_left - 1.5
+            })
+            .unwrap_or_else(|| panic!("the header band is drawn: {rects:?}"));
+        let title = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "File details")
+            .expect("the panel title is on screen")
+            .1;
+        assert!(
+            title.top() >= band.top() && title.bottom() <= band.bottom(),
+            "the title stands inside the band: {title:?} in {band:?}"
+        );
+        // The mock-up's "×" sits 12 px from the panel's right edge, inside the band.
+        assert!(
+            rects.iter().any(|r| (r.width() - 22.0).abs() < 0.5
+                && (r.height() - 22.0).abs() < 0.5
+                && (r.right() - (size.x - PANEL_PAD)).abs() < 0.5
+                && r.center().y > band.top()
+                && r.center().y < band.bottom()),
+            "the close target is at the right of the band: {rects:?}"
+        );
+        // Below the band every block keeps the 12 px air of the card: the preview, the shooting
+        // params, the chips and the own-tag field all start on the same column.
+        let card: Vec<&egui::Rect> = rects
+            .iter()
+            // The scroll area paints its ground over the whole panel: the card is what is
+            // narrower than the panel minus its two margins.
+            .filter(|r| {
+                r.top() >= band.bottom()
+                    && r.left() >= panel_left - 1.5
+                    && r.width() <= RIGHT_W - 2.0 * PANEL_PAD + 0.5
+            })
+            .collect();
+        let left = card
+            .iter()
+            .map(|r| r.left())
+            .fold(f32::INFINITY, f32::min);
+        let right = card.iter().map(|r| r.right()).fold(0.0, f32::max);
+        assert!(
+            (left - (band.left() + PANEL_PAD)).abs() < 1.0,
+            "the card starts 12 px inside the panel: {left} against {}",
+            band.left() + PANEL_PAD
+        );
+        assert!(
+            (right - (band.right() - PANEL_PAD)).abs() < 1.0,
+            "the card ends 12 px before the edge: {right} against {}",
+            band.right() - PANEL_PAD
+        );
     }
 
     #[test]
@@ -16784,7 +17555,10 @@ mod tests {
             window_strokes(app, &ctx, size)
                 .into_iter()
                 .filter(|(r, s)| {
-                    s.color == accent && (s.width - 1.0).abs() < 0.01 && r.left() > super::LEFT_W
+                    s.color == accent
+                        && (s.width - 1.0).abs() < 0.01
+                        && r.left() > super::LEFT_W
+                        && r.top() > super::TOP_H + 8.0
                 })
                 .map(|(r, _)| r)
                 .collect()
@@ -17215,19 +17989,23 @@ mod tests {
         assert!((big - small - 51.2).abs() < 0.5, "{small} → {big}");
     }
 
-    /// M22.2a: the size slider is visible in the heading in all three cell views — it is in the
-    /// list too, so the heading does not jump when switching.
+    /// M22.19: the tile size moved from the content panel into the top strip; the pill is drawn
+    /// in every cell view, so the size never disappears with a view switch.
     #[test]
     fn the_size_slider_shows_in_all_three_views() {
         let mut app = m17_app();
-        app.settings.lang = i18n::Lang::Ru;
+        app.settings.lang = i18n::Lang::En;
         app.tile_size = 200.0;
+        let ctx = egui::Context::default();
         for style in [db::CellStyle::Tiles, db::CellStyle::Rows, db::CellStyle::List] {
             app.settings.cell_style = style;
-            let texts = window_frame(&mut app, &egui::Context::default());
+            let strokes = window_strokes(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+            let pill = strokes.iter().find(|(r, s)| {
+                s.width < 1.5 && r.top() < 50.0 && (100.0..140.0).contains(&r.width())
+            });
             assert!(
-                texts.iter().any(|t| t == "Плитки 200"),
-                "the size slider is gone in the {style:?} view: {texts:?}"
+                pill.is_some(),
+                "the tile size pill is gone in the {style:?} view: {strokes:?}"
             );
         }
     }
@@ -17990,8 +18768,12 @@ mod tests {
         // The content of the screens (the view heading, the chips, the card) is translated by the
         // next M21 steps: here the shell is checked — the navigation, the top bar, the filter.
         assert!(
-            texts.iter().any(|t| t == "family archive"),
-            "no English subtitle: {texts:?}"
+            texts.iter().any(|t| t == "Synced"),
+            "no English state word: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Search"),
+            "no English search button: {texts:?}"
         );
         app.settings.lang = i18n::Lang::Ru;
         let texts = window_frame(&mut app, &egui::Context::default());
@@ -18540,7 +19322,8 @@ mod tests {
             CalendarToday, Face, BurstMode, Verified, Apps, GridView, ViewAgenda, ViewList, Sort, Add,
             Remove, Edit, MoveTo, ContentCopy, Download, Upload, Check, CheckCircle, Delete,
             Restore, Stop, ArrowUp, ArrowDown, ArrowBack, ChevronLeft, ChevronRight, ZoomIn,
-            ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Slideshow, TextFields,
+            ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Location, Slideshow,
+            TextFields,
             Preview, CompareArrows, Description, Psychology, Label, Inventory, Terminal,
             AutoAwesome, Calculate, Cleaning, Prev, Next, Play, Pause, Volume,
         ]
@@ -18872,10 +19655,8 @@ mod tests {
             );
         }
     }
-    /// M22.8: the controls of the content panel (three cell views, the grouping, the order) have
-    /// their own row under the title. With an icon on every button the group grew wide enough to
-    /// reach the title and the facts on a 1240 px window with the details panel open, so the
-    /// heading keeps its row and nothing is drawn over anything.
+    /// M22.19: the title, its facts and the controls of the view share one 44 px ribbon, as in
+    /// `photocat_1`; the tile size moved into the top strip, so nothing is drawn over the title.
     #[test]
     fn the_content_controls_keep_their_own_row() {
         let mut app = m17_app();
@@ -18901,36 +19682,31 @@ mod tests {
         let list = at("List");
         let sort = at("Sort");
         let months = at("By months");
-        let tiles = at("Tiles 150");
-        // The controls are one row of their own, a line below the title.
+        // The ribbon is one row: the title and every control stand on the same line.
         for word in [tile, rows, list, sort, months] {
             assert!(
-                (word.y - tile.y).abs() <= 3.0,
-                "the controls are not one row: {tile:?} vs {word:?}"
-            );
-            assert!(
-                word.y > title.y + 10.0,
-                "a control stands on the title's row: {title:?} vs {word:?}"
+                (word.y - title.y).abs() <= 6.0,
+                "the ribbon is not one row: {title:?} vs {word:?}"
             );
         }
-        // The size of a cell stays in the heading row, on the right.
-        assert!(
-            (tiles.y - title.y).abs() < 12.0,
-            "the size slider left the heading row: {tiles:?} vs {title:?}"
-        );
-        // Nothing reaches into the right panel (it starts at 1240 − 280) and nothing runs over
-        // the title: the old right-aligned group began at x 288, inside the title.
+        // Nothing reaches into the right panel (it starts at 1240 − 280), and the controls stay
+        // right of the title.
         let widest = [tile, rows, list, sort, months]
             .iter()
             .map(|p| p.x)
             .fold(0.0f32, f32::max);
         assert!(
-            widest < 900.0,
+            widest < 950.0,
             "the controls run into the details panel: the last one starts at {widest}"
         );
         assert!(
             tile.x > title.x,
             "the controls start left of the title: {tile:?} vs {title:?}"
+        );
+        // The tile size moved to the top strip: the heading keeps the name and the facts.
+        assert!(
+            !drawn.iter().any(|(text, _)| text.starts_with("Tiles ")),
+            "the size label is back in the content panel: {drawn:?}"
         );
     }
 

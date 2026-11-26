@@ -79,8 +79,9 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 
 ### 2.4 Layout metrics
 
-- Top strip **32 px** (one row: brand, search mode, query, Find/Reset, state, Settings). The third
-  row exists only for pass progress.
+- Top strip **32 px** (one row: the mark, one search field with the mode switch, the query,
+  "Search" and "×", then the "Tiles" pill, the state, the details toggle and "Settings" —
+  M22.19). The third row exists only for pass progress.
 - Bottom strip **28 px**: the last fact on the left, counters and the selection on the right, mono.
 - Left panel **260 px** (fixed), right panel **280 px** (fixed, hidden below 1200 px).
 - Grid: **three cell views**, `settings.cell_style`, the segment "Tile / Rows / List" in the
@@ -99,35 +100,48 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 
 ### 2.5 Main screen (the first task)
 
-- Brand "photocat" + "family archive" in the top strip; the working folder and "Index / Refresh /
-  Folders" move into the left panel — the top strip stays one row.
+- The mark (a photo-library glyph and "photocat") in the top strip; the working folder, "Index /
+  Refresh" and the folders dialog move into the left panel — the top strip stays one row.
 - Left panel: `CATALOG` block → navigation (two groups, numbers on the right, the active row has a
   2 px accent edge and the card tone) → `FILTER` block → view context → model and text blocks →
   pinned summary.
-- Content: view title 18 px + facts 12 px mono with the "Tiles" slider on the right (M22.8: the
-  controls — the cell views, "By months / Flat", "Sort" — take a row of their own under the heading,
-  because with an icon on each button they no longer fit beside the title); a chip row that never
-  disappears; the month heading 14 px + facts 11 px mono, pinned at
-  the top edge of the grid area while its group is on screen (M22.4).
+- Content (M22.19, after `photocat_1`): one 44 px ribbon — the view title 18 px and the facts
+  12 px mono on the left, the controls (the cell views, "By months / Flat", "Sort") on the right,
+  divided by 1 × 16 px lines; the tile size is the pill of the top strip. A chip row with "×" and
+  "Reset" is drawn only while a filter is on; the month heading 14 px + facts 11 px mono is pinned
+  at the top edge of the grid area while its group is on screen (M22.4). While anything is picked,
+  the floating selection bar lies at the bottom edge of the grid.
 - Tile: card frame 1 px, preview on the `field` well, caption band 22 px with the file name (mono 10,
   left) and the date (mono 10, `text_dim`, right). A video keeps the `▶ M:SS` strip.
   Selected/keep/picked — accent.
-- Inspector (M22.14): the info glyph and `FILE DETAILS` with "Hide"; the preview as a card (4:3,
-  the `canvas` well, the 8 px radius, a 1 px `border`, all four corners cut); the identity row — the
-  name in the numeric family in the accent and the size on the right; the path in mono 10 `text_dim`;
-  a `card_block` "Shooting params" with the camera, the two columns "Date and time" / "Resolution",
-  "Location" and the checksum; "Albums" as chips; "AI tags" as a caps row with `CLIP <weight>%` on
-  the right and chips "tag 30% ×"; "My tags" as chips with the own-tag field; "Text on the photo"
-  with the engine name on the right. The weights and percentiles stay in the chip hints; the
-  exposure badges of the mock-up are not built (the index keeps the camera name, §5 q. 5).
+- Inspector (M22.14, the header and the air of `photocat_12` in M22.16): a 44 px header band on
+  the `card` tone with a 1 px line under it — the info glyph, "File details" at 12 px strong and
+  the mock-up's "×" at the right (the way back is the top strip's details toggle, its hint
+  "Details" / "Hide details", M22.19) — then the card
+  on 12 px of air; the preview as a card (4:3, the `canvas` well, the 8 px radius, a 1 px `border`,
+  all four corners cut, the corner badge "▶ M:SS" or the format); the identity row — the name in
+  the numeric family in the accent and the size on the right; the path in mono 11 `text_dim`;
+  "Open full screen" and "To trash" as 20 px buttons in one row; a `card_block` "Shooting params"
+  with the camera, the two columns "Date and time" / "Resolution", "Location" with a pin and the
+  checksum; "Albums" as chips with a folder glyph; "AI tags" as a caps row with `CLIP <weight>%` on
+  the right and chips "tag 30% ×"; "My tags" as chips with the own-tag row framed by the mock-up's
+  "`#`" and a 22 px bare "+" since M22.18; "Text on the photo" with the engine name on the right.
+  A chip has two targets since M22.17: the word filters the grid by the tag (a second click clears the filter, and the accent
+  marks the tags the photos are filtered by, not "the confident one") and the "×" removes the tag
+  from the photo; the word of the album chip opens the album. The weights and percentiles stay in
+  the chip hints; the exposure badges and the place name of the mock-up are not built (the index
+  keeps the camera name and no geocoder is allowed offline, §5 q. 5). The mock-up's round action
+  buttons over the preview keep their words (docs/UI.md § Layout: an icon is never the only path),
+  and the album "+ Add" chip is not drawn: adding a file to an album from the card is a function of
+  its own, not a layout detail.
 
 ## 3. Screens: what is drawn by a mock-up and what is not
 
 | Screen | Mock-up | What is adopted | Task |
 |---|---|---|---|
-| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅ |
+| Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling; the top strip, the one-row ribbon and the floating selection bar | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅, M22.19 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
-| Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down | M22.5 ✅ |
+| Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down; the inspector of the screen is the right panel of M22.16 | M22.5 ✅, M22.16 ✅ |
 | Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 ✅ |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 ✅ |
 | Duplicates | — | no mock-up: same strips, header, `card_block` per group, `draw_cell`, amber "keep", red-free everywhere | M22.9 ✅ |
@@ -202,6 +216,9 @@ choice (the picked people, the trash counter with its two actions) stands where 
     grid with five icon buttons. We keep the selection in the chips row and the status strip
     (documented, one place for actions). *Recommendation: keep ours; a floating bar covers
     photographs and duplicates the chips row.* **Answer: keep ours for now, look again later.**
+    **Reversed in M22.19:** the owner asked for the mock-up's bar; it floats at the bottom edge of
+    the grid with "N selected · size", "Select all (M)" and "Clear selection" only — no actions of
+    its own, so nothing is duplicated, and the chip row is left to the filters.
 11. **Icons.** The mock-up is Material Symbols throughout. We have a geometric `paint_icon` for the
     player only and forbid emoji. *Recommendation: keep words + the existing geometric glyphs; an
     icon set is a separate decision (font dependency).* **Answer (2026-11-25): take the mock-up's
@@ -227,7 +244,8 @@ in the same commit.
 
 ### M22.2 — the main screen ✅ (this change)
 
-1. Top strip 32 px: brand + subtitle, search mode, query, Find/Reset, state, "Folders (N)",
+1. Top strip 32 px (M22.19): the mark, one search field with the mode switch, the query,
+   "Search"/"×", the "Tiles" pill, the state, the details toggle and "Settings";
    "Details", "Settings". The folder field and "Index / Refresh" move to the left panel.
 2. Bottom strip 28 px: the last fact on the left, file counters and the selection on the right, mono.
 3. Left panel: `CATALOG` block, navigation with a 2 px accent edge on the active row, `FILTER` block,
@@ -325,7 +343,8 @@ idle frames request nothing.
 4. "Summary" stays pinned at the bottom.
 
 **Result.** The years open the scrolling part of the panel, right under the pinned filter block: a
-20 px cell in **two columns of three rows** — mono 11 on the left, the count in mono 10 at the right
+20 px cell in **three columns of two rows** (M22.19; the old two columns of three left the fifth
+year under the pinned summary at 840 px) — mono 11 on the left, the count in mono 10 at the right
 edge, the picked year on the accent fill and in the accent text — and "All years" as the first cell
 only while a year is picked, so the panel does not spend a row on a filter that is already empty and
 six cells are still three rows: the block never changes height, not even on a click. A single column
@@ -737,8 +756,9 @@ photographs full size, but they must be fitted into the tile".
    the size on the right; the path in mono 10; a `card_block` "Shooting params" (the camera after a
    photo glyph, "Date and time" and "Resolution" in two columns, "Location", a hairline, SHA256);
    "Albums" as chips with a count; "AI tags" as a caps row with `CLIP <weight>%` on the right and
-   chips "tag 30% ×" (the confident one in the accent, a click removes it, the weight and the
-   percentile in the hint, the "not sure" line, the top-3 and "all tags (N)" as before); "My tags"
+   chips "tag 30% ×" (the confident one in the accent and a click that removed it — superseded by
+   M22.17: the word filters, the "×" removes; the weight and the percentile in the hint, the "not
+   sure" line, the top-3 and "all tags (N)" as before); "My tags"
    as chips with the own-tag field; "Text on the photo" with the engine name on the right. The
    exposure badges and the share/favourite/delete circles of the mock-up stay refused (§5 q. 5).
 3. **A block counts its own line.** `card_block` sized its content as `available − 16` and forgot
@@ -784,6 +804,171 @@ diagnostics` 0 errors.
 **Files.** `src/app.rs` (`cover_rect`, `ThumbFit`, `paint_thumb_as`, `paint_thumb_filling`,
 `draw_cell`, `draw_tiles`, the tooltip, five tests), `src/i18n.rs`, `src/db.rs` (the `CellStyle`
 doc), `docs/UI.md`, `plan/`.
+
+### M22.16 — the right panel after `photocat_12` ✅
+
+The owner after M22.15: "make the layout of the right panel after the mock-up" (`photocat_12`).
+
+1. **The panel's frame.** `Panel::right` used egui's default side-panel frame — an 8 px margin on
+   every side — so the 1 px line drawn by `panel_edge` stood 9 px inside the panel, with a strip of
+   panel tone between the line and the grid, and the card lived on 264 px instead of 280. The panel
+   now carries `Frame::NONE` with the panel tone: the line stands on its left edge and the whole
+   280 px belong to the content.
+2. **The header band.** The mock-up's `h-11`: 44 px on the `card` tone, a 1 px line under it, the
+   info glyph, "File details" at 12 px strong and the close target at the right. The close target
+   is the mock-up's "×" — a 22 px `icon_button` 12 px from the edge with the hint "free up room for
+   the grid and calendar"; the way back is the top strip's details toggle with "Details"/"Hide
+   details" as its hint (M22.19 moved the word into the hint), so the
+   rule "an icon is never the only path" holds (docs/UI.md § Layout).
+3. **The air.** The card is drawn inside a 12 px margin (`PANEL_PAD`) on every side, as the
+   mock-up's `p-3.5`; the preview is 255 px wide at the 280 px panel, and the blocks start and end
+   on the same column. In the full-screen inspector the same card keeps the same air.
+4. **The details of the mock-up** that the window can carry: the corner badge of the preview shows
+   the format of a still ("JPG", "HEIC") next to the video's "▶ M:SS"; the location row gets the
+   mock-up's pin; an album chip gets the folder glyph before the name; the own-tag row becomes one
+   framed field with the "`#`" of the mock-up and the "Add tag" button inside it, still never wider
+   than the card (M22.12); the card's two actions take the 20 px `WordButton::small`/`compact` so
+   "Open full screen" and "To trash" stay on one row in both languages.
+5. **Refused in this pass** (and why): the mock-up's round icon-only actions over the preview
+   (words stay, docs/UI.md § Layout), the album "+ Add" chip (a new flow: adding a file to an album
+   from the card), the exposure badges and the RAW/14-bit badge (not indexed, §5 q. 5), the place
+   name in the location row (needs a geocoder; the network is for models only), the 320 px panel
+   width (the owner's 280 px from M22.12 stays until he asks otherwise) and the mock-up's
+   `rounded-full` tag pills (the 4/6/8 radius scale).
+
+**Result.** At 1240×840 a headless frame draws the panel's band from y 31 to y 75 on the full
+279 px, the × at x 1206–1228, the preview at 973–1228 (255 px) and every block between those two
+columns; no rectangle or word leaves the window. `the_file_card_keeps_the_mock_ups_band_and_air`
+locks the band, the × and the 12 px air; `the_file_card_fits_the_right_panel`, `cargo test` 285,
+`cargo test --test source_language` 3, `clippy` clean, `check.sh` 55 checks, `rust-analyzer
+diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`details_panel`, `file_card`, `PANEL_HEAD_H`, `PANEL_PAD`, `card_chip`,
+`Icon::Location`, the right panel's frame, one test), `docs/UI.md`, `plan/`.
+
+### M22.17 — the word of a chip acts, the "×" removes ✅
+
+The owner after M22.16: the tag cloud of the card highlights "the confident tag" but a click on any
+other tag hides it from the photo — a click on a tag must not delete it; removal has the "×" of the
+chip; the highlight must mean the tags the photos are filtered by.
+
+1. **Two targets in one 20 px chip.** `card_chip` returns a `ChipClick` (`None`, `Body`, `Remove`)
+   and knows where the "×" is: the glyph, the 4 px gap before it and 2 px around it — 16 px of the
+   chip's right edge. The "×" turns `danger` under the pointer and carries the removal hint, the word
+   carries the action hint; the two zones never overlap, so a click that meant "show the others" can
+   not hide a tag.
+2. **The word filters.** A click on the word of an AI tag or of an own tag sets `tag_filter` — the
+   same filter as the left panel's tag chips — and a second click on the highlighted chip clears it.
+   The accent now marks that filter and nothing else; the confident tag keeps its place in the caps
+   row ("CLIP 84%") and in the line "tag: <name>".
+3. **The album chip opens the album.** Its word goes to the "Albums" view with the album open (the
+   same path as a click in the album tree); only the "×" removes the photo from the album.
+4. **The left panel keeps its rule** — it already toggled a filter and removed nothing; the new hints
+   and the split of the card's chips are noted in `docs/UI.md` § Interaction and § Metrics.
+
+**Result.** `the_word_of_a_card_chip_acts_and_the_cross_removes` (a click at 8 px of the left edge
+gives `Body`, at 8 px of the right edge `Remove`), `a_click_on_a_tag_in_the_card_filters_the_photos`
+(the filter is set, the tags of the photo are untouched, a second click clears it) and
+`the_word_of_an_album_chip_opens_the_album_and_the_cross_removes_the_row`; `cargo test` 288,
+`cargo test --test source_language` 3, `clippy` clean, `check.sh` 55 checks, `rust-analyzer
+diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`card_chip`, `ChipClick`, the three chip blocks, three tests), `src/i18n.rs`
+(three labels), `docs/UI.md`, `plan/`.
+
+### M22.18 — the own-tag field gets its room back ✅
+
+The owner after M22.17: the "add tag" field is short and the button is far too big — drop the word
+and keep only the "+".
+
+1. **The button is a bare "+".** The word button (140 px reserved in the row, a 118 px label) became
+   an icon-only 22 px square (`icon_button` with the `add` glyph) inside the framed row; its hint is
+   the word `Add tag`. The field now takes `available − 16 − 22 − 8` — about 190 px of the 255 px
+   card instead of 81 px in Russian, and the hint "свой тег, например мебель" (164 px) fits whole.
+2. **The row still never widens the panel** (M22.12): the reserve is counted (the "`#`", the 8 px of
+   the gap, the 22 px of the button) and the field never falls below 40 px.
+3. **One line, one height.** egui's text edit is styled as a button: `min_size.y` is the 26 px of
+   `interact_size` and the text is aligned `LEFT_TOP`, so inside the framed row the input stuck to
+   the upper edge and read as a short, crooked field (the owner's second review of the row). The row
+   sets `interact_size.y = 22` and centres the text (`TextEdit::align(LEFT_CENTER)`): the "`#`", the
+   tag and the "+" are one 22 px line, the row is 28 px — the mock-up's `h-7` — and the field no
+   longer floats. The test compares the vertical centres of all three within 1 px.
+4. **A documented exception.** `docs/UI.md` § Layout names the "+" among the targets that keep no
+   word: a 22 px square with the hint, the "`#`" and the "My tags" heading around it — the owner's
+   request outranks the general rule "an icon is never the only path", as it already did for the
+   panel's "×".
+
+**Result.** In Russian the hint of the field is drawn whole and the "+" starts at least 150 px after
+the text — `the_own_tag_row_keeps_a_wide_field_and_a_bare_plus` fails on the 140 px reserve
+(103 px) and passes now; the word "Добавить тег" is not drawn any more; the "#", the hint and the "+"
+share one line (the test fails on the top-aligned text of the theme, 3.5 px off).
+`the_file_card_keeps_the_mock_ups_band_and_air` still holds the "+" inside the card's 12 px air;
+`cargo test` 289, `cargo test --test source_language` 3, `clippy` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (the own-tag row, one test), `docs/UI.md`, `plan/`.
+
+### M22.19 — the top strip, the ribbon and the selection bar after `photocat_1` ✅
+
+The owner after M22.18: the top part of the window and several other elements do not match the
+mock-up. A screenshot of the window at 1440×875 next to the rendered `photocat_1` showed why: the
+strip was a row of eight word buttons without a mark, the content had three rows where the mock-up
+has one, the selection lived in the chip row, and the footer repeated the hidden "Details" word.
+
+1. **The top strip is audited against the mock-up, element by element.** The brand gets the
+   photo-library glyph in the accent; the subtitle "family archive" is dropped (the mock-up has the
+   word only). The eight controls become the mock-up's four groups: one search field in the middle
+   (the search glyph, the mode switch "Semantic / By text" with an arrow, the query, "Search" in the
+   accent and "×" that clears both the field and the results), and on the right the "Tiles" pill,
+   the state pill, the details toggle and "Settings". The search is at most 576 px and centred
+   between the mark and the tools: the three sectors are measured from the words, so the centring
+   holds in either language.
+2. **What left the strip and where it went.** The "Tiles" slider moved from the content heading to
+   the mock-up's compact pill (the value is in the hint); "Folders (N)" became the bare "+" of the
+   "Catalog" heading that opens the same dialog; "Details / Hide details" became the mock-up's 28 px
+   icon toggle that stays lit while the panel is open — the second icon-only target of the window
+   after the own-tag "+", with the word in its hint and the panel's "×" as the way back. The facts
+   ("N files · M with EXIF") moved into the hint of the state pill; the footer carries the numbers.
+3. **The content panel is one ribbon of 44 px.** The title 18 px and the facts 12 px mono stand on
+   the left, the controls — the three cell views, "By months / Flat", "Sort" — on the right, in the
+   mock-up's order and divided by 1 × 16 px lines. The chip row is drawn only while a filter is on,
+   so the common screen has exactly the mock-up's height; the "found N of M" line is gone because
+   the title already says "N of M files".
+4. **The selection bar floats.** The mock-up's pill at the bottom edge of the grid replaced the
+   "N selected · size / Select all / Clear selection" group of the chip row: a dot, the count and
+   the volume in mono 11 in the accent, then "Select all (M)" and "Clear selection". It is drawn in
+   a child ui at a fixed rect on the panel's own layer, drawn after the scroll area, so it lies over
+   the tiles, never moves them, and its buttons win the hit test; an `egui::Area` was tried first
+   and refused — its first frame is a sizing pass that paints nothing, so a headless frame and the
+   first frame of a window showed no bar.
+5. **The footer follows the mock-up's line**: an accent dot, the last fact, the count of files and
+   their volume on the left; on the right the selected file as "name · frame · size" (or
+   "N selected · volume"). The years moved from two columns of three rows to **three columns of two
+   rows**: six cells always take two rows, so the block keeps its height and the fifth year no longer
+   falls under the pinned summary at 840 px.
+6. **Refused in this pass** (and why): the mock-up's "Filter" menu (date range, rating, geolocation,
+   person — functions the window does not have; the chips of the left panel and the search stay the
+   way in), the per-month "Select all" link (the footer bar and Ctrl+A cover it), the 224 px left
+   panel and the 320 px right panel (the owner's 260/280 of M22.3/M22.12 stand until he asks
+   otherwise), the storage bar of the left panel (it needs a volume to measure, not an index fact)
+   and the mock-up's third search mode "Name / EXIF" (the path/date field of the left panel is that
+   function; one field would have to drive two states at once).
+
+**Result.** At 1440×875 the strip draws the mark at x 12–112, the search frame at 273–860, the
+"Tiles" pill at 1030–1150, the state pill, the lit toggle and "Settings" to the right edge; the
+ribbon is one row from y 85 to y 129; with two picked files the bar appears at the bottom centre of
+the grid (y 751–783) and its "Select all (4)" and "Clear selection" are drawn there instead of the
+chip row. `the_content_controls_keep_their_own_row`, `the_size_slider_shows_in_all_three_views` (the
+pill is a 1 px frame of 100–140 px in the top strip in all three cell views),
+`the_chips_row_shows_the_selection_and_the_buttons` (the tests read the words of the bar),
+`the_left_panel_fits_the_years_above_the_summary` and `the_picked_month_and_day_are_framed_in_the_accent`
+(only frames below the strip count) cover it. A clean `git checkout` of `src/app.rs` during this
+pass wiped the uncommitted M22.16–M22.18 work; it was replayed from the session log of that pass and
+verified by the 289 tests of M22.18 passing again before M22.19 was re-applied.
+
+**Files.** `src/app.rs` (`top_bar`, `search_field`, `tile_pill`, `status_bar`, the ribbon, the
+"pick-bar", `years_block`, `toggle_icon_button`, `text_width`/`mono_width`, `hairline_vertical`,
+four tests), `src/i18n.rs` (five labels; `found` is gone), `docs/UI.md`, `plan/`.
 
 ## 7. Not doing in M22
 

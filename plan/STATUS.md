@@ -7,7 +7,7 @@
 
 STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
 the parts of the main screen), M22.10 (dialogs and reports: one card frame, one accent button, mono
-numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language), M22.13 (every action button carries an icon: six chained `.button(` calls and the one menu became `WordButton`s, and the guard now fails on a chained button or a word-only menu), M22.14 (a tile is a card again — the preview on the `field` well, the body on `card` — and the file card follows `photocat_1`: the preview card, the identity row, the "Shooting params" block, album and tag chips, the engine row; `card_block` counts its own line), M22.15 (the tile preview fills the whole 4:3 frame with a centring crop instead of the letterbox: `cover_rect`; every other preview stays fitted whole) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language), M22.13 (every action button carries an icon: six chained `.button(` calls and the one menu became `WordButton`s, and the guard now fails on a chained button or a word-only menu), M22.14 (a tile is a card again — the preview on the `field` well, the body on `card` — and the file card follows `photocat_1`: the preview card, the identity row, the "Shooting params" block, album and tag chips, the engine row; `card_block` counts its own line), M22.15 (the tile preview fills the whole 4:3 frame with a centring crop instead of the letterbox: `cover_rect`; every other preview stays fitted whole), M22.16 (the right panel after `photocat_12`: its own 280 px without a side-panel margin, a 44 px header band with the mock-up's "×", the card on 12 px of air, the format badge, the location pin, the folder glyph of an album chip and the framed "#" own-tag row), M22.17 (the word of a card chip acts and only the "×" removes: a tag click filters the grid by that tag and the accent marks the filter, the album word opens the album), M22.18 (the own-tag row: the word button became a bare 22 px "+", so the field is ~190 px of the 255 px card instead of 81), M22.19 (the top strip, the one-row content ribbon and the floating selection bar after `photocat_1`: the mark, one search field, the "Tiles" pill, the state, the icon details toggle and "Settings"; the chip row only while a filter is on; the years in three columns of two rows) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -2906,3 +2906,149 @@ source_language` 3 passed, `cargo clippy --all-targets` clean, `check.sh` 55 che
 **Documents.** `docs/UI.md` § Layout, § Metrics and the tile rule; `plan/M22-ui-spec.md` §2.4,
 §2.5, §5 q. 4, §6 M22.15 and §7; `docs/ARCHITECTURE.md` § Measurements; this file and
 `plan/BACKLOG.md` count M22.15.
+
+## M22.16 — the right panel after `photocat_12` (2026-11-26) ✅
+
+The owner after M22.15: "make the layout of the right panel after the mock-up" (`photocat_12`).
+
+**Symptoms.** The panel never owned its 280 px: egui's default side-panel frame keeps an 8 px margin
+on each side, so the 1 px line painted by `panel_edge` stood 9 px inside the panel — a strip of panel
+tone between the line and the grid — and the file card lived on 263 px. The header was two loose
+rows in the top corner of the scroll area with a word button "Hide", the preview and the blocks
+touched the panel's lines from edge to edge, and the own-tag field, the album chips and the location
+row were farther from `photocat_12` than from it.
+
+**Done.** The right panel now takes `Frame::NONE` with the panel tone: the line stands on its left
+edge and the whole width is the content's. The mock-up's header is a 44 px band on the `card` tone
+with a 1 px line under it — the info glyph, "File details" at 12 px strong and the mock-up's "×" as
+a 22 px icon button 12 px from the right edge, with the hint "free up room for the grid and
+calendar"; the worded way back is still "Details"/"Hide details" in the top bar, so an icon is never
+the only path (docs/UI.md § Layout). The card is drawn inside 12 px of air (`PANEL_PAD`) on every
+side — the mock-up's `p-3.5` — so the preview and every block share one column, and the full-screen
+inspector keeps the same air. The details the window can carry came with it: the corner badge of the
+preview shows the format of a still ("JPG", "HEIC") next to the video's "▶ M:SS"; the location row
+gets the mock-up's pin (a new `Icon::Location`); an album chip gets the folder glyph before the name;
+the own-tag row becomes one framed field with the mock-up's "`#`" and the "Add tag" button inside it,
+still never wider than the card (M22.12); the card's two actions take the 20 px button so "Open full
+screen" and "To trash" stay on one row in both languages. Refused: the round icon-only actions over
+the preview (the words stay), the album "+ Add" chip (a flow of its own — adding a file to an album
+from the card), the exposure badges and the RAW badge (not indexed, `plan/M22-ui-spec.md` §5 q. 5),
+the place name (a geocoder; the network is for models only), the 320 px panel width (the owner's
+280 px from M22.12) and the `rounded-full` tag pills (the 4/6/8 radius scale).
+
+**Measured** (`docs/ARCHITECTURE.md` § Measurements, the real DB of 2232 files, 1240×840 headless
+frames): the header band is 279×44 px at y 31–75, the "×" 22×22 px at x 1206–1228, the file card
+255 px wide at x 973–1228 — 12 px of air on both sides — and no rectangle or word of the panel leaves
+the window in either language; the Russian action row of the card is one line now (it used to wrap
+over 255 px). `cargo test` 285 passed (one new test), `cargo test --test source_language` 3 passed,
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
+
+**Documents.** `docs/UI.md` § Layout (the right panel, the "×" in the list of targets that keep their
+word alone), § Metrics (the right panel, the preview in the card, the own-tag row) and the file-card
+row of § Screens; `plan/M22-ui-spec.md` §2.5, §3 and §6 M22.16; `docs/references/mockups/README.md`;
+`plan/I18N.md`; `docs/ARCHITECTURE.md` § Measurements; this file and `plan/BACKLOG.md` count M22.16.
+
+## M22.17 — the word of a chip acts, the "×" removes (2026-11-26) ✅
+
+The owner after M22.16: the tag cloud of the card highlights one tag as "chosen", yet a click on any
+other tag deletes it from the photo; a click on a tag must not delete anything — removal has the "×"
+of the chip; and the highlight must mean the tags the photos are filtered by. Either a click does
+something meaningful (a search of the shared photos) or nothing at all, and then nothing is
+highlighted.
+
+**Symptom.** `card_chip` was one 20 px target: the word "tag 30% ×" was painted as a single galley
+and every click on the box hid the tag from the photo (`db::hide_tag`). The accent marked the
+*confident* tag, so the chip that looked "chosen" was not the chip the grid was filtered by; the
+albums chips worked the same way — a click anywhere removed the photo from the album.
+
+**Done.** A chip is now two targets in one box, `app::ChipClick` (`None`, `Body`, `Remove`): the "×"
+owns the glyph, the 4 px gap before it and 2 px around it — 16 px of the chip's right edge — turns
+`danger` under the pointer and carries the removal hint, while the word carries the action hint. A
+click on the word of a tag chip sets `tag_filter` (the same filter as the left panel's tag chips), a
+second click on the highlighted chip clears it, and the accent marks exactly that filter; the
+confident tag keeps its place in the caps row ("CLIP 84%") and in the line "tag: <name>". The word of
+an album chip opens the album in the "Albums" view (the path of a click in the tree); only the "×"
+removes the photo from it. My tags follow the same rule: the word filters, the "×" removes the own
+tag. The left panel already worked this way and is untouched.
+
+**Checks.** `the_word_of_a_card_chip_acts_and_the_cross_removes` clicks the chip at 8 px of its left
+edge (`Body`) and at 8 px of its right edge (`Remove`); `a_click_on_a_tag_in_the_card_filters_the_photos`
+clicks a tag in the whole window frame: the filter becomes `beach`, the two tags of the photo stay, a
+second click clears the filter; `the_word_of_an_album_chip_opens_the_album_and_the_cross_removes_the_row`
+checks the album word (the view becomes "Albums", the album is picked) and the "×" (the view stays, the
+rows of the file are reloaded). `cargo test` 288 passed, `cargo test --test source_language` 3
+passed, `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0
+errors; the window lives through `timeout 6`.
+
+**Documents.** `docs/UI.md` § Interaction (the chips of the file card), § Metrics (the card chip) and
+§ Findable in a second (a filter by a tag seen on a photo); `plan/M22-ui-spec.md` §2.5 and §6 M22.17;
+`plan/I18N.md` (three labels); this file and `plan/BACKLOG.md` count M22.17.
+
+## M22.18 — the own-tag field gets its room back (2026-11-26) ✅
+
+The owner after M22.17: the "add tag" field is short and the button is far too big — drop the word
+and keep only the "+".
+
+**Symptom.** The own-tag row reserved 140 px for a word button ("Add tag", 118 px in Russian) inside
+a 237 px framed row: the field got `available − 140 − 16` = 81 px, less than the 164 px hint of the
+field, and the button outweighed the input it serves.
+
+**Done.** The button is an icon-only 22 px square (`icon_button` with the `add` glyph, the word
+`Add tag` as its hint) inside the framed row; the field takes `available − 16 − 22 − 8` — about
+190 px of the 255 px card in either language, and the Russian hint fits whole. The reserve is
+counted, so the row still never widens the panel (M22.12), and the field never falls below 40 px.
+The owner's second look at the same row ("the input is short and sticks to the upper edge of the
+shared field") found the cause: egui styles a text edit as a button — `min_size.y` is the 26 px of
+`interact_size` and the text is aligned `LEFT_TOP`, so inside the 22 px row the input sat at the top
+and read as short and crooked. The row now sets `interact_size.y = 22` and centres the text
+(`TextEdit::align(LEFT_CENTER)`): "`#`", the tag and the "+" are one 22 px line, the row is 28 px
+(the mock-up's `h-7`).
+`docs/UI.md` § Layout names the "+" among the targets that keep no word, next to the panel's "×":
+the owner's request outranks the general rule, and the "`#`", the hint and the "My tags" heading say
+what the square does.
+
+**Checks.** `the_own_tag_row_keeps_a_wide_field_and_a_bare_plus`: the word "Добавить тег" is not
+drawn, the hint of the field is whole, the "+" is a 22×22 rect at least 150 px after the text and
+inside the window, and the vertical centres of the "#", the hint and the "+" agree within 1 px; the
+test fails on the 140 px reserve (103 px to the button) and on the theme's top-aligned text (3.5 px
+off) and passes now.
+`the_file_card_keeps_the_mock_ups_band_and_air` still keeps the "+" inside the card's 12 px air;
+`the_file_card_fits_the_right_panel` now looks for the field's hint (the row has no word button any
+more). `cargo test` 289 passed, `cargo test --test source_language` 3 passed, `cargo clippy
+--all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors; the window lives
+through `timeout 6`.
+
+**Documents.** `docs/UI.md` § Layout (the "+" in the list of targets that keep no word), § Metrics
+(the own-tag row) and the file-card row of § Screens; `plan/M22-ui-spec.md` §2.5 and §6 M22.18; this
+file and `plan/BACKLOG.md` count M22.18.
+
+M22.19 is the owner's next look at the window: "the top part does not match the mock-up, and other
+elements either". A frame at 1440×875 beside the rendered `photocat_1` named the differences: the
+strip was eight word buttons without a mark, the content had three rows where the mock-up has one,
+the selection sat in the chip row, and the footer repeated the "Details" word that the icon toggle
+now carries. The strip now follows the mock-up group by group: the photo-library mark and "photocat",
+one search field in the middle (mode switch, query, "Search", "×") at most 576 px and centred on
+measured widths, and on the right the "Tiles" pill (a compact slider, the value in the hint), the
+state pill (a dot and "Synced"/"Syncing", the counters in the hint), the lit details toggle and
+"Settings". "Folders (N)" became the bare "+" of the "Catalog" heading; the facts moved into the
+state hint and the footer. The content is one 44 px ribbon — title 18 px and facts 12 px mono on the
+left, the cell views, "By months / Flat" and "Sort" on the right behind 1 × 16 px dividers — and the
+chip row appears only while a filter is on. The selection is the mock-up's floating pill at the
+bottom edge of the grid: a dot, "N selected · size" in mono 11 in the accent, "Select all (M)" and
+"Clear selection", drawn in a child ui at a fixed rect after the scroll area (an `egui::Area` was
+refused: its first frame is a sizing pass that paints nothing). The footer is a dot, the last fact
+and the counters on the left, the selected file "name · frame · size" on the right; the five years
+went from two columns of three rows to three of two, so the fifth year no longer falls under the
+pinned summary at 840 px. Refused: the "Filter" menu, the per-month "Select all", the 224/320 px
+panels and the storage bar (the reasons are in §6 of the spec).
+**Measured.** At 1440×875: the mark at x 12–112, the search frame at 273–860, the "Tiles" pill at
+1030–1150, the toggle and "Settings" to the right edge; the ribbon is one row, y 85–129; with two
+files picked the bar sits at y 751–783 and the chip row is not drawn. `cargo test` 290,
+`cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors. A stray `git checkout src/app.rs` during the pass wiped the
+uncommitted M22.16–M22.18 work; it was replayed from that pass's session log — the 289 tests of
+M22.18 passed again — and M22.19 was then re-applied on top.
+
+**Documents.** `docs/UI.md` § Layout, § Metrics (the top strip, the ribbon, the years, the selection
+and the footer) and the Grid row of § Screens; `plan/M22-ui-spec.md` §2.4, §2.5, §3 and §6 M22.19;
+this file and `plan/BACKLOG.md` count M22.19.

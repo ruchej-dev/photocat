@@ -139,18 +139,22 @@ the interface rules at the end of the file.
   decision mark → a 22 px caption band (`panel` tone, a mono 10 file name on the left, the date in
   `text_dim` on the right) → a 2 px accent selection outline and a square check flag. The list view
   keeps the same words and accent: a row with a 58×40 thumbnail, the name and the date · size.
-- **The top strip is 32 px and one row** (M22): brand + subtitle, the search mode, the query,
-  "Find", "Reset", the state, "Folders (N)", "Details", "Settings". The third row is the pass
-  progress only. The folder field and "Index / Refresh" live in the left panel: working with the
-  archive is not search.
-- **The bottom strip is 28 px** (M22): the last fact on the left, the file counters and the
-  selection on the right, all in the numeric family.
-- **The content panel (two rows, M22.8):** first the view title at 18 px and the facts next to it at
-  12 px, with "Tiles" and its 100–260 px slider on the right; then a row of 20 px controls — the three
-  cell views, "By months / Flat" and the "Sort" menu — which wraps instead of clipping in a narrow
-  window, so the title keeps its row at any width. Below, the chips of active filters with "×" and the
-  total "found N of M". The filter row stays in place when the filter is empty: the view title does
-  not jump.
+- **The top strip is 32 px and one row** (M22.19, after `photocat_1`): the mark (a 20 px
+  photo-library glyph in the accent and "photocat" at 14 px), one search field in the middle (the
+  search glyph, the "Semantic / By text" mode switch with its arrow, the query, "Search" in the
+  accent and "×"), and the tools on the right — the "Tiles" pill (the grid glyph and a compact
+  100–260 px slider, no number: the value is in the hint), the state pill (a dot and "Synced" /
+  "Syncing", the counters in its hint), the details toggle (a 28 px icon that stays lit while the
+  right panel is open) and "Settings". The third row is the pass progress only. The folder field
+  and "Index / Refresh" live in the left panel: working with the archive is not search.
+- **The bottom strip is 28 px** (M22.19): a dot and the last fact on the left, then the count of
+  files with their volume in the numeric family; on the right the selected file — its name, the
+  frame ("6000×4000") and the size, or "N selected · volume".
+- **The content ribbon is one 44 px row** (M22.19, the mock-up's `h-11`): the view title at 18 px
+  and the facts next to it at 12 px on the left; on the right the controls of the view as 20 px
+  buttons — the three cell views, "By months / Flat" and the "Sort" menu — separated by 1 × 16 px
+  lines. The row of active filter chips with "×" and "Reset" is drawn **only while a filter is on**,
+  so the grid does not pay for an empty row; the counts are already in the title.
 - **Three columns:** on the left the app map and the filters, in the centre the grid, on the right
   the details of the selected file. The right panel is 280 px and appears while the grid keeps 4
   columns (window ≥ 1200 px); below that the card moves into the left panel, so that the grid does
@@ -160,12 +164,20 @@ the interface rules at the end of the file.
   and the file card (in a narrow window). The years open that scrolling part, so they are the first
   thing under the pinned filter and need no scroll of their own; they are a filter of the grid and
   of the calendar only — the duplicates, faces, trash and integrity screens have a context of their
-  own.
-- **The right panel:** "File details" is pinned on top, the rest scrolls. Nothing is selected by
-  itself: while there is no file, the panel says "Pick a snapshot in the grid".
+  own. The five years go in three columns of two rows (M22.19): six cells (five years and "All
+  years") always take two rows, so the block never changes height and the oldest year stays above
+  the pinned summary at 840 px. The "Catalog" heading carries a bare "+" that opens the folders
+  dialog (the worded path is the dialog itself).
+- **The right panel (M22.16, after `photocat_12`):** a 44 px header band on the `card` tone with a
+  1 px line under it — the info glyph and "File details" at 12 px strong on the left, the mock-up's
+  "×" at the right (a 22 px target, the hint "free up room for the grid and calendar"; the worded
+  way back is "Details" in the top bar) — then the file card on 12 px of air, scrolled as one
+  column. Nothing is selected by itself: while there is no file, the panel says "Pick a snapshot in
+  the grid".
 - **A row never widens a panel** (M22.12): the width of a panel is the rule, the row is the content.
-  A long field takes what the word button leaves (the own-tag field is `available − 140 px`, never
-  below 60 px), a long name is shortened or wrapped, and no row may push the card past the 280 px.
+  A long field takes what the word button leaves (the own-tag field is `available − 140 − 16 px`
+  inside its frame, never below 40 px), a long name is shortened or wrapped, and no row may push the
+  card past the 280 px.
   egui widens a panel to fit an overflowing row and remembers the wider size, so the defect outlives
   the file that caused it: the card is shifted right and clipped on both sides, and the canvas of the
   central panel paints over its left margin. `app::tests::the_file_card_fits_the_right_panel` draws
@@ -191,11 +203,16 @@ the interface rules at the end of the file.
   `Popup::menu`) carry the same icons. A `ComboBox` is a select, not a button: the language, the
   model, the theme and the album parent keep words, as the mock-up's `<select>` does. The colour
   comes from the theme, so both themes and the disabled state need no second drawing.
-- **Where a button keeps its word alone.** Four kinds of target are too small or too special for an
-  icon, and each is checked by `every_button_of_the_window_has_an_icon` in `src/app.rs`:
+- **Where a button keeps its word alone.** A few kinds of target are too small or too special for
+  an icon, and each is checked by `every_button_of_the_window_has_an_icon` in `src/app.rs`:
   the per-tile actions placed into a fixed 20 px rect (`keep`, `restore`, `pick`, `not him`), the
-  "×" of a filter chip (it is part of the chip), the collapse triangle of the album tree, and the
-  "×" that removes a row from an album. A plain `menu_button` is forbidden: the one menu of the
+  "×" of a filter chip (it is part of the chip), the collapse triangle of the album tree, the
+  "×" that removes a row from an album, the "×" that closes the right panel (M22.16: a 22 px
+  target in the mock-up's header with a hint), the details toggle of the top strip (M22.19: the
+  mock-up's 28 px icon that stays lit while the panel is open; its hint is "Details" / "Hide
+  details" and the panel's "×" is the second way), and the "+" that adds an own tag (M22.18: a
+  22 px square inside the framed field row, the owner's request — the word made the field short;
+  the hint "Add tag", the "`#`" and the block's heading "My tags" say what it does). A plain `menu_button` is forbidden: the one menu of the
   window ("Sort") is a `WordButton` that opens its list through `Popup::menu`, so a menu carries an
   icon like every other action.
 - **The player.** ⏮ ▶ ⏸ ⏭ and the sound sign are the first members of the same set (`Icon`), drawn
@@ -225,6 +242,13 @@ The full rules are in `.pi/skills/ui-design/references/vzaimodeystvie.md`. In sh
   snapshots and add them: by itself it saves nothing. "Album order" is a separate sort option,
   available only inside an album; outside it the sort returns to date ↓. Deleting an album asks for
   confirmation and shows the subtree; the files on disk do not change.
+- **The chips of the file card (M22.17):** the word and the "×" on a chip are two targets. A click
+  on the word of a tag chip filters the grid by that tag — a second click on the highlighted chip
+  clears the filter — and the accent marks exactly the tags the photos are filtered by, not "the
+  confident one". The "×" (which turns red under the pointer) removes the tag from this photo, the
+  own tag from the photo, or the photo from the album; a click on the word of an album chip opens
+  that album in the "Albums" view. The left panel's tag chips keep the same rule: a click picks a
+  filter, a second click on the picked one clears it.
 - **Album export (M20):** "Export to disk…" opens a dialog: the destination folder (it must already
   exist), the name template (`{n}_{orig}` by default), "Show the plan" and "Export N files". First
   the plan tree with folders and names is visible; copying runs in the background, progress and
@@ -277,9 +301,10 @@ a rare one.
 | Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section | 0–1 |
 | One year of the archive | left panel, the "Years" block: the five newest with counts; the picked year in the accent, "All years" is the way back | 1 |
 | Active filters and reset | above the grid, chips with "×" | 1 |
+| Filter by a tag seen on a photo | the tag chips of the file card: a click on the word (the "×" removes the tag from the photo) | 1 |
 | Selecting several files | Ctrl/Shift+click on tiles, "Select all (M)" above the grid | 1 |
 | Albums: tree, subalbums, order | left panel "Albums (N)" → the tree in the content panel; "+ New album", "+ Subalbum" | 1–2 |
-| Tile size ("Tiles") | above the grid, to the right of the view title | 0 |
+| Tile size (the "Tiles" pill) | in the top strip, right of the search field (M22.19) | 1 |
 | Cell view (tile / rows / list) | there too, next to the size slider | 1 |
 | Layout and sort | there too: "By months / Flat" and the "Sort" menu | 1 |
 | The main action of the view | left panel, the first group after navigation | 1 |
@@ -312,9 +337,9 @@ a rare one.
 | Cell view "List" | the row height `24 + 0.16 × slider` (40 px at 100, 66 px at 260), a 4:3 thumbnail `row − 8` high, the name at 12–14 px, the date · size in mono 10–12, the kind/duration on the right in mono; the two text lines are centred as one block and never leave the row; gap 4 px | `app.rs::draw_list`, `list_row_height` |
 | Grid step | 10 px between tiles inside a row and between rows (the mock-up's `gap-2.5`); other screens live on the common `item_spacing` 8×6 | `app.rs::draw_tiles`, `draw_flow` |
 | Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group; the heading of the group under the top edge of the grid area is pinned there on the canvas tone and pushed out by the next group's heading (M22.4) | `app.rs::month_header`, `draw_sticky_month` |
-| Content panel | two rows (M22.8): the heading — view title 18 px + facts 12 px, and on the right "Tiles" 11 px with a 120 px slider, present in all three cell views, its tooltip naming what it scales (tile width, row height, list row); then the controls row of 20 px buttons: the three cell views, "By months / Flat" and the "Sort" menu (11 px label), wrapping instead of clipping; below, the chips row 26 px high | `ui()` → `draw_filter_chips` |
+| Content panel | one 44 px ribbon (M22.19): the view title 18 px with the facts 12 px mono on the left; on the right the controls as 20 px buttons — the three cell views, "By months / Flat" and the "Sort" menu (11 px label) — divided by 1 × 16 px lines; the chips row with "×" and "Reset" appears only while a filter is on | `ui()` → `draw_filter_chips` |
 | Navigation item | 28 px high, a 14 px icon 8 px from the left edge, the 13 px label 6 px after it, the 11 px number on the right; the selected one — the `field` tone and accent text (M22.3, the mock-up's row without a bar) | `app.rs::nav_item` |
-| Action button | 26 px high, 10 px padding, 4 px radius: a 14 px icon, 6 px, the word of 13 px; the one main action of a screen — the accent fill and the text on the accent; the OS-trash path — a 1 px `danger` border, no fill; a 20 px compact variant for a strip switch and a 20 px small one for a dense row; the icon takes the colour of the word, the disabled state takes `text_dim` | `app.rs::WordButton`, `word_button` |
+| Action button | 26 px high, 10 px padding, 4 px radius: a 14 px icon, 6 px, the word of 13 px; the one main action of a screen — the accent fill and the text on the accent; the OS-trash path — a 1 px `danger` border, no fill; a 20 px compact variant for a strip switch, for a dense row and for the two actions of the file card (M22.16, so they stay on one line in both languages); the icon takes the colour of the word, the disabled state takes `text_dim` | `app.rs::WordButton`, `word_button` |
 | Icon | 14 px (12 px in a compact/small button), a 1.5 px stroke, the box = the glyph: the set is the mock-up's Material Symbols by name, drawn by `paint_icon` — the player signs (⏮ ▶ ⏸ ⏭, sound) were the first of it | `app.rs::Icon`, `paint_icon` |
 | Details row | an 11 px label on the left in a 72 px column, a 12 px value with wrapping | `app.rs::meta_row` |
 | Face tile | 150×150 px + a 26 px caption (the metrics do not change, M22.9); a 112×112 crop aligned by 5 points; a "not him" button top right; under the frame the date in mono 10 `text_med` on the left and the detection score in mono 10 `text_dim` on the right; a picked face and the selected file carry a 2 px accent frame; the tile is a `card` with an 8 px radius | `app.rs::draw_face_cell` |
@@ -332,18 +357,19 @@ a rare one.
 | Tooltip preview | up to 400 px on the long side, proportions kept | `draw_cell` |
 | Left panel | 260 px, width not draggable | `Panel::left(...).exact_size` |
 | Navigation row | 28 px, a 14 px icon and the word at 13 px, the count in mono 11 at the right edge, radius 6; the active row sits on the `card` tone with a 2 px accent edge on the left and its word and number in the accent — the same mark as the settings section list (M22.11); hovering shows the card tone as well | `app.rs::nav_item` |
-| Year row | 20 px, two columns of three rows (`All years` included, so the block never grows): the year in mono 11 on the left, the count of files in mono 10 at the right edge; the picked year has the accent fill and the accent text; "All years" appears only while a year is picked | `app.rs::year_row`, `years_block` |
+| Year row | 20 px, three columns of two rows (M22.19; `All years` included, so the block never grows): the year in mono 11 on the left, the count of files in mono 10 at the right edge; the picked year has the accent fill and the accent text; "All years" appears only while a year is picked | `app.rs::year_row`, `years_block` |
 | Summary row | 16 px: an 11 px caption on the left, an 11 px mono number at the right edge; four rows fit under the pinned "Summary" of the left panel | `app.rs::stat_row` |
 | Tag chip | 20 px high, mono 11, the word and the count of snapshots after a middle dot ("furniture · 669"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — accent fill, accent 1 px border and accent text; the width follows the text and never the state, so a click does not move the row | `app.rs::tag_chip` |
-| Right panel | 280 px; closed by "Hide" and by "Details" in the top bar; hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right` |
-| Preview in the card | the panel width, 4:3, no higher than 210 px, the frame fitted entirely; below the file name 14 px and the path 11 px | `App::file_card` |
-| Own-tag row | one line, 26 px high: the field takes `available − 140 px` (never below 60) and the word button keeps its 140 px, so the row always fits the 280 px panel and never widens it (M22.12) | `App::file_card` |
+| Card chip | 20 px high, mono 11, 7 px of padding on each side; the word, an optional 12 px glyph before it (the album's folder) and the "×" after a 4 px gap; two targets in one box — the word (the tag filter, the album) and the "×" (removal, `danger` under the pointer); idle — `field` fill and `text_med`, the tag the grid is filtered by — `accent_soft`, an accent border and accent text | `app.rs::card_chip`, `ChipClick` |
+| Right panel | 280 px, its frame with no margin of its own so the 1 px line stands on its left edge; a 44 px header band on the `card` tone with the info glyph, "File details" at 12 px strong and the 22 px "×" 12 px from the right edge, a 1 px line under it; closed by that "×" (hint) and by the details toggle of the top strip (M22.19; its hint is "Details" / "Hide details"); hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right`, `App::details_panel` |
+| Preview in the card | the panel width minus 24 px of air, 4:3, no higher than 210 px, the frame fitted entirely, the `canvas` well, an 8 px radius, a 1 px `border`, all four corners cut; a dark corner badge — "▶ M:SS" for a video, the format ("JPG", "HEIC") for a still; below the name mono 12 in the accent and the path mono 11 `text_dim`; "Open full screen" and "To trash" as 20 px buttons in one row in either language | `App::file_card` |
+| Own-tag row | one line in a framed `field` row (a 4 px radius, 8 px/2 px inside, M22.16, 28 px high with its 1 px line): the "`#`" in mono 12, the frame-less field takes `available − 16 − 22 − 8 px` (never below 40), the "Add tag" button is an icon-only 22 px square with the `add` glyph and the hint, and both are 22 px high with the text centred on the line (M22.18 — the theme's 26 px field with its text at the top made the input stick to the upper edge); the field is ~190 px of the 255 px card and the row never widens the panel (M22.12) | `App::file_card` |
 | "Settings" dialog | 760×620 px of content inside the dialog frame, a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 14 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
 | Dialog | one `dialog_frame` for all seven: the `card` tone, a 1 px `border`, the 8 px radius and 16 px of air inside; the title 14 px, the body 13 px, hints 11–12 px; at most one accent button — the dialog's main action — and no accent at all on the settings dialog, where every change is saved at once; the trash confirmation is the one dialog whose button moves files, so it carries the `danger` border and no fill; a number stands in a facts row of its own in mono 11, never inside a translated sentence; a report body is mono 11 in its own scroll area with a copy button (M22.10) | `app.rs::dialog_frame`, the `*_modal` functions |
 | Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |
-| Top strip | 32 px, one row, `panel` tone, 1 px bottom line | `App::top_bar` |
-| Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters | `App::status_bar` |
-| Selection | a 2 px accent outline on the selected tile and a square accent check flag; "N selected · size" at 11 px in the chips row | `draw_cell`, `draw_filter_chips` |
+| Top strip | 32 px, one row, `panel` tone, 1 px bottom line (M22.19, after `photocat_1`); the search field is at most 576 px and centred between the mark and the tools; the "Tiles" pill is 14 px of glyph, a 6 px gap and an 84 px slider, the state pill a dot and one word, the details toggle and "Settings" on the right | `App::top_bar`, `App::search_field`, `App::tile_pill` |
+| Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters: a dot and the last fact, the count of files and their volume; on the right the selected file (name · frame · size) | `App::status_bar` |
+| Selection | a 2 px accent outline on the selected tile and a square accent check flag; while anything is picked, a floating bar at the bottom edge of the grid (the mock-up's pill): a dot, "N selected · size" in mono 11 in the accent, then "Select all (M)" and "Clear selection" (M22.19); it lies over the grid on its own layer and never moves the tiles | `draw_cell`, `App::ui` (the "pick-bar") |
 | Album tree | a row 26 px, a 14 px indent per level, a 22 px triangle, a 14 px label; "N files · M subalbums · size" at 11 px next to it; the tree area no higher than 190 px | `draw_album_tree` |
 | Album header | above the actions of an open album: the name 14 px strong, the facts next to it in mono 11 — "N files · M sub-albums · size" and " · N in the trash" when it is not empty; the view heading keeps "Albums" with the count of albums, so the name is printed once | `app.rs::album_header` |
 | Sub-album card | the width from the "Tiles" slider (100–260 px), a 16:10 `canvas` cover with the album's first snapshot fitted whole (a folder mark `▸` when it has none), the name 13 px, "N files" and the size in mono 10 at the bottom; the `card` tone with a 1 px `border`, the accent line under the cursor; 10 px apart; the sub-albums take one row, two at most, the rest scrolls, and the grid keeps 220 px | `app.rs::draw_album_cell`, `album_card_size` |
@@ -357,11 +383,11 @@ for text over a darkened frame, where the background is a photograph.
 
 | Screen | What is on it | Main action |
 |---|---|---|
-| Grid (`View::Grid`) | the top strip: brand, the "Semantic / By text" switch, the query field, "Find", "Reset", the archive state, "Folders (N)", "Details", "Settings"; the left panel, top down: the "Catalog" block (the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos"), then, in the scrolling part, the "Years" block (the five newest years with counts, two columns), the model and text blocks, with the summary pinned at the bottom; above the grid — the view title at 18 px with the facts at 12 px in the numeric family and "Tiles" with a slider on the right, then a row with the three cell views, "By months / Flat" and the "Sort" menu, and the filter chips with "×"; in the model block — the tags as 20 px chips with the snapshot count after a middle dot ("furniture · 669"), the picked chip in the accent, and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; in the chips row — "N selected · size", "Select all (M)", "Clear the selection"; on the right — the details of the selected file; the bottom strip: the last fact and the counters | find and open |
+| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (a "+" in its heading, the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos"), then, in the scrolling part, the "Years" block (the five newest years with counts, three columns), the model and text blocks, with the summary pinned at the bottom; above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; in the model block — the tags as 20 px chips with the snapshot count after a middle dot ("furniture · 669"), the picked chip in the accent, and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed"; every group is a card of the `card` tone with "#N", the reason at 13 px, the facts in mono 11 and the advice "keep <name> — …", the pictures inside; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 month cards with counters, covers and sizes above the line "12 months of 2024" and the facts of the year, a month — a grid of weeks Mon–Sun with the caps weekday row, the day number, the counter badge and up to 3 thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects (an accent frame); on the "Day" layer — the snapshots in a `draw_cell` grid with the time in the caption; on the upper layers below — the selected day as a list with the time, the name and the size, and "No date"; an empty month says "No files in this month." and the button "Go to <the nearest month with files>" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups", the group list with names, photo counts and a "together" tick; the open group's name at 14 px with its facts in mono 11; the face crops of the group with the date and the score in mono 10, "not him", "pick" and "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" title at 14 px | name a person, split off strangers and find photos where people are together |
-| Albums (`View::Albums`) | the tree with indents and collapsing, the primary "+ New album", "+ Sub-album", "Rename", "Move to…", "Up / Down", "Delete the album"; inside — the album's own header (the name 14 px, the facts in mono 11), the sub-albums as cards with a 16:10 cover, the name, the count and the size, and a grid of snapshots in album order, "In the album / All files", "Add selected (N)", "Remove from the album (N)", "File up / down", "Export to disk…"; the chip "Album "Name" ×" in the chips row (no floating bar) | build a tree and an order, add snapshots, export copies to disk |
+| Albums (`View::Albums`) | the tree with indents and collapsing, the primary "+ New album", "+ Sub-album", "Rename", "Move to…", "Up / Down", "Delete the album"; inside — the album's own header (the name 14 px, the facts in mono 11), the sub-albums as cards with a 16:10 cover, the name, the count and the size, and a grid of snapshots in album order, "In the album / All files", "Add selected (N)", "Remove from the album (N)", "File up / down", "Export to disk…"; the chip "Album "Name" ×" in the chips row (the floating bar is for the selection only, M22.19) | build a tree and an order, add snapshots, export copies to disk |
 | Album export (dialog, `App::export_modal`) | "Folder" (must exist), "File name" (`{n}_{orig}`), a hint about the substitutions, "Show the plan", "Export N files", "Close"; below — a summary and the tree "album / subalbum / 001_name.jpg"; after the pass — a report line and "Copy the report" | get a real folder with copies in album order |
 | Trash (`View::Trash`) | the counter and size in mono 11, "Restore all" in the neutral tone, "Empty the trash (N)" in the one `danger` border with confirmation, tiles marked "in trash" and a "restore" button | return a file or deliberately move it to the OS trash |
 | Integrity (`View::Integrity`) | the "Folder A (archive)", "Folder B (copy)", "Manifest file" fields; the "Show all paths" tick; the "Compare the copies", "Write the manifest" (with an existing file — "Overwrite the manifest" and "Cancel"), "Check against the manifest" buttons; the row "Remind me to check every [N] days" (0 — off), the date and result of the last pass, the report path `verify-last.txt` and "Copy the last report"; the verdict in words, a report in the same format as the CLI, and "Copy the report" | compare a backup or check the archive against the manifest without a terminal |
@@ -369,18 +395,18 @@ for text over a darkened frame, where the background is a photograph.
 | Full screen (modal) | the header: "Back to the grid", the name at 14 px, the date and the facts (`18.4 MiB · 6000×4000`) in mono 11, "N of M" in the accent; the tools row: "Zoom out", the percentage in mono, "Zoom in", "Fit", "1:1", "Rotate", "Text on the photo", "In the system viewer", "Inspector"; the frame with the face chips over it; below it the playback row ⏮ ▶/⏸ ⏭ (on a snapshot ▶ starts the slideshow), "Slideshow", a 3/5/10 s interval; under the frame the series strip of the day; with "Inspector" on — the file card on the right | look at a snapshot in full, look at a detail at a zoom above 100 %, walk the series of the day and come back to the same place |
 | Video in the full screen (modal, the same screen) | a cover frame with a big ▶ button in the centre; after it starts the frame plays in the window, ▶/⏸, "0:12 / 0:22" with seek, the sound sign and a slider, the "no device" label, "Stop the video"; when finished — the next file opens itself | watch a video with sound without leaving the app |
 | Settings (dialog, `App::settings_modal`) | on the left, under the caps "SETTINGS SECTIONS", the sections with their icons and their state: "Interface" (EN) / "Интерфейс" (RU) (the language — English or Русский, the choice is saved immediately; in English an untranslated label stays Russian — `plan/I18N.md`), "AI model", "Indexing and duplicates", "Tags", "Faces", "Storage", "External programs"; inside — the model from the catalogue with the number of features, the licence and a hint (CLIP 512, SigLIP 768), the state "Downloaded · verified", the model folder, the size limit, the consent and "Download model", "Verify the model", "Compute tags", the tag and duplicate thresholds (a 0–100% filter percentile per tag and a separate confident-tag threshold 0.22 + margin; next to it — how many files pass), the tag dictionary editor (a row per tag: enabled, label, minimum percentile, "Remove from the dictionary", 2–3 prompts per line — the tag weight is the best of them; below — the "new label" and "prompt" fields, "Add to the dictionary", "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults", the JSON file path), the thread count, the face model with consent and "Download the face model", the face merge threshold, the used space ("Compute the used space"), cleaning previews/faces/index, the DB/cache/model paths, the `ffmpeg`/`ffprobe`/`tesseract` path fields with the version and a "without it" hint, "Verify and save the programs"; at the bottom "Changes are saved immediately" and "Close" | download/switch the model, set thresholds, the tag dictionary, faces, disk space and external programs |
-| File card (right panel, `App::file_card`) | the header "File details" with the info glyph and "Hide"; a 4:3 preview card — the `canvas` well, the 8 px radius, a 1 px `border`, the snapshot fitted whole with all four corners cut, a video gets a "▶ M:SS" badge in the corner; the identity row — the name in the numeric family in the accent on the left, the size on the right; the path in mono 10 `text_dim`; the "Shooting params" `card_block` — a caps heading, the camera after a photo glyph, "Date and time" and "Resolution" in two columns, "Location", a hairline and SHA256; "Albums" as chips with a count in the caps row; "AI tags" — the caps row with "CLIP <weight>%" on the right, the line "tag: <name>" or "tag: not sure — the top weights are close", chips "tag 30% ×" (the confident one in the accent, a click removes it, the weight and the percentile are in the hint), the top-3 when unsure and the rest under "all tags (N)", "restore hidden tags (N)"; "My tags" as chips and the own-tag field with "Add tag"; "Text on the photo" with the "tesseract" engine, "Recognize text" / "Recognize again" and the text block with the match highlighted | understand what this is and fix the tags |
+| File card (right panel, `App::file_card`) | the panel's 44 px header band — the info glyph, "File details" at 12 px strong and the mock-up's "×" at the right — then the card on 12 px of air (M22.16); a 4:3 preview card — the `canvas` well, the 8 px radius, a 1 px `border`, the snapshot fitted whole with all four corners cut, the corner badge ("▶ M:SS" or the format); the identity row — the name in the numeric family in the accent on the left, the size on the right; the path in mono 11 `text_dim`; "Open full screen" and "To trash"; the "Shooting params" `card_block` — a caps heading, the camera after a photo glyph, "Date and time" and "Resolution" in two columns, "Location" with a pin and the coordinates, a hairline and SHA256; "Albums" as chips with a folder glyph and a count in the caps row (a click on the word opens the album, the "×" removes the photo from it); "AI tags" — the caps row with "CLIP <weight>%" on the right, the line "tag: <name>" or "tag: not sure — the top weights are close", chips "tag 30% ×" (a click on the word filters the grid by the tag, a click on the tag that is the filter clears it, the accent marks that filter, the "×" removes the tag from the photo, the weight and the percentile are in the hint), the top-3 when unsure and the rest under "all tags (N)", "restore hidden tags (N)"; "My tags" as chips (the same split: the word filters, the "×" removes) and the framed own-tag row ("`#`", the field, the "+"); "Text on the photo" with the "tesseract" engine, "Recognize text" / "Recognize again" and the text block with the match highlighted | understand what this is and fix the tags |
 
 ## States
 
 - Empty DB → one line in the grid: "Type a folder and press "Index"", no empty tiles.
-- An active filter → chips appear above the grid: "path/date: … ×", "tag: … ×", "photos only ×",
-  "by relevance: … ×", next to them "found N of M"; "×" removes only its own filter, the grid does
-  not shift.
-- Several tiles selected → each gets an accent outline and a tick, the chips row shows "N selected ·
-  size", "Clear the selection"; the card shows the file clicked last and "N in the selection"; the
-  status on the right shows "N selected · last: name". Changing the view/filter/search/order clears
-  the selection and writes the reason.
+- An active filter → a chips row appears under the ribbon: "path/date: … ×", "tag: … ×",
+  "photos only ×", "by relevance: … ×" and "Reset"; "×" removes only its own filter, the grid does
+  not shift. No filter → no row (M22.19).
+- Several tiles selected → each gets an accent outline and a tick, and the floating bar appears at
+  the bottom edge of the grid: "N selected · size", "Select all (M)", "Clear selection" (M22.19);
+  the card shows the file clicked last and "N in the selection"; the footer shows "N selected ·
+  volume". Changing the view/filter/search/order clears the selection and writes the reason.
 - "Flat" on → one continuous grid without month headings; the same order as in the full screen and
   in the selection: one function `App::ordered`, key `(date, id)`.
 - A semantic search is running → the results are a flat list by relevance; "By months / Flat" and the
@@ -615,7 +641,7 @@ are what the owner sees in English mode. See `plan/I18N.md`.
   model", "Verify the model", "Apply the path", "Verify and save the programs", "Download the face
   model", "Verify the face model", "Find faces (1972)", "Resume (N)", "Rebuild groups", "not him",
   "Save the name", "Recognize text", "Recognize again", "Recognize documents (435)", "Resume (315)",
-  "Stop", "Today", "Folders (N)", "Add a folder…", "Remove from the index", "Index all", "Open full
+  "Stop", "Today", "Add a folder…", "Remove from the index", "Index all", "Open full
   screen", "Back to the grid", "Zoom out", "Zoom in", "Fit", "1:1", "Rotate", "Inspector",
   "Slideshow", "Stop the slideshow", "3 s", "5 s", "10 s", "Text on the photo", "Show the
   full text", "Stop the video", "Close", "To trash", "Restore", "Restore all", "Empty the trash
@@ -626,16 +652,21 @@ are what the owner sees in English mode. See `plan/I18N.md`.
   without indexing".
 - Model catalogue: "217.5 MiB · in place", "148.6 MiB · not downloaded", "over the limit"; the limit
   is "250 MiB" with a unit.
-- Search mode: "Semantic" / "By text" (a switch, the active one has an accent underline).
-- Content panel: "Tiles", the cell views "Tile / Rows / List", "By months / Flat", "Sort", "All", "Photos", "Videos", "found N of M"; the
-  filter chips — "path/date: … ×", "tag: … ×", "by relevance: … ×" (a chip has only one "×" and the
-  tooltip "remove the filter").
+- Search mode: "Semantic" / "By text" (a switch inside the search field, the active one in the
+  accent, with a down arrow); the field's hint names the mode ("cake, sea, furniture, document" or
+  "receipt, invoice, 2024"); "Search" submits, "×" clears the field and the results.
+- Top strip: "photocat", then "Synced" / "Syncing" with the counters in the pill's hint, the
+  details toggle with "Details" / "Hide details" as its hint, "Settings".
+- Content ribbon: the view title and its facts, the cell views "Tile / Rows / List", "By months /
+  Flat", "Sort"; the filter chips — "path/date: … ×", "tag: … ×", "by relevance: … ×" (a chip has
+  only one "×" and the tooltip "remove the filter") and "Reset".
 - Month heading: "May 2024" and "· 132 files · 5.4 GiB"; without a date — "No date"; a month with
   zero files is not drawn at all.
 - Navigation: "LIBRARY" (All files, Calendar, Faces) and "TOOLS" (Duplicates and series, Trash); the
   number on the right is how many files, groups or faces there are, zero is a number too.
-- Card: "File details", the file name at 14 px, the path at 11 px, "Date", "Camera", "GPS", "Size",
-  "SHA256", "AI tags", "Text on the photo", "Selected: <file> · <date>" in the status line.
+- Card: "File details" at 12 px in the panel's header band, the file name at 12 px, the path at
+  11 px, "Shooting params", "Date and time", "Resolution", "Location", "SHA256", "Albums", "AI tags",
+  "My tags", "Text on the photo", "Selected: <file> · <date>" in the status line.
 - Date source: "(EXIF)", "(file name)", "(file time)" — the DB holds `exif`/`filename`/`mtime`.
 - Semantic: "Text on the photo:", "tag: children (0.24)", "tag: not sure", "with a confident tag:
   1122", "with text: 146 of 1972 snapshots", "candidates for the pass: 435, N left", "text from the

@@ -245,14 +245,6 @@ pub fn weekday(lang: Lang, day: usize) -> &'static str {
 const RU_WEEKDAYS: [&str; 7] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const EN_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/// «found 4 of 10» — the same phrase in both languages, built in one place.
-pub fn found(lang: Lang, shown: usize, total: usize) -> String {
-    match lang {
-        Lang::En => format!("found {shown} of {total}"),
-        Lang::Ru => format!("найдено {shown} из {total}"),
-    }
-}
-
 /// «by relevance: 4 files» — the whole phrase is translated, the number is substituted.
 pub fn relevance(lang: Lang, n: usize) -> String {
     format!("{} {}", t(lang, "by relevance:"), count(lang, n, "file"))
@@ -405,8 +397,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("2024-05, vacation", "2024-05, отпуск"),
     ("Folder", "Каталог"),
     (
-        "path to a folder; several — with the “Folders” button",
-        "путь к каталогу; несколько — кнопкой «Каталоги»",
+        "path to a folder; several — with the “+” button",
+        "путь к каталогу; несколько — кнопкой «+»",
     ),
     ("Start indexing", "Индексировать"),
     ("Indexing", "Индексация"),
@@ -419,6 +411,10 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("Hide details", "Скрыть сведения"),
     ("Details", "Сведения"),
+    ("Synced", "Синхронизировано"),
+    ("Syncing", "Синхронизация"),
+    ("Ready", "Готов к работе"),
+    ("Clear the search", "Очистить поиск"),
     (
         "right panel with date, camera, tags and text",
         "правая панель с датой, камерой, тегами и текстом",
@@ -479,8 +475,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("marks everything visible now; Ctrl+A does the same", "отметить всё, что видно сейчас; Ctrl+A делает то же"),
     ("picked", "выбрано"),
     (
-        "Add a folder with the “Folders” button or type a path above, then press “Index”.",
-        "Добавьте каталог кнопкой «Каталоги» или введите путь вверху, затем нажмите «Индексировать».",
+        "Add a folder with the “+” button or type a path above, then press “Index”.",
+        "Добавьте каталог кнопкой «+» или введите путь вверху, затем нажмите «Индексировать».",
     ),
     ("nothing found", "ничего не найдено"),
     ("comparing copies and a sha256 manifest", "сверка копий и слепок sha256"),
@@ -550,6 +546,15 @@ const PAIRS: &[(&str, &str)] = &[
         "remove the photo from this album; the file on disk is unchanged",
         "убрать снимок из этого альбома; файл на диске не меняется",
     ),
+    (
+        "open the album in the Albums view",
+        "открыть альбом в виде «Альбомы»",
+    ),
+    (
+        "show only the photos that carry this tag",
+        "показать только снимки с этим тегом",
+    ),
+    ("clear the tag filter", "снять фильтр по тегу"),
     ("photo removed from the album", "снимок убран из альбома"),
     ("cannot remove from the album", "из альбома не убрать"),
     ("AI tags", "Теги ИИ"),

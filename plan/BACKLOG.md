@@ -278,7 +278,8 @@ disk usage, own tags and a search for people together.
    group.
 3. **The right panel** closes with the "Hide" button and comes back with the "Details" button; the
    calendar and the grid get all the room. The width of a month cell no longer has a hard minimum of
-   82 px.
+   82 px. (Since M22.16 the close target is the mock-up's "×" in the panel's header; "Details" in the
+   top bar stays the worded way back.)
 4. **The calendar** got the scales "Year / Month / Week" with navigation; a click on a month in a
    year switches to the month, a click on a day in a week — to the day.
 5. **Duplicates and the model.** "Keep", "Export the plan", "Compute tags" got explanation labels
@@ -1052,15 +1053,30 @@ corners cut, the identity row with the name and the size, the "Shooting params" 
 chips, the engine row; `card_block` counts its own 1 px line, so no block is wider than its panel) —
 2026-11-26; M22.15 (the tile preview fills the whole 4:3 frame with a centring crop — `cover_rect`,
 `ThumbFit` — instead of the letterbox; the calendar, the series strip, the album cover and the file
-card keep the fitted whole preview) — 2026-11-26.
+card keep the fitted whole preview) — 2026-11-26; M22.16 (the right panel after `photocat_12`: the
+panel's frame with no margin of its own so its 280 px and the 1 px line are its own, a 44 px header
+band with the mock-up's "×", the card on 12 px of air, the format badge of the preview, the pin of
+the location row, the folder glyph of an album chip and the framed "`#`" own-tag row; the round
+icon-only actions, the album "+ Add" chip and the 320 px width stay refused) — 2026-11-26;
+M22.17 (the word of a card chip acts and only the "×" removes: a click on a tag filters the grid by
+it and the accent marks that filter instead of "the confident tag", a click on an album chip's word
+opens the album; `ChipClick` splits every card chip into the word and the "×") — 2026-11-26;
+M22.18 (the own-tag row: the word button became a bare 22 px "+" with the word as its hint, so the
+field takes ~190 px of the 255 px card instead of 81; the field and the "+" are one 22 px line with
+the text centred, the row 28 px) — 2026-11-26; M22.19 (the top strip after `photocat_1`: the mark,
+one search field with the mode switch, the "Tiles" pill, the state pill, the lit details toggle and
+"Settings"; the content is one 44 px ribbon with the chip row only while a filter is on; the
+selection floats at the bottom edge of the grid; the footer carries the counters and the selected
+file; the years take three columns of two rows) — 2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
    (`dark | light | system`, key/value, `SCHEMA_VERSION` unchanged), "Settings → Interface → theme".
    Radius 4/6/8 px (controls; navigation and menus; cards and dialogs), no shadows, the type scale
    10/11/12/13/14/18, monospace numbers, caps labels.
-2. The main screen follows `photocat_1`: a 32 px top strip and a 28 px bottom strip, the working
-   folder in the left panel; three cell views — the mock-up's 4:3 tile (default) with the preview
+2. The main screen follows `photocat_1`: a 32 px top strip and a 28 px bottom strip, the mark and
+   one search field in the strip, the working folder in the left panel; one 44 px ribbon above the
+   grid, the chips only while a filter is on, the selection in the floating bar (M22.19); three cell views — the mock-up's 4:3 tile (default) with the preview
    filling the frame (a centring crop, M22.15) and a 22 px caption band, the `field` well of a
    `card` under it; proportion rows, and a list; a 10 px gap, accent selection.
    Previews follow the EXIF orientation and a stale preview is rewritten when its dimensions differ.
