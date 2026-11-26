@@ -1317,8 +1317,25 @@ const PAIRS: &[(&str, &str)] = &[
     ("video", "видео"),
     (" (with sound)", " (со звуком)"),
     (" (without sound)", " (без звука)"),
-    ("the built-in player could not open it", "встроенный плеер не взялся"),
-    ("opening ffplay", "открываю ffplay"),
+    (
+        "the built-in player could not open it: {}",
+        "встроенный плеер не смог открыть: {}",
+    ),
+    (
+        "The built-in player cannot open this video",
+        "Встроенный плеер не может открыть это видео",
+    ),
+    ("Copy the reason", "Скопировать причину"),
+    ("the reason is copied", "причина скопирована"),
+    (
+        "Play with ffplay in a separate window",
+        "Играть через ffplay в отдельном окне",
+    ),
+    ("Open in the system player", "Открыть в системном плеере"),
+    (
+        "the video leaves the app — a separate window",
+        "видео уходит из приложения — отдельное окно",
+    ),
     ("ffplay did not start", "ffplay не запустился"),
     ("the system player", "системный проигрыватель"),
     ("ffplay: the video is closed", "ffplay: видео закрыто"),

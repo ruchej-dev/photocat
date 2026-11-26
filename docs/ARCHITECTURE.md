@@ -203,9 +203,9 @@ without a preview and the `errors` counter grows. The console window is suppress
 
 **Video playback.** Since M14 a video plays in the built-in player (`src/player.rs`, ADR 0030): the
 frame is drawn in the app window, the sound goes through `cpal`. External programs are no longer
-needed for viewing; `ffplay` remains the fallback path when the player cannot handle a file (a codec
-out of scope, a broken container) — then `app` calls `tools::ffplay` and says so honestly in the
-status.
+needed for viewing. A file the player cannot handle (a codec out of scope, a broken container) is
+refused honestly: nothing is started, the viewer shows the reason and offers `ffplay` / the system
+player behind explicit buttons (M26.12) — the app never opens a second window by itself.
 
 Three threads, each responsible for one thing:
 
@@ -243,7 +243,7 @@ photocat-player   clock and presentation: frame → RGBA (1280 px) → Shared.fr
 - **Codecs.** H.264 (the whole corpus), HEVC Main 8/10 bit, MJPEG in a `.MOV` (the Panasonic
   Lumix camera; `rff-codec-jpeg`, the packet's PTS becomes the frame's when the still-picture
   decoder has none), PCM sound (`rff-codec-pcm`) and AAC-LC. Other frame formats and codecs
-  (VP9, Opus) are rejected by name and yield to `ffplay`.
+  (VP9, Opus) are rejected by name; the viewer names the codec and waits for an explicit press.
 - **Build.** The decoder in a plain debug profile gives 2.2 fps instead of 41.9 — `cargo run`
   turned video into a slideshow. In `Cargo.toml` the dev profile is tuned: dependencies
   `opt-level = 3`, our own code `opt-level = 1`; after that `cargo run` shows 1080p at 29.2 fps.

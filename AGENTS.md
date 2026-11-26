@@ -262,8 +262,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   master, only while it actually plays; otherwise wall-clock time drives the frames, and video never
   stalls. 1080p holds real time (29.8 fps for a 30 fps source), 2520×1080 — 22.9 fps with up to
   0.5 s of lag; 4K does not play. The frame is downscaled to 1280 px before presentation. Codecs out
-  of scope (VP9, Opus, 4:2:2) and broken files go to external `ffplay` if present, otherwise to the
-  system player.
+  of scope (VP9, Opus, 4:2:2) and broken files are refused with the reason in the viewer, which offers
+  the external `ffplay` or the system player only by an explicit press (M26.12).
 - Re-indexing skips files whose path, size and mtime match. If the content changed while the size and
   time were preserved, sha256 is not recomputed — the price of speed.
 - Album export does not rename or delete what is already exported: after reordering, a file stays

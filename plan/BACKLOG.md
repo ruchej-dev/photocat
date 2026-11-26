@@ -1814,8 +1814,9 @@ M26.5 the face settings move to the People screen; M26.6 the layout survives a n
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
-together; M26.11 a named person is recognized in every catalog; M26.12 the built-in player is
-the only player — a codec out of scope is an explicit offer, never an automatic separate window.
+together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
+built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
+separate window.
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -2208,15 +2209,20 @@ container the registry does not know) errors out and gets the automatic fallback
 printed in the status bar for a moment, then the viewer only shows the ffplay line — a design the
 owner refuses.
 
-**Found (2026-11-26, part 1 done).** The owner's file is `P1050016.MOV` from a Panasonic Lumix:
+**Done (2026-11-26).** The owner's file is `P1050016.MOV` from a Panasonic Lumix:
 MJPEG video in a QuickTime container with PCM sound (`sowt`) — the `rff` family has no MJPEG or PCM
 decoder registered, so `Player::open` failed and the automatic `ffplay` followed. `rff-codec-jpeg` and
 `rff-codec-pcm` are added and registered; the video loop now takes the packet's PTS when a decoder
 leaves the frame's PTS empty (the still-picture decoder did, so every MJPEG frame would land at 0 s).
 A generated MJPEG/`yuvj420p` MOV with PCM sound plays: Linux 90 frames in 2.97 s (30.3 fps), with
 sound 27.8 fps; the Windows exe under Wine 90 frames in 2.99 s (30.1 fps), the last PTS 2.97 s; a
-registry test holds the five decoders. The **remaining** half of this task is criterion 1: the
-automatic ffplay must go, and the reason plus the explicit buttons must appear in the viewer.
+registry test holds the five decoders. The automatic fallback is gone: on an
+error `start_video_playback` starts nothing, keeps the reason in `App::video_error`, and the viewer's
+frame area becomes a card that names the reason and offers "Copy the reason", "Play with ffplay in a
+separate window" (only when `tools::find_ffplay` finds one) and "Open in the system player", each
+saying the video leaves the app; ▶ retries the built-in player. A new `Icon::Warning` joins the set.
+Tests: `a_refused_video_explains_itself_and_starts_nothing` (no child process, the card's words and
+the real reason) and `ffplay_is_found_next_to_ffmpeg`.
 
 **Acceptance criteria.**
 1. No process is started by the app when a video is opened: neither `ffplay` nor the system player.

@@ -519,6 +519,15 @@ impl YearPick {
     }
 }
 
+/// Why the built-in player refused to open a file (M26.12): the viewer names the reason and
+/// offers an external player only by an explicit press.
+#[derive(Clone, Debug)]
+struct VideoError {
+    file_id: i64,
+    path: String,
+    reason: String,
+}
+
 /// The set of files the selection was made in: the view, the filter, the search, the order.
 /// While it stays the same the selection lives; a change of any field clears it (M18), so
 /// that an action does not touch files that are no longer on the screen.
@@ -2695,6 +2704,8 @@ struct App {
     video_tex: Option<egui::TextureHandle>,
     /// The fallback: an external ffplay when the built-in player refused.
     video_child: Option<std::process::Child>,
+    /// The built-in player refused this file and nothing was started: the viewer explains why.
+    video_error: Option<VideoError>,
     /// When the video texture was last refreshed: filling the frame is the most expensive
     /// operation in a frame, so there is no point in doing it more than 30 times a second.
     video_tex_at: Option<std::time::Instant>,
@@ -2883,6 +2894,7 @@ impl App {
             video: None,
             video_tex: None,
             video_child: None,
+            video_error: None,
             video_tex_at: None,
             video_id: None,
             video_lag_shown: false,
@@ -8533,12 +8545,14 @@ impl App {
     }
 
     /// The built-in player plays the video: the frame into a texture, the sound through cpal.
-    /// If the file is beyond it (a codec out of scope, a broken container) — we honestly
-    /// yield to an external `ffplay` instead of showing a black screen.
+    /// If the file is beyond it (a codec out of scope, a broken container), nothing is started:
+    /// the viewer names the reason and offers an external player only by an explicit press
+    /// (M26.12).
     fn start_video_playback(&mut self, f: &FileRow) {
         let lang = self.settings.lang;
         self.stop_video();
         self.video_lag_shown = false;
+        self.video_error = None;
         self.video_id = Some(f.id);
         match player::Player::open(Path::new(&f.path), player::Options::default()) {
             Ok(p) => {
@@ -8555,38 +8569,17 @@ impl App {
                 self.video = Some(p);
             }
             Err(e) => {
-                self.status = format!(
-                    "{} ({e:#}); {}",
-                    t(lang, "the built-in player could not open it"),
-                    t(lang, "opening ffplay")
+                let reason = format!("{e:#}");
+                self.status = i18n::fill(
+                    lang,
+                    "the built-in player could not open it: {}",
+                    std::slice::from_ref(&reason),
                 );
-                let tools = self.settings.tools.clone();
-                match tools::ffplay(&tools, Path::new(&f.path)) {
-                    Ok(child) => {
-                        self.video_child = Some(child);
-                    }
-                    Err(e2) => {
-                        self.status = format!(
-                            "{} ({e2:#}); {}",
-                            t(lang, "ffplay did not start"),
-                            t(lang, "the system player")
-                        );
-                        match tools::open_path(Path::new(&f.path)) {
-                            Ok(()) => {
-                                self.status = format!(
-                                    "{}: {}",
-                                    t(lang, "opening in the system player"),
-                                    f.path
-                                )
-                            }
-                            Err(e3) => {
-                                self.status =
-                                    format!("{}: {e3:#}", t(lang, "cannot open the video"))
-                            }
-                        }
-                        self.video_id = None;
-                    }
-                }
+                self.video_error = Some(VideoError {
+                    file_id: f.id,
+                    path: f.path.clone(),
+                    reason,
+                });
             }
         }
     }
@@ -8604,6 +8597,7 @@ impl App {
             let _ = child.wait();
         }
         self.video_id = None;
+        self.video_error = None;
     }
 
     /// The player frame → a texture. While the video plays the window is repainted 30 times a second.
@@ -8985,6 +8979,17 @@ impl App {
         let mut step_click = 0i32;
         let video_active =
             self.video_id == Some(id) && (self.video.is_some() || self.video_child.is_some());
+        // The built-in player refused this file (M26.12): the frame area explains it, and an
+        // external player is offered only as a press, never started by itself.
+        let video_error = self
+            .video_error
+            .as_ref()
+            .filter(|e| e.file_id == id)
+            .cloned();
+        let ffplay_found = tools::find_ffplay(&self.settings.tools).is_some();
+        let mut video_copy_reason = false;
+        let mut video_system = false;
+        let mut video_ffplay = false;
         // Space is the same as ▶: play and pause for video, a slideshow for a photo.
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
             if f.kind == "video" {
@@ -9258,7 +9263,93 @@ impl App {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         let mut image_resp = None;
-                        if v.show_text {
+                        if let Some(err) = video_error.as_ref() {
+                            let th = theme(ui);
+                            let card = egui::Rect::from_min_size(
+                                ui.available_rect_before_wrap().min,
+                                egui::vec2(left_w, frame_h),
+                            );
+                            ui.painter()
+                                .rect_filled(card, RADIUS_CARD, th.card);
+                            ui.painter().rect_stroke(
+                                card,
+                                RADIUS_CARD,
+                                egui::Stroke::new(1.0, th.border),
+                                egui::StrokeKind::Inside,
+                            );
+                            ui.allocate_ui_with_layout(
+                                card.shrink(16.0).size(),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    ui.set_max_width((card.width() - 32.0).max(120.0));
+                                    ui.horizontal(|ui| {
+                                        icon_mark(ui, Icon::Warning, 16.0);
+                                        ui.label(
+                                            egui::RichText::new(t(
+                                                lang,
+                                                "The built-in player cannot open this video",
+                                            ))
+                                            .size(14.0)
+                                            .strong(),
+                                        );
+                                    });
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        num(ui, file_name(&err.path), 11.0)
+                                            .color(dim(ui)),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&err.reason)
+                                                .monospace()
+                                                .size(11.0)
+                                                .color(dim(ui)),
+                                        )
+                                        .wrap(),
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui
+                                            .add(WordButton::new(
+                                                Icon::ContentCopy,
+                                                t(lang, "Copy the reason"),
+                                            ))
+                                            .clicked()
+                                        {
+                                            video_copy_reason = true;
+                                        }
+                                        if ffplay_found
+                                            && ui
+                                                .add(WordButton::new(
+                                                    Icon::Play,
+                                                    t(lang, "Play with ffplay in a separate window"),
+                                                ))
+                                                .on_hover_text(t(
+                                                    lang,
+                                                    "the video leaves the app — a separate window",
+                                                ))
+                                                .clicked()
+                                        {
+                                            video_ffplay = true;
+                                        }
+                                        if ui
+                                            .add(WordButton::new(
+                                                Icon::OpenInNew,
+                                                t(lang, "Open in the system player"),
+                                            ))
+                                            .on_hover_text(t(
+                                                lang,
+                                                "the video leaves the app — a separate window",
+                                            ))
+                                            .clicked()
+                                        {
+                                            video_system = true;
+                                        }
+                                    });
+                                },
+                            );
+                        } else if v.show_text {
                             ui.horizontal(|ui| {
                                 let img_w = (left_w * 0.62).max(160.0);
                                 ui.allocate_ui(egui::vec2(img_w, frame_h), |ui| {
@@ -9579,6 +9670,33 @@ impl App {
         }
         if start_video {
             self.start_video_playback(&f);
+        }
+        if video_copy_reason
+            && let Some(err) = self.video_error.as_ref()
+        {
+            ctx.copy_text(err.reason.clone());
+            self.status = t(lang, "the reason is copied").into();
+        }
+        if video_system {
+            match tools::open_path(Path::new(&f.path)) {
+                Ok(()) => {
+                    self.status = format!(
+                        "{}: {}",
+                        t(lang, "opening in the system player"),
+                        f.path
+                    )
+                }
+                Err(e) => self.status = format!("{}: {e:#}", t(lang, "cannot open")),
+            }
+        }
+        if video_ffplay {
+            match tools::ffplay(&self.settings.tools, Path::new(&f.path)) {
+                Ok(child) => {
+                    self.video_child = Some(child);
+                    self.status = t(lang, "ffplay in its own window").into();
+                }
+                Err(e) => self.status = format!("{}: {e:#}", t(lang, "ffplay did not start")),
+            }
         }
         // The ←/→ buttons page after the drawing: the frame of the new file comes next frame.
         if step_click != 0 {
@@ -11401,6 +11519,7 @@ enum Icon {
     Rotate,
     OpenInNew,
     Info,
+    Warning,
     Location,
     Slideshow,
     TextFields,
@@ -12011,6 +12130,11 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui:
             ring(0.0, 0.0, 0.92);
             disc(0.0, -0.42, 0.15);
             line(pt(0.0, -0.05), pt(0.0, 0.55));
+        }
+        Icon::Warning => {
+            frame(vec![pt(0.0, -0.9), pt(0.92, 0.78), pt(-0.92, 0.78)]);
+            line(pt(0.0, -0.32), pt(0.0, 0.28));
+            line(pt(0.0, 0.5), pt(0.0, 0.62));
         }
         Icon::Slideshow => {
             boxed(-0.95, -0.75, 0.95, 0.75);
@@ -18519,6 +18643,52 @@ mod tests {
         );
     }
 
+    /// M26.12: a video the built-in player refuses does not start anything by itself — the
+    /// viewer names the reason and offers the external player as a press only.
+    #[test]
+    fn a_refused_video_explains_itself_and_starts_nothing() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-refused-video.db"));
+        let mut row = file_row(1, "video", "broken.mp4");
+        row.path = "/tmp/photocat-test-no-such-video.mp4".into();
+        app.items = vec![row.clone()];
+        app.settings.lang = i18n::Lang::En;
+        app.open_viewer(1);
+        app.start_video_playback(&row);
+        assert!(
+            app.video_error.is_some(),
+            "the refusal is not remembered: {:?}",
+            app.video_error
+        );
+        assert!(
+            app.video_child.is_none(),
+            "the app started an external player by itself"
+        );
+        let reason = app.video_error.as_ref().map(|e| e.reason.clone()).unwrap_or_default();
+        assert!(
+            reason.contains("No such file") || reason.contains("no such file"),
+            "the reason is not the real one: {reason}"
+        );
+        let ctx = egui::Context::default();
+        let texts = viewer_frame(&mut app, &ctx, None);
+        for want in [
+            "The built-in player cannot open this video",
+            "Copy the reason",
+            "Open in the system player",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "missing “{want}” in the refusal card: {texts:?}"
+            );
+        }
+        assert!(
+            texts.iter().any(|t| t.contains("No such file") || t.contains("no such file")),
+            "the viewer does not show the reason: {texts:?}"
+        );
+        // The next file starts with a clean slate.
+        app.stop_video();
+        assert!(app.video_error.is_none(), "the refusal outlives the file");
+    }
+
     /// M21.5: the archive folders and the built-in folder picker are translated together:
     /// opening a folder without translating the parent dialog is a half translation.
     #[test]
@@ -23075,7 +23245,7 @@ mod tests {
             Remove, Edit, MoveTo, ContentCopy, Download, Upload, Check, CheckCircle, Pick, NotHim,
             Delete,
             Restore, Stop, ArrowUp, ArrowDown, ArrowBack, ChevronLeft, ChevronRight, ZoomIn,
-            ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Location, Slideshow,
+            ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Warning, Location, Slideshow,
             TextFields,
             Preview, CompareArrows, Description, Psychology, Label, Inventory, Terminal,
             AutoAwesome, Calculate, Cleaning, Prev, Next, Play, Pause, Volume,

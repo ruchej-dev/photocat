@@ -72,15 +72,24 @@ impl Tool {
     }
 }
 
-/// The video player: `ffplay` next to the configured `ffmpeg`, or from `PATH`.
-/// ffplay decodes both video and sound itself — no second stream and no manual audio are needed.
-pub fn ffplay(tools: &Tools, path: &Path) -> Result<std::process::Child> {
+/// Where `ffplay` is: next to the configured `ffmpeg`, or the first one in `PATH`. Nothing is
+/// started — the viewer offers it explicitly when the built-in player cannot open a file (M26.12).
+pub fn find_ffplay(tools: &Tools) -> Option<PathBuf> {
     let name = if cfg!(windows) { "ffplay.exe" } else { "ffplay" };
-    let program = tools
+    if let Some(sibling) = tools
         .locate(Tool::Ffmpeg)
         .and_then(|p| p.parent().map(|d| d.join(name)))
         .filter(|p| p.is_file())
-        .unwrap_or_else(|| std::path::PathBuf::from("ffplay"));
+    {
+        return Some(sibling);
+    }
+    search_path(name)
+}
+
+/// The video player: `ffplay` next to the configured `ffmpeg`, or from `PATH`.
+/// ffplay decodes both video and sound itself — no second stream and no manual audio are needed.
+pub fn ffplay(tools: &Tools, path: &Path) -> Result<std::process::Child> {
+    let program = find_ffplay(tools).unwrap_or_else(|| std::path::PathBuf::from("ffplay"));
     let mut cmd = Command::new(&program);
     cmd.args(["-autoexit", "-loglevel", "error", "-window_title", "photocat"])
         .arg(path)
@@ -266,6 +275,27 @@ mod tests {
             assert_eq!(t.source(tool, Lang::Ru), "из PATH");
             assert!(!t.configured(tool));
         }
+    }
+
+    /// M26.12: `ffplay` is found next to the configured `ffmpeg` (the usual Windows layout of a
+    /// portable ffmpeg folder) and nothing is started by the lookup.
+    #[test]
+    fn ffplay_is_found_next_to_ffmpeg() {
+        let dir = std::env::temp_dir().join("photocat-tools-ffplay");
+        std::fs::create_dir_all(&dir).expect("the test folder");
+        let ffmpeg = dir.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
+        let ffplay = dir.join(if cfg!(windows) { "ffplay.exe" } else { "ffplay" });
+        std::fs::write(&ffmpeg, b"x").expect("the test program");
+        std::fs::write(&ffplay, b"x").expect("the test program");
+        let t = Tools {
+            ffmpeg: ffmpeg.to_string_lossy().into_owned(),
+            ..Tools::default()
+        };
+        assert_eq!(
+            find_ffplay(&t).as_deref(),
+            Some(ffplay.as_path()),
+            "ffplay is not found next to ffmpeg"
+        );
     }
 
     #[test]
