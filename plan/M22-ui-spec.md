@@ -1093,6 +1093,25 @@ glyph — and lands in the sub-album.
 **Files.** `src/app.rs` (`album_tree_row`, `draw_album_tree`, the empty covers of `draw_album_cell`
 and `draw_album_row`, one test), `docs/UI.md`, `plan/`.
 
+### M22.25 — the right panel keeps 280 px with a long file name ✅
+
+The owner: "на странице альбомов правая панель не соответствует своему макету… по ним щёлкать, то
+начинают прыгать размеры плиток. Правая панель урезана". The identity row of the file card printed
+the whole name in a horizontal `Label`; a long name demanded more than the 255 px card, the
+`ScrollArea` widened to 306.5 px, the right panel grew past the window edge, and because the panel's
+width is subtracted from the central one, the grid changed its column count and the tiles jumped.
+The row now shortens the name to the room the size leaves (`shorten`, the full name in the hint);
+the "All files" switch of an album goes through `t()`.
+
+**Result.** On a copy of the real DB at 1691×1021 the panel was 1412–1718.5 (306.5 px) and the tiles
+176 → 181 px after selecting a file; now the panel is 1412–1691 (279 px) and the tiles stay 176 px.
+`cargo test` 309, `cargo test --test source_language` 3, `cargo clippy --all-targets` clean,
+`check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. The test
+`a_long_file_name_does_not_widen_the_right_panel` checks the panel width at the window edge, that no
+frame or word leaves the window, and that the tile widths are equal before and after the selection.
+
+**Files.** `src/app.rs` (the identity row, the "All files" switch, one test), `docs/UI.md`, `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".

@@ -1084,7 +1084,9 @@ List" drives both the album cards and the album's photos — `App::grid_cell_sty
 view of the other screens stays; an album without sub-albums no longer looks dead) — 2026-11-26;
 M22.24 (every album tree row carries a 14 px folder glyph and is one click target, the glyph
 included; an album without a preview gets the real folder icon instead of the "▸" mark on its card
-and in the list row) — 2026-11-26.
+and in the list row) — 2026-11-26; M22.25 (a long file name is cut to the room the size leaves, so
+the identity row cannot widen the 255 px card and the right panel stays 280 px; the grid keeps its
+tile width when a photo is selected, and the album's "All files" switch is translated) — 2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

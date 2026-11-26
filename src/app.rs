@@ -7402,14 +7402,23 @@ impl App {
         ui.add_space(8.0);
         // The mock-up's identity row: the name in the numeric family on the left, the size on the
         // right; the path is its caption below.
+        // The name is cut to the room the size leaves, otherwise a long name widens the card
+        // (and with it the whole right panel) past its 280 px and the grid jumps (M22.25).
+        let name = file_name(&f.path);
+        let size_text = db::human_in(lang, f.size);
+        let size_w = mono_width(ui, &size_text, 11.0);
+        let name_cap = ((w - size_w - 8.0) / 7.0).max(6.0) as usize;
         ui.horizontal(|ui| {
-            ui.label(
-                num(ui, file_name(&f.path), 12.0)
-                    .strong()
-                    .color(accent(ui)),
-            );
+            ui.add(
+                egui::Label::new(
+                    num(ui, shorten(&name, name_cap), 12.0)
+                        .strong()
+                        .color(accent(ui)),
+                ),
+            )
+            .on_hover_text(&name);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(num(ui, db::human_in(lang, f.size), 11.0).color(dim(ui)));
+                ui.label(num(ui, &size_text, 11.0).color(dim(ui)));
             });
         });
         ui.add(egui::Label::new(num(ui, &f.path, 11.0).color(dim(ui))).wrap());
@@ -13169,7 +13178,11 @@ impl eframe::App for App {
                         album_browse = false;
                     }
                     if ui
-                        .add(WordButton::picked(Icon::PhotoLibrary, "All files", album_browse))
+                        .add(WordButton::picked(
+                            Icon::PhotoLibrary,
+                            t(lang, "All files"),
+                            album_browse,
+                        ))
                         .on_hover_text(
                             t(
                                 lang,
@@ -17686,6 +17699,70 @@ mod tests {
         }
     }
 
+    /// M22.25: a long file name is cut to the room the size leaves. It used to widen the card and
+    /// with it the whole right panel (306 px instead of 280), the panel ran past the window and the
+    /// grid changed its tile width as soon as a photo was selected.
+    #[test]
+    fn a_long_file_name_does_not_widen_the_right_panel() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-long-name.db"));
+        let long = "66248-chelovek_logotip_chernyj_fon_2026-10-16_18-38-42_very_long_name.jpg";
+        app.items = vec![file_row(1, "image", long)];
+        app.settings.lang = i18n::Lang::Ru;
+        app.selected = None;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let central = |rects: &[egui::Rect]| {
+            let mut widths: Vec<f32> = rects
+                .iter()
+                .filter(|r| r.left() >= super::LEFT_W && r.right() <= size.x - super::RIGHT_W)
+                .filter(|r| r.width() > 100.0 && r.width() < 300.0 && r.height() > 100.0)
+                .map(|r| r.width())
+                .collect();
+            widths.sort_by(|a, b| a.total_cmp(b));
+            widths.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+            widths
+        };
+        let before = window_rects_at(&mut app, &ctx, size);
+        app.selected = Some(1);
+        let after = window_rects_at(&mut app, &ctx, size);
+        assert!(
+            after
+                .iter()
+                .any(|r| (r.width() - super::RIGHT_W).abs() <= 1.5
+                    && (r.right() - size.x).abs() <= 1.5),
+            "the right panel keeps its 280 px at the window edge: {:?}",
+            after
+                .iter()
+                .filter(|r| r.right() > size.x - 40.0)
+                .collect::<Vec<_>>()
+        );
+        for rect in &after {
+            assert!(
+                rect.left() >= -0.5 && rect.right() <= size.x + 0.5,
+                "a frame leaves the window: {rect:?} in {size:?}"
+            );
+        }
+        let panel_left = size.x - super::RIGHT_W;
+        let words = window_word_rects_at(&mut app, &ctx, size);
+        for (word, r) in &words {
+            assert!(
+                r.right() <= size.x + 0.5,
+                "the word “{word}” leaves the window: {r:?}"
+            );
+        }
+        assert!(
+            !words
+                .iter()
+                .any(|(w, r)| w == long && r.left() >= panel_left),
+            "the long name in the panel is cut, not printed whole: {words:?}"
+        );
+        assert_eq!(
+            central(&before),
+            central(&after),
+            "selecting a photo must not change the tile width"
+        );
+    }
+
     /// M22.18: the own-tag row keeps a wide field and a bare "+" — a word button took 140 px of
     /// the 255 px card and left the field short.
     #[test]
@@ -20415,6 +20492,15 @@ mod tests {
             app.settings.album_list
         );
         assert_eq!(app.grid_cell_style(), db::CellStyle::Tiles, "the photos are tiles");
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Все файлы"),
+            "the album switch speaks Russian: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t == "All files"),
+            "no English “All files” in the Russian window: {texts:?}"
+        );
         let at = window_word_rects_at(&mut app, &ctx, size)
             .into_iter()
             .find(|(w, r)| w == "Список" && r.center().y > 100.0)
