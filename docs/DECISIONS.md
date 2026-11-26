@@ -1340,3 +1340,42 @@ all; if yes — country/region/city or a street address; and is a click that sen
 acceptable. Until then the row stays as it is (Option A).
 
 **Forbids now:** a map link, a browser, a network call, a bundled geocoder, a guessed place name.
+
+## 0050. The Windows release is built from Linux: MSVC through `cargo xwin`, dynamic CRT, the esaxx fast path off
+
+**Decision (2026-11-26).** A portable release for Windows is built on the Linux machine and shipped
+as a folder: `photocat.exe`, the Microsoft VC++ runtime DLLs, `DirectML.dll` and a launcher that
+keeps the data next to the binary (`PHOTOCAT_CACHE`).
+
+**Why MSVC and not the GNU target.** `ort` (ONNX Runtime, ADR 0037) ships a prebuilt static
+`onnxruntime.lib` for `x86_64-pc-windows-msvc` only; for `windows-gnu` its build stops with "no
+prebuilt binaries available". The target is linked with `cargo xwin`, `clang-cl` and `lld-link`
+against the Microsoft CRT and SDK headers that xwin downloads; no Visual Studio is installed.
+
+**Why the CRT is dynamic.** ONNX Runtime's objects are compiled `/MD`. The `esaxx-rs` C++ object
+inside `tokenizers` forces `/MT` (`.static_crt(true)`), and the linker refuses to mix the two
+(`/failifmismatch: RuntimeLibrary`). Two ways out: a vendored patch of `esaxx-rs`, or the pure-Rust
+suffix array. The second is chosen: `tokenizers` is taken with
+`default-features = false, features = ["progressbar", "onig"]` — the suffix array is built for a
+handful of CLIP prompts, so the fast path buys nothing measurable, and a vendored crate is a
+maintenance debt. The price of the dynamic CRT is four DLLs (`msvcp140.dll`, `msvcp140_1.dll`,
+`vcruntime140.dll`, `vcruntime140_1.dll`) shipped in the folder — the redistributable files, with
+their licence next to them.
+
+**What else the folder needs.** `DirectML.dll`: the Windows ONNX Runtime build links it, and it is
+loaded at start even when inference runs on the CPU. ONNX Runtime itself is statically linked into
+the 58 MB exe. `ffmpeg`/`ffprobe` and `tesseract` are **not** bundled: they are optional, the app
+names them in `doctor` and in Settings, and without them photos work while slices of video and text
+are disabled.
+
+**Portable data.** `db::cache_dir` honours `PHOTOCAT_CACHE`: when the launcher sets it to `data\`
+next to the exe, the database, previews, faces and models live there, and the folder is the whole
+application (nothing in the user profile). Without the variable the platform convention stands.
+
+**What it costs and what we would do without it.** The build needs a downloaded LLVM-MinGW and
+`cargo-xwin` cache on the build machine, and the first link downloads ~360 MB of ONNX Runtime; the
+tokenizer takes the pure-Rust path on every platform. Without this route a Windows binary would need
+a Windows machine with Visual Studio, or the GNU target with ONNX Runtime built from source.
+
+**Forbids:** a bundled Visual Studio dependency for the owner, a static ONNX Runtime rebuild, a
+vendored `esaxx-rs`, and shipping the release without its runtime DLLs.

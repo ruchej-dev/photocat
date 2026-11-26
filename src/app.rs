@@ -2474,6 +2474,18 @@ fn first_lang(db_path: &Path) -> i18n::Lang {
 }
 
 pub fn run(explicit: Option<PathBuf>) -> Result<()> {
+    // The binary is a console program, because the CLI needs its console; the window does not, and
+    // on Windows the console window would sit next to it (ADR 0050).
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn FreeConsole() -> i32;
+        }
+        // A failure only means there was no console to free.
+        unsafe {
+            FreeConsole();
+        }
+    }
     let db_path = db::resolve_db(explicit.as_deref())?;
     let lang = first_lang(&db_path);
     let opts = eframe::NativeOptions {
@@ -2712,6 +2724,9 @@ struct App {
     roots_open: bool,
     picker_open: bool,
     picker_current: PathBuf,
+    /// The path typed or pasted into the picker; "Go" or Enter opens it (M24.4: on Windows the
+    /// drive list is not a folder, so a path has to be reachable without one).
+    picker_path_input: String,
     picker_entries: Vec<PathBuf>,
     picker_error: String,
     /// The used space is counted on a button press, not on every frame.
@@ -2885,11 +2900,12 @@ impl App {
             root_counts: BTreeMap::new(),
             roots_open: false,
             picker_open: false,
-            picker_current: std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
+            picker_current: std::env::var_os("USERPROFILE")
+                .or_else(|| std::env::var_os("HOME"))
                 .map(PathBuf::from)
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| PathBuf::from("/")),
+            picker_path_input: String::new(),
             picker_entries: Vec::new(),
             picker_error: String::new(),
             storage_usage: None,
@@ -4460,6 +4476,7 @@ impl App {
     fn refresh_picker(&mut self) {
         self.picker_entries.clear();
         self.picker_error.clear();
+        self.picker_path_input = self.picker_current.display().to_string();
         match std::fs::read_dir(&self.picker_current) {
             Ok(rd) => {
                 for e in rd.flatten() {
@@ -4480,7 +4497,27 @@ impl App {
         }
     }
 
-    /// The built-in folder picker: no dependency on the system dialog and no typing a path by hand.
+    /// The drive roots of a Windows machine (`C:\`, `D:\`, …); empty on every other system.
+    /// `GetLogicalDrives` is one bit per letter — no crate and no shell.
+    #[cfg(windows)]
+    fn drive_roots() -> Vec<PathBuf> {
+        unsafe extern "system" {
+            fn GetLogicalDrives() -> u32;
+        }
+        let mask = unsafe { GetLogicalDrives() };
+        (0..26u32)
+            .filter(|i| mask & (1 << i) != 0)
+            .map(|i| PathBuf::from(format!("{}:\\", (b'A' + i as u8) as char)))
+            .collect()
+    }
+
+    #[cfg(not(windows))]
+    fn drive_roots() -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    /// The built-in folder picker: no dependency on the system dialog. The path field and the drive
+    /// list make every folder reachable — the parent of a Windows drive root is `None`.
     fn picker_modal(&mut self, ctx: &egui::Context) {
         if !self.picker_open {
             return;
@@ -4490,8 +4527,11 @@ impl App {
         let mut nav: Option<PathBuf> = None;
         let mut add = false;
         let mut add_and_index = false;
+        let mut path = self.picker_path_input.clone();
+        let mut go = false;
         let current = self.picker_current.clone();
         let entries = self.picker_entries.clone();
+        let drives = Self::drive_roots();
         let error = self.picker_error.clone();
         let modal = egui::Modal::new(egui::Id::unique("photocat-picker"))
             .frame(dialog_frame(ctx));
@@ -4505,6 +4545,36 @@ impl App {
             );
             if !error.is_empty() {
                 ui.label(egui::RichText::new(error).size(12.0).color(dim(ui)));
+            }
+            // The path: type or paste it and press Enter (or "Go"). On Windows this is also the way
+            // back from a drive root, whose parent does not exist.
+            ui.horizontal(|ui| {
+                // The field keeps the room the "Go" button leaves; an infinite width here made
+                // the dialog 1 946 px wide and pushed its buttons off the screen.
+                let field_w = (ui.available_width() - 90.0).max(160.0);
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut path)
+                        .hint_text(t(lang, "path to a folder"))
+                        .desired_width(field_w),
+                );
+                go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if word_button(ui, Icon::Next, t(lang, "Go")).clicked() {
+                    go = true;
+                }
+            });
+            if drives.len() > 1 || (drives.len() == 1 && drives[0] != current) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for d in &drives {
+                        let label = d.display().to_string();
+                        if ui
+                            .add(WordButton::new(Icon::Inventory, label.clone()).compact())
+                            .clicked()
+                        {
+                            nav = Some(d.clone());
+                        }
+                    }
+                });
             }
             ui.horizontal(|ui| {
                 if let Some(parent) = current.parent()
@@ -4548,6 +4618,18 @@ impl App {
         }
         if close {
             self.picker_open = false;
+        }
+        if go {
+            let typed = PathBuf::from(path.trim());
+            if typed.is_dir() {
+                nav = Some(typed);
+            } else {
+                self.picker_error = format!(
+                    "{}: {}",
+                    t(lang, "not a folder"),
+                    typed.display()
+                );
+            }
         }
         if let Some(p) = nav {
             self.picker_current = p;
@@ -23420,6 +23502,52 @@ mod tests {
         app.settings.roots = vec![root];
         app.refresh_root_counts();
         app
+    }
+
+    /// M24.4: the folder picker lists the folders of the current directory, not the files, shows the
+    /// path in an editable field and walks into a folder on a click. The Windows drive row is built
+    /// from `GetLogicalDrives`, so on this system it is empty.
+    #[test]
+    fn the_folder_picker_lists_folders_and_navigates() {
+        let temp = std::env::temp_dir().join("photocat-picker-test");
+        std::fs::create_dir_all(temp.join("alpha")).expect("the test folder");
+        std::fs::create_dir_all(temp.join("beta")).expect("the test folder");
+        std::fs::write(temp.join("x.txt"), b"x").expect("the test file");
+        let mut app = App::new(std::env::temp_dir().join("photocat-picker-test.db"));
+        app.settings.lang = i18n::Lang::En;
+        app.picker_current = temp.clone();
+        app.picker_open = true;
+        app.refresh_picker();
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 900.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        for folder in ["alpha/", "beta/"] {
+            assert!(
+                texts.iter().any(|t| t == folder),
+                "no folder “{folder}”: {texts:?}"
+            );
+        }
+        assert!(
+            !texts.iter().any(|t| t == "x.txt"),
+            "the picker lists a file as a folder: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| *t == temp.display().to_string()),
+            "the path field does not show the current folder: {texts:?}"
+        );
+        let rects = window_word_rects_at(&mut app, &ctx, size);
+        let row = rects
+            .iter()
+            .find(|(text, _)| text == "alpha/")
+            .expect("the folder row is drawn")
+            .1;
+        click_at(&mut app, &ctx, row.center());
+        assert_eq!(
+            app.picker_current,
+            temp.join("alpha"),
+            "a click does not open the folder"
+        );
     }
 
     /// M22.10: every dialog of the window is a card — the `card` tone, a 1 px `border` line, the

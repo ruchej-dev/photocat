@@ -603,8 +603,9 @@ ffmpeg/ffprobe, `--version` у tesseract). GUI пишет итог или оши
 
 ## Кросс-платформенность
 
-Цель — Linux (ADR 0014), но код не содержит тупиков: кэш ищется через `XDG_CACHE_HOME` /
-`LOCALAPPDATA` / `HOME`, симлинки — с `#[cfg(unix)]` и `#[cfg(windows)]`, внешние
+Цель — Linux (ADR 0014), но код не содержит тупиков: кэш ищется через `PHOTOCAT_CACHE`
+(переносимая копия называет его сама, ADR 0050) или `XDG_CACHE_HOME` / `LOCALAPPDATA` / `HOME`,
+симлинки — с `#[cfg(unix)]` и `#[cfg(windows)]`, внешние
 `ffmpeg`/`ffprobe`/`tesseract` берутся из настроек или `PATH` (`tools::Tools`) и запускаются без
 консольного окна на Windows.
 Известное ограничение: не-UTF-8 имена (в Linux допустимы) теряются при записи пути в SQLite через

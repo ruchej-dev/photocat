@@ -630,6 +630,7 @@ state, not a crash: only its own kind of work is disabled.
 ## Cross-platform
 
 The target is Linux (ADR 0014), but the code has no dead ends: the cache is found through
+`PHOTOCAT_CACHE` (a portable copy names it itself, ADR 0050) or
 `XDG_CACHE_HOME` / `LOCALAPPDATA` / `HOME`, symlinks use `#[cfg(unix)]` and `#[cfg(windows)]`, and
 `ffmpeg`/`ffprobe`/`tesseract` come from the settings or `PATH` (`tools::Tools`) and are started
 without a console window on Windows. A known limitation: non-UTF-8 names (allowed on Linux) are lost

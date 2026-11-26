@@ -1226,6 +1226,32 @@ smoke of a clean start also caught the GUI not storing the first-launch language
 clean-install pass itself: an empty cache, no models, no external programs, then a model download
 with consent.
 
+### M24.4 — the Windows release and the folder picker on a Windows disk (done 2026-11-26)
+
+**Goal.** A portable release for Windows built on the Linux machine, and a folder picker that can
+reach every disk of a Windows machine.
+
+**Done.** The binary is `x86_64-pc-windows-msvc`, linked with `cargo xwin`, `clang-cl` and `lld-link`
+against the xwin CRT/SDK, ONNX Runtime statically linked, `DirectML.dll` and the four VC++ runtime
+DLLs in the folder, with a Russian `ПРОЧТИ-МЕНЯ.txt` and two launchers (`photocat.cmd` keeps the
+database, previews, faces and models in `data\` next to the exe via the new `PHOTOCAT_CACHE`;
+`photocat-gl.cmd` is the OpenGL fallback). `tokenizers` is taken with `default-features = false,
+features = ["progressbar", "onig"]`: the `esaxx-rs` C++ object forces `/MT` while ONNX Runtime's
+objects are `/MD`, and the link fails on the CRT mismatch (ADR 0050). The folder picker gained an
+editable path field with "Go" (Enter works) and, on Windows, a row of drive buttons from
+`GetLogicalDrives` — before it, the parent of `C:\` is `None`, so another disk was unreachable; the
+window also drops its console (`FreeConsole`) once the GUI starts.
+
+**Checks.** `cargo test` 327 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh`
+55 checks; the exe smoke-tested under Wine: `--help`, `doctor`, `settings`, `index` of three images
+(3/3, 0 errors), `stats`, and the GUI through `WGPU_BACKEND=gl` (D3D12 shader compilation is a Wine
+limitation, not a Windows one); the data landed in `data\photocat.db` as the portable launcher
+asks. The build needs the downloaded LLVM-MinGW and the `cargo-xwin` cache; the folder is
+`/home/alx/rdp-share/photocat` (77 MB).
+
+**Not doing.** Bundling `ffmpeg`/`tesseract` and the models (ADR 0023; the weights are downloaded by
+the app with consent).
+
 **Not doing.** Bundling the weights into the binary (218–393 MiB, and they change independently of
 the code); bundling `ffmpeg`/`tesseract` (ADR 0023); a portable single-file package (AppImage and
 alike) — the target stays a release binary plus the cache.

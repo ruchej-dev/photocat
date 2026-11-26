@@ -68,6 +68,12 @@ impl Progress {
 }
 
 pub fn cache_dir() -> PathBuf {
+    // A portable copy names its cache itself (the Windows release's launcher does): the database,
+    // the previews, the faces and the models then lie next to the binary, and the folder is the
+    // whole application. Without it the platform convention below applies.
+    if let Some(dir) = std::env::var_os("PHOTOCAT_CACHE") {
+        return PathBuf::from(dir);
+    }
     // Linux — XDG, Windows — LOCALAPPDATA, macOS — the usual ~/.cache: no platform crates.
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
