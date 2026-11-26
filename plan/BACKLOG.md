@@ -1810,7 +1810,8 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 
 **Tasks.** M26.1 folders can be switched off; M26.2 a warning mark for a limited feature and its
 info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
-M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window.
+M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
+M26.7 the catalog block after `photocat_1`: the pill and its dropdown.
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -1823,7 +1824,8 @@ back with one switch, no re-index.
 2. The "Folders" dialog gives every root a switch ("shown" / "off") with the hint "off: its files
    are hidden from every view; the rows, the previews and the files on disk stay". A switched-off
    folder shows its state in the list (dimmed path, the word "off") and a "Turn on" / "Turn off"
-   action, not a delete.
+   action, not a delete. The same switch is reachable from the catalog dropdown (M26.7), which opens
+   the selected catalog's settings.
 3. One filter, one place: `App::reload` drops the rows under a switched-off root before they reach
    `items`, so the grid, the calendar, the albums, duplicates, faces, the trash, the semantic
    search, the counters of the navigation and the status bar all see the same visible set. The
@@ -1843,6 +1845,55 @@ grid and the counters; switching it back restores them without a single file rea
 
 **Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `src/main.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
+
+**M26.7 — the catalog block after `photocat_1`: one pill with a dropdown, a scope and its settings.**
+**Goal.** The left panel's catalog block follows the mock-up instead of a text field and two buttons:
+one pill shows the working catalog, and its dropdown chooses the scope, connects a catalog and opens
+its settings.
+
+**Source of truth.** `docs/references/mockups/photocat_1/code.html`, the section "Рабочий каталог
+(Вариант Б)" and the menu "Catalog Dropdown Switcher Menu": the caps heading with a "+", the pill
+(`w-full p-2 rounded-lg`, the 7×7 icon well with `folder_special`, the name in mono 12 semibold
+truncated, the second line in mono 10 `86.4 ГБ · 7 370 шт`, the `unfold_more` chevron), and the menu
+(a mono 10 caps header "Каталоги хранилища", "Все каталоги" with a check and the volume, one row per
+catalog with its name and count, a divider, "Подключить каталог…" in the primary tone and
+"Переиндексировать"). Our tokens stand for its colours: `card` for `surface-container`,
+`panel` for `surface-container-low`, `field` for `surface-container-highest`, `border` for
+`outline-variant`, the accent for `primary*`.
+
+**Acceptance criteria.**
+1. The block is the mock-up's: the caps heading "Working catalog" with the bare 20 px "+" (the
+   folder picker), the pill with the 28 px icon well, the title and the "size · N files" line, and
+   the chevron. The old text field with the path and the "Index"/"Refresh" buttons leave the panel —
+   the path is typed only in the picker or the folders dialog.
+2. A click on the pill opens a menu that stays open until a click outside (the mock-up opens it on
+   hover/focus; a hover-only menu is not reachable without a pointer and is refused): the header
+   "Storage catalogs", "All catalogs" with a check and the total, one row per root (its last path
+   segment, the full path in the hint, the file count), a divider, "Connect a catalog…" (the
+   picker) and "Re-index" (the same pass as "Start indexing" today, with the skip rule).
+3. Choosing a row is a scope, not a filter of the text field: the grid, the calendar, the albums,
+   the duplicates, the faces, the trash and the counters show only that root; "All catalogs" clears
+   it. The scope lives in memory like the other view filters, a change drops the selection with the
+   reason in the status, and the chips row shows "catalog: <name> ×".
+4. The pill's second line follows the scope: the scope's size and file count, "All catalogs" for the
+   whole visible index; with the scope on, the counts in the navigation follow it as they follow the
+   other filters.
+5. The per-catalog settings are reachable from the menu: the selected row's settings open the
+   "Folders" dialog with that root in focus, where its switch (M26.1: on/off without losing rows),
+   "Remove from the index" and "Index this catalog" live. A switched-off catalog is dimmed in the
+   list with the word "off" and can be turned on from the same menu or the dialog.
+6. A catalog with no files still has a row ("0 files") and is not hidden; a root that no longer
+   exists on disk is marked in its hint (the files stay until the index is cleaned).
+7. `docs/UI.md` § Layout and § Screens (the catalog block), § Findable, the `ui-design` skill's
+   normative left-panel layout and `plan/I18N.md` are updated; the strings are in `PAIRS`.
+
+**Acceptance.** With two roots the pill says "All catalogs · N · size"; the menu lists both with
+their counts; a click on one narrows the grid, the calendar and the counters to it, the pill and the
+chips row name it, "All catalogs" clears it; the DB is untouched; the folders dialog opens on the
+row's settings with the switch and "Remove from the index"; the old path field and the two buttons
+are gone from the panel. A headless frame at 1240×840 and a test of the scope and the menu.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `.pi/skills/ui-design/SKILL.md`, `plan/I18N.md`.
 
 **M26.2 — a limited feature shows a warning mark, and the mark explains itself.**
 **Goal.** The owner sees that something is limited before hunting for the reason, and one click
