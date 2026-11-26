@@ -1811,7 +1811,8 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 **Tasks.** M26.1 folders can be switched off; M26.2 a warning mark for a limited feature and its
 info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
 M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
-M26.7 the catalog block after `photocat_1`: the pill and its dropdown.
+M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
+space back (VACUUM).
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -1821,11 +1822,14 @@ back with one switch, no re-index.
 1. A new `settings` key `roots_off` holds the switched-off paths in the same one-string form as
    `roots` (`settings.roots`); an empty value means every folder is on. No schema change, no
    `SCHEMA_VERSION` bump.
-2. The "Folders" dialog gives every root a switch ("shown" / "off") with the hint "off: its files
-   are hidden from every view; the rows, the previews and the files on disk stay". A switched-off
-   folder shows its state in the list (dimmed path, the word "off") and a "Turn on" / "Turn off"
-   action, not a delete. The same switch is reachable from the catalog dropdown (M26.7), which opens
-   the selected catalog's settings.
+2. The "Folders" dialog gives every root a **checkbox** (ticked — shown; cleared — off) with the
+   hint "off: its files are hidden from every view; the rows, the previews and the files on disk
+   stay". A switched-off folder shows its state in the list (dimmed path, the word "off") and its
+   box is the only control, not a delete. The same checkbox is reachable from the catalog dropdown
+   (M26.7), which opens the selected catalog's settings. Removing a catalog from the database is a
+   different action and stays the existing one — "Remove from the index" (rows only) or clearing the
+   index in "Settings → Storage" and indexing again; the space a removed catalog leaves in the file
+   is reclaimed by M26.8.
 3. One filter, one place: `App::reload` drops the rows under a switched-off root before they reach
    `items`, so the grid, the calendar, the albums, duplicates, faces, the trash, the semantic
    search, the counters of the navigation and the status bar all see the same visible set. The
@@ -1879,9 +1883,10 @@ catalog with its name and count, a divider, "Подключить каталог
    whole visible index; with the scope on, the counts in the navigation follow it as they follow the
    other filters.
 5. The per-catalog settings are reachable from the menu: the selected row's settings open the
-   "Folders" dialog with that root in focus, where its switch (M26.1: on/off without losing rows),
-   "Remove from the index" and "Index this catalog" live. A switched-off catalog is dimmed in the
-   list with the word "off" and can be turned on from the same menu or the dialog.
+   "Folders" dialog with that root in focus, where its checkbox (M26.1: ticked — shown; cleared —
+   off, without losing rows), "Remove from the index" (rows only) and "Index this catalog" live. A
+   switched-off catalog is dimmed in the list with the word "off" and can be turned on from the
+   same menu or the dialog.
 6. A catalog with no files still has a row ("0 files") and is not hidden; a root that no longer
    exists on disk is marked in its hint (the files stay until the index is cleaned).
 7. `docs/UI.md` § Layout and § Screens (the catalog block), § Findable, the `ui-design` skill's
@@ -2024,6 +2029,38 @@ grid recomputes its columns — the owner's "при узком окне вся �
 readable central panel; the owner's review on the real window.
 
 **Files.** `src/app.rs`, `docs/UI.md`, `.pi/skills/ui-design/SKILL.md`, `plan/STATUS.md`.
+
+**M26.8 — the database gives the space back (VACUUM).**
+**Goal.** Rows that left the database — a catalog removed from the index, the index reset, tags and
+faces dropped after a file changed — leave free pages inside the SQLite file; the owner reclaims them
+with one action instead of seeing a file that never shrinks.
+
+**Acceptance criteria.**
+1. "Settings → Storage" gains "Compact the database" next to "Compute the used space", with the
+   facts before the press: the file's size and its free share — "12.4 MiB, of which 3.1 MiB is free"
+   (`PRAGMA page_count`/`freelist_count` × `page_size`). The button is disabled when there is nothing
+   to reclaim (free space under 1 MiB or under 5 %); it is not a pass that silently does nothing.
+2. The press asks for confirmation (like the cache cleanup): the file is rebuilt in place, the
+   archive, the previews, the faces and the models are untouched, the app does not read the database
+   while it runs, the pass cannot be stopped once started (SQLite's `VACUUM` cannot), it needs free
+   disk space of about the file's size, and it takes seconds for tens of megabytes.
+3. The pass runs off the UI thread and the window stays responsive; the top strip shows a "Compact"
+   progress row (the busy state of M25.8 names it too); the status reports "12.4 MiB → 9.3 MiB"; the
+   pane shows the new size afterwards.
+4. After the pass the row counts, the tags, the OCR text, the faces, the albums and the settings are
+   exactly what they were; a second press is a no-op (nothing to reclaim, the button is disabled).
+5. The hint names where the free pages come from: "Remove from the index", the index reset, tags and
+   faces wiped after a file changed, deleted album rows.
+6. `docs/UI.md` § Settings (Storage), `docs/ARCHITECTURE.md` (the DB file and `VACUUM`) and
+   `plan/STATUS.md` with the measured size before/after on the copy of the real DB are updated.
+
+**Acceptance.** A test on a temporary database: insert rows with large blobs, delete half, assert
+`freelist_count > 0`; the new `db::vacuum(path)` leaves `freelist_count == 0`, the file shrinks, every
+remaining row is intact, and a repeated call is a no-op; a headless frame shows the button and its
+facts.
+
+**Files.** `src/db.rs` (or `src/storage.rs`), `src/app.rs`, `src/i18n.rs`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`.
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
