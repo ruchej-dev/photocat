@@ -135,17 +135,29 @@ photocat albums show --id N [--tree]
 No command opens a file by a path or writes to disk: `PATH` is a key in `files.path`, not
 a file operation.
 
-## 5. The interface (M19)
+## 5. The interface (M19, the cards of M22.20)
 
 - The left panel, the "LIBRARY" group: the item **"Albums (N)"** with the number of albums.
-- The "Albums" view: a tree with indents and collapsing triangles; a node — a cover, the name,
-  "N files · M subalbums · size". On top "+ New album"; for the selected one — "+ Subalbum",
-  "Rename", "Move to…" (picking a parent from the tree; its own descendants are unavailable in the
-  list),
-  "Up / Down" (the order among siblings), "Delete the album".
-- Inside an album: a row of subalbums (folder tiles, the same order), below — a grid of files
-  (`draw_cell`), the chip "Album “Name”" with "×". The actions: **"Add picked"** (M18),
+- The "Albums" view: since M22.20 it opens on the **cards of the top level albums** — a 16:10 cover
+  with the first snapshot, "N sub-albums" and "N files" over it, the name and "size · date" under it
+  — with the control row of the screen (the filter of the names, the order, "Cards / List" and
+  "+ New album"). The album order of the export is the default order of the cards; "By update",
+  "By name", "By file count" and "By size" are looks (`AlbumSort`), and `AlbumNode::updated_at` is
+  the stamp they sort by, touched by `add_to_album`, `remove_from_album` and `move_in_album`.
+- Inside an album: the breadcrumb "All albums › … › here", then the tree with indents and
+  collapsing triangles; a node — a cover, the name, "N files · M subalbums · size". For the open
+  one — "+ Subalbum", "Rename", "Move to…" (picking a parent from the tree; its own descendants are
+  unavailable in the list), "Up / Down" (the order among siblings), "Delete the album".
+- Inside an album: a row of cards of the subalbums (the same order), below — a grid of files
+  (`draw_cell`), the chip "Album “Name”" with "×". The actions: **"Add the picked ones"** (M18),
   **"Remove from the album"**, **"Up / Down"** for a file (the order), **"Export to disk…"** (M20).
+- **The way into an album (M22.20)** is a dialog of its own, `AlbumPick`, with three entrances: the
+  dashed "+ Add" chip of the file card (one photo), "Add to an album… (N)" in the floating selection
+  bar (the marked photos) and "Add the picked ones (N)" inside an album (straight into the open
+  album). The dialog lists the albums with their paths and file counts, filters by name and has a
+  field for a new album: a name makes a root album and fills it in the same press. The photos go to
+  the end of the album, a repeat does not duplicate rows, and only `album_files` is written: not a
+  single file on disk is opened.
 - The sorting inside an album by default is "Album order" (a new option in the M17 list, available
   only inside an album); "By date" and "By name" stay as a temporary look.
 - Deleting: the confirmation shows the subtree ("delete “Dacha 2024”, “May”, “June” — 3 albums,

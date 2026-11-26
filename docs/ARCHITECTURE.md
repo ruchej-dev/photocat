@@ -132,7 +132,11 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   insert, a move and a delete. This is data, not a view: the grid sort does not change the order.
   An album stores only `files.id`; one snapshot can be in several albums but only once in one
   (`PRIMARY KEY(album_id, file_id)`). No cover is stored: the preview of the first non-trashed file
-  by `position` serves as one (`albums_tree().cover`).
+  by `position` serves as one (`albums_tree().cover`). `updated_at` (unix seconds) is touched by
+  every change of the row **and** of its contents (`add_to_album`, `remove_from_album`,
+  `move_in_album`): it is the date an album card shows and the key of the "By update" order
+  (M22.20). The card orders (`db::AlbumSort`, `db::album_order`) are a look — `position` stays the
+  order of the export.
 - `PRAGMA foreign_keys` is not enabled, so there are no cascades: `delete_album` recursively clears
   the subtree (`album_files` → `albums`) in one transaction, and deleting `files` rows (index
   reset, "remove the folder") clears `album_files` and compacts `position`. The files on disk do not

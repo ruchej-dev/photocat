@@ -431,12 +431,28 @@ impl AlbumDialog {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum AlbumAction {
     Select(i64),
+    /// Back to the root: the cards of the top level albums (M22.20).
+    Root,
     Up,
     Down,
     AddPicked,
     RemovePicked,
     FileUp,
     FileDown,
+}
+
+/// The "add photos to an album" dialog (M22.20). It is the one path for adding a photo: from the
+/// file card (one photo), from the selection of the grid (N photos) and from inside an album.
+/// Nothing here opens a file: rows only.
+struct AlbumPick {
+    /// The files to add, in the order they were picked.
+    files: Vec<i64>,
+    /// The chosen target: 0 means "nothing chosen yet".
+    target: i64,
+    /// A new album at the root, made and filled by the same press. Empty means "use `target`".
+    new_name: String,
+    /// The filter of the album list inside the dialog.
+    filter: String,
 }
 
 /// The kind of a click on a tile (M18): Ctrl adds or removes, Shift takes a range in grid order.
@@ -1783,17 +1799,57 @@ fn album_header(ui: &mut egui::Ui, node: &db::AlbumNode, lang: i18n::Lang) {
     });
 }
 
-/// The size of a sub-album card (M22.6): the width from the "Tiles" slider, a 16:10 canvas cover,
-/// the name at 13 px and the mono facts at 10 px — one card model for every sub-album.
-fn album_card_size(tile: f32) -> egui::Vec2 {
-    const PAD: f32 = 8.0;
-    let w = tile.clamp(100.0, 260.0);
-    let cover = ((w - 2.0 * PAD) * 10.0 / 16.0).round();
-    egui::vec2(w, PAD + cover + 6.0 + 16.0 + 14.0 + PAD)
+/// The date of an album card (M22.20): the day of the last change from the unix seconds the DB
+/// keeps, "18.05.2024"; an empty or broken stamp prints nothing instead of a wrong date.
+fn album_date(stamp: &str) -> String {
+    stamp
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+        .map(|t| t.with_timezone(&chrono::Local).format("%d.%m.%Y").to_string())
+        .unwrap_or_default()
 }
 
-/// A sub-album card (M22.6): the mock-up's card — a canvas cover with the preview of the album's
-/// first snapshot fitted whole, the name, the count of files and the size; a click opens the album.
+/// The size of an album card (M22.20, the mock-up's `photocat_3`): the width from the "Tiles"
+/// slider, a 16:10 cover with 10 px of air, the name at 13 px and the facts in mono 10 — one card
+/// model for every album and sub-album.
+fn album_card_size(tile: f32) -> egui::Vec2 {
+    const PAD: f32 = 10.0;
+    let w = tile.clamp(100.0, 260.0);
+    let cover = ((w - 2.0 * PAD) * 10.0 / 16.0).round();
+    egui::vec2(w, PAD + cover + 8.0 + 18.0 + 4.0 + 14.0 + PAD)
+}
+
+/// A plate of text over a cover: the mock-up's badge. The background is a photograph, not the
+/// theme, so the text keeps the one dimmed-frame tone of the window.
+fn cover_badge(
+    painter: &egui::Painter,
+    anchor: egui::Pos2,
+    align: egui::Align2,
+    text: &str,
+) {
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::monospace(10.0),
+        egui::Color32::from_gray(235),
+    );
+    let size = galley.size() + egui::vec2(10.0, 4.0);
+    let plate = align.anchor_size(anchor, size);
+    painter.rect_filled(plate, RADIUS_CTRL, egui::Color32::from_black_alpha(150));
+    painter.galley(
+        egui::pos2(plate.left() + 5.0, plate.center().y - galley.size().y / 2.0),
+        galley,
+        egui::Color32::from_gray(235),
+    );
+}
+
+/// An album card (M22.20, the mock-up's `photocat_3`): a `card`-tone card with a 16:10 canvas
+/// cover — the preview of the first snapshot fitted whole (a preview is never cropped), the count
+/// of files in the corner, the count of sub-albums in the other one, the name at 13 px and "size ·
+/// date" in mono 10. A click opens the album; the open album keeps the accent frame and the accent
+/// name.
+#[allow(clippy::too_many_arguments)]
 fn draw_album_cell(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -1801,26 +1857,31 @@ fn draw_album_cell(
     node: &db::AlbumNode,
     cover: Option<&FileRow>,
     tile: f32,
+    open: bool,
     lang: i18n::Lang,
 ) -> bool {
-    const PAD: f32 = 8.0;
+    const PAD: f32 = 10.0;
     let th = theme(ui);
     let size = album_card_size(tile);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect_filled(rect, RADIUS_CARD, th.card);
-        // A 1 px line on every card, the accent one under the cursor (the mock-up's hover).
+        // A 1 px line on every card — the accent one for the open album, the hovered one as well.
+        let line = if open || resp.hovered() {
+            th.accent
+        } else {
+            th.border
+        };
         painter.rect_stroke(
             rect,
             RADIUS_CARD,
-            egui::Stroke::new(1.0, if resp.hovered() { th.accent } else { th.border }),
+            egui::Stroke::new(if open { 2.0 } else { 1.0 }, line),
             egui::StrokeKind::Inside,
         );
-        // The cover area: a 16:10 canvas with the snapshot fitted whole — a preview is never cropped.
         let cover_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left() + PAD, rect.top() + PAD),
-            egui::vec2(size.x - 2.0 * PAD, size.y - 2.0 * PAD - 36.0),
+            egui::vec2(size.x - 2.0 * PAD, size.y - 2.0 * PAD - 44.0),
         );
         painter.rect_filled(cover_rect, RADIUS_CTRL, th.canvas);
         let drawn = cover.is_some_and(|f| paint_thumb(ui, ctx, cs, f, cover_rect));
@@ -1834,9 +1895,25 @@ fn draw_album_cell(
                 th.text_dim,
             );
         }
+        // The two counters of the mock-up sit on the cover: the sub-albums at the top left, the
+        // files at the bottom right.
+        if node.subalbums > 0 {
+            cover_badge(
+                painter,
+                cover_rect.left_top() + egui::vec2(6.0, 6.0),
+                egui::Align2::LEFT_TOP,
+                &i18n::count(lang, node.subalbums as usize, "sub_album"),
+            );
+        }
+        cover_badge(
+            painter,
+            cover_rect.right_bottom() - egui::vec2(6.0, 6.0),
+            egui::Align2::RIGHT_BOTTOM,
+            &i18n::count(lang, node.files as usize, "file"),
+        );
         let inner = size.x - 2.0 * PAD;
-        let name_top = cover_rect.bottom() + 6.0;
-        let facts_top = name_top + 17.0;
+        let name_top = cover_rect.bottom() + 8.0;
+        let facts_top = name_top + 18.0;
         // The texts are clipped to the card: a long name is cut with an ellipsis, not spilling out.
         let clipped = painter.with_clip_rect(rect.shrink(1.0));
         clipped.text(
@@ -1844,27 +1921,24 @@ fn draw_album_cell(
             egui::Align2::LEFT_TOP,
             shorten(&node.name, (inner / 7.0).max(6.0) as usize),
             egui::FontId::proportional(13.0),
-            th.text,
+            if open { th.accent } else { th.text },
+        );
+        let facts = format!(
+            "{} · {}",
+            db::human_in(lang, node.bytes),
+            album_date(&node.updated_at)
         );
         clipped.text(
             egui::pos2(rect.left() + PAD, facts_top),
             egui::Align2::LEFT_TOP,
-            i18n::count(lang, node.files as usize, "file"),
+            shorten(&facts, (inner / 6.0).max(8.0) as usize),
             egui::FontId::monospace(10.0),
             th.text_med,
-        );
-        clipped.text(
-            egui::pos2(rect.right() - PAD, facts_top),
-            egui::Align2::RIGHT_TOP,
-            db::human_in(lang, node.bytes),
-            egui::FontId::monospace(10.0),
-            th.text_dim,
         );
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
     }
-    // The sub-albums cannot be counted on a 100 px card: they are in the tree and in the hint.
     let hint = if !node.note.trim().is_empty() {
         node.note.clone()
     } else {
@@ -1879,6 +1953,241 @@ fn draw_album_cell(
         )
     };
     resp.on_hover_text(hint).clicked()
+}
+
+/// The height of an album row in the list look (M22.20): a 16:10 cover 26 px high and text that
+/// scales with the "Tiles" slider, the same as the file list.
+fn album_row_height(tile: f32) -> f32 {
+    (26.0 + tile * 0.12).round().clamp(36.0, 58.0)
+}
+
+/// An album in the list look (M22.20): a cover, the name, the path and "N files · M sub-albums ·
+/// size · date" in mono 10, with the accent edge on the open album. A click opens it.
+#[allow(clippy::too_many_arguments)]
+fn draw_album_row(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    node: &db::AlbumNode,
+    cover: Option<&FileRow>,
+    tile: f32,
+    open: bool,
+    lang: i18n::Lang,
+) -> bool {
+    let th = theme(ui);
+    let h = album_row_height(tile);
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), h),
+        egui::Sense::click(),
+    );
+    if ui.is_rect_visible(rect) {
+        if open || resp.hovered() {
+            let fill = if open { th.accent_soft } else { th.card };
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(RADIUS_CTRL as u8), fill);
+        }
+        if open {
+            let bar = egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height()));
+            ui.painter().rect_filled(bar, 0.0, th.accent);
+        }
+        let thumb_h = (h - 10.0).max(16.0);
+        let thumb = egui::vec2((thumb_h * 16.0 / 10.0).round(), thumb_h);
+        let tr = egui::Rect::from_min_size(
+            rect.left_top() + egui::vec2(8.0, (h - thumb.y) / 2.0),
+            thumb,
+        );
+        ui.painter().rect_filled(tr, RADIUS_CTRL, th.canvas);
+        if !cover.is_some_and(|f| paint_thumb(ui, ctx, cs, f, tr)) {
+            ui.painter().text(
+                tr.center(),
+                egui::Align2::CENTER_CENTER,
+                "▸",
+                egui::FontId::proportional(12.0),
+                th.text_dim,
+            );
+        }
+        let name_px = list_name_px(tile);
+        let meta_px = list_meta_px(tile);
+        let text_left = tr.right() + 10.0;
+        let clip = egui::Rect::from_min_max(
+            egui::pos2(text_left, rect.top()),
+            egui::pos2(rect.right() - 10.0, rect.bottom()),
+        );
+        let painter = ui.painter().with_clip_rect(clip);
+        let name_top = rect.center().y - name_px - 1.0;
+        painter.text(
+            egui::pos2(text_left, name_top),
+            egui::Align2::LEFT_TOP,
+            shorten(&node.name, ((clip.width() / name_px) * 1.6) as usize),
+            egui::FontId::proportional(name_px),
+            if open { th.accent } else { th.text },
+        );
+        let facts = i18n::fill(
+            lang,
+            "{} · {} · {} · {}",
+            &[
+                i18n::count(lang, node.files as usize, "file"),
+                i18n::count(lang, node.subalbums as usize, "sub_album"),
+                db::human_in(lang, node.bytes).to_string(),
+                album_date(&node.updated_at),
+            ],
+        );
+        painter.text(
+            egui::pos2(text_left, name_top + name_px + 2.0),
+            egui::Align2::LEFT_TOP,
+            &facts,
+            egui::FontId::monospace(meta_px),
+            th.text_dim,
+        );
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    let hint = if !node.note.trim().is_empty() {
+        node.note.clone()
+    } else {
+        t(lang, "open the album").to_string()
+    };
+    resp.on_hover_text(hint).clicked()
+}
+
+/// The words of the album order menu (M22.20).
+fn album_sort_label(sort: db::AlbumSort, lang: i18n::Lang) -> &'static str {
+    t(
+        lang,
+        match sort {
+            db::AlbumSort::Position => "Album order",
+            db::AlbumSort::Updated => "By update",
+            db::AlbumSort::Name => "By name",
+            db::AlbumSort::Count => "By file count",
+            db::AlbumSort::Size => "By size",
+        },
+    )
+}
+
+/// The cover of an album: the preview of its first snapshot in the order — the very preview the
+/// grid would show first. The tree carries the `thumb` sha, the row is looked up by it.
+fn album_cover<'a>(node: &db::AlbumNode, items: &'a [FileRow]) -> Option<&'a FileRow> {
+    node.cover
+        .as_ref()
+        .and_then(|sha| items.iter().find(|f| f.thumb.as_deref() == Some(sha.as_str())))
+}
+
+/// The cards (or the rows) of one album level (M22.20): 10 px apart, wrapped to the panel. Returns
+/// the album of a click — the caller opens it.
+#[allow(clippy::too_many_arguments)]
+fn draw_album_cards(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    cards: &[db::AlbumNode],
+    items: &[FileRow],
+    tile: f32,
+    selected: Option<i64>,
+    list: bool,
+    lang: i18n::Lang,
+) -> Option<i64> {
+    let mut open = None;
+    if list {
+        for node in cards {
+            let cover = album_cover(node, items);
+            if draw_album_row(
+                ui,
+                ctx,
+                cs,
+                node,
+                cover,
+                tile,
+                selected == Some(node.id),
+                lang,
+            ) {
+                open = Some(node.id);
+            }
+        }
+    } else {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+            for node in cards {
+                let cover = album_cover(node, items);
+                if draw_album_cell(
+                    ui,
+                    ctx,
+                    cs,
+                    node,
+                    cover,
+                    tile,
+                    selected == Some(node.id),
+                    lang,
+                ) {
+                    open = Some(node.id);
+                }
+            }
+        });
+    }
+    open
+}
+
+/// The albums of one level in the chosen order (M22.20): the children of `parent` whose name
+/// contains `filter`, sorted by `sort`. The album order stays the data of the export.
+fn album_cards_of(
+    albums: &[db::AlbumNode],
+    parent: i64,
+    filter: &str,
+    sort: db::AlbumSort,
+) -> Vec<db::AlbumNode> {
+    let needle = filter.trim().to_lowercase();
+    let mut cards: Vec<db::AlbumNode> = albums
+        .iter()
+        .filter(|n| n.parent_id == parent)
+        .filter(|n| needle.is_empty() || n.name.to_lowercase().contains(&needle))
+        .cloned()
+        .collect();
+    cards.sort_by(|a, b| db::album_order(a, b, sort));
+    cards
+}
+
+/// The mock-up's dashed "+ Add" chip (M22.20): the one path that puts a photo into an album from
+/// the file card. A dashed line says "a place to fill" without the weight of a button.
+fn dashed_add_chip(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let th = theme(ui);
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::monospace(11.0),
+        th.text_med,
+    );
+    let size = egui::vec2(galley.size().x + 16.0, 20.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let color = if resp.hovered() {
+            th.accent
+        } else {
+            th.border_strong
+        };
+        let st = egui::Stroke::new(1.0, color);
+        let r = rect.shrink(0.5);
+        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()];
+        for i in 0..4 {
+            ui.painter().extend(egui::Shape::dashed_line(
+                &[corners[i], corners[(i + 1) % 4]],
+                st,
+                4.0,
+                3.0,
+            ));
+        }
+        ui.painter().galley(
+            egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            if resp.hovered() {
+                th.accent
+            } else {
+                th.text_med
+            },
+        );
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    resp
 }
 
 /// The progress row of a background pass: `done/total`, "Stop" next to it.
@@ -1964,6 +2273,10 @@ struct App {
     /// The albums of the selected file for the card: a cache for one file.
     file_albums: Vec<(i64, String)>,
     file_albums_for: Option<i64>,
+    /// The filter of the album cards (M22.20): a substring of the album name. Not saved.
+    album_filter: String,
+    /// The "add photos to an album" dialog (M22.20): from the file card or from the selection.
+    album_pick: Option<AlbumPick>,
     /// Exporting an album to disk (M20): the dialog, the plan tree and the background pass.
     export_open: bool,
     export_album: Option<i64>,
@@ -2177,6 +2490,8 @@ impl App {
             album_delete_facts: String::new(),
             file_albums: Vec::new(),
             file_albums_for: None,
+            album_filter: String::new(),
+            album_pick: None,
             export_open: false,
             export_album: None,
             export_out: String::new(),
@@ -3366,6 +3681,10 @@ impl App {
                     self.album_open(other);
                     Ok(String::new())
                 }
+                AlbumAction::Root => {
+                    self.album_close();
+                    Ok(String::new())
+                }
                 AlbumAction::Up | AlbumAction::Down => {
                     let node = self.album_node(id).cloned().context(t(lang, "there is no album"))?;
                     let position = if action == AlbumAction::Up {
@@ -3434,6 +3753,167 @@ impl App {
                 self.refresh_albums();
             }
             Err(e) => self.status = i18n::fill(lang, "the album is not changed: {}", &[e.to_string()]),
+        }
+    }
+
+    /// Open the "add photos to an album" dialog for a set of files (M22.20). The target starts at
+    /// the open album when there is one: inside an album the owner adds photos to that album in
+    /// most cases. An empty set does nothing.
+    fn album_pick_open(&mut self, files: Vec<i64>) {
+        if files.is_empty() {
+            return;
+        }
+        let target = self.album_selected.unwrap_or(0);
+        self.album_pick = Some(AlbumPick {
+            files,
+            target,
+            new_name: String::new(),
+            filter: String::new(),
+        });
+    }
+
+    /// The confirmed add: rows in `album_files` only, the files on disk are untouched. A typed
+    /// name makes a new root album and fills it in the same press, so "collect into a new album"
+    /// is one step.
+    fn album_pick_commit(&mut self) {
+        let lang = self.settings.lang;
+        let Some(pick) = self.album_pick.take() else {
+            return;
+        };
+        let res: Result<String> = (|| {
+            let conn = db::open(&self.db_path)?;
+            let target = if pick.new_name.trim().is_empty() {
+                pick.target
+            } else {
+                db::create_album(&conn, 0, &pick.new_name, "")?
+            };
+            if target == 0 {
+                anyhow::bail!(t(lang, "pick an album or type a name for a new one"));
+            }
+            let (added, already) = db::add_to_album(&conn, target, &pick.files)?;
+            let path = db::album_path(&conn, target)?;
+            Ok(i18n::fill(
+                lang,
+                "{} added to “{}”, {} were there already",
+                &[added.to_string(), path, already.to_string()],
+            ))
+        })();
+        match res {
+            Ok(msg) => self.status = msg,
+            Err(e) => {
+                self.status = i18n::fill(lang, "the album is not changed: {}", &[e.to_string()])
+            }
+        }
+        self.file_albums_for = None;
+        self.refresh_albums();
+    }
+
+    /// The dialog itself: the tree of albums, a filter, and the field for a new album. A press on
+    /// the primary button adds the photos to the chosen album (or to the new one).
+    fn album_pick_modal(&mut self, ctx: &egui::Context) {
+        let lang = self.settings.lang;
+        let Some(pick) = self.album_pick.as_ref() else {
+            return;
+        };
+        let mut target = pick.target;
+        let mut new_name = pick.new_name.clone();
+        let mut filter = pick.filter.clone();
+        let mut confirm = false;
+        let mut cancel = false;
+        let albums = self.albums.clone();
+        let things = i18n::count(lang, pick.files.len(), "shot");
+        let modal = egui::Modal::new(egui::Id::unique("photocat-album-pick"))
+            .frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
+            ui.set_min_width(460.0);
+            ui.label(egui::RichText::new(t(lang, "Add to an album")).size(14.0).strong());
+            ui.label(num(ui, things.clone(), 11.0).color(dim(ui)));
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "The photos go to the end of the album. The files on disk stay untouched.",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
+            );
+            ui.add_space(6.0);
+            if albums.is_empty() {
+                ui.label(t(
+                    lang,
+                    "There are no albums yet: type a name and the album is made with these photos.",
+                ));
+            } else {
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut filter)
+                        .hint_text(t(lang, "Filter the albums"))
+                        .desired_width(300.0),
+                );
+                field.on_hover_text(t(lang, "a part of the album name"));
+                ui.add_space(2.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("album-pick-list")
+                    .max_height(220.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        let needle = filter.trim().to_lowercase();
+                        for node in &albums {
+                            let path = album_label(&albums, node.id);
+                            if !needle.is_empty() && !path.to_lowercase().contains(&needle) {
+                                continue;
+                            }
+                            let picked = target == node.id;
+                            let text = i18n::fill(
+                                lang,
+                                "{} · {}",
+                                &[path, i18n::count(lang, node.files as usize, "file")],
+                            );
+                            let row = ui.selectable_label(picked, text);
+                            if row.clicked() {
+                                target = node.id;
+                            }
+                        }
+                    });
+            }
+            ui.add_space(6.0);
+            ui.label(t(lang, "or a new album:"));
+            ui.add(
+                egui::TextEdit::singleline(&mut new_name)
+                    .hint_text(t(lang, "For printing, Summer 2024"))
+                    .desired_width(360.0),
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let label = i18n::fill(lang, "Add {}", std::slice::from_ref(&things));
+                if ui
+                    .add(WordButton::primary(Icon::Add, label))
+                    .on_hover_text(t(
+                        lang,
+                        "add the photos to the chosen album or to a new one; a repeat does not duplicate rows",
+                    ))
+                    .clicked()
+                {
+                    confirm = true;
+                }
+                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() {
+            cancel = true;
+        }
+        if cancel {
+            self.album_pick = None;
+            return;
+        }
+        if let Some(pick) = self.album_pick.as_mut() {
+            pick.target = target;
+            pick.new_name = new_name;
+            pick.filter = filter;
+        }
+        if confirm {
+            self.album_pick_commit();
         }
     }
 
@@ -6930,20 +7410,22 @@ impl App {
         });
 
         // The albums of the file (M19): chips in the inspector, the "×" removes only the album
-        // row. Nothing changes on disk.
+        // row. Nothing changes on disk. Since M22.20 the section is always here, with the mock-up's
+        // dashed "+ Add": the one way to put a photo into an album without leaving the grid.
         if self.file_albums_for != Some(id) {
             self.file_albums_for = Some(id);
             self.file_albums = db::open(&self.db_path)
                 .and_then(|c| db::album_refs_of_file(&c, id))
                 .unwrap_or_default();
         }
-        if !self.file_albums.is_empty() {
+        {
             let list = self.file_albums.clone();
             ui.add_space(8.0);
             caps_row(ui, t(lang, "Albums"), &list.len().to_string(), false);
             ui.add_space(2.0);
             let mut remove_from: Option<i64> = None;
             let mut open_album: Option<i64> = None;
+            let mut add_to_album = false;
             ui.horizontal_wrapped(|ui| {
                 for (album_id, path) in &list {
                     let body = t(lang, "open the album in the Albums view");
@@ -6958,7 +7440,19 @@ impl App {
                         ChipClick::None => {}
                     }
                 }
+                if dashed_add_chip(ui, t(lang, "+ Add"))
+                    .on_hover_text(t(
+                        lang,
+                        "put this photo into an album; the file on disk is unchanged",
+                    ))
+                    .clicked()
+                {
+                    add_to_album = true;
+                }
             });
+            if add_to_album {
+                self.album_pick_open(vec![id]);
+            }
             if let Some(album_id) = open_album {
                 // A click on the word goes to the album; only the "×" changes a row (M22.17).
                 self.view = View::Albums;
@@ -11845,6 +12339,7 @@ impl eframe::App for App {
         self.picker_modal(ctx);
         self.storage_modal(ctx);
         self.album_modal(ctx);
+        self.album_pick_modal(ctx);
         self.export_modal(ctx);
         self.trash_modal(ctx);
         self.poll_photo(ctx);
@@ -11941,6 +12436,7 @@ impl eframe::App for App {
         let mut face_assign: Option<String> = None;
         let mut reset = false;
         let mut empty_click = false;
+        let mut album_pick_request = false;
         let mut view_save = false;
         let mut clear_chips = FilterClear::default();
         let view = self.view;
@@ -12237,15 +12733,125 @@ impl eframe::App for App {
                 }
             }
             View::Albums => {
-                // The tree (M19): indents and collapsing. A click opens an album, the triangle expands
-                // the sub-albums without changing the selection.
-                ui.horizontal_wrapped(|ui| {
-                    // The main action of the view carries the accent (M22.6, the mock-up's "+").
-                    let new_album = WordButton::primary(Icon::CreateNewFolder, t(lang, "+ New album"));
-                    if ui.add(new_album).clicked() {
-                        album_dialog_request = Some(AlbumDialog::New);
+                // The control row of the screen (M22.20, the mock-up's `photocat_3`): the filter of
+                // the album names, their order, the cards-or-list look, and the one main action of
+                // the view with the accent. All of it is a look: the album order stays the data of
+                // the export.
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        if ui
+                            .add(WordButton::primary(
+                                Icon::CreateNewFolder,
+                                t(lang, "+ New album"),
+                            ))
+                            .on_hover_text(t(
+                                lang,
+                                "an album is data only: the files on disk do not change",
+                            ))
+                            .clicked()
+                        {
+                            album_dialog_request = Some(AlbumDialog::New);
+                        }
+                        let mut list = self.settings.album_list;
+                        for (value, icon, label) in [
+                            (false, Icon::GridView, t(lang, "Cards")),
+                            (true, Icon::ViewList, t(lang, "List")),
+                        ] {
+                            if ui
+                                .add(WordButton::picked(icon, label, list == value).compact())
+                                .clicked()
+                            {
+                                list = value;
+                            }
+                        }
+                        if list != self.settings.album_list {
+                            self.settings.album_list = list;
+                            view_save = true;
+                        }
+                        let mut sort = self.settings.album_sort;
+                        let resp = ui.add(WordButton::new(Icon::Sort, t(lang, "Sort")));
+                        egui::Popup::menu(&resp).show(|ui| {
+                            for value in db::AlbumSort::ALL {
+                                ui.selectable_value(&mut sort, value, album_sort_label(value, lang));
+                            }
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} {}",
+                                    t(lang, "now:"),
+                                    album_sort_label(sort, lang)
+                                ))
+                                .size(11.0)
+                                .color(dim(ui)),
+                            );
+                        });
+                        if sort != self.settings.album_sort {
+                            self.settings.album_sort = sort;
+                            view_save = true;
+                        }
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.album_filter)
+                                .hint_text(t(lang, "Filter the albums"))
+                                .desired_width(150.0),
+                        )
+                        .on_hover_text(t(lang, "a part of the album name"));
+                    });
+                });
+                ui.add_space(4.0);
+                let chosen: Option<db::AlbumNode> = album_selected
+                    .and_then(|id| albums.iter().find(|n| n.id == id).cloned());
+                // The breadcrumb: the way up from the open album, one press per level (M22.20).
+                if let Some(node) = &chosen {
+                    let mut crumbs: Vec<(i64, String)> = Vec::new();
+                    let mut at = node.parent_id;
+                    for _ in 0..256 {
+                        if at == 0 {
+                            break;
+                        }
+                        let Some(up) = albums.iter().find(|n| n.id == at) else {
+                            break;
+                        };
+                        crumbs.push((up.id, up.name.clone()));
+                        at = up.parent_id;
                     }
+                    crumbs.reverse();
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if ui
+                            .add(WordButton::small(
+                                Icon::CollectionsBookmark,
+                                t(lang, "All albums"),
+                            ))
+                            .on_hover_text(t(lang, "the cards of the top level albums"))
+                            .clicked()
+                        {
+                            album_action = Some(AlbumAction::Root);
+                        }
+                        for (id, name) in &crumbs {
+                            ui.label(egui::RichText::new("›").size(11.0).color(dim(ui)));
+                            if ui
+                                .add(WordButton::small(Icon::Folder, name))
+                                .on_hover_text(t(lang, "open the album"))
+                                .clicked()
+                            {
+                                album_action = Some(AlbumAction::Select(*id));
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+                    ui.separator();
+                }
+                let Some(node) = chosen.clone() else {
+                    // The root of the albums: the cards of the top level, as in the mock-up. An
+                    // album without parents is what the owner sees first.
                     if albums.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(
+                            t(
+                                lang,
+                                "Create the first album with “+ New album”: inside are the sub-albums and the photos in the order they will lie on disk.",
+                            ),
+                        );
                         ui.label(
                             egui::RichText::new(t(
                                 lang,
@@ -12254,36 +12860,64 @@ impl eframe::App for App {
                             .size(11.0)
                             .color(dim(ui)),
                         );
+                        return;
                     }
-                });
-                if !albums.is_empty() {
+                    let cards = album_cards_of(
+                        &albums,
+                        0,
+                        &self.album_filter,
+                        self.settings.album_sort,
+                    );
+                    if cards.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(i18n::fill(
+                            lang,
+                            "no album with the name “{}”",
+                            &[self.album_filter.trim().to_string()],
+                        ));
+                        if word_button(ui, Icon::Close, t(lang, "Reset the filter")).clicked() {
+                            self.album_filter.clear();
+                        }
+                        return;
+                    }
+                    let list = self.settings.album_list;
                     egui::ScrollArea::vertical()
-                        .id_salt("album-tree")
-                        .max_height(190.0)
-                        .auto_shrink([false, true])
+                        .id_salt("album-root-cards")
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            if let Some(id) =
-                                draw_album_tree(ui, &albums, album_selected, &mut album_expanded, lang)
-                            {
+                            if let Some(id) = draw_album_cards(
+                                ui,
+                                ctx,
+                                &mut cells,
+                                &cards,
+                                &items,
+                                self.tile_size,
+                                None,
+                                list,
+                                lang,
+                            ) {
                                 album_action = Some(AlbumAction::Select(id));
                             }
                         });
-                }
-                ui.separator();
-                let chosen = album_selected.and_then(|id| albums.iter().find(|n| n.id == id));
-                let Some(node) = chosen else {
-                    ui.add_space(8.0);
-                    ui.label(
-                        t(
-                            lang,
-                            "Pick an album in the tree or create a new one. Inside are the sub-albums and the photos in the order they will lie on disk.",
-                        ),
-                    );
                     return;
                 };
-                let node = node.clone();
+                // The tree (M19) stays inside an album: there it is the nesting and the order the
+                // cards cannot show. The root of the albums is the card grid alone (M22.20).
+                ui.add_space(2.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("album-tree")
+                    .max_height(190.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        if let Some(id) =
+                            draw_album_tree(ui, &albums, album_selected, &mut album_expanded, lang)
+                        {
+                            album_action = Some(AlbumAction::Select(id));
+                        }
+                    });
+                ui.separator();
                 // M22.6: the open album is a card header — the name at 14 px and the facts of the
-                // card in mono 11 — over the same action row as before.
+                // card in mono 11 — over the action row of the album itself.
                 ui.add_space(4.0);
                 album_header(ui, &node, lang);
                 ui.add_space(2.0);
@@ -12309,7 +12943,11 @@ impl eframe::App for App {
                     }
                     if ui
                         .add_enabled(
-                            node.position + 1 < albums.iter().filter(|n| n.parent_id == node.parent_id).count() as i64,
+                            node.position + 1
+                                < albums
+                                    .iter()
+                                    .filter(|n| n.parent_id == node.parent_id)
+                                    .count() as i64,
                             WordButton::new(Icon::ArrowDown, t(lang, "Down")),
                         )
                         .on_hover_text(t(lang, "move the album down among its siblings"))
@@ -12319,54 +12957,52 @@ impl eframe::App for App {
                     }
                     if ui
                         .add(WordButton::new(Icon::Delete, t(lang, "Delete the album")))
-                        .on_hover_text(t(lang, "delete the rows of the album and its sub-albums; the files on disk stay"))
+                        .on_hover_text(t(
+                            lang,
+                            "delete the rows of the album and its sub-albums; the files on disk stay",
+                        ))
                         .clicked()
                     {
                         album_dialog_request = Some(AlbumDialog::Delete);
                     }
                 });
-                let children: Vec<db::AlbumNode> = albums
-                    .iter()
-                    .filter(|n| n.parent_id == node.id)
-                    .cloned()
-                    .collect();
+                let children =
+                    album_cards_of(&albums, node.id, &self.album_filter, self.settings.album_sort);
                 if !children.is_empty() {
                     ui.add_space(6.0);
-                    ui.label(egui::RichText::new(t(lang, "Sub-albums")).size(11.0).color(dim(ui)));
+                    ui.label(
+                        egui::RichText::new(t(lang, "Sub-albums"))
+                            .size(11.0)
+                            .color(dim(ui)),
+                    );
                     // The cards scale with the "Tiles" slider, so a row of them can outgrow the
                     // window: one row is always whole, two rows at most, the rest scrolls, and the
                     // grid below keeps 220 px — many sub-albums must not hide the album's files.
-                    let card_h = album_card_size(self.tile_size).y;
-                    let room =
-                        (ui.available_height() - 220.0).clamp(card_h, card_h * 2.0 + TILE_GAP);
+                    let card_h = if self.settings.album_list {
+                        album_row_height(self.tile_size)
+                    } else {
+                        album_card_size(self.tile_size).y
+                    };
+                    let room = (ui.available_height() - 220.0).clamp(card_h, card_h * 2.0 + TILE_GAP);
+                    let list = self.settings.album_list;
                     egui::ScrollArea::vertical()
                         .id_salt("album-cards")
                         .max_height(room)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
-                                for child in &children {
-                                    // The cover is the first snapshot of the sub-album in its order:
-                                    // the very preview the grid would show first.
-                                    let cover = child.cover.as_ref().and_then(|sha| {
-                                        items
-                                            .iter()
-                                            .find(|f| f.thumb.as_deref() == Some(sha.as_str()))
-                                    });
-                                    if draw_album_cell(
-                                        ui,
-                                        ctx,
-                                        &mut cells,
-                                        child,
-                                        cover,
-                                        self.tile_size,
-                                        lang,
-                                    ) {
-                                        album_action = Some(AlbumAction::Select(child.id));
-                                    }
-                                }
-                            });
+                            if let Some(id) = draw_album_cards(
+                                ui,
+                                ctx,
+                                &mut cells,
+                                &children,
+                                &items,
+                                self.tile_size,
+                                album_selected,
+                                list,
+                                lang,
+                            ) {
+                                album_action = Some(AlbumAction::Select(id));
+                            }
                         });
                 }
                 ui.add_space(6.0);
@@ -12386,11 +13022,7 @@ impl eframe::App for App {
                         album_browse = false;
                     }
                     if ui
-                        .add(WordButton::picked(
-                            Icon::PhotoLibrary,
-                            "All files",
-                            album_browse,
-                        ))
+                        .add(WordButton::picked(Icon::PhotoLibrary, "All files", album_browse))
                         .on_hover_text(
                             t(
                                 lang,
@@ -12415,7 +13047,10 @@ impl eframe::App for App {
                                 ),
                             ),
                         )
-                        .on_hover_text(t(lang, "add the marked photos to the end of the album; a repeat does not duplicate rows"))
+                        .on_hover_text(t(
+                            lang,
+                            "add the marked photos to the end of the album; a repeat does not duplicate rows",
+                        ))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::AddPicked);
@@ -12437,7 +13072,10 @@ impl eframe::App for App {
                                 ),
                             ),
                         )
-                        .on_hover_text(t(lang, "the album rows go away; the files on disk do not change"))
+                        .on_hover_text(t(
+                            lang,
+                            "the album rows go away; the files on disk do not change",
+                        ))
                         .clicked()
                     {
                         album_action = Some(AlbumAction::RemovePicked);
@@ -12445,7 +13083,10 @@ impl eframe::App for App {
                     let file_in_album =
                         self.selected.is_some_and(|id| self.album_set.contains(&id));
                     if ui
-                        .add_enabled(file_in_album, WordButton::new(Icon::ArrowUp, t(lang, "File up")))
+                        .add_enabled(
+                            file_in_album,
+                            WordButton::new(Icon::ArrowUp, t(lang, "File up")),
+                        )
                         .on_hover_text(t(lang, "move the selected photo up in the album order"))
                         .clicked()
                     {
@@ -13572,7 +14213,23 @@ impl eframe::App for App {
                 );
                 let all = WordButton::small(Icon::Check, i18n::select_all(lang, visible.len()));
                 let clear = WordButton::small(Icon::Close, t(lang, "Clear selection"));
+                // M22.20: with albums around, the bar also carries the way into them — the one
+                // action of the bar that changes data, and it changes rows only.
+                let add = WordButton::small(
+                    Icon::Add,
+                    i18n::fill(
+                        lang,
+                        "Add to an album… ({})",
+                        &[chips.picked.to_string()],
+                    ),
+                );
+                let add_w = if albums.is_empty() {
+                    0.0
+                } else {
+                    add.size(ui).0 + 6.0
+                };
                 let w = 12.0 + 6.0 + 6.0 + mono_width(ui, &picked_text, 11.0) + 12.0 + 1.0 + 12.0
+                    + add_w
                     + all.size(ui).0
                     + 6.0
                     + clear.size(ui).0
@@ -13602,6 +14259,17 @@ impl eframe::App for App {
                                     ui.add_space(6.0);
                                     hairline_vertical(ui);
                                     ui.add_space(6.0);
+                                    if !albums.is_empty()
+                                        && ui
+                                            .add(add)
+                                            .on_hover_text(t(
+                                                lang,
+                                                "put the marked photos into an album; the files on disk stay untouched",
+                                            ))
+                                            .clicked()
+                                    {
+                                        album_pick_request = true;
+                                    }
                                     if ui
                                         .add(all)
                                         .on_hover_text(t(lang, "marks everything visible now; Ctrl+A does the same"))
@@ -13667,6 +14335,11 @@ impl eframe::App for App {
         }
         if let Some(id) = album_export_request {
             self.export_dialog_open(id);
+        }
+        // The "add to an album" dialog takes the selection as it was at the click (M22.20).
+        if album_pick_request {
+            let files: Vec<i64> = self.picked.iter().copied().collect();
+            self.album_pick_open(files);
         }
         // A chip removes exactly its own filter; the grid is recomputed on the next frame.
         if clear_chips.query {
@@ -15139,6 +15812,7 @@ mod tests {
             position: 0,
             name: "Summer 2024".into(),
             note: String::new(),
+            updated_at: "1714557600".into(),
             depth: 0,
             files: ids.len() as i64,
             trashed: 0,
@@ -15153,6 +15827,7 @@ mod tests {
                 position: i as i64,
                 name: format!("Month {}", i + 1),
                 note: String::new(),
+                updated_at: "1714557600".into(),
                 depth: 1,
                 files: 12,
                 trashed: 0,
@@ -17138,11 +17813,14 @@ mod tests {
         let card: Vec<&egui::Rect> = rects
             .iter()
             // The scroll area paints its ground over the whole panel: the card is what is
-            // narrower than the panel minus its two margins.
+            // narrower than the panel minus its two margins. The 1 px scrollbar of the panel is
+            // not a card either — the card is taller than the panel since the "Albums" block is
+            // always here (M22.20), so the bar appears.
             .filter(|r| {
                 r.top() >= band.bottom()
                     && r.left() >= panel_left - 1.5
                     && r.width() <= RIGHT_W - 2.0 * PANEL_PAD + 0.5
+                    && r.width() > 8.0
             })
             .collect();
         let left = card
@@ -18442,6 +19120,7 @@ mod tests {
             position: 0,
             name: "Дача 2024".into(),
             note: String::new(),
+            updated_at: "1714557600".into(),
             depth: 0,
             files: 3,
             trashed: 0,
@@ -19007,6 +19686,7 @@ mod tests {
                 position: 0,
                 name: "Summer".into(),
                 note: String::new(),
+                updated_at: "1714557600".into(),
                 depth: 0,
                 files: 3,
                 trashed: 0,
@@ -19181,6 +19861,7 @@ mod tests {
             position: 0,
             name: name.into(),
             note: String::new(),
+            updated_at: "1714557600".into(),
             depth: usize::from(parent != 0),
             files,
             trashed: 0,
@@ -19190,18 +19871,18 @@ mod tests {
         }
     }
 
-    /// M22.6: a sub-album card is one model — the width from the "Tiles" slider, a 16:10 canvas
-    /// cover, the name at 13 px and the mono facts at 10 px below it.
+    /// M22.20: an album card is one model — the width from the "Tiles" slider, a 16:10 canvas
+    /// cover with the mock-up's 10 px of air, the name at 13 px and the mono facts at 10 px.
     #[test]
     fn the_album_card_follows_the_tiles_slider() {
         let small = album_card_size(100.0);
         let big = album_card_size(260.0);
         assert_eq!(small.x, 100.0);
         assert_eq!(big.x, 260.0);
-        // 8 px pad + a 53 px cover (84 × 10/16) + 6 px + the name + the facts + 8 px pad.
-        assert!((small.y - 105.0).abs() < 0.01, "{}", small.y);
-        // 8 + a 153 px cover (244 × 10/16) + 6 + 16 + 14 + 8.
-        assert!((big.y - 205.0).abs() < 0.01, "{}", big.y);
+        // 10 px pad + a 50 px cover (80 × 10/16) + 8 + 18 (name) + 4 + 14 (facts) + 10 px pad.
+        assert!((small.y - 114.0).abs() < 0.01, "{}", small.y);
+        // 10 + a 150 px cover (240 × 10/16) + 8 + 18 + 4 + 14 + 10.
+        assert!((big.y - 214.0).abs() < 0.01, "{}", big.y);
     }
 
     /// Draws one sub-album card in a frame without a window and returns the height it took: the
@@ -19241,21 +19922,30 @@ mod tests {
         let mut used = 0.0;
         let out = ctx.run_ui(raw, |ui| {
             let ctx = ui.ctx().clone();
-            super::draw_album_cell(ui, &ctx, &mut cells, &node, None, tile, i18n::Lang::En);
+            super::draw_album_cell(
+                ui,
+                &ctx,
+                &mut cells,
+                &node,
+                None,
+                tile,
+                false,
+                i18n::Lang::En,
+            );
             used = ui.min_rect().height();
         });
         out.drop_without_applying_deltas();
         used
     }
 
-    /// M22.6: the card grows with the slider: a 105 px card at 100, a 205 px one at 260, and the
+    /// M22.20: the card grows with the slider: a 114 px card at 100, a 214 px one at 260, and the
     /// drawn height is the model's.
     #[test]
     fn the_album_card_draws_at_the_model_height() {
         let small = album_card_frame_height(100.0);
         let big = album_card_frame_height(260.0);
-        assert!((small - 105.0).abs() < 0.01, "a card at 100: {small}");
-        assert!((big - 205.0).abs() < 0.01, "a card at 260: {big}");
+        assert!((small - 114.0).abs() < 0.01, "a card at 100: {small}");
+        assert!((big - 214.0).abs() < 0.01, "a card at 260: {big}");
     }
 
     /// M22.6: the cards scale with the slider, so twelve of them at 260 must not push the grid out
@@ -19304,10 +19994,288 @@ mod tests {
             texts.iter().any(|t| t == "3 files · 1 sub-album · 2.0 MiB"),
             "the card header lost its facts: {texts:?}"
         );
-        // The sub-album card: the name, the count of files and the size on the card itself.
+        // The sub-album card: the name, the count of files on the cover and the facts under it —
+        // the size and the date of the last change (M22.20).
         assert!(texts.iter().any(|t| t == "May"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "12 files"), "{texts:?}");
-        assert!(texts.iter().any(|t| t == "2.0 MiB"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t.starts_with("2.0 MiB · ")),
+            "the card lost its facts: {texts:?}"
+        );
+    }
+
+    /// M22.20: with no album open the screen is the mock-up's grid of album cards — the cover of
+    /// the first snapshot, the counters on it, the name and "size · date" under it, and no actions
+    /// of an album that is not open.
+    #[test]
+    fn the_root_of_the_albums_is_a_grid_of_cards() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        app.albums = vec![
+            album_node(1, 0, "Summer 2024", 3, 0),
+            album_node(2, 0, "Dacha", 0, 2),
+        ];
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(texts.iter().any(|t| t == "Summer 2024"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Dacha"), "{texts:?}");
+        // The counters of the mock-up on the cover: the files bottom right, the sub-albums top left.
+        assert!(texts.iter().any(|t| t == "3 files"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "2 sub-albums"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t.starts_with("2.0 MiB · ")),
+            "the card carries the size and the date: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t == "Delete the album"),
+            "the actions belong to the open album: {texts:?}"
+        );
+        // The heading of the view is not printed twice: "Albums" is the ribbon's, the cards are
+        // named by the albums themselves.
+        assert_eq!(
+            texts.iter().filter(|t| t.as_str() == "Albums").count(),
+            2,
+            "the nav item, the card section of the file card"
+        );
+    }
+
+    /// M22.20: the cards of one level are the children of that level only, filtered by a part of
+    /// the name and ordered by the chosen look — the album order stays the data of the export.
+    #[test]
+    fn the_album_filter_and_order_keep_the_album_order_of_the_export() {
+        let albums = vec![
+            album_node(1, 0, "Май", 5, 0),
+            album_node(2, 0, "Август", 9, 0),
+            album_node(3, 1, "День 1", 2, 0),
+        ];
+        let names = |cards: Vec<db::AlbumNode>| {
+            cards.into_iter().map(|n| n.name).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(super::album_cards_of(&albums, 0, "", db::AlbumSort::Position)),
+            ["Май", "Август"]
+        );
+        assert_eq!(
+            names(super::album_cards_of(&albums, 0, "АВГ", db::AlbumSort::Position)),
+            ["Август"],
+            "the filter ignores the case"
+        );
+        assert_eq!(
+            names(super::album_cards_of(&albums, 0, "", db::AlbumSort::Count)),
+            ["Август", "Май"]
+        );
+        assert_eq!(
+            names(super::album_cards_of(&albums, 1, "", db::AlbumSort::Position)),
+            ["День 1"],
+            "a sub-album is a card of its own level"
+        );
+        assert!(names(super::album_cards_of(&albums, 0, "нет такого", db::AlbumSort::Position)).is_empty());
+    }
+
+    /// The date of a card comes from the unix seconds the DB keeps: a broken stamp prints nothing
+    /// instead of a wrong date.
+    #[test]
+    fn the_album_date_is_dd_mm_yyyy_or_nothing() {
+        let date = super::album_date("1714557600");
+        assert_eq!(date.len(), 10, "dd.mm.yyyy: {date}");
+        assert_eq!(&date[2..3], ".", "{date}");
+        assert_eq!(&date[5..6], ".", "{date}");
+        assert_eq!(super::album_date(""), "");
+        assert_eq!(super::album_date("not a stamp"), "");
+    }
+
+    /// M22.20: "add photos to an album" is one dialog for the file card and for the selection: the
+    /// open album is the target by default, a typed name makes a root album and fills it, and a
+    /// repeat does not duplicate rows. Rows only — no file is created.
+    #[test]
+    fn the_album_picker_adds_the_photos_and_makes_a_new_album() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-pick-{}.db",
+            std::process::id()
+        ));
+        let (album, files) = {
+            let conn = db::open(&path).unwrap();
+            db::insert(&conn, &file_row(0, "image", "pick-one.jpg")).unwrap();
+            db::insert(&conn, &file_row(1, "image", "pick-two.jpg")).unwrap();
+            let files: Vec<i64> = {
+                let mut st = conn.prepare("SELECT id FROM files ORDER BY id").unwrap();
+                let rows = st.query_map([], |r| r.get(0)).unwrap();
+                rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
+            };
+            let album = db::create_album(&conn, 0, "May", "").unwrap();
+            (album, files)
+        };
+        let mut app = App::new(path.clone());
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        app.album_open(album);
+        // From the card of one photo: the open album is the target.
+        app.album_pick_open(vec![files[0]]);
+        assert_eq!(
+            app.album_pick.as_ref().unwrap().target,
+            album,
+            "the open album is the target by default"
+        );
+        // From the selection of the grid: two photos into a new album in the same press.
+        app.album_pick_open(vec![files[0], files[1]]);
+        if let Some(pick) = app.album_pick.as_mut() {
+            pick.new_name = "For printing".into();
+        }
+        app.album_pick_commit();
+        assert!(app.album_pick.is_none(), "the dialog closes after the add");
+        let conn = db::open(&path).unwrap();
+        let made = app
+            .albums
+            .iter()
+            .find(|n| n.name == "For printing")
+            .expect("the new album is made by the same press")
+            .id;
+        assert_eq!(db::album_items(&conn, made).unwrap().len(), 2);
+        assert!(db::album_items(&conn, album).unwrap().is_empty());
+        // A repeat adds nothing twice.
+        app.album_pick_open(vec![files[0]]);
+        if let Some(pick) = app.album_pick.as_mut() {
+            pick.target = made;
+        }
+        app.album_pick_commit();
+        assert_eq!(db::album_items(&conn, made).unwrap().len(), 2);
+        // The photos are rows only: nothing appears on disk.
+        assert!(!std::path::Path::new("/tmp/pick-one.jpg").exists());
+    }
+
+    /// M22.20: the dialog itself — the facts of the selection, the tree with the paths, the field
+    /// of a new album and the one accent button.
+    #[test]
+    fn the_album_picker_draws_the_tree_and_the_photos() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.albums = vec![
+            album_node(1, 0, "Summer 2024", 3, 1),
+            album_node(2, 1, "May", 12, 0),
+        ];
+        app.album_pick_open(vec![1, 2]);
+        let ctx = egui::Context::default();
+        let texts = modal_frame(&mut app, &ctx, App::album_pick_modal);
+        assert!(texts.iter().any(|w| w == "Add to an album"), "{texts:?}");
+        assert!(
+            texts.iter().any(|w| w == "Add 2 photos"),
+            "the primary button names the count: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|w| w.starts_with("Summer 2024 / May · ")),
+            "the nested album is offered with its path: {texts:?}"
+        );
+        assert!(texts.iter().any(|w| w == "or a new album:"), "{texts:?}");
+        assert!(texts.iter().any(|w| w == "Cancel"), "{texts:?}");
+    }
+
+    /// M22.20: with albums around, the selection bar carries the way into them; without albums
+    /// the word is not promised.
+    #[test]
+    fn the_selection_bar_offers_the_way_into_an_album() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Grid;
+        app.picked = app.items.iter().take(2).map(|f| f.id).collect();
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            !texts.iter().any(|t| t.starts_with("Add to an album…")),
+            "no albums — no road into them: {texts:?}"
+        );
+        app.albums = vec![album_node(1, 0, "Summer 2024", 0, 0)];
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(
+            texts.iter().any(|t| t == "Add to an album… (2)"),
+            "the bar offers the way into an album: {texts:?}"
+        );
+    }
+
+    /// M22.20: the control row of the albums screen — the filter, the order, the look and the main
+    /// action — has to fit the content panel at the narrowest working window. A row that does not
+    /// fit pushes its first word under the left panel, where nobody looks for it.
+    #[test]
+    fn the_album_control_row_fits_the_content_panel() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        app.albums = vec![album_node(1, 0, "Summer 2024", 3, 0)];
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let left = super::LEFT_W;
+        let right = size.x - super::RIGHT_W;
+        let words = window_word_rects_at(&mut app, &ctx, size);
+        for name in ["Filter the albums", "+ New album", "Cards", "Sort"] {
+            let found: Vec<&egui::Rect> = words
+                .iter()
+                .filter(|(w, _)| w == name)
+                .map(|(_, r)| r)
+                .collect();
+            assert!(!found.is_empty(), "the control “{name}” is on screen: {words:?}");
+            for r in found {
+                assert!(
+                    r.left() >= left - 0.5 && r.right() <= right + 0.5,
+                    "“{name}” leaves the content panel: {r:?} in [{left}, {right}]"
+                );
+            }
+        }
+    }
+
+    /// M22.20: the breadcrumb is the way up from an open album — one press per level, and the
+    /// root is the card grid again.
+    #[test]
+    fn the_breadcrumb_goes_back_to_the_root_of_the_albums() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-breadcrumb-{}.db",
+            std::process::id()
+        ));
+        let child;
+        {
+            let conn = db::open(&path).unwrap();
+            let root = db::create_album(&conn, 0, "Summer 2024", "").unwrap();
+            child = db::create_album(&conn, root, "May", "").unwrap();
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        app.album_open(child);
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let r = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "All albums")
+            .expect("the breadcrumb is on screen")
+            .1;
+        click_at(&mut app, &ctx, r.center());
+        assert_eq!(app.album_selected, None, "the root of the albums");
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Summer 2024"),
+            "the root is the card grid of the top level: {texts:?}"
+        );
+    }
+
+    /// M22.20: the album list row grows with the "Tiles" slider, like the file list.
+    #[test]
+    fn the_album_list_row_scales_with_the_slider() {
+        assert!((super::album_row_height(100.0) - 38.0).abs() < 0.01);
+        assert!((super::album_row_height(260.0) - 57.0).abs() < 0.01);
+        // The clamps keep a row legible at both ends of the slider.
+        assert!((super::album_row_height(20.0) - 36.0).abs() < 0.01);
+        assert!((super::album_row_height(600.0) - 58.0).abs() < 0.01);
+    }
+
+    /// M22.20: the file card carries the mock-up's dashed "+ Add" even when the photo is in no
+    /// album yet — otherwise the way into an album would be invisible.
+    #[test]
+    fn the_file_card_carries_the_dashed_add_to_an_album() {
+        let mut app = m17_app();
+        app.settings.lang = i18n::Lang::En;
+        app.selected = Some(app.items[0].id);
+        app.file_albums_for = Some(app.items[0].id);
+        let texts = window_frame(&mut app, &egui::Context::default());
+        assert!(texts.iter().any(|t| t == "Albums"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "+ Add"), "{texts:?}");
     }
 
     /// The inventory of the icon set: every glyph paints inside its box. `Icon` has no `ALL` in the

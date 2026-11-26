@@ -131,9 +131,10 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
   from the photo; the word of the album chip opens the album. The weights and percentiles stay in
   the chip hints; the exposure badges and the place name of the mock-up are not built (the index
   keeps the camera name and no geocoder is allowed offline, §5 q. 5). The mock-up's round action
-  buttons over the preview keep their words (docs/UI.md § Layout: an icon is never the only path),
-  and the album "+ Add" chip is not drawn: adding a file to an album from the card is a function of
-  its own, not a layout detail.
+  buttons over the preview keep their words (docs/UI.md § Layout: an icon is never the only path).
+  The album section is always drawn and carries the mock-up's dashed "+ Add" since M22.20: the
+  function it promised (adding a photo to an album from the card) was built then, as its own dialog
+  with the selection bar as the second entrance.
 
 ## 3. Screens: what is drawn by a mock-up and what is not
 
@@ -142,7 +143,7 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 | Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling; the top strip, the one-row ribbon and the floating selection bar | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅, M22.19 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down; the inspector of the screen is the right panel of M22.16 | M22.5 ✅, M22.16 ✅ |
-| Albums | `photocat_3` | album card look, counters, selection bar; the **tree stays** (see §5 q. 7) | M22.6 ✅ |
+| Albums | `photocat_3` | the card grid at the root, the control row (filter, order, cards/list, the primary "+"), the counters over the cover, "size · date", the breadcrumb; the **tree stays inside an album** (§5 q. 7, revised in M22.20); the mock-up's floating album bar is not built — the selection bar carries "Add to an album…" | M22.6 ✅, M22.20 ✅ |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 ✅ |
 | Duplicates | — | no mock-up: same strips, header, `card_block` per group, `draw_cell`, amber "keep", red-free everywhere | M22.9 ✅ |
 | Faces | — | same panels, face tile metrics unchanged, caption in mono 10, accent only on a picked face | M22.9 ✅ |
@@ -197,14 +198,19 @@ choice (the picked people, the trash counter with its two actions) stands where 
    grouping. None of these are in `docs/UI.md` and none is promised by a label. Each one that the
    owner really wants becomes its own task (a DB column, a view, a measurement).
    *Recommendation: refuse all of them for M22; favourites are the only one worth a later task.*
-   **Answer: agree, refuse.**
+   **Answer: agree, refuse.** The album "+ Add" chip of q. 5 / §2.4 is not on this list: it was a
+   missing function, and M22.20 built it.
 6. **Sticky month heading.** The mock-up has it; it is `docs/UI.md` debt item 7 and was planned as
    M13e. Folded into M22.4. *Recommendation: do it in M22.4, separately from the main screen.*
 7. **Albums: cards vs tree.** The mock-up shows a card grid; our album view is a tree with an order,
    subalbums and "Album order" sorting (M19). The tree carries information the cards cannot (nesting,
    order, trashed counts). *Recommendation: keep the tree, give the open album the card look for its
    subalbum tiles. A card-only album screen needs an owner's decision.* **Answer: the nested tree
-   stays.**
+   stays.** **M22.20 (the owner's "make the album layout of `photocat_3` and add the way to put
+   photos into albums"):** the tree stays inside an album, where the nesting matters; the root of
+   the albums is the card grid of the mock-up, because there the tree only repeats the cards.
+   Navigation keeps its cost: a card opens an album, the breadcrumb "All albums › …" opens any
+   level, one press per level.
 8. **Favourites.** `photocat_1` has "Favorites 128" in the navigation and a star in the inspector.
    There is no `files.favorite` column. *Recommendation: a separate task after M22: one column, a
    nav item and a filter chip; no new screen.* **Answer: yes, a later task.**
@@ -969,6 +975,50 @@ verified by the 289 tests of M22.18 passing again before M22.19 was re-applied.
 **Files.** `src/app.rs` (`top_bar`, `search_field`, `tile_pill`, `status_bar`, the ribbon, the
 "pick-bar", `years_block`, `toggle_icon_button`, `text_width`/`mono_width`, `hairline_vertical`,
 four tests), `src/i18n.rs` (five labels; `found` is gone), `docs/UI.md`, `plan/`.
+
+### M22.20 — the album layout of `photocat_3` and the way into an album ✅
+
+The owner: "делай вёрстку альбомов и добавь механизм добавления фотографий в альбомы".
+
+1. **The card grid is the root of the Albums view.** An album card is the mock-up's: a `card`-tone
+   frame with 10 px of air, a 16:10 `canvas` cover with the first snapshot fitted whole (a preview
+   is never cropped), two dark plates over the cover — "N sub-albums" at the top left, "N files" at
+   the bottom right, mono 10 on black 60 % — the name at 13 px and "size · date" in mono 10; the
+   open album keeps the 2 px accent frame and the accent name, the hovered one the 1 px accent line.
+   The card is 100–260 px wide by the "Tiles" slider (`album_card_size`).
+2. **The control row of the screen** (under the ribbon): the filter of the album names (150 px), the
+   "Sort" menu ("Album order" by default — the order of the export is data —, "By update", "By
+   name", "By file count", "By size"), the "Cards / List" switch and the primary "+ New album". The
+   list look is a 38–57 px row that follows the slider (`draw_album_row`). `settings.album_sort` and
+   `settings.album_list` keep the choice (two settings keys, no schema change).
+3. **The tree stays inside an album**, under the breadcrumb "All albums › … › here"; the root is the
+   card grid. A press on any crumb opens that level (`AlbumAction::Root`/`Select`).
+4. **The way into an album is a function of its own** (`AlbumPick`): one dialog for three entrances —
+   the dashed "+ Add" chip of the file card (one photo), "Add to an album… (N)" in the floating
+   selection bar (the marked photos) and "Add the picked ones (N)" inside an album (straight into the
+   open album). The dialog lists the albums with their paths and counts, filters by name, and has a
+   field for a new album: a name makes a root album and fills it in the same press. Rows only.
+5. **The date of a card** is the day of the last change of the album or of its contents: `AlbumNode`
+   gained `updated_at`, and `add_to_album`, `remove_from_album` and `move_in_album` touch it. No
+   schema change: the column has been there since M19.
+6. **Refused:** the per-card "⋮" menu of the mock-up (an icon-only target, docs/UI.md § Layout says
+   an action is a word; the actions of an album belong to the open album), the mock-up's floating
+   album bar ("Open · Export · Delete" duplicates the action row of the open album), the cover
+   cropping of the mock-up (M22.15's rule: only the grid tile fills, an album cover fits whole).
+
+**Result.** `cargo test` 301, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors. New tests: the root of the albums
+is a card grid, the filter and the order of the cards, the breadcrumb back to the root, the card
+model at 100 and 260 px, the list row, the control row inside the content panel at 1240 px, the
+picker that adds and makes an album (a DB test), the picker frame, the selection bar without and
+with albums, the dashed "+ Add" of the card, and the DB order of the cards with `updated_at`.
+
+**Files.** `src/app.rs` (`draw_album_cell`, `draw_album_row`, `draw_album_cards`, `album_card_size`,
+`album_row_height`, `album_cards_of`, `album_sort_label`, `album_date`, `cover_badge`,
+`dashed_add_chip`, `AlbumPick`, `album_pick_open`/`album_pick_commit`/`album_pick_modal`, the
+`View::Albums` branch, the selection bar, the file card), `src/db.rs` (`AlbumSort`, `album_order`,
+`AlbumNode::updated_at`, the touched stamps, two settings keys), `src/i18n.rs` (28 labels),
+`docs/UI.md`, `plan/`.
 
 ## 7. Not doing in M22
 

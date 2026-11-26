@@ -1067,7 +1067,13 @@ the text centred, the row 28 px) — 2026-11-26; M22.19 (the top strip after `ph
 one search field with the mode switch, the "Tiles" pill, the state pill, the lit details toggle and
 "Settings"; the content is one 44 px ribbon with the chip row only while a filter is on; the
 selection floats at the bottom edge of the grid; the footer carries the counters and the selected
-file; the years take three columns of two rows) — 2026-11-26.
+file; the years take three columns of two rows) — 2026-11-26; M22.20 (the albums after
+`photocat_3`: the root is the mock-up's card grid with the counters over the cover and "size ·
+date" under it, the control row filters the album names, orders the cards and switches them to a
+list, the breadcrumb and the tree live inside an album, `AlbumNode::updated_at` gives the card its
+date, and the "add photos to an album" dialog has three entrances — the card's dashed "+ Add", the
+selection bar and "Add the picked ones", with a new album made in the same press; rows only) —
+2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
@@ -1081,7 +1087,8 @@ file; the years take three columns of two rows) — 2026-11-26.
    `card` under it; proportion rows, and a list; a 10 px gap, accent selection.
    Previews follow the EXIF orientation and a stale preview is rewritten when its dimensions differ.
 3. Calendar (`photocat_2`, `photocat_12`), albums (`photocat_3`) and the viewer (`photocat_5/6`) are
-   brought to the same tokens; the albums keep the tree (an owner's decision is asked in the spec §5).
+   brought to the same tokens; the albums keep the tree (an owner's decision is asked in the spec §5)
+   inside an album, while the root of the view is the mock-up's card grid (M22.20).
 4. Duplicates, faces, trash and integrity have no mock-up: they are built from the same parts, with
    one accent and red only on the OS-trash path.
 5. The settings dialog gets the section list and the theme control; the mock-up's non-existent

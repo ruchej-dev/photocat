@@ -234,14 +234,26 @@ The full rules are in `.pi/skills/ui-design/references/vzaimodeystvie.md`. In sh
   the view, filter, query, search or order clears the selection with the reason in the status
   ("selection cleared: the path/date filter changed"): an action must not hit invisible files. The
   selection lives in memory only and is empty after a restart.
-- **Albums (M19):** the "Albums" view is a tree with indents and collapse triangles; a node shows
-  "N files · M subalbums · size", a non-empty trash shows "N in the trash". A click on an album
-  opens it, the triangle only expands the subalbums. Inside are the tiles of subalbums and the grid
-  of snapshots in album order; top right: "Add selected", "Remove from the album", "File up / down",
-  "Export to disk…". The "In the album / All files" switch is a temporary look that lets you collect
-  snapshots and add them: by itself it saves nothing. "Album order" is a separate sort option,
-  available only inside an album; outside it the sort returns to date ↓. Deleting an album asks for
-  confirmation and shows the subtree; the files on disk do not change.
+- **Albums (M19, the card grid of M22.20):** the "Albums" view opens on the cards of the top level
+  albums — the cover of the first snapshot, the counters on it, the name and "size · date" under it;
+  a click opens the album. Inside an album the tree with indents and collapse triangles stays
+  (a node shows "N files · M subalbums · size", a non-empty trash "N in the trash"), above the
+  album's own header, its sub-album cards and the grid of snapshots in album order; the breadcrumb
+  "All albums › … › here" is the way up, one press per level. The control row filters the albums by
+  a part of the name, orders them ("Album order" by default, "By update", "By name", "By file
+  count", "By size" — a look only: the album order stays the order of the export), switches the
+  cards to a list and carries the one main action "+ New album". Inside an album: "Add the picked
+  ones", "Remove from the album", "File up / down", "Export to disk…"; the "In the album / All
+  files" switch is a temporary look that lets you collect snapshots and add them. "Album order" is
+  also a sort option for the snapshots, available only inside an album; outside it the sort returns
+  to date ↓. Deleting an album asks for confirmation and shows the subtree; the files on disk do
+  not change.
+- **Adding photos to an album (M22.20):** one dialog for every path into an album — the dashed
+  "+ Add" chip of the file card (one photo), "Add to an album… (N)" in the floating selection bar
+  (the marked photos) and "Add the picked ones (N)" inside an album (the open album directly). The
+  dialog lists the albums with their paths and file counts, filters by name, and offers a field for
+  a new album: a name there makes a root album and fills it in the same press. The photos go to the
+  end of the album; a repeat does not duplicate rows. Rows only: not a single file on disk changes.
 - **The chips of the file card (M22.17):** the word and the "×" on a chip are two targets. A click
   on the word of a tag chip filters the grid by that tag — a second click on the highlighted chip
   clears the filter — and the accent marks exactly the tags the photos are filtered by, not "the
@@ -303,7 +315,8 @@ a rare one.
 | Active filters and reset | above the grid, chips with "×" | 1 |
 | Filter by a tag seen on a photo | the tag chips of the file card: a click on the word (the "×" removes the tag from the photo) | 1 |
 | Selecting several files | Ctrl/Shift+click on tiles, "Select all (M)" above the grid | 1 |
-| Albums: tree, subalbums, order | left panel "Albums (N)" → the tree in the content panel; "+ New album", "+ Subalbum" | 1–2 |
+| Albums: cards, tree, subalbums, order | left panel "Albums (N)" → the cards of the top level in the content panel, the tree inside an album; "+ New album", "+ Sub-album" | 1–2 |
+| Putting a photo into an album | the dashed "+ Add" of the file card, or "Add to an album… (N)" in the selection bar | 1–2 |
 | Tile size (the "Tiles" pill) | in the top strip, right of the search field (M22.19) | 1 |
 | Cell view (tile / rows / list) | there too, next to the size slider | 1 |
 | Layout and sort | there too: "By months / Flat" and the "Sort" menu | 1 |
@@ -369,10 +382,13 @@ a rare one.
 | Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |
 | Top strip | 32 px, one row, `panel` tone, 1 px bottom line (M22.19, after `photocat_1`); the search field is at most 576 px and centred between the mark and the tools; the "Tiles" pill is 14 px of glyph, a 6 px gap and an 84 px slider, the state pill a dot and one word, the details toggle and "Settings" on the right | `App::top_bar`, `App::search_field`, `App::tile_pill` |
 | Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters: a dot and the last fact, the count of files and their volume; on the right the selected file (name · frame · size) | `App::status_bar` |
-| Selection | a 2 px accent outline on the selected tile and a square accent check flag; while anything is picked, a floating bar at the bottom edge of the grid (the mock-up's pill): a dot, "N selected · size" in mono 11 in the accent, then "Select all (M)" and "Clear selection" (M22.19); it lies over the grid on its own layer and never moves the tiles | `draw_cell`, `App::ui` (the "pick-bar") |
+| Selection | a 2 px accent outline on the selected tile and a square accent check flag; while anything is picked, a floating bar at the bottom edge of the grid (the mock-up's pill): a dot, "N selected · size" in mono 11 in the accent, then "Add to an album… (N)" while albums exist (M22.20), "Select all (M)" and "Clear selection" (M22.19); it lies over the grid on its own layer and never moves the tiles | `draw_cell`, `App::ui` (the "pick-bar") |
 | Album tree | a row 26 px, a 14 px indent per level, a 22 px triangle, a 14 px label; "N files · M subalbums · size" at 11 px next to it; the tree area no higher than 190 px | `draw_album_tree` |
 | Album header | above the actions of an open album: the name 14 px strong, the facts next to it in mono 11 — "N files · M sub-albums · size" and " · N in the trash" when it is not empty; the view heading keeps "Albums" with the count of albums, so the name is printed once | `app.rs::album_header` |
-| Sub-album card | the width from the "Tiles" slider (100–260 px), a 16:10 `canvas` cover with the album's first snapshot fitted whole (a folder mark `▸` when it has none), the name 13 px, "N files" and the size in mono 10 at the bottom; the `card` tone with a 1 px `border`, the accent line under the cursor; 10 px apart; the sub-albums take one row, two at most, the rest scrolls, and the grid keeps 220 px | `app.rs::draw_album_cell`, `album_card_size` |
+| Album card | the width from the "Tiles" slider (100–260 px) and 10 px of air on every side (M22.20, after `photocat_3`): a 16:10 `canvas` cover with the album's first snapshot fitted whole (a folder mark `▸` when it has none) and two dark plates over it — "N sub-albums" at the top left, "N files" at the bottom right, both mono 10 on black 60 %; the name 13 px, then "size · date" in mono 10; the `card` tone with a 1 px `border`, the accent frame and the accent name on the open album, the accent line under the cursor; 10 px apart; inside an album the cards take one row, two at most, the rest scrolls, and the grid keeps 220 px | `app.rs::draw_album_cell`, `draw_album_cards`, `album_card_size`, `cover_badge` |
+| Album list row | the "List" look of the albums: full width, 38–57 px high following the "Tiles" slider (`26 + 0.12 × value`), a 16:10 cover 26–48 px high in the `canvas` well, the name 12–14 px and "N files · M sub-albums · size · date" in mono 10–12; the accent edge and the `accent_soft` fill on the open album | `app.rs::draw_album_row`, `album_row_height` |
+| Album control row | under the ribbon of the "Albums" view, right to left: the filter field 150 px ("Filter the albums"), the "Sort" menu, the "Cards / List" switch at the 20 px rhythm and the primary "+ New album"; every control fits the content panel at 1240 px | `App::ui` (the `View::Albums` branch), `album_cards_of`, `album_sort_label` |
+| Album breadcrumb | above an open album: "All albums" and every ancestor as a 20 px word button with a folder glyph, a "›" between them in `text_dim`; a press opens that level, the root is the card grid | `App::ui` (the `View::Albums` branch) |
 | "Integrity" screen | the `card`-free form of the content panel (canvas tone, 12/6 margin); the "Folder A/B" and "Manifest file" fields 460 px wide in the numeric family with labels on the left; the "Show all paths" tick; the verdict at 14 px in the accent / red / grey; the report monospaced at 11 px in a scroll area; the reminder row "Remind me to check every [30] days" (0 — off), the date and result of the last pass, the `verify-last.txt` path and "Copy the last report" at 11 px | `App::integrity_panel` |
 | Reminder banner | in the top bar, below the search rows: "Time to check the archive" at 13 px in the accent, a fact about the manifest and the deadline at 11 px in grey, the "Check" and "Remind later" buttons; it starts nothing itself | `App::verify_banner` |
 
@@ -387,7 +403,8 @@ for text over a darkened frame, where the background is a photograph.
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed"; every group is a card of the `card` tone with "#N", the reason at 13 px, the facts in mono 11 and the advice "keep <name> — …", the pictures inside; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 month cards with counters, covers and sizes above the line "12 months of 2024" and the facts of the year, a month — a grid of weeks Mon–Sun with the caps weekday row, the day number, the counter badge and up to 3 thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects (an accent frame); on the "Day" layer — the snapshots in a `draw_cell` grid with the time in the caption; on the upper layers below — the selected day as a list with the time, the name and the size, and "No date"; an empty month says "No files in this month." and the button "Go to <the nearest month with files>" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups", the group list with names, photo counts and a "together" tick; the open group's name at 14 px with its facts in mono 11; the face crops of the group with the date and the score in mono 10, "not him", "pick" and "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" title at 14 px | name a person, split off strangers and find photos where people are together |
-| Albums (`View::Albums`) | the tree with indents and collapsing, the primary "+ New album", "+ Sub-album", "Rename", "Move to…", "Up / Down", "Delete the album"; inside — the album's own header (the name 14 px, the facts in mono 11), the sub-albums as cards with a 16:10 cover, the name, the count and the size, and a grid of snapshots in album order, "In the album / All files", "Add selected (N)", "Remove from the album (N)", "File up / down", "Export to disk…"; the chip "Album "Name" ×" in the chips row (the floating bar is for the selection only, M22.19) | build a tree and an order, add snapshots, export copies to disk |
+| Albums (`View::Albums`) | the control row: the filter of the album names, the "Sort" menu ("Album order", "By update", "By name", "By file count", "By size"), the "Cards / List" switch and the primary "+ New album"; at the root — the cards of the top level albums; inside an album — the breadcrumb "All albums › …", the tree with indents and collapsing, the album's own header (the name 14 px, the facts in mono 11), "+ Sub-album", "Rename", "Move to…", "Up / Down", "Delete the album", the sub-albums as cards (their cover, name, counters and date), and a grid of snapshots in album order, "In the album / All files", "Add the picked ones (N)", "Remove from the album (N)", "File up / down", "Export to disk…"; the chip "Album "Name" ×" in the chips row (the floating bar is for the selection only, M22.19) | build a tree and an order, add snapshots, export copies to disk |
+| Add to an album (dialog, `App::album_pick_modal`) | the title, the facts of the selection ("N photos") in mono 11, the hint "The photos go to the end of the album…", the filter of the albums, the tree as selectable rows with the file counts, the field "or a new album:", the primary "N photos" and "Cancel" — one accent button, the dialog frame of M22.10 | put one photo or a selection into an album, or make an album out of them |
 | Album export (dialog, `App::export_modal`) | "Folder" (must exist), "File name" (`{n}_{orig}`), a hint about the substitutions, "Show the plan", "Export N files", "Close"; below — a summary and the tree "album / subalbum / 001_name.jpg"; after the pass — a report line and "Copy the report" | get a real folder with copies in album order |
 | Trash (`View::Trash`) | the counter and size in mono 11, "Restore all" in the neutral tone, "Empty the trash (N)" in the one `danger` border with confirmation, tiles marked "in trash" and a "restore" button | return a file or deliberately move it to the OS trash |
 | Integrity (`View::Integrity`) | the "Folder A (archive)", "Folder B (copy)", "Manifest file" fields; the "Show all paths" tick; the "Compare the copies", "Write the manifest" (with an existing file — "Overwrite the manifest" and "Cancel"), "Check against the manifest" buttons; the row "Remind me to check every [N] days" (0 — off), the date and result of the last pass, the report path `verify-last.txt` and "Copy the last report"; the verdict in words, a report in the same format as the CLI, and "Copy the report" | compare a backup or check the archive against the manifest without a terminal |
@@ -395,7 +412,7 @@ for text over a darkened frame, where the background is a photograph.
 | Full screen (modal) | the header: "Back to the grid", the name at 14 px, the date and the facts (`18.4 MiB · 6000×4000`) in mono 11, "N of M" in the accent; the tools row: "Zoom out", the percentage in mono, "Zoom in", "Fit", "1:1", "Rotate", "Text on the photo", "In the system viewer", "Inspector"; the frame with the face chips over it; below it the playback row ⏮ ▶/⏸ ⏭ (on a snapshot ▶ starts the slideshow), "Slideshow", a 3/5/10 s interval; under the frame the series strip of the day; with "Inspector" on — the file card on the right | look at a snapshot in full, look at a detail at a zoom above 100 %, walk the series of the day and come back to the same place |
 | Video in the full screen (modal, the same screen) | a cover frame with a big ▶ button in the centre; after it starts the frame plays in the window, ▶/⏸, "0:12 / 0:22" with seek, the sound sign and a slider, the "no device" label, "Stop the video"; when finished — the next file opens itself | watch a video with sound without leaving the app |
 | Settings (dialog, `App::settings_modal`) | on the left, under the caps "SETTINGS SECTIONS", the sections with their icons and their state: "Interface" (EN) / "Интерфейс" (RU) (the language — English or Русский, the choice is saved immediately; in English an untranslated label stays Russian — `plan/I18N.md`), "AI model", "Indexing and duplicates", "Tags", "Faces", "Storage", "External programs"; inside — the model from the catalogue with the number of features, the licence and a hint (CLIP 512, SigLIP 768), the state "Downloaded · verified", the model folder, the size limit, the consent and "Download model", "Verify the model", "Compute tags", the tag and duplicate thresholds (a 0–100% filter percentile per tag and a separate confident-tag threshold 0.22 + margin; next to it — how many files pass), the tag dictionary editor (a row per tag: enabled, label, minimum percentile, "Remove from the dictionary", 2–3 prompts per line — the tag weight is the best of them; below — the "new label" and "prompt" fields, "Add to the dictionary", "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults", the JSON file path), the thread count, the face model with consent and "Download the face model", the face merge threshold, the used space ("Compute the used space"), cleaning previews/faces/index, the DB/cache/model paths, the `ffmpeg`/`ffprobe`/`tesseract` path fields with the version and a "without it" hint, "Verify and save the programs"; at the bottom "Changes are saved immediately" and "Close" | download/switch the model, set thresholds, the tag dictionary, faces, disk space and external programs |
-| File card (right panel, `App::file_card`) | the panel's 44 px header band — the info glyph, "File details" at 12 px strong and the mock-up's "×" at the right — then the card on 12 px of air (M22.16); a 4:3 preview card — the `canvas` well, the 8 px radius, a 1 px `border`, the snapshot fitted whole with all four corners cut, the corner badge ("▶ M:SS" or the format); the identity row — the name in the numeric family in the accent on the left, the size on the right; the path in mono 11 `text_dim`; "Open full screen" and "To trash"; the "Shooting params" `card_block` — a caps heading, the camera after a photo glyph, "Date and time" and "Resolution" in two columns, "Location" with a pin and the coordinates, a hairline and SHA256; "Albums" as chips with a folder glyph and a count in the caps row (a click on the word opens the album, the "×" removes the photo from it); "AI tags" — the caps row with "CLIP <weight>%" on the right, the line "tag: <name>" or "tag: not sure — the top weights are close", chips "tag 30% ×" (a click on the word filters the grid by the tag, a click on the tag that is the filter clears it, the accent marks that filter, the "×" removes the tag from the photo, the weight and the percentile are in the hint), the top-3 when unsure and the rest under "all tags (N)", "restore hidden tags (N)"; "My tags" as chips (the same split: the word filters, the "×" removes) and the framed own-tag row ("`#`", the field, the "+"); "Text on the photo" with the "tesseract" engine, "Recognize text" / "Recognize again" and the text block with the match highlighted | understand what this is and fix the tags |
+| File card (right panel, `App::file_card`) | the panel's 44 px header band — the info glyph, "File details" at 12 px strong and the mock-up's "×" at the right — then the card on 12 px of air (M22.16); a 4:3 preview card — the `canvas` well, the 8 px radius, a 1 px `border`, the snapshot fitted whole with all four corners cut, the corner badge ("▶ M:SS" or the format); the identity row — the name in the numeric family in the accent on the left, the size on the right; the path in mono 11 `text_dim`; "Open full screen" and "To trash"; the "Shooting params" `card_block` — a caps heading, the camera after a photo glyph, "Date and time" and "Resolution" in two columns, "Location" with a pin and the coordinates, a hairline and SHA256; "Albums" as chips with a folder glyph and a count in the caps row (a click on the word opens the album, the "×" removes the photo from it) and the dashed "+ Add" chip that opens the "add to an album" dialog (M22.20); "AI tags" — the caps row with "CLIP <weight>%" on the right, the line "tag: <name>" or "tag: not sure — the top weights are close", chips "tag 30% ×" (a click on the word filters the grid by the tag, a click on the tag that is the filter clears it, the accent marks that filter, the "×" removes the tag from the photo, the weight and the percentile are in the hint), the top-3 when unsure and the rest under "all tags (N)", "restore hidden tags (N)"; "My tags" as chips (the same split: the word filters, the "×" removes) and the framed own-tag row ("`#`", the field, the "+"); "Text on the photo" with the "tesseract" engine, "Recognize text" / "Recognize again" and the text block with the match highlighted | understand what this is and fix the tags |
 
 ## States
 
@@ -404,9 +421,10 @@ for text over a darkened frame, where the background is a photograph.
   "photos only ×", "by relevance: … ×" and "Reset"; "×" removes only its own filter, the grid does
   not shift. No filter → no row (M22.19).
 - Several tiles selected → each gets an accent outline and a tick, and the floating bar appears at
-  the bottom edge of the grid: "N selected · size", "Select all (M)", "Clear selection" (M22.19);
-  the card shows the file clicked last and "N in the selection"; the footer shows "N selected ·
-  volume". Changing the view/filter/search/order clears the selection and writes the reason.
+  the bottom edge of the grid: "N selected · size", "Add to an album… (N)" while albums exist,
+  "Select all (M)", "Clear selection" (M22.19, M22.20); the card shows the file clicked last and
+  "N in the selection"; the footer shows "N selected · volume". Changing the
+  view/filter/search/order clears the selection and writes the reason.
 - "Flat" on → one continuous grid without month headings; the same order as in the full screen and
   in the selection: one function `App::ordered`, key `(date, id)`.
 - A semantic search is running → the results are a flat list by relevance; "By months / Flat" and the
@@ -414,16 +432,25 @@ for text over a darkened frame, where the background is a photograph.
   files" with "×" clears the search and returns the chosen layout and sort.
 - The grid is grouped by month → a month without files is not drawn; "no date" is the last group with
   the same heading and count.
-- An album is open → the view heading stays "Albums" with the count of albums, and the album's own
-  header carries the name at 14 px with "N files · M sub-albums · size" and "N in the trash" in mono
-  11; the chip "Album "Name" ×" sits in the chips row; the grid shows only its snapshots in its
-  order. An empty album says "There are no files in the album yet — switch to "All files"…". "All
-  files" inside an album is the same archive, but the selection and the "Add selected" button target
-  the open album. A sub-album card opens it with one click; a many-sub-album album scrolls its cards
-  instead of pushing the grid off the window.
-- No album selected → the view shows only the tree and "Pick an album in the tree or create a new
-  one", there is no grid. The delete dialog shows the subtree and the number of rows: "delete … — 3
-  albums, 412 rows; the files on disk will stay".
+- An album is open → the view heading stays "Albums" with the count of albums, the breadcrumb
+  "All albums › … › here" stands above, and the album's own header carries the name at 14 px with
+  "N files · M sub-albums · size" and "N in the trash" in mono 11; the chip "Album "Name" ×" sits
+  in the chips row; the grid shows only its snapshots in its order. An empty album says "There are
+  no files in the album yet — switch to "All files"…". "All files" inside an album is the same
+  archive, but the selection and the "Add the picked ones" button target the open album. A
+  sub-album card opens it with one click; a many-sub-album album scrolls its cards instead of
+  pushing the grid off the window. The tree stands inside an album, under the breadcrumb.
+- No album selected → the view is the card grid of the top level albums with the control row and a
+  hint below when there are no albums at all; the tree appears once an album is open. The delete
+  dialog shows the subtree and the number of rows: "delete … — 3 albums, 412 rows; the files on
+  disk will stay".
+- The album filter hides everything at the current level → "no album with the name "…"" and the
+  "Reset the filter" button; the same filter also narrows the sub-album cards and the tree is not
+  touched.
+- "Add to an album" → the dialog lists the albums with their paths, the drawn files are counted in
+  mono 11, the field of a new album is empty; after the press the status says "N added to "path",
+  M were there already" and the counts of the cards change in the same frame. No album and no new
+  name → "pick an album or type a name for a new one", nothing is written.
 - Album export → the dialog has the "Folder" and "File name" fields, the "Show the plan" and "Export
   N files" buttons, below a summary "4 folders · 500 files · 2.4 GiB; in the trash …" and the tree
   "Дача_2024/ Май/ 001_….jpg". Copying → the top bar shows "Export: 173/500" and "Stop"; finished →
@@ -665,8 +692,15 @@ are what the owner sees in English mode. See `plan/I18N.md`.
 - Navigation: "LIBRARY" (All files, Calendar, Faces) and "TOOLS" (Duplicates and series, Trash); the
   number on the right is how many files, groups or faces there are, zero is a number too.
 - Card: "File details" at 12 px in the panel's header band, the file name at 12 px, the path at
-  11 px, "Shooting params", "Date and time", "Resolution", "Location", "SHA256", "Albums", "AI tags",
-  "My tags", "Text on the photo", "Selected: <file> · <date>" in the status line.
+  11 px, "Shooting params", "Date and time", "Resolution", "Location", "SHA256", "Albums" with its
+  dashed "+ Add", "AI tags", "My tags", "Text on the photo", "Selected: <file> · <date>" in the
+  status line.
+- Albums: "+ New album", "+ Sub-album", "Rename", "Move to…", "Up", "Down", "Delete the album",
+  "Cards" / "List", "Filter the albums", "Album order", "By update", "By name", "By file count",
+  "By size", "All albums", "In the album" / "All files", "Add the picked ones (N)", "Remove from
+  the album (N)", "File up", "File down", "Export to disk…", "Add to an album… (N)", "Add to an
+  album", "or a new album:", "Cancel"; a card reads "N sub-albums" and "N files" over the cover and
+  "<size> · <dd.mm.yyyy>" under it.
 - Date source: "(EXIF)", "(file name)", "(file time)" — the DB holds `exif`/`filename`/`mtime`.
 - Semantic: "Text on the photo:", "tag: children (0.24)", "tag: not sure", "with a confident tag:
   1122", "with text: 146 of 1972 snapshots", "candidates for the pass: 435, N left", "text from the

@@ -421,6 +421,51 @@ impl CellStyle {
     }
 }
 
+/// The order of the album cards on the "Albums" screen (M22.20). It is a look, not data: the
+/// album order (`position`) stays the order of the export whatever the cards show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AlbumSort {
+    /// The owner's own order — the order a sub-album takes on disk.
+    #[default]
+    Position,
+    /// The album changed most recently first (a photo was added, the name changed).
+    Updated,
+    Name,
+    Count,
+    Size,
+}
+
+impl AlbumSort {
+    pub const ALL: [AlbumSort; 5] = [
+        AlbumSort::Position,
+        AlbumSort::Updated,
+        AlbumSort::Name,
+        AlbumSort::Count,
+        AlbumSort::Size,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlbumSort::Position => "position",
+            AlbumSort::Updated => "updated",
+            AlbumSort::Name => "name",
+            AlbumSort::Count => "count",
+            AlbumSort::Size => "size",
+        }
+    }
+
+    /// An unknown value from an old DB means the default, never a panic.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "updated" => AlbumSort::Updated,
+            "name" => AlbumSort::Name,
+            "count" => AlbumSort::Count,
+            "size" => AlbumSort::Size,
+            _ => AlbumSort::Position,
+        }
+    }
+}
+
 /// The order of the tiles (M17). "Album order" (M19) works only inside the chosen
 /// album; outside it reads as "date: newest first".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -508,6 +553,9 @@ pub struct Settings {
     pub grid_sort: GridSort,
     /// How files are shown: the mock-up tile, proportion rows or a list (M22).
     pub cell_style: CellStyle,
+    /// The order of the album cards and the album look: cards or a list (M22.20).
+    pub album_sort: AlbumSort,
+    pub album_list: bool,
     /// Folders indexed with one button; empty means the path from the top bar.
     pub roots: Vec<String>,
     /// The integrity reminder (M10): the folder and the manifest the term belongs to,
@@ -547,6 +595,8 @@ impl Default for Settings {
             grid_layout: GridLayout::Months,
             grid_sort: GridSort::DateDesc,
             cell_style: CellStyle::Tiles,
+            album_sort: AlbumSort::Position,
+            album_list: false,
             roots: Vec::new(),
             verify_root: String::new(),
             verify_manifest: String::new(),
@@ -596,6 +646,8 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "grid_layout" => s.grid_layout = GridLayout::parse(&v),
             "grid_sort" => s.grid_sort = GridSort::parse(&v),
             "cell_style" => s.cell_style = CellStyle::parse(&v),
+            "album_sort" => s.album_sort = AlbumSort::parse(&v),
+            "album_list" => s.album_list = v == "1" || v == "true",
             "roots" => {
                 s.roots = v
                     .lines()
@@ -643,6 +695,11 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("grid_layout", s.grid_layout.as_str().to_string()),
         ("grid_sort", s.grid_sort.as_str().to_string()),
         ("cell_style", s.cell_style.as_str().to_string()),
+        ("album_sort", s.album_sort.as_str().to_string()),
+        (
+            "album_list",
+            if s.album_list { "1" } else { "0" }.to_string(),
+        ),
         ("roots", s.roots.join("\n")),
         ("verify_root", s.verify_root.clone()),
         ("verify_manifest", s.verify_manifest.clone()),
@@ -1831,8 +1888,29 @@ pub struct AlbumNode {
     pub trashed: i64,
     pub subalbums: i64,
     pub bytes: i64,
+    /// Unix seconds of the last change of the album or of its contents: the card shows the date
+    /// and "by update" sorts by it (M22.20).
+    pub updated_at: String,
     /// The preview of the first file in order that is not in the trash; `None` for an empty album.
     pub cover: Option<String>,
+}
+
+/// The order of two sibling albums for the cards (M22.20). A tie keeps the album order, so the
+/// screen does not shuffle on equal numbers.
+pub fn album_order(a: &AlbumNode, b: &AlbumNode, sort: AlbumSort) -> std::cmp::Ordering {
+    let by_position = || (a.position, a.id).cmp(&(b.position, b.id));
+    let stamp = |n: &AlbumNode| n.updated_at.parse::<i64>().unwrap_or(0);
+    match sort {
+        AlbumSort::Position => by_position(),
+        AlbumSort::Updated => stamp(b).cmp(&stamp(a)).then_with(by_position),
+        AlbumSort::Name => a
+            .name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(by_position),
+        AlbumSort::Count => b.files.cmp(&a.files).then_with(by_position),
+        AlbumSort::Size => b.bytes.cmp(&a.bytes).then_with(by_position),
+    }
 }
 
 fn album_name(name: &str) -> Result<String> {
@@ -2126,6 +2204,13 @@ pub fn add_to_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> Resul
         position += 1;
         added += 1;
     }
+    // The card of the album shows the date of its last change (M22.20).
+    if added > 0 {
+        tx.execute(
+            "UPDATE albums SET updated_at=?1 WHERE id=?2",
+            params![now().to_string(), album_id],
+        )?;
+    }
     tx.commit()?;
     Ok((added, already))
 }
@@ -2142,6 +2227,10 @@ pub fn remove_from_album(conn: &Connection, album_id: i64, file_ids: &[i64]) -> 
     }
     if removed > 0 {
         resequence_album_files(&tx, album_id)?;
+        tx.execute(
+            "UPDATE albums SET updated_at=?1 WHERE id=?2",
+            params![now().to_string(), album_id],
+        )?;
     }
     tx.commit()?;
     Ok(removed)
@@ -2177,6 +2266,10 @@ pub fn move_in_album(
             params![position as i64, album_id, id],
         )?;
     }
+    tx.execute(
+        "UPDATE albums SET updated_at=?1 WHERE id=?2",
+        params![now().to_string(), album_id],
+    )?;
     tx.commit()?;
     Ok(true)
 }
@@ -2185,7 +2278,7 @@ pub fn move_in_album(
 /// `depth` is the indent for the interface; the counters are the rows and the size of the album.
 pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
     let mut st = conn.prepare(
-        "SELECT a.id, a.parent_id, a.position, a.name, a.note,
+        "SELECT a.id, a.parent_id, a.position, a.name, a.note, a.updated_at,
                 (SELECT COUNT(*) FROM album_files af WHERE af.album_id=a.id),
                 (SELECT COUNT(*) FROM album_files af JOIN files f ON f.id=af.file_id
                   WHERE af.album_id=a.id AND f.trashed_at IS NOT NULL),
@@ -2204,12 +2297,13 @@ pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
             position: r.get(2)?,
             name: r.get(3)?,
             note: r.get(4)?,
+            updated_at: r.get(5)?,
             depth: 0,
-            files: r.get(5)?,
-            trashed: r.get(6)?,
-            subalbums: r.get(7)?,
-            bytes: r.get(8)?,
-            cover: r.get(9)?,
+            files: r.get(6)?,
+            trashed: r.get(7)?,
+            subalbums: r.get(8)?,
+            bytes: r.get(9)?,
+            cover: r.get(10)?,
         })
     })?;
     let mut by_parent: HashMap<i64, Vec<AlbumNode>> = HashMap::new();
@@ -3170,6 +3264,87 @@ mod tests {
             rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
         };
         assert_eq!(positions, [0, 1]);
+    }
+
+    #[test]
+    fn the_album_cards_follow_the_chosen_order_not_the_data() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = three_files(&c);
+        let small = create_album(&c, 0, "Малый", "").unwrap();
+        let big = create_album(&c, 0, "Большой", "").unwrap();
+        let middle = create_album(&c, 0, "Средний", "").unwrap();
+        add_to_album(&c, big, &ids).unwrap();
+        add_to_album(&c, middle, &ids[..1]).unwrap();
+        let order = |sort: AlbumSort| {
+            let tree = albums_tree(&c).unwrap();
+            let node = |id: i64| tree.iter().find(|n| n.id == id).unwrap().clone();
+            let mut cards = vec![node(small), node(big), node(middle)];
+            cards.sort_by(|a, b| album_order(a, b, sort));
+            cards.into_iter().map(|n| n.name).collect::<Vec<_>>()
+        };
+        assert_eq!(order(AlbumSort::Position), ["Малый", "Большой", "Средний"]);
+        assert_eq!(order(AlbumSort::Name), ["Большой", "Малый", "Средний"]);
+        assert_eq!(order(AlbumSort::Count), ["Большой", "Средний", "Малый"]);
+        assert_eq!(order(AlbumSort::Size), ["Большой", "Средний", "Малый"]);
+        // "By update": the album that changed last goes first. The order on disk is untouched.
+        c.execute(
+            "UPDATE albums SET updated_at=?1 WHERE id=?2",
+            params!["1714557600", small],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE albums SET updated_at=?1 WHERE id=?2",
+            params!["1717236000", middle],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE albums SET updated_at=?1 WHERE id=?2",
+            params!["1711965600", big],
+        )
+        .unwrap();
+        assert_eq!(order(AlbumSort::Updated), ["Средний", "Малый", "Большой"]);
+        let positions: Vec<i64> = albums_tree(&c).unwrap().iter().map(|n| n.position).collect();
+        assert_eq!(positions, [0, 1, 2], "the album order is data, the cards are a look");
+        // A parse of an unknown value means the default.
+        assert_eq!(AlbumSort::parse("galleries"), AlbumSort::Position);
+        assert_eq!(AlbumSort::parse("count"), AlbumSort::Count);
+    }
+
+    #[test]
+    fn a_change_of_the_contents_moves_the_album_card_up() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let ids = three_files(&c);
+        let album = create_album(&c, 0, "Май", "").unwrap();
+        let stamp = |c: &Connection| {
+            albums_tree(c)
+                .unwrap()
+                .iter()
+                .find(|n| n.id == album)
+                .unwrap()
+                .updated_at
+                .clone()
+        };
+        // A known old stamp: the date moves only when the contents really change.
+        c.execute(
+            "UPDATE albums SET updated_at='1' WHERE id=?1",
+            [album],
+        )
+        .unwrap();
+        assert_eq!(stamp(&c), "1");
+        // An add of nothing changes nothing.
+        add_to_album(&c, album, &[9999]).unwrap();
+        assert_eq!(stamp(&c), "1", "nothing was added, nothing changed");
+        add_to_album(&c, album, &ids[..1]).unwrap();
+        assert_ne!(stamp(&c), "1", "the content changed");
+        c.execute(
+            "UPDATE albums SET updated_at='1' WHERE id=?1",
+            [album],
+        )
+        .unwrap();
+        remove_from_album(&c, album, &ids[..1]).unwrap();
+        assert_ne!(stamp(&c), "1", "a removal is a change too");
     }
 
     #[test]
