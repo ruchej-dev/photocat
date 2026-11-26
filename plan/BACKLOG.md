@@ -1053,7 +1053,8 @@ corners cut, the identity row with the name and the size, the "Shooting params" 
 chips, the engine row; `card_block` counts its own 1 px line, so no block is wider than its panel) —
 2026-11-26; M22.15 (the tile preview fills the whole 4:3 frame with a centring crop — `cover_rect`,
 `ThumbFit` — instead of the letterbox; the calendar, the series strip, the album cover and the file
-card keep the fitted whole preview) — 2026-11-26; M22.16 (the right panel after `photocat_12`: the
+card keep the fitted whole preview at that point — the album cover dropped it in M22.29) — 2026-11-26;
+M22.16 (the right panel after `photocat_12`: the
 panel's frame with no margin of its own so its 280 px and the 1 px line are its own, a 44 px header
 band with the mock-up's "×", the card on 12 px of air, the format badge of the preview, the pin of
 the location row, the folder glyph of an album chip and the framed "`#`" own-tag row; the round
@@ -1076,7 +1077,7 @@ selection bar and "Add the picked ones", with a new album made in the same press
 2026-11-26; M22.21 (the album card opens the album from the root — the action used to be dropped
 while no album was open — and its cover is a mosaic of up to four of its first photos,
 `AlbumNode::covers`; one photo whole, two in columns, three as a half and a right stack, four as a
-2×2 grid with 2 px seams) — 2026-11-26; M22.22 (the albums root hides the ribbon's dead
+2×2 grid with 2 px seams; every cell is filled and cropped since M22.29) — 2026-11-26; M22.22 (the albums root hides the ribbon's dead
 "Tile / Rows / List" switch — the root has no snapshot grid — so the "Cards / List" of the album
 control row is the only look switch there, and the switch now has a click test in both languages) —
 2026-11-26; M22.23 (on the whole Albums screen the ribbon's cell views are hidden and its "Cards /
@@ -1086,7 +1087,18 @@ M22.24 (every album tree row carries a 14 px folder glyph and is one click targe
 included; an album without a preview gets the real folder icon instead of the "▸" mark on its card
 and in the list row) — 2026-11-26; M22.25 (a long file name is cut to the room the size leaves, so
 the identity row cannot widen the 255 px card and the right panel stays 280 px; the grid keeps its
-tile width when a photo is selected, and the album's "All files" switch is translated) — 2026-11-26.
+tile width when a photo is selected, and the album's "All files" switch is translated) — 2026-11-26;
+M22.26 (the People screen after the owner's look: the tile's "pick" and "not him" became round icon
+targets, the group list moved into the right panel with the best face of each group as its icon, the
+dead "Tile / Rows / List" switch and the details toggle left the screen) — 2026-11-26; M22.27 (the
+trash's per-tile "restore" became a round 24 px icon target on the tile and in the list row, the word
+moved into the translated hint) — 2026-11-26; M22.28 (the full screen: the header ends with a 22 px
+"×" that closes the screen, the face boxes moved behind the "Show faces" tool with the face glyph,
+and a click on a box opens the 280 px right panel with every photo of that face, oldest first;
+`db::FaceBox` carries the face id and its group) — 2026-11-26; M22.29 (an album cover has no margins:
+every cell of the mosaic is filled and cropped by `ThumbFit::Filling` instead of the fitted whole
+preview, `paint_cover_mosaic` cuts the four corners back to the 4 px radius with `round_preview`, and
+the card and the list row share that call) — 2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

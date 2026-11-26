@@ -7,7 +7,7 @@
 
 STATE: done:M21.1 (mechanism, shell), M21.2 (grid), M21.3 (file card and inspector), M21.4a (duplicates screen), M21.4b (calendar), M21.4c (faces), M21.4d (trash), M21.4e (integrity), M21.4f (left panel blocks, settings panes), M21.5 (viewer, player controls, folder dialogs, storage confirmation), M21.6 (CLI reports), M21.7a (the architecture document), M21.7b (the interface document), M21.7c (the decisions log), M21.8a (`plan/STATUS.md`), M21.8b (`plan/BACKLOG.md`), M21.8c (the remaining `plan/*.md`), M21.9 (the repository skills), M15.6 (the multilingual SigLIP 2 model and the calibration of the tag weight), M15.7 (a blind labelled check on two folders; ADR 0042), M15.6 tail (the fp16 towers against int8 — int8 costs no tag quality, ADR 0043), M13d (panning the zoomed frame in the full screen), M22.1 (two themes, one token palette; ADR 0044), M22.2 (the main screen after the mock-up: three cell views, 10 px gap, EXIF-oriented previews), M22.2a (the list view scales with the size slider and the slider never disappears), M22.2b (scrolling: a wheel notch is a third of the screen, a trackpad swipe coasts after the fingers lift), M22.3 (the left panel: the five newest years and tag chips), M22.4 (the month heading pinned while scrolling), M22.5 (the calendar after `photocat_2`/`photocat_12`: the year and month layers, the day list) → done:M23.1 (English source: 206 identifiers renamed, the table inverted, `tests/source_language.rs` guards the rule), M23.2 (L0/L1 modules), M23.3 (every L2 module, the default tag labels in English), M23.4 (`app.rs`: comments, literals, the `match lang` blocks), M23.5 (the test messages and `scripts/`; the guard checks message positions), M23.6 (the corpus pass: the numbers on 2230 files and the OCR candidate regression it caught), M24.1 (the model download is the binary's business: `scripts/fetch-model.sh` is gone), M24.2 (the binary downloads the weights itself: `ureq` + `rustls` in place of `curl`; ADR 0047), M22.0 (the owner's mock-ups are in `docs/references/mockups/`), M22.6 (the albums: the card header, the sub-album cards with covers, one scroll area for them), M22.7 (the full-screen viewer: the header and the tools row with words, 1:1 and a turned view, the series strip of the day, the face chips, the inspector inside), M22.8 (the settings dialog after `photocat_4`, and the mock-up's icons as drawn geometry on every button; ADR 0048), M22.9 (the screens without a mock-up: duplicates, faces, trash and integrity built from
 the parts of the main screen), M22.10 (dialogs and reports: one card frame, one accent button, mono
-numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language), M22.13 (every action button carries an icon: six chained `.button(` calls and the one menu became `WordButton`s, and the guard now fails on a chained button or a word-only menu), M22.14 (a tile is a card again — the preview on the `field` well, the body on `card` — and the file card follows `photocat_1`: the preview card, the identity row, the "Shooting params" block, album and tag chips, the engine row; `card_block` counts its own line), M22.15 (the tile preview fills the whole 4:3 frame with a centring crop instead of the letterbox: `cover_rect`; every other preview stays fitted whole), M22.16 (the right panel after `photocat_12`: its own 280 px without a side-panel margin, a 44 px header band with the mock-up's "×", the card on 12 px of air, the format badge, the location pin, the folder glyph of an album chip and the framed "#" own-tag row), M22.17 (the word of a card chip acts and only the "×" removes: a tag click filters the grid by that tag and the accent marks the filter, the album word opens the album), M22.18 (the own-tag row: the word button became a bare 22 px "+", so the field is ~190 px of the 255 px card instead of 81), M22.19 (the top strip, the one-row content ribbon and the floating selection bar after `photocat_1`: the mark, one search field, the "Tiles" pill, the state, the icon details toggle and "Settings"; the chip row only while a filter is on; the years in three columns of two rows), M22.20 (the albums after `photocat_3`: the card grid at the root, the control row with the filter, the order and the Cards/List look, the breadcrumb and the tree inside an album, the card date from `updated_at`, and the "add photos to an album" dialog with three entrances), M22.21 (the album card opens from the root — the open-album action used to be dropped there — and its cover is a mosaic of up to four of its first photos: `AlbumNode::covers`, `cover_cells`, `paint_cover_mosaic`), M22.22 (the ribbon at the albums root hides the dead "Tile / Rows / List" switch), M22.23 (on the whole Albums screen the ribbon's cell views are hidden and the "Cards / List" switch drives both the album cards and the album's photos: `App::grid_cell_style`; the global cell view of the other screens stays), M22.24 (every album tree row carries a folder glyph and is one click target; an album without a preview gets a real folder icon instead of the "▸" mark), M22.25 (a long file name is cut to the room the size leaves, so the right panel keeps its 280 px and the grid no longer jumps when a photo is selected; the "All files" switch of an album is translated) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
+numbers), M22.11 (the light theme pass: the palette's contrast is a test, the light accent is `#b45309`, every screen renders in both themes without a colour of its own), M22.12 (the right panel keeps its 280 px: the own-tag row fits, no frame leaves the window, and the first status line follows the settings language), M22.13 (every action button carries an icon: six chained `.button(` calls and the one menu became `WordButton`s, and the guard now fails on a chained button or a word-only menu), M22.14 (a tile is a card again — the preview on the `field` well, the body on `card` — and the file card follows `photocat_1`: the preview card, the identity row, the "Shooting params" block, album and tag chips, the engine row; `card_block` counts its own line), M22.15 (the tile preview fills the whole 4:3 frame with a centring crop instead of the letterbox: `cover_rect`; every other preview stays fitted whole), M22.16 (the right panel after `photocat_12`: its own 280 px without a side-panel margin, a 44 px header band with the mock-up's "×", the card on 12 px of air, the format badge, the location pin, the folder glyph of an album chip and the framed "#" own-tag row), M22.17 (the word of a card chip acts and only the "×" removes: a tag click filters the grid by that tag and the accent marks the filter, the album word opens the album), M22.18 (the own-tag row: the word button became a bare 22 px "+", so the field is ~190 px of the 255 px card instead of 81), M22.19 (the top strip, the one-row content ribbon and the floating selection bar after `photocat_1`: the mark, one search field, the "Tiles" pill, the state, the icon details toggle and "Settings"; the chip row only while a filter is on; the years in three columns of two rows), M22.20 (the albums after `photocat_3`: the card grid at the root, the control row with the filter, the order and the Cards/List look, the breadcrumb and the tree inside an album, the card date from `updated_at`, and the "add photos to an album" dialog with three entrances), M22.21 (the album card opens from the root — the open-album action used to be dropped there — and its cover is a mosaic of up to four of its first photos: `AlbumNode::covers`, `cover_cells`, `paint_cover_mosaic`), M22.22 (the ribbon at the albums root hides the dead "Tile / Rows / List" switch), M22.23 (on the whole Albums screen the ribbon's cell views are hidden and the "Cards / List" switch drives both the album cards and the album's photos: `App::grid_cell_style`; the global cell view of the other screens stays), M22.24 (every album tree row carries a folder glyph and is one click target; an album without a preview gets a real folder icon instead of the "▸" mark), M22.25 (a long file name is cut to the room the size leaves, so the right panel keeps its 280 px and the grid no longer jumps when a photo is selected; the "All files" switch of an album is translated), M22.26 (the People screen after the owner's look: the tile's "pick" and "not him" are round icon targets, the group list moved into the right panel with the best face of each group as its icon, and the dead "Tile / Rows / List" switch and details toggle left the screen), M22.27 (the trash's per-tile "restore" became a round icon target, the word lives in the hint), M22.28 (the full screen: a "×" closes it, the face boxes moved to the "Show faces" tool, and a click on a face opens the right panel with all of its photos), M22.29 (an album cover has no margins: every cell of the mosaic is filled and cropped, the 4 px radius survives the crop) → next:M24.3 (a clean install: an empty cache, no models, no external programs); `plan/M22-ui-spec.md` §6; the owner's re-read of the M15.7 labels runs in parallel; SigLIP 2 stays opt-in and the default stays the multilingual CLIP. Interface language: chosen in Settings, detected from the system locale on the first launch, English when unknown; every visible surface of the window goes through `t()` and every CLI report prints the same language from `settings.lang`. Interface theme: dark by default, light and "follow the system" in Settings → Interface. The mock-up set is in `docs/references/mockups/` and digested in `plan/M22-ui-spec.md`; screens without a layout follow its rules. Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
 Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 
@@ -233,9 +233,10 @@ that the theme changes neither files nor the database. The owner asked for the m
 every button: `paint_icon` grew from the five player signs to 62 glyphs of the Material Symbols
 family by name, drawn as geometry — no icon font, no image, the binary does not grow (ADR 0048). Every
 action button is one `WordButton`: a 14 px icon, 6 px, the word, the accent on the one main action of
-a screen and the danger border on the OS-trash path. The four kinds of 20 px target that cannot hold
-both keep their word alone (per-tile `keep`/`restore`/`pick`/`not him`, the "×" of a chip, the album
-tree's triangle, the "×" of an album row) and menus keep words; a source test fails on a button built
+a screen and the danger border on the OS-trash path. The kinds of 20 px target that cannot hold both
+keep their word alone (per-tile `keep`/`restore`, the "×" of a chip, the album tree's triangle, the
+"×" of an album row), the two round targets on a face tile are icon-only (M22.26), and menus keep
+words; a source test fails on a button built
 outside `WordButton`. The wider buttons pushed the controls of the content panel into the heading —
 right-aligned they began at x 288 and ran over "All files · 2232 files" on a 1240 px window with the
 details panel open — so the heading keeps its row (title, facts, "Tiles" slider on the right) and the
@@ -286,8 +287,8 @@ similar shots, show them in the GUI, suggest the best frame per group, keep the 
 computes CLIP embeddings locally, searches by meaning with English text ("cake", "sea", "document"),
 shows tags in the card and filters by them, collects 30 clusters into a report for review.
 Since M6 faces are found locally: SCRFD finds boxes and 5 points, ArcFace gives a 512-dimension
-vector, aligned crops are grouped by cosine, a group can be named and split with the "not him"
-button.
+vector, aligned crops are grouped by cosine, a group can be named and split with the crossed-head
+button on a face tile.
 Since M7 the showcase is configurable: `organize --by day|month|event`, the name from the template
 `{date} {time} {camera} {tag} {orig} {ext}` (or the original one), `--exclude-dup` leaves out the
 files marked as spare; the originals still do not change — the showcase is a hardlink/copy/symlink.
@@ -957,9 +958,9 @@ unsuccessful showcase — the owner removes it himself.
 
 Tails after M6: 617 groups on the corpus are almost all without names — the owner has to name his
 people by eye; the threshold 0.45 is chosen on the corpus, but false merges of relatives are possible
-and are split with the "not him" button. The detector takes a screen, a statue or a picture on a wall
-for a face; there are few such "faces", they are visible in the common grid and remain separate
-groups. The crops of replaced files stay in the `faces/` cache (the key is sha256): the code does not
+and are split with the crossed-head button of a face tile. The detector takes a screen, a statue or a
+picture on a wall for a face; there are few such "faces", they are visible in the common grid and
+remain separate groups. The crops of replaced files stay in the `faces/` cache (the key is sha256): the code does not
 delete files even in the cache, the size grows only when the contents are replaced.
 
 Tails after M5c: the path is checked on saving, not before every run — if the program was removed
@@ -1144,7 +1145,8 @@ All decisions on M17–M20 are taken and closed; the M20 measurements are in § 
 - After a schema update old DBs get an empty `sharpness` until a reindex; the duplicates panel warns
   about it.
 - Faces: the threshold 0.45 is a compromise; relatives sometimes have a high cosine, so one group can
-  contain two similar people. This is cured with "not him", not with an automatic threshold. The
+  contain two similar people. This is cured with the crossed-head button, not with an automatic
+  threshold. The
   detector does not distinguish a face in a photo from a face on a screen/a statue. 21 faces of the
   corpus are smaller than 40 px — the embedding is weak, but such faces are not discarded if they
   passed the detection threshold of 0.5 and the minimum of 28 px.
@@ -3119,3 +3121,92 @@ M22.18 passed again — and M22.19 was then re-applied on top.
 **Documents.** `docs/UI.md` § Layout, § Metrics (the top strip, the ribbon, the years, the selection
 and the footer) and the Grid row of § Screens; `plan/M22-ui-spec.md` §2.4, §2.5, §3 and §6 M22.19;
 this file and `plan/BACKLOG.md` count M22.19.
+
+M22.26 is the owner's look at the "People" screen. Four things were wrong: the face tiles carried two
+worded buttons where the owner asked for icons (an empty tick circle for "pick", a crossed head for
+"not him"), the group list sat in the left panel while the right panel showed the file card that this
+screen does not need, the group rows had no picture of the person, and the ribbon's "Tile / Rows /
+List" switch did nothing because `draw_face_cell` never reads `CellStyle`. The tile now has two round
+24 px targets drawn over a dark scrim so they read on any crop: the tick circle fills with the accent
+and shows the tick once the face is picked, the crossed head is drawn only inside one group — in "All
+people" there is nothing to split off — and both carry their translated hint instead of a word
+(`tile_icon_target`, `Icon::Pick`, `Icon::NotHim`). The right panel of the screen is the group list now
+(`faces_panel`): the same 44 px header band as the details panel, the face glyph and "Groups" but no
+"×" — the list is content, not a toggle — then one scroll with "All people · N" and a row per group:
+the "together" tick, the best face of the group as its icon (`face_avatar`, the same texture cache the
+tiles use, the face glyph while a crop is missing) and the name with its photo count. The list left
+the left panel, which keeps the threshold, the pass, "Rebuild groups" and the together search; below
+1200 px the list falls back into the left panel the way the file card does. The details toggle of the
+top strip is not drawn on this screen and the ribbon keeps no cell-view switch there. `cargo test`
+310, `cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors; the window lives through `timeout 6`. On a copy of the real DB
+(2232 files, 2498 faces in 617 groups) the screen costs p50 10.27 ms / p95 12.16 ms in the dark palette
+and 9.61 / 11.08 ms in the light one — up from the 8.07–8.49 ms of M22.9, which is the price of the
+617-row list with a face icon on every row, still inside the 16.7 ms of a 60 fps frame. The new test
+`the_faces_screen_keeps_its_list_in_the_right_panel` checks that "Groups" and "All people · 2" are
+drawn at x ≥ 960 of a 1240 px window and that "Tile", "Rows", "List" and "Details" are not drawn on
+the screen at all; the two existing screen tests lost the "not him"/"pick"/"picked" words and now
+check that those words are gone.
+
+**Documents.** `docs/UI.md` § Layout (the ribbon, the right panel, the one-scroll rule), § Metrics
+(the face tile), § Screens (the People row), the false-merge bullet and the wording list; `plan/I18N.md`
+(the face tile labels are hints now); `docs/ARCHITECTURE.md` § Measurements (the M22.26 row);
+`plan/M22-ui-spec.md` §6 M22.26; this file and `plan/BACKLOG.md` count M22.26.
+
+M22.27 is the owner's word about the trash: the "restore" button on a trashed tile should be an icon.
+The tile and the list row now carry the same round 24 px target a face tile has — the dark scrim, the
+accent on hover, the restore glyph (`tile_icon_target`, now shared with M22.26, and the thin
+`restore_icon` wrapper) — and the word moved into the hint, translated: "Restore: back into the usual
+views — the file was untouched on disk". The rest of the screen did not change: "Restore all" keeps
+its word, "Empty the trash (N)" keeps the one `danger` border, and a click on the target no longer
+selects the row or the tile as well. The name row of the list gained the room the 70 px word took:
+`right` is 40 px in the trash instead of 96. `cargo test` 310, `cargo test --test source_language` 3,
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors; the
+window lives through `timeout 6`. The trash tests now check that the word "restore" is not drawn on
+the screen at all, and the button guard lost its exception for it.
+
+**Documents.** `docs/UI.md` § Layout (the word-only targets), § Metrics (the Trash row),
+§ Screens (the Trash row) and the wording list; `plan/I18N.md` (the trash hint); `plan/M22-ui-spec.md`
+§6 M22.27; this file and `plan/BACKLOG.md` count M22.27.
+
+M22.28 is the owner's look at the full screen: no visible close target, the face boxes always on, and
+a face told nothing about its other photos. The header now ends with the mock-up's 22 px "×" right of
+the position counter (`Icon::Close`, the hint "close the full screen — Esc"); "Back to the grid" stays
+as the worded way back. The boxes became a tool: "Show faces" in the tools row with the face
+silhouette, off by default, disabled with the hint "no faces found in this file" while the model found
+none. Every box is a click target now — `paint_face_chips` returns the pressed face id and
+`db::FaceBox` grew `id` and `cluster_id` — and a click opens the 280 px right column: the same 44 px
+band with the face glyph, the name of the group and a "×", the count "N photos", then every photo of
+that face, oldest first (`App::face_focus_for`), as 64×48 rows with name, date and size; the frame on
+screen carries a 1.5 px accent. A click on a row opens that photo in place (or rebuilds the viewer
+when the current walk does not hold it), a click on the empty part of the frame or the panel's "×"
+closes it, and paging closes it too — another file is another face. An ungrouped face lists only the
+frame and says "This face is not in a group yet." `cargo test` 311, `cargo test --test source_language`
+3, `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors;
+the window lives through `timeout 6`. The old test `the_full_screen_marks_the_faces_over_the_frame`
+became `the_full_screen_hides_the_face_boxes_until_asked` (off by default, the word turns them on,
+the turn keeps them); `a_picked_face_lists_its_photos_in_the_right_panel` checks the chronological
+list of a group, the panel texts and the ungrouped case.
+
+**Documents.** `docs/UI.md` § Screens (the full-screen rows, the new face panel), § Interaction (the
+two new ways into faces) and the counter list; `plan/I18N.md` (the viewer strings of M22.28);
+`plan/M22-ui-spec.md` §6 M22.28; this file and `plan/BACKLOG.md` count M22.28.
+
+M22.29 is the owner's look at an album cover: the mosaic of previews must not show a photo at its own
+size with margins around it — the previews should fill their cell. The mosaic kept `paint_thumb`'s
+fitted whole preview (M22.21, M22.15's rule), so a 16:10 cover of 4:3 photos left a band inside every
+cell at once. `paint_cover_mosaic` now paints through `paint_thumb_as(..., ThumbFit::Filling)`: the
+preview covers its cell edge to edge and the sides that do not fit are cut evenly — the centring crop
+of the grid tile (`cover_rect`), no stretch and no margins, the `canvas` showing only through the 2 px
+seams. The crop would square the corners of the well, so the mosaic ends with
+`round_preview(ui, rect, RADIUS_CTRL, bg, true)` — `bg` is the tone under the well, `card` on an album
+card, `canvas` in the list row — and both looks share the one call. Refused: a square cover, a "cover
+crop" setting, more than four cells; the fitted whole preview stays everywhere else — the calendar,
+the series strip and the file card. `cargo test` 311, `cargo test --test source_language` 3,
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors; the
+window lives through `timeout 6`.
+`the_album_cover_paints_four_previews` also checks that each of the four painted rectangles covers
+its cell, so the margins cannot come back unnoticed.
+
+**Documents.** `docs/UI.md` § Interaction (the Albums bullet) and § Metrics (the album card and the
+album list row); `plan/M22-ui-spec.md` §6 M22.29 and §7; this file and `plan/BACKLOG.md` count M22.29.

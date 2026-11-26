@@ -330,6 +330,11 @@ struct Viewer {
     rotation: u8,
     /// The file card next to the frame: off by default, the frame gets the whole width.
     inspector: bool,
+    /// The boxes of the found faces are drawn only on demand: the "Show faces" tool (M22.28).
+    show_faces: bool,
+    /// The face picked in the frame: its photos are listed in the right panel. `None` — the
+    /// panel is closed, and a click on the empty part of the frame closes it (M22.28).
+    face_focus: Option<FaceFocus>,
     /// The day of the current file and its neighbours: the series strip under the frame. Computed
     /// on a file change, not every frame — it walks the whole list (M22.7).
     day: Option<String>,
@@ -338,6 +343,17 @@ struct Viewer {
     slideshow: bool,
     interval_s: u64,
     last_advance: std::time::Instant,
+}
+
+/// The face picked in the full screen (M22.28): its group and every photo that carries it. The
+/// list is built once, on the click, and ordered by date — the panel is the story of one face.
+#[derive(Clone)]
+struct FaceFocus {
+    /// The name of the group; empty while the group has no name.
+    label: String,
+    /// `None` while the face is not grouped yet: only the frame on screen is listed.
+    cluster_id: Option<i64>,
+    file_ids: Vec<i64>,
 }
 
 /// A neighbour in the series strip of the full screen: where it sits in the viewer order, the
@@ -1928,28 +1944,33 @@ fn cover_cells(rect: egui::Rect, n: usize) -> Vec<egui::Rect> {
     }
 }
 
-/// The mosaic of an album cover (M22.21): up to four previews fitted whole, the `canvas` showing
-/// through the 2 px seams. Returns how many previews were drawn.
+/// The mosaic of an album cover (M22.21): up to four previews, each filling its cell whole (the
+/// sides that do not fit are cut evenly, M22.29), the `canvas` showing through the 2 px seams and
+/// the cut corners of the well, which `bg` restores. Returns how many previews were drawn.
 fn paint_cover_mosaic(
     ui: &egui::Ui,
     ctx: &egui::Context,
     cs: &mut Cells,
     covers: &[&FileRow],
     rect: egui::Rect,
+    bg: egui::Color32,
 ) -> usize {
     let cells = cover_cells(rect, covers.len());
     let mut drawn = 0;
     for (f, cell) in covers.iter().zip(cells) {
-        if paint_thumb(ui, ctx, cs, f, cell) {
+        if paint_thumb_as(ui, ctx, cs, f, cell, ThumbFit::Filling) {
             drawn += 1;
         }
+    }
+    if drawn > 0 {
+        round_preview(ui, rect, RADIUS_CTRL, bg, true);
     }
     drawn
 }
 
 /// An album card (M22.20, the mock-up's `photocat_3`): a `card`-tone card with a 16:10 canvas
-/// cover — a mosaic of up to four previews of its photos fitted whole (a preview is never
-/// cropped, M22.21), the count of files in the corner, the count of sub-albums in the other one,
+/// cover — a mosaic of up to four previews of its photos, each filling its cell without margins
+/// (M22.29), the count of files in the corner, the count of sub-albums in the other one,
 /// the name at 13 px and "size · date" in mono 10. A click opens the album; the open album keeps
 /// the accent frame and the accent name.
 #[allow(clippy::too_many_arguments)]
@@ -1987,7 +2008,7 @@ fn draw_album_cell(
             egui::vec2(size.x - 2.0 * PAD, size.y - 2.0 * PAD - 44.0),
         );
         painter.rect_filled(cover_rect, RADIUS_CTRL, th.canvas);
-        let drawn = paint_cover_mosaic(ui, ctx, cs, covers, cover_rect) > 0;
+        let drawn = paint_cover_mosaic(ui, ctx, cs, covers, cover_rect, th.card) > 0;
         if !drawn {
             // An album without a snapshot keeps the empty canvas and a folder mark, not a placeholder.
             paint_icon(
@@ -2101,7 +2122,7 @@ fn draw_album_row(
             thumb,
         );
         ui.painter().rect_filled(tr, RADIUS_CTRL, th.canvas);
-        if paint_cover_mosaic(ui, ctx, cs, covers, tr) == 0 {
+        if paint_cover_mosaic(ui, ctx, cs, covers, tr, th.canvas) == 0 {
             paint_icon(
                 ui.painter(),
                 tr.center(),
@@ -5963,7 +5984,13 @@ impl App {
         let status_w = 8.0 + 6.0 + 6.0 + text_width(ui, &state, 11.0) + 8.0;
         let zoom_w = 8.0 + 14.0 + 6.0 + TILE_SLIDER_W + 8.0;
         let with_state = row.width() >= 1100.0;
-        let mut right_w = settings_w + 28.0 + zoom_w + 2.0 * gap;
+        // The details toggle has nothing to toggle on the "People" screen: its right panel always
+        // holds the group list (M22.26).
+        let details_toggle = self.view != View::Faces;
+        let mut right_w = settings_w + zoom_w + gap;
+        if details_toggle {
+            right_w += 28.0 + gap;
+        }
         if with_state {
             right_w += status_w + gap;
         }
@@ -5993,14 +6020,17 @@ impl App {
                 if word_button(ui, Icon::Settings, t(lang, "Settings")).clicked() {
                     self.settings_open = true;
                 }
-                let hint = if self.details_open {
-                    t(lang, "Hide details")
-                } else {
-                    t(lang, "Details")
-                };
-                if toggle_icon_button(ui, Icon::DockToRight, 28.0, self.details_open, hint).clicked()
-                {
-                    self.details_open = !self.details_open;
+                if details_toggle {
+                    let hint = if self.details_open {
+                        t(lang, "Hide details")
+                    } else {
+                        t(lang, "Details")
+                    };
+                    if toggle_icon_button(ui, Icon::DockToRight, 28.0, self.details_open, hint)
+                        .clicked()
+                    {
+                        self.details_open = !self.details_open;
+                    }
                 }
                 if with_state {
                     let facts = i18n::fill(
@@ -6458,7 +6488,7 @@ impl App {
     }
 
     /// The left panel: the map of the application. The navigation and the filter are pinned, the view context scrolls.
-    fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool) {
+    fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool, show_faces: bool) {
         let lang = self.settings.lang;
         // The folder and "Start indexing" are work with the archive, not a search: they live here, while
         // the top bar stays a single 32 px row (mock-up: working folder block).
@@ -6637,7 +6667,7 @@ impl App {
                 }
                 match self.view {
                     View::Dupes => self.dupes_controls(ui),
-                    View::Faces => self.faces_controls(ui),
+                    View::Faces => self.faces_controls(ui, show_faces),
                     _ => {}
                 }
                 self.model_block(ui);
@@ -6824,8 +6854,10 @@ impl App {
         });
     }
 
-    /// The context of the "Faces" view: the threshold, the pass over the photos, the regrouping and the list.
-    fn faces_controls(&mut self, ui: &mut egui::Ui) {
+    /// The context of the "Faces" view: the threshold, the pass over the photos, the regrouping and
+    /// the "all together" search. The list of groups is the right panel of the screen (M22.26);
+    /// only a narrow window keeps it here.
+    fn faces_controls(&mut self, ui: &mut egui::Ui, show_lists: bool) {
         let lang = self.settings.lang;
         block(ui, |ui| {
             ui.label(
@@ -6912,60 +6944,20 @@ impl App {
                     self.start_face_clusters();
                 }
             }
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(t(lang, "Groups"))
-                    .size(11.0)
-                    .color(dim(ui)),
-            );
-            let clusters = self.face_clusters.clone();
-            egui::ScrollArea::vertical()
-                .id_salt("face-clusters")
-                .max_height(220.0)
-                .show(ui, |ui| {
-                    if ui
-                        .selectable_label(
-                            self.face_selected_cluster.is_none(),
-                            format!("{} · {}", t(lang, "All people"), self.face_faces),
-                        )
-                        .clicked()
-                    {
-                        self.face_selected_cluster = None;
-                        self.face_label_input.clear();
-                    }
-                    for c in clusters {
-                        let label = if c.label.is_empty() {
-                            t(lang, "no name").to_string()
-                        } else {
-                            c.label.clone()
-                        };
-                        ui.horizontal(|ui| {
-                            let mut mark = self.face_picked_clusters.contains(&c.id);
-                            if ui
-                                .checkbox(&mut mark, "")
-                                .on_hover_text(t(lang, "mark the group for the “all together” search"))
-                                .changed()
-                            {
-                                if mark {
-                                    self.face_picked_clusters.insert(c.id);
-                                } else {
-                                    self.face_picked_clusters.remove(&c.id);
-                                }
-                            }
-                            let line = format!(
-                                "{label} · {}",
-                                i18n::count(lang, c.photos as usize,"photo")
-                            );
-                            if ui
-                                .selectable_label(self.face_selected_cluster == Some(c.id), line)
-                                .clicked()
-                            {
-                                self.face_selected_cluster = Some(c.id);
-                                self.face_label_input = c.label;
-                            }
-                        });
-                    }
-                });
+            // The list of groups is the right panel of the screen; only a narrow window keeps it
+            // here (M22.26).
+            if show_lists {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(t(lang, "Groups"))
+                        .size(11.0)
+                        .color(dim(ui)),
+                );
+                egui::ScrollArea::vertical()
+                    .id_salt("face-clusters")
+                    .max_height(220.0)
+                    .show(ui, |ui| self.face_list_rows(ui));
+            }
             // "All together": the photos that hold at least one face from each marked group.
             if self.face_picked_clusters.len() >= 2 {
                 let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
@@ -7004,6 +6996,145 @@ impl App {
                 self.face_together = false;
             }
         });
+    }
+
+    /// The rows of the group list: "All people", then every group with a tick for the "all
+    /// together" search and the best face of the group as its icon (M22.26).
+    fn face_list_rows(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        let clusters = self.face_clusters.clone();
+        // The faces are ordered by quality, so the first one of a group is its icon.
+        let mut best: HashMap<i64, (i64, Option<String>)> = HashMap::new();
+        for f in &self.face_views {
+            if let Some(cid) = f.cluster_id {
+                best.entry(cid).or_insert((f.id, f.thumb.clone()));
+            }
+        }
+        if ui
+            .selectable_label(
+                self.face_selected_cluster.is_none(),
+                format!("{} · {}", t(lang, "All people"), self.face_faces),
+            )
+            .clicked()
+        {
+            self.face_selected_cluster = None;
+            self.face_label_input.clear();
+        }
+        for c in clusters {
+            let label = if c.label.is_empty() {
+                t(lang, "no name").to_string()
+            } else {
+                c.label.clone()
+            };
+            ui.horizontal(|ui| {
+                let mut mark = self.face_picked_clusters.contains(&c.id);
+                if ui
+                    .checkbox(&mut mark, "")
+                    .on_hover_text(t(lang, "mark the group for the “all together” search"))
+                    .changed()
+                {
+                    if mark {
+                        self.face_picked_clusters.insert(c.id);
+                    } else {
+                        self.face_picked_clusters.remove(&c.id);
+                    }
+                }
+                let (face_id, thumb) = best
+                    .get(&c.id)
+                    .map(|(id, thumb)| (Some(*id), thumb.as_deref()))
+                    .unwrap_or((None, None));
+                self.face_avatar(ui, face_id, thumb, 20.0);
+                let line = format!(
+                    "{label} · {}",
+                    i18n::count(lang, c.photos as usize, "photo")
+                );
+                if ui
+                    .selectable_label(self.face_selected_cluster == Some(c.id), line)
+                    .clicked()
+                {
+                    self.face_selected_cluster = Some(c.id);
+                    self.face_label_input = c.label;
+                }
+            });
+        }
+    }
+
+    /// The icon of a group row: its best face. The texture goes to the same cache the tiles use;
+    /// a group without a crop keeps the face glyph (M22.26).
+    fn face_avatar(
+        &mut self,
+        ui: &mut egui::Ui,
+        face_id: Option<i64>,
+        thumb: Option<&str>,
+        size: f32,
+    ) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+        let Some(face_id) = face_id else {
+            paint_icon(ui.painter(), rect.center(), size * 0.30, Icon::Face, dim(ui));
+            return;
+        };
+        if !self.face_textures.contains_key(&face_id) && !self.face_missing.contains(&face_id) {
+            let dir = db::cache_dir().join("faces");
+            match thumb.and_then(|rel| {
+                load_texture(ui.ctx(), &dir.join(rel), &format!("face{face_id}"))
+            }) {
+                Some(t) => {
+                    self.face_textures.insert(face_id, t);
+                }
+                None => {
+                    self.face_missing.insert(face_id);
+                }
+            }
+        }
+        match self.face_textures.get(&face_id) {
+            Some(t) => {
+                ui.painter().with_clip_rect(rect).image(
+                    t.id(),
+                    fit_rect(rect, t.size_vec2()),
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            None => paint_icon(ui.painter(), rect.center(), size * 0.30, Icon::Face, dim(ui)),
+        }
+    }
+
+    /// The right panel of the "People" screen: the list of groups, not the card of a file (M22.26).
+    fn faces_panel(&mut self, ui: &mut egui::Ui) {
+        panel_edge(ui, true);
+        let lang = self.settings.lang;
+        let th = theme(ui);
+        // The same 44 px header band as the details panel, with the face glyph instead of "File
+        // details" and no "×": this list is the screen's content, it does not open or close.
+        let w = ui.available_width();
+        let (band, _) = ui.allocate_exact_size(egui::vec2(w, PANEL_HEAD_H), egui::Sense::hover());
+        ui.painter().rect_filled(band, 0.0, th.card);
+        ui.painter().hline(
+            band.x_range(),
+            band.bottom() - 0.5,
+            egui::Stroke::new(1.0, th.border),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(band.shrink2(egui::vec2(PANEL_PAD, 0.0))),
+            |ui| {
+                ui.horizontal_centered(|ui| {
+                    icon_mark(ui, Icon::Face, 14.0);
+                    ui.label(
+                        egui::RichText::new(t(lang, "Groups"))
+                            .size(12.0)
+                            .strong(),
+                    );
+                });
+            },
+        );
+        egui::ScrollArea::vertical()
+            .id_salt("face-groups")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::same(PANEL_PAD as i8))
+                    .show(ui, |ui| self.face_list_rows(ui));
+            });
     }
 
     /// The model block: the state, "Compute tags", the filter by tag.
@@ -8315,6 +8446,8 @@ impl App {
             pan: egui::Vec2::ZERO,
             rotation: 0,
             inspector: false,
+            show_faces: false,
+            face_focus: None,
             day: None,
             series: Vec::new(),
             show_text: false,
@@ -8344,6 +8477,9 @@ impl App {
         // A sideways-looking frame was turned on purpose for one file; the next one is shown
         // as it is stored (M22.7).
         v.rotation = 0;
+        // The panel lists the photos of the face picked on the previous frame: another photo is
+        // another face, so the panel closes (M22.28).
+        v.face_focus = None;
         self.set_series(v);
     }
 
@@ -8358,7 +8494,40 @@ impl App {
         v.last_advance = std::time::Instant::now();
         v.pan = egui::Vec2::ZERO;
         v.rotation = 0;
+        v.face_focus = None;
         self.set_series(v);
+    }
+
+    /// The photos of the face picked in the full screen (M22.28): every photo of the same group,
+    /// oldest first. A face that is not grouped yet lists only the frame on screen.
+    fn face_focus_for(&self, face: &db::FaceBox, current: i64) -> FaceFocus {
+        let mut file_ids: Vec<i64> = Vec::new();
+        if let Some(cid) = face.cluster_id {
+            for f in &self.face_views {
+                if f.cluster_id == Some(cid) && !file_ids.contains(&f.file_id) {
+                    file_ids.push(f.file_id);
+                }
+            }
+        }
+        if file_ids.is_empty() {
+            file_ids.push(current);
+        }
+        let date_of = |id: i64| {
+            self.items
+                .iter()
+                .chain(self.trash_items.iter())
+                .find(|r| r.id == id)
+                .and_then(|r| r.taken_at.clone())
+        };
+        file_ids.sort_by(|a, b| {
+            cmp_date_none_last(date_of(*a).as_deref(), date_of(*b).as_deref(), false)
+                .then(a.cmp(b))
+        });
+        FaceFocus {
+            label: face.label.clone(),
+            cluster_id: face.cluster_id,
+            file_ids,
+        }
     }
 
     /// Keep the series strip of the viewer in step with the file on screen (M22.7).
@@ -8567,6 +8736,8 @@ impl App {
             .filter(|(fid, _)| *fid == id)
             .map(|(_, b)| b.clone())
             .unwrap_or_default();
+        // The boxes are drawn only on demand (M22.28): the tool "Show faces" decides.
+        let shown_faces: &[db::FaceBox] = if v.show_faces { &faces } else { &[] };
         // The neighbours of the same day: the strip under the frame, computed on a file change.
         // The thumbnails come from the same cache as the grid: a file that has just been on the
         // screen costs nothing.
@@ -8593,8 +8764,15 @@ impl App {
         let mut new_interval = v.interval_s;
         let mut new_rotation = v.rotation;
         let mut new_inspector = v.inspector;
+        let mut new_show_faces = v.show_faces;
+        let mut new_focus = v.face_focus.clone();
         let mut want_one_to_one = false;
         let mut goto: Option<usize> = None;
+        let mut image_clicked = false;
+        let mut face_click: Option<i64> = None;
+        let mut panel_open: Option<i64> = None;
+        let mut panel_close = false;
+        let mut reopen: Option<i64> = None;
         if ctx.input(|i| i.key_pressed(egui::Key::I)) {
             new_inspector = !v.inspector;
         }
@@ -8605,7 +8783,10 @@ impl App {
             ui.set_min_size(min_size);
             let avail = ui.available_size();
             let chrome_top = ui.cursor().top();
-            let insp_w = if v.inspector {
+            // The column is decided by what is on the screen at the start of the frame: a face
+            // picked now opens its panel on the next frame, when the body has made room for it
+            // (M22.28).
+            let insp_w = if v.inspector || v.face_focus.is_some() {
                 RIGHT_W + 16.0
             } else {
                 0.0
@@ -8643,6 +8824,18 @@ impl App {
                         .unwrap_or_else(|| t(lang, "no date").into());
                     ui.label(num(ui, format!("{date} · {facts}"), 11.0).color(dim(ui)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // The mock-up's "×": the close target of the whole screen, next to the
+                        // position counter (M22.28).
+                        if icon_button(
+                            ui,
+                            Icon::Close,
+                            22.0,
+                            t(lang, "close the full screen — Esc"),
+                        )
+                        .clicked()
+                        {
+                            close = true;
+                        }
                         ui.label(
                             num(ui, i18n::position(lang, v.idx + 1, v.ids.len()), 11.0)
                                 .color(accent(ui)),
@@ -8712,6 +8905,23 @@ impl App {
                     {
                         new_text = !v.show_text;
                     }
+                    // The face boxes are a tool, not a permanent overlay: off by default, one
+                    // word and the silhouette glyph turn them on (M22.28).
+                    let faces_hint = if faces.is_empty() {
+                        t(lang, "no faces found in this file")
+                    } else {
+                        t(lang, "the boxes of the found faces — a click on a face lists its photos")
+                    };
+                    if ui
+                        .add_enabled(
+                            !faces.is_empty(),
+                            WordButton::picked(Icon::Face, t(lang, "Show faces"), v.show_faces),
+                        )
+                        .on_hover_text(faces_hint)
+                        .clicked()
+                    {
+                        new_show_faces = !v.show_faces;
+                    }
                     if f.kind != "video"
                         && word_button(ui, Icon::OpenInNew, t(lang, "In the system viewer"))
                             .clicked()
@@ -8756,7 +8966,7 @@ impl App {
                             ui.horizontal(|ui| {
                                 let img_w = (left_w * 0.62).max(160.0);
                                 ui.allocate_ui(egui::vec2(img_w, frame_h), |ui| {
-                                    image_resp = Some(draw_viewer_image(
+                                    let (r, face) = draw_viewer_image(
                                         ui,
                                         ViewerFrame {
                                             textures: ViewerTextures {
@@ -8767,14 +8977,18 @@ impl App {
                                                 paused,
                                             },
                                             rot: v.rotation,
-                                            faces: &faces,
+                                            faces: shown_faces,
                                         },
                                         &f,
                                         v.zoom,
                                         &mut new_pan,
                                         egui::vec2(img_w, frame_h),
                                         lang,
-                                    ));
+                                    );
+                                    image_resp = Some(r);
+                                    if face.is_some() {
+                                        face_click = face;
+                                    }
                                 });
                                 ui.separator();
                                 egui::ScrollArea::vertical()
@@ -8804,7 +9018,7 @@ impl App {
                                     });
                             });
                         } else {
-                            image_resp = Some(draw_viewer_image(
+                            let (r, face) = draw_viewer_image(
                                 ui,
                                 ViewerFrame {
                                     textures: ViewerTextures {
@@ -8815,22 +9029,36 @@ impl App {
                                         paused,
                                     },
                                     rot: v.rotation,
-                                    faces: &faces,
+                                    faces: shown_faces,
                                 },
                                 &f,
                                 v.zoom,
                                 &mut new_pan,
                                 egui::vec2(left_w, frame_h),
                                 lang,
-                            ));
+                            );
+                            image_resp = Some(r);
+                            if face.is_some() {
+                                face_click = face;
+                            }
                         }
                         // A click on the video frame is like a big ▶ button: play or pause.
-                        if f.kind == "video" && image_resp.is_some_and(|r| r.clicked()) {
+                        if f.kind == "video" && image_resp.as_ref().is_some_and(|r| r.clicked()) {
                             if video_active {
                                 toggle_video = true;
                             } else {
                                 start_video = true;
                             }
+                        }
+                        image_clicked = image_resp.as_ref().is_some_and(|r| r.clicked());
+                        // A click on a face opens its photos in the right panel; a click on the
+                        // empty part of the frame closes the panel (M22.28).
+                        if let Some(fid) = face_click.take() {
+                            if let Some(face) = shown_faces.iter().find(|b| b.id == fid) {
+                                new_focus = Some(self.face_focus_for(face, id));
+                            }
+                        } else if image_clicked && f.kind != "video" {
+                            new_focus = None;
                         }
                         // The playback bar: paging, play and pause, seeking, the volume.
                         ui.horizontal_wrapped(|ui| {
@@ -8989,16 +9217,22 @@ impl App {
                         }
                     },
                 );
-                if v.inspector {
+                if insp_w > 0.0 {
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
                         ui.set_width(RIGHT_W);
-                        panel_edge(ui, true);
-                        ui.add_space(4.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("viewer-card")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| self.file_card(ui, Some(id)));
+                        if let Some(focus) = &new_focus {
+                            let (open, close_panel) = self.viewer_face_panel(ui, focus, id);
+                            panel_open = open;
+                            panel_close = close_panel;
+                        } else if v.inspector {
+                            panel_edge(ui, true);
+                            ui.add_space(4.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("viewer-card")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| self.file_card(ui, Some(id)));
+                        }
                     });
                 }
             });
@@ -9016,6 +9250,11 @@ impl App {
         }
         v.slideshow = new_slideshow;
         v.interval_s = new_interval;
+        v.show_faces = new_show_faces;
+        if !v.show_faces || panel_close {
+            new_focus = None;
+        }
+        v.face_focus = new_focus;
         if open_video {
             match tools::open_path(Path::new(&f.path)) {
                 Ok(()) => {
@@ -9055,6 +9294,21 @@ impl App {
             self.viewer_goto(&mut v, idx);
             ctx.request_repaint();
         }
+        // A photo picked in the face panel opens in place when the walk holds it, otherwise the
+        // viewer is rebuilt around it (M22.28).
+        if let Some(fid) = panel_open {
+            match v.ids.iter().position(|&x| x == fid) {
+                Some(idx) => {
+                    self.viewer_goto(&mut v, idx);
+                    ctx.request_repaint();
+                }
+                None => reopen = Some(fid),
+            }
+        }
+        if let Some(fid) = reopen {
+            self.open_viewer(fid);
+            return;
+        }
         if close {
             self.stop_video();
             self.viewer = None;
@@ -9064,6 +9318,170 @@ impl App {
             self.request_around(&v.ids, v.idx);
             self.viewer = Some(v);
         }
+    }
+
+    /// The right panel of the full screen: every photo that carries the picked face, oldest
+    /// first (M22.28). A click on a row opens that photo; the "×" in the band closes the panel.
+    /// Returns the photo picked in the list and whether the band asked to close.
+    fn viewer_face_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        focus: &FaceFocus,
+        current: i64,
+    ) -> (Option<i64>, bool) {
+        let lang = self.settings.lang;
+        let th = theme(ui);
+        panel_edge(ui, true);
+        let w = ui.available_width();
+        let (band, _) = ui.allocate_exact_size(egui::vec2(w, PANEL_HEAD_H), egui::Sense::hover());
+        ui.painter().rect_filled(band, 0.0, th.card);
+        ui.painter().hline(
+            band.x_range(),
+            band.bottom() - 0.5,
+            egui::Stroke::new(1.0, th.border),
+        );
+        let mut close = false;
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(band.shrink2(egui::vec2(PANEL_PAD, 0.0))),
+            |ui| {
+                ui.horizontal_centered(|ui| {
+                    icon_mark(ui, Icon::Face, 14.0);
+                    let name = if focus.label.is_empty() {
+                        t(lang, "face")
+                    } else {
+                        focus.label.as_str()
+                    };
+                    ui.label(egui::RichText::new(name).size(12.0).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icon_button(ui, Icon::Close, 22.0, t(lang, "close the face panel"))
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
+            },
+        );
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        let open = egui::Frame::NONE
+            .inner_margin(egui::Margin::same(PANEL_PAD as i8))
+            .show(ui, |ui| {
+                ui.label(
+                    num(ui, i18n::count(lang, focus.file_ids.len(), "photo"), 11.0)
+                        .color(dim(ui)),
+                );
+                if focus.cluster_id.is_none() {
+                    ui.label(
+                        egui::RichText::new(t(lang, "This face is not in a group yet."))
+                            .size(11.0)
+                            .color(dim(ui)),
+                    );
+                }
+                ui.add_space(6.0);
+                let rows: Vec<db::FileRow> = focus
+                    .file_ids
+                    .iter()
+                    .filter_map(|id| {
+                        self.items
+                            .iter()
+                            .chain(self.trash_items.iter())
+                            .find(|r| r.id == *id)
+                            .cloned()
+                    })
+                    .collect();
+                let mut open = None;
+                egui::ScrollArea::vertical()
+                    .id_salt("viewer-face-photos")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for f in &rows {
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 56.0),
+                                egui::Sense::click(),
+                            );
+                            ui.painter().rect_filled(rect, 4.0, th.card);
+                            let p = ui.painter().with_clip_rect(rect.shrink(1.0));
+                            let thumb = egui::Rect::from_min_size(
+                                rect.min + egui::vec2(4.0, 4.0),
+                                egui::vec2(64.0, 48.0),
+                            );
+                            if !self.textures.contains_key(&f.id)
+                                && !self.missing.contains(&f.id)
+                            {
+                                let loaded = f.thumb.as_ref().and_then(|rel| {
+                                    load_texture(
+                                        ui.ctx(),
+                                        &self.thumbs_dir.join(rel),
+                                        &format!("t{}", f.id),
+                                    )
+                                });
+                                match loaded {
+                                    Some(t) => {
+                                        self.textures.insert(f.id, t);
+                                    }
+                                    None => {
+                                        self.missing.insert(f.id);
+                                    }
+                                }
+                            }
+                            if let Some(t) = self.textures.get(&f.id) {
+                                p.image(
+                                    t.id(),
+                                    fit_rect(thumb, t.size_vec2()),
+                                    uv,
+                                    egui::Color32::WHITE,
+                                );
+                                // The tone under the cut corners is the card the row lies on.
+                                round_preview(ui, thumb, 4.0, th.card, false);
+                            }
+                            let text_x = thumb.right() + 8.0;
+                            let name = file_name(&f.path);
+                            p.text(
+                                egui::pos2(text_x, rect.top() + 6.0),
+                                egui::Align2::LEFT_TOP,
+                                name.clone(),
+                                egui::FontId::proportional(12.0),
+                                th.text_med,
+                            );
+                            let date = f
+                                .taken_at
+                                .as_deref()
+                                .map(|d| d.chars().take(10).collect::<String>())
+                                .unwrap_or_else(|| t(lang, "no date").to_string());
+                            p.text(
+                                egui::pos2(text_x, rect.top() + 24.0),
+                                egui::Align2::LEFT_TOP,
+                                date,
+                                egui::FontId::monospace(10.0),
+                                th.text_dim,
+                            );
+                            p.text(
+                                egui::pos2(text_x, rect.top() + 38.0),
+                                egui::Align2::LEFT_TOP,
+                                db::human_in(lang, f.size),
+                                egui::FontId::monospace(10.0),
+                                th.text_dim,
+                            );
+                            if f.id == current {
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    4.0,
+                                    egui::Stroke::new(1.5, accent(ui)),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                            let resp = resp
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text(name);
+                            if resp.clicked() {
+                                open = Some(f.id);
+                            }
+                        }
+                    });
+                open
+            })
+            .inner;
+        (open, close)
     }
 
     /// One pass over the programs: the version, the file found, the source. Run on reload and on save.
@@ -9883,12 +10301,14 @@ fn draw_face_cell(
     cs: &mut FaceCells,
     f: &db::FaceView,
     lang: i18n::Lang,
+    can_split: bool,
 ) {
     let w = cs.tile.clamp(100.0, 260.0);
     let th = theme(ui);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, w + 26.0), egui::Sense::click());
     let img_rect = egui::Rect::from_min_size(rect.min, egui::vec2(w, w));
     let mut button_clicked = false;
+    let mut pointer_on_button = false;
     if ui.is_rect_visible(rect) {
         // A face tile is a card of the same palette as a file tile: the card tone, an 8 px radius
         // and a mono 10 caption (M22.9). The metrics stay 150×150 + 26 (docs/UI.md § Metrics).
@@ -9946,34 +10366,49 @@ fn draw_face_cell(
             egui::FontId::monospace(10.0),
             th.text_dim,
         );
-        // A false merge is split right on the tile, without going to another screen.
-        let btn = egui::Rect::from_min_size(
-            egui::pos2(img_rect.right() - 62.0, img_rect.top() + 4.0),
-            egui::vec2(58.0, 20.0),
-        );
-        if ui
-            .place(btn, egui::Button::new(t(lang, "not him")).small())
-            .on_hover_text(t(lang, "split this face into a new group"))
-            .clicked()
-        {
-            cs.split_clicked = Some(f.id);
-            button_clicked = true;
+        // A false merge is split right on the tile, without going to another screen. The target
+        // is relevant only inside one group: in "All people" there is nothing to split off
+        // (M22.26).
+        if can_split {
+            let btn = egui::Rect::from_min_size(
+                egui::pos2(img_rect.right() - 30.0, img_rect.top() + 6.0),
+                egui::vec2(24.0, 24.0),
+            );
+            let r = tile_icon_target(
+                ui,
+                egui::Id::unique(("face-split", f.id)),
+                btn,
+                Icon::NotHim,
+                false,
+                t(lang, "split this face into a new group"),
+            );
+            pointer_on_button |= r.hovered();
+            if r.clicked() {
+                cs.split_clicked = Some(f.id);
+                button_clicked = true;
+            }
         }
-        // A batch naming: mark several faces and give them one name.
+        // A batch naming: mark several faces and give them one name. An empty circle before the
+        // pick, the tick in the accent after it (M22.26).
         let pick = egui::Rect::from_min_size(
-            egui::pos2(img_rect.left() + 4.0, img_rect.top() + 4.0),
-            egui::vec2(66.0, 20.0),
+            egui::pos2(img_rect.left() + 6.0, img_rect.top() + 6.0),
+            egui::vec2(24.0, 24.0),
         );
         let is_picked = cs.picked.contains(&f.id);
-        if ui
-            .place(
-                pick,
-                egui::Button::new(t(lang, if is_picked { "picked" } else { "pick" }))
-                    .small(),
-            )
-            .on_hover_text(t(lang, "mark this face for a shared name"))
-            .clicked()
-        {
+        let r = tile_icon_target(
+            ui,
+            egui::Id::unique(("face-pick", f.id)),
+            pick,
+            if is_picked {
+                Icon::CheckCircle
+            } else {
+                Icon::Pick
+            },
+            is_picked,
+            t(lang, "mark this face for a shared name"),
+        );
+        pointer_on_button |= r.hovered();
+        if r.clicked() {
             if is_picked {
                 cs.picked.remove(&f.id);
             } else {
@@ -9998,10 +10433,6 @@ fn draw_face_cell(
             egui::StrokeKind::Inside,
         );
     }
-    let pointer_on_button = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| {
-        p.x > img_rect.right() - 70.0 && p.y < img_rect.top() + 28.0
-            || p.x < img_rect.left() + 74.0 && p.y < img_rect.top() + 28.0
-    });
     if resp.clicked() && !button_clicked && !pointer_on_button {
         cs.open_clicked = Some(f.file_id);
     }
@@ -10017,6 +10448,42 @@ fn draw_face_cell(
             ui.label(&f.path);
         });
     }
+}
+
+/// A round icon target over a tile: the tick circle, the "not him" slash and the trash's restore
+/// glyph. The scrim keeps the glyph readable on any crop; the picked state takes the accent fill
+/// (M22.26).
+fn tile_icon_target(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    rect: egui::Rect,
+    icon: Icon,
+    active: bool,
+    hint: &str,
+) -> egui::Response {
+    let resp = ui
+        .interact(rect, id, egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(hint);
+    if ui.is_rect_visible(rect) {
+        let th = theme(ui);
+        let bg = if active {
+            th.accent
+        } else if resp.hovered() {
+            egui::Color32::from_black_alpha(200)
+        } else {
+            egui::Color32::from_black_alpha(150)
+        };
+        ui.painter()
+            .circle_filled(rect.center(), rect.width() * 0.5, bg);
+        let color = if active {
+            th.on_accent
+        } else {
+            egui::Color32::WHITE
+        };
+        paint_icon(ui.painter(), rect.center(), rect.width() * 0.30, icon, color);
+    }
+    resp
 }
 
 /// A short version caption: the first line and the first three words ("ffmpeg version 9.0.2").
@@ -10110,10 +10577,10 @@ fn clamp_pan(pan: egui::Vec2, image: egui::Vec2, area: egui::Rect) -> egui::Vec2
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ThumbFit {
     /// The whole frame: the picture is fitted and the margins remain (the calendar, the series
-    /// strip, the album cover, the file card — a preview is never cropped there).
+    /// strip, the file card — a preview is never cropped there).
     Whole,
-    /// The whole tile: the picture fills the frame edge to edge and the sides that do not fit are
-    /// cut (the grid tile, M22.15).
+    /// The whole frame: the picture fills it edge to edge and the sides that do not fit are cut
+    /// evenly (the grid tile, M22.15; a cell of an album cover, M22.29).
     Filling,
 }
 
@@ -10431,6 +10898,9 @@ enum Icon {
     Upload,
     Check,
     CheckCircle,
+    // The face tile: an empty tick circle and a head with a slash (M22.26).
+    Pick,
+    NotHim,
     Delete,
     Restore,
     Stop,
@@ -10836,6 +11306,20 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, s: f32, icon: Icon, color: egui:
             ring(0.0, 0.0, 0.92);
             seg(vec![pt(-0.45, 0.02), pt(-0.12, 0.38), pt(0.5, -0.38)]);
         }
+        // The tick of a face tile before it is picked (M22.26).
+        Icon::Pick => ring(0.0, 0.0, 0.9),
+        // "Not him": a head and shoulders with a slash across them (M22.26).
+        Icon::NotHim => {
+            ring(0.0, -0.32, 0.38);
+            arc(
+                0.0,
+                0.88,
+                0.62,
+                std::f32::consts::PI,
+                2.0 * std::f32::consts::PI,
+            );
+            line(pt(-0.82, -0.82), pt(0.82, 0.82));
+        }
         // The mock-up's `tune` (the icon of the settings dialog there): three rails with a knob
         // each. A 14 px gear reads as a sun, a rail reads at once.
         Icon::Settings => {
@@ -11211,8 +11695,10 @@ fn paint_play_overlay(ui: &egui::Ui, area: egui::Rect, lang: i18n::Lang) {
 /// One way to draw a frame in the full-screen viewer: 100% means fitted, more means
 /// zoomed; a zoomed frame is dragged with the mouse (`pan`) and does not leave the edges
 /// of the area (the wheel does not page the file).
-/// `rot` turns the view by 90° steps, `faces` marks who is in the frame (M22.7).
-/// Returns the response of the frame area: a click on a video is play or pause.
+/// `rot` turns the view by 90° steps, `faces` marks who is in the frame (M22.7) and makes every
+/// box a target: a click lists the photos of that face (M22.28).
+/// Returns the response of the frame area (a click on a video is play or pause) and the id of the
+/// face clicked, if any.
 fn draw_viewer_image(
     ui: &mut egui::Ui,
     frame: ViewerFrame<'_>,
@@ -11221,7 +11707,7 @@ fn draw_viewer_image(
     pan: &mut egui::Vec2,
     size: egui::Vec2,
     lang: i18n::Lang,
-) -> egui::Response {
+) -> (egui::Response, Option<i64>) {
     let tex = frame.textures;
     let rot = frame.rot;
     let (area, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -11244,7 +11730,7 @@ fn draw_viewer_image(
         if tex.paused {
             paint_play_overlay(ui, area, lang);
         }
-        return resp;
+        return (resp, None);
     }
     let mut shown: Option<(egui::Rect, egui::Rect)> = None;
     if let Some((tid, t)) = tex.full
@@ -11313,13 +11799,14 @@ fn draw_viewer_image(
             dim(ui),
         );
     }
+    let mut face_click = None;
     if let Some((content, disp)) = shown {
-        paint_face_chips(ui, content, disp, rot, f, frame.faces, lang);
+        face_click = paint_face_chips(ui, content, disp, rot, f, frame.faces, lang);
     }
     if f.kind == "video" {
         paint_play_overlay(ui, area, lang);
     }
-    resp
+    (resp, face_click)
 }
 
 /// The scale that shows one image pixel per screen pixel (M22.7): the frame is fitted into the
@@ -11382,7 +11869,8 @@ fn rotate_rect(r: egui::Rect, center: egui::Pos2, rot: u8) -> egui::Rect {
 
 /// The face chips over the frame: who is in the picture and with what confidence. Drawn only
 /// when the face model has seen this file; the boxes are image pixels of the same oriented frame
-/// the viewer shows, so a turn moves them with it (M22.7).
+/// the viewer shows, so a turn moves them with it (M22.7). Every box is a click target: it returns
+/// the id of the face pressed, which opens the photos of that face (M22.28).
 fn paint_face_chips(
     ui: &egui::Ui,
     content: egui::Rect,
@@ -11391,10 +11879,11 @@ fn paint_face_chips(
     f: &FileRow,
     faces: &[db::FaceBox],
     lang: i18n::Lang,
-) {
+) -> Option<i64> {
     if faces.is_empty() || f.width == 0 || f.height == 0 {
-        return;
+        return None;
     }
+    let mut clicked = None;
     let p = ui.painter().with_clip_rect(disp);
     for face in faces {
         let r = egui::Rect::from_min_size(
@@ -11411,6 +11900,17 @@ fn paint_face_chips(
         let r = rotate_rect(r, disp.center(), rot);
         if r.width() < 8.0 || r.height() < 8.0 {
             continue;
+        }
+        let resp = ui
+            .interact(
+                r,
+                ui.scope_id().with(("face-box", face.id)),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(t(lang, "all photos with this face"));
+        if resp.clicked() {
+            clicked = Some(face.id);
         }
         p.rect_stroke(
             r,
@@ -11444,6 +11944,7 @@ fn paint_face_chips(
         );
         p.galley(pos, galley, egui::Color32::from_gray(235));
     }
+    clicked
 }
 
 /// The series strip under the frame: the day, the number of its snapshots and the neighbours
@@ -11600,6 +12101,25 @@ fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     }
 }
 
+/// The restore target of the trash: a round 24 px icon target on a tile or a row. The owner
+/// asked for an icon instead of the word (M22.27, after the face targets of M22.26); the word
+/// lives in the hint, so the action stays findable without a legend.
+fn restore_icon(
+    ui: &mut egui::Ui,
+    f: &FileRow,
+    rect: egui::Rect,
+    lang: i18n::Lang,
+) -> egui::Response {
+    tile_icon_target(
+        ui,
+        egui::Id::unique(("restore", f.id)),
+        rect,
+        Icon::Restore,
+        false,
+        t(lang, "Restore: back into the usual views — the file was untouched on disk"),
+    )
+}
+
 /// The row height from the "Tiles" slider: 24 + 0.16 × the value (40 px at 100, 66 px at 260).
 /// One slider value for three cell views (M22.2a).
 fn list_row_height(tile: f32) -> f32 {
@@ -11660,6 +12180,8 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
     let thumb_h = (row_h - 8.0).max(16.0);
     let thumb = egui::vec2((thumb_h * 4.0 / 3.0).round(), thumb_h.round());
     for &f in files {
+        // A click on the round restore target must not select the row as well.
+        let mut restore = false;
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), row_h),
             egui::Sense::click(),
@@ -11710,7 +12232,13 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             }
         };
         let meta = format!("{date} · {}", db::human_in(cs.lang, f.size));
-        let right = if cs.show_keep || cs.trash_mode { 96.0 } else { 132.0 };
+        let right = if cs.trash_mode {
+            40.0
+        } else if cs.show_keep {
+            96.0
+        } else {
+            132.0
+        };
         let clip = egui::Rect::from_min_max(
             tr.right_top() + egui::vec2(8.0, 0.0),
             egui::pos2(rect.right() - right, rect.bottom()),
@@ -11754,22 +12282,20 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             }
         }
         if cs.trash_mode {
-            let btn = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - 78.0, rect.center().y - 10.0),
-                egui::vec2(70.0, 20.0),
+            let btn = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - 20.0, rect.center().y),
+                egui::vec2(24.0, 24.0),
             );
-            if ui
-                .place(btn, egui::Button::new(t(cs.lang, "restore")).small())
-                .clicked()
-            {
+            if restore_icon(ui, f, btn, cs.lang).clicked() {
                 cs.restore_clicked = Some(f.id);
+                restore = true;
             }
         }
-        if resp.clicked() {
+        if resp.clicked() && !restore {
             let mods = ui.input(|i| i.modifiers);
             cs.clicked = Some((f.id, pick_kind(&mods)));
         }
-        if resp.double_clicked() {
+        if resp.double_clicked() && !restore {
             cs.open_clicked = Some(f.id);
         }
         resp.on_hover_text(&f.path);
@@ -11863,6 +12389,8 @@ fn draw_cell(
         egui::pos2(rect.left(), img_rect.bottom()),
         rect.right_bottom(),
     );
+    // A click on the round restore target must not select the tile as well.
+    let mut restore = false;
     if ui.is_rect_visible(rect) {
         // A card radius of 8 px: the top corners on the preview, the bottom ones on the caption strip.
         let top = egui::CornerRadius {
@@ -12043,19 +12571,17 @@ fn draw_cell(
                 egui::FontId::proportional(12.0),
                 egui::Color32::from_gray(235),
             );
-            let btn = egui::Rect::from_min_size(
-                egui::pos2(img_rect.right() - 70.0, img_rect.bottom() - 26.0),
-                egui::vec2(66.0, 20.0),
+            // A narrow row tile keeps the target inside the frame.
+            let btn = egui::Rect::from_center_size(
+                egui::pos2(
+                    (img_rect.right() - 18.0).max(img_rect.left() + 18.0),
+                    (img_rect.bottom() - 18.0).max(img_rect.top() + 18.0),
+                ),
+                egui::vec2(24.0, 24.0),
             );
-            if ui
-                .place(btn, egui::Button::new(t(cs.lang, "restore")).small())
-                .on_hover_text(t(
-                    cs.lang,
-                    "bring the file back into the usual views; on disk it was untouched",
-                ))
-                .clicked()
-            {
+            if restore_icon(ui, f, btn, cs.lang).clicked() {
                 cs.restore_clicked = Some(f.id);
+                restore = true;
             }
         }
     }
@@ -12088,11 +12614,11 @@ fn draw_cell(
             egui::StrokeKind::Inside,
         );
     }
-    if resp.clicked() {
+    if resp.clicked() && !restore {
         let mods = ui.input(|i| i.modifiers);
         cs.clicked = Some((f.id, pick_kind(&mods)));
     }
-    if resp.double_clicked() {
+    if resp.double_clicked() && !restore {
         cs.open_clicked = Some(f.id);
     }
     if resp.hovered()
@@ -12461,16 +12987,29 @@ impl eframe::App for App {
 
         // The details live in the right panel while the grid keeps 4 columns; in a narrow window
         // the card moves to the left one, and the grid does not shrink.
-        // There is no card on "Integrity": it checks folders, not files.
+        // There is no card on "Integrity": it checks folders, not files. The "People" screen keeps
+        // its group list in the right panel instead of the card (M22.26), and only a narrow window
+        // puts that list back into the left panel.
+        let wide = ui.available_width() >= DETAILS_MIN_W;
+        let faces_panel = self.view == View::Faces && wide;
+        let show_faces = self.view == View::Faces && !faces_panel;
         let details = self.details_open
             && self.view != View::Integrity
-            && ui.available_width() >= DETAILS_MIN_W;
-        let show_card = self.details_open && self.view != View::Integrity && !details;
+            && self.view != View::Faces
+            && wide;
+        let show_card =
+            self.details_open && self.view != View::Integrity && self.view != View::Faces && !wide;
         egui::Panel::left("left")
             .exact_size(LEFT_W)
             .resizable(false)
-            .show(ui, |ui| self.left_panel(ui, show_card));
-        if details {
+            .show(ui, |ui| self.left_panel(ui, show_card, show_faces));
+        if faces_panel {
+            egui::Panel::right("faces")
+                .exact_size(RIGHT_W)
+                .resizable(false)
+                .frame(egui::Frame::NONE.fill(theme(ui).panel))
+                .show(ui, |ui| self.faces_panel(ui));
+        } else if details {
             // The panel carries no margin of its own: the 1 px line stands on its edge and the
             // file card keeps the mock-up's 12 px of air (M22.16).
             egui::Panel::right("details")
@@ -12682,7 +13221,9 @@ impl eframe::App for App {
                         // On the Albums screen the "Cards / List" switch of the album control row
                         // is the one look switch: it changes the album cards and the snapshots
                         // together, so no second, dead "List" sits in the ribbon (M22.22/M22.23).
-                        if view != View::Albums {
+                        // The face tiles have one look of their own, so the switch is not drawn
+                        // there either (M22.26).
+                        if !matches!(view, View::Albums | View::Faces) {
                             let mut style = self.settings.cell_style;
                             for (value, icon, label, hint) in [
                                 (
@@ -14233,13 +14774,13 @@ impl eframe::App for App {
                     });
                     ui.label(t(
                         lang,
-                        "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is split by the “not him” button on the tile.",
+                        "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is split by the crossed-head button on the tile.",
                     ));
                 } else {
                     ui.label(
                         egui::RichText::new(t(
                             lang,
-                            "Pick a group on the left to name it, or split the tiles.",
+                            "Pick a group in the list to name it, or split the tiles.",
                         ))
                         .size(12.0)
                         .color(dim(ui)),
@@ -14249,7 +14790,7 @@ impl eframe::App for App {
                     .iter()
                     .filter(|f| face_selected.is_none() || f.cluster_id == face_selected)
                     .collect();
-                // A batch naming: mark faces with the "pick" button and give them one name.
+                // A batch naming: mark faces with the tick circle and give them one name.
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
@@ -14300,7 +14841,14 @@ impl eframe::App for App {
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             for f in &shown {
-                                draw_face_cell(ui, ctx, &mut face_cells, f, lang);
+                                draw_face_cell(
+                                    ui,
+                                    ctx,
+                                    &mut face_cells,
+                                    f,
+                                    lang,
+                                    face_selected.is_some(),
+                                );
                             }
                         });
                     });
@@ -16148,6 +16696,8 @@ mod tests {
             pan: egui::Vec2::ZERO,
             rotation: 0,
             inspector: false,
+            show_faces: false,
+            face_focus: None,
             day: None,
             series: Vec::new(),
             show_text: false,
@@ -16383,7 +16933,7 @@ mod tests {
         app.face_selected_cluster = Some(7);
         app.settings.lang = i18n::Lang::En;
         app.view = View::Faces;
-        // A tall window: the group list in the left panel must not be cut off.
+        // A tall window: the group list in the right panel must not be cut off.
         let texts = window_frame_at(
             &mut app,
             &egui::Context::default(),
@@ -16401,8 +16951,6 @@ mod tests {
             "Save the name",
             "Name the picked people",
             "Unpick",
-            "not him",
-            "pick",
             "no frame",
             "no date",
         ] {
@@ -16429,6 +16977,60 @@ mod tests {
         }
     }
 
+    /// M22.26: the group list is the right panel of the "People" screen, and the ribbon carries
+    /// no dead cell-view switch there: the face tiles have one look of their own.
+    #[test]
+    fn the_faces_screen_keeps_its_list_in_the_right_panel() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-faces-panel.db"));
+        app.face_faces = 2;
+        app.face_photos = 1;
+        app.face_clusters = vec![db::FaceCluster {
+            id: 7,
+            label: "Lisa".into(),
+            faces: 2,
+            photos: 1,
+        }];
+        app.face_views = vec![db::FaceView {
+            id: 1,
+            file_id: 1,
+            path: "/tmp/a.jpg".into(),
+            taken_at: None,
+            thumb: None,
+            score: 0.62,
+            cluster_id: Some(7),
+        }];
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Faces;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 1400.0);
+        let layout = window_layout(&mut app, &ctx, size);
+        let pos = |needle: &str| {
+            layout
+                .iter()
+                .find(|(t, _)| t == needle)
+                .map(|(_, p)| *p)
+                .unwrap_or_else(|| panic!("no “{needle}”: {layout:?}"))
+        };
+        // The list lives on the right, after the 280 px panel edge, not in the left panel.
+        assert!(
+            pos("Groups").x >= size.x - super::RIGHT_W - 1.0,
+            "the group heading is not in the right panel: {:?}",
+            pos("Groups")
+        );
+        assert!(
+            pos("All people · 2").x >= size.x - super::RIGHT_W,
+            "the group rows are not in the right panel: {:?}",
+            pos("All people · 2")
+        );
+        // The dead look switch and the card's own toggle are gone from this screen.
+        for word in ["Tile", "Rows", "List", "Details"] {
+            assert!(
+                !layout.iter().any(|(t, _)| t == word),
+                "the dead control “{word}” is drawn on the People screen: {layout:?}"
+            );
+        }
+    }
+
     /// M21.4d: the trash is translated completely — the screen, the tile and the confirmation dialog.
     /// A modal window does not know its size on the first frame, so there are two frames.
     #[test]
@@ -16447,7 +17049,6 @@ mod tests {
             "Restore all",
             "Empty the trash (1)",
             "in trash",
-            "restore",
             "Empty the trash?",
             "Move to the OS trash",
             "Cancel",
@@ -16767,8 +17368,13 @@ mod tests {
                 .cloned()
                 .unwrap_or_else(|| panic!("no “{needle}”: {formats:?}"))
         };
-        find("not him");
-        find("picked");
+        // The tile buttons are icons now: no word "not him", no word "pick" (M22.26).
+        assert!(
+            !formats
+                .iter()
+                .any(|(t, _, _)| t == "not him" || t == "pick" || t == "picked"),
+            "a face tile still carries a worded button: {formats:?}"
+        );
         find("Save the name");
         let (_, title_font, _) = find("Lisa");
         assert_eq!(title_font.size, 14.0, "the group's name is a 14 px subheading");
@@ -16813,7 +17419,11 @@ mod tests {
         };
         find("Restore all");
         find("in trash");
-        find("restore");
+        // M22.27: the per-tile restore is a round icon target, not a worded button.
+        assert!(
+            !formats.iter().any(|(t, _, _)| t == "restore"),
+            "a worded restore is still on the tile: {formats:?}"
+        );
         let (_, empty_font, empty_color) = find("Empty the trash (1)");
         assert_eq!(empty_color, super::DARK.danger, "the emptying is the red word");
         assert_eq!(empty_font.size, 13.0);
@@ -17155,6 +17765,7 @@ mod tests {
             "interval:",
             "3 s",
             "Text on the photo",
+            "Show faces",
             "In the system viewer",
             "1 of 1",
             "the full frame is loading…",
@@ -17173,6 +17784,7 @@ mod tests {
             "Слайд-шоу",
             "интервал:",
             "Текст на фото",
+            "Показать лица",
             "В системном просмотрщике",
             "масштаб",
             "полный кадр загружается",
@@ -17572,20 +18184,23 @@ mod tests {
         );
     }
 
-    /// M22.7: the faces of the frame are marked over it with the name and the score.
+    /// M22.7, M22.28: the boxes of the found faces are a tool, off by default; the "Show faces"
+    /// word turns them on, and then they are marked with the name and the score.
     #[test]
-    fn the_full_screen_marks_the_faces_over_the_frame() {
+    fn the_full_screen_hides_the_face_boxes_until_asked() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-viewer-faces.db"));
         app.items = vec![file_row(1, "image", "a.jpg")];
         app.settings.lang = i18n::Lang::En;
         app.viewer_faces = Some((
             1,
             vec![db::FaceBox {
+                id: 10,
                 x: 10,
                 y: 20,
                 w: 30,
                 h: 40,
                 score: 0.92,
+                cluster_id: Some(7),
                 label: "Lisa".into(),
             }],
         ));
@@ -17597,6 +18212,17 @@ mod tests {
             egui::TextureOptions::LINEAR,
         );
         app.viewer_tex = Some((1, tex));
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            !texts.iter().any(|t| t.contains("(92%)")),
+            "the boxes are hidden by default: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Show faces"),
+            "the tool is on the row: {texts:?}"
+        );
+        // The word turns the boxes on: the face is named over the frame.
+        app.viewer.as_mut().expect("the viewer is open").show_faces = true;
         let texts = viewer_frame(&mut app, &ctx, None);
         assert!(
             texts.iter().any(|t| t == "Lisa (92%)"),
@@ -17613,11 +18239,13 @@ mod tests {
         app.viewer_faces = Some((
             1,
             vec![db::FaceBox {
+                id: 10,
                 x: 10,
                 y: 20,
                 w: 30,
                 h: 40,
                 score: 0.92,
+                cluster_id: Some(7),
                 label: "Lisa".into(),
             }],
         ));
@@ -17626,6 +18254,88 @@ mod tests {
         assert!(
             texts.iter().any(|t| t == "Lisa (92%)"),
             "the chip turns with the frame: {texts:?}"
+        );
+    }
+
+    /// M22.28: a click on a face opens the right panel with every photo of that face, oldest
+    /// first; an ungrouped face lists only the frame on screen.
+    #[test]
+    fn a_picked_face_lists_its_photos_in_the_right_panel() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-face-panel.db"));
+        app.items = vec![
+            file_row(1, "image", "a.jpg"),
+            file_row(2, "image", "b.jpg"),
+        ];
+        app.items[1].taken_at = Some("2024-04-01T10:00".into());
+        app.face_views = vec![
+            db::FaceView {
+                id: 10,
+                file_id: 1,
+                path: "/tmp/a.jpg".into(),
+                taken_at: Some("2024-05-01T10:00".into()),
+                thumb: None,
+                score: 0.9,
+                cluster_id: Some(7),
+            },
+            db::FaceView {
+                id: 11,
+                file_id: 2,
+                path: "/tmp/b.jpg".into(),
+                taken_at: Some("2024-04-01T10:00".into()),
+                thumb: None,
+                score: 0.8,
+                cluster_id: Some(7),
+            },
+        ];
+        app.settings.lang = i18n::Lang::En;
+        let face = db::FaceBox {
+            id: 10,
+            x: 10,
+            y: 20,
+            w: 30,
+            h: 40,
+            score: 0.92,
+            cluster_id: Some(7),
+            label: "Lisa".into(),
+        };
+        let focus = app.face_focus_for(&face, 1);
+        assert_eq!(
+            focus.file_ids,
+            vec![2, 1],
+            "every photo of the group, oldest first"
+        );
+        app.open_viewer(1);
+        let viewer = app.viewer.as_mut().expect("the viewer is open");
+        viewer.show_faces = true;
+        viewer.face_focus = Some(focus);
+        let ctx = egui::Context::default();
+        let texts = viewer_frame(&mut app, &ctx, None);
+        for needle in ["Lisa", "2 photos", "a.jpg", "b.jpg"] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "the panel lists “{needle}”: {texts:?}"
+            );
+        }
+        // A face that is not grouped yet: the panel says so and lists only this frame.
+        let lone = db::FaceBox {
+            id: 12,
+            x: 10,
+            y: 20,
+            w: 30,
+            h: 40,
+            score: 0.7,
+            cluster_id: None,
+            label: String::new(),
+        };
+        let focus = app.face_focus_for(&lone, 1);
+        assert_eq!(focus.file_ids, vec![1]);
+        app.viewer.as_mut().expect("the viewer is open").face_focus = Some(focus);
+        let texts = viewer_frame(&mut app, &ctx, None);
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == "This face is not in a group yet."),
+            "an ungrouped face is explained: {texts:?}"
         );
     }
 
@@ -20788,7 +21498,8 @@ mod tests {
                 budget: 8,
             };
             let cover = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 100.0));
-            let drawn = super::paint_cover_mosaic(ui, &ctx, &mut cs, &covers, cover);
+            let drawn =
+                super::paint_cover_mosaic(ui, &ctx, &mut cs, &covers, cover, egui::Color32::BLACK);
             assert_eq!(drawn, 4, "four previews of the six are drawn");
         });
         let mut meshes = Vec::new();
@@ -20797,6 +21508,22 @@ mod tests {
         }
         out.drop_without_applying_deltas();
         assert_eq!(meshes.len(), 4, "the cover is a mosaic of four pictures: {meshes:?}");
+        // M22.29: a cell has no margins — every preview covers its cell and is cut on the sides
+        // that do not fit, so the `canvas` shows only through the seams.
+        let cover = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 100.0));
+        for (i, (mesh, cell)) in meshes
+            .iter()
+            .zip(super::cover_cells(cover, 4))
+            .enumerate()
+        {
+            assert!(
+                mesh.left() <= cell.left() + 0.01
+                    && mesh.top() <= cell.top() + 0.01
+                    && mesh.right() >= cell.right() - 0.01
+                    && mesh.bottom() >= cell.bottom() - 0.01,
+                "the preview {i} leaves a margin in its cell: {mesh:?} against {cell:?}"
+            );
+        }
     }
 
     /// M22.20: the album list row grows with the "Tiles" slider, like the file list.
@@ -20832,7 +21559,8 @@ mod tests {
             Search, Close, Settings, DockToRight, Folder, FolderSpecial, CreateNewFolder, Sync,
             Refresh, PhotoLibrary, Photo, Videocam, CollectionsBookmark, CalendarMonth,
             CalendarToday, Face, BurstMode, Verified, Apps, GridView, ViewAgenda, ViewList, Sort, Add,
-            Remove, Edit, MoveTo, ContentCopy, Download, Upload, Check, CheckCircle, Delete,
+            Remove, Edit, MoveTo, ContentCopy, Download, Upload, Check, CheckCircle, Pick, NotHim,
+            Delete,
             Restore, Stop, ArrowUp, ArrowDown, ArrowBack, ChevronLeft, ChevronRight, ZoomIn,
             ZoomOut, FitScreen, OneToOne, Rotate, OpenInNew, Info, Location, Slideshow,
             TextFields,
@@ -21021,11 +21749,10 @@ mod tests {
             // "×" removes a row from an album: a 20 px target in the inspector.
             ".small_button(\"×\")",
             // Per-tile actions are placed into a fixed 20 px rect (`ui.place`): a word and an
-            // icon do not fit there, so the word stays alone.
-            "t(lang, \"not him\")",
-            "if is_picked { \"picked\" } else { \"pick\" }",
+            // icon do not fit there, so the word stays alone (the per-tile targets — the two of
+            // M22.26 and the trash's restore of M22.27 — are icon-only circles drawn by
+            // `tile_icon_target`, not buttons of egui).
             "t(cs.lang, \"keep\")",
-            "t(cs.lang, \"restore\")",
         ];
         let mut offenders = Vec::new();
         for marker in [

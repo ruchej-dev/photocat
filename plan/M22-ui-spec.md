@@ -143,7 +143,7 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 | Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling; the top strip, the one-row ribbon and the floating selection bar | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅, M22.19 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down; the inspector of the screen is the right panel of M22.16 | M22.5 ✅, M22.16 ✅ |
-| Albums | `photocat_3` | the card grid at the root, the control row (filter, order, cards/list, the primary "+"), the counters over the cover, "size · date", the breadcrumb; the **tree stays inside an album** (§5 q. 7, revised in M22.20); the cover is a mosaic of up to four photos (M22.21); the mock-up's floating album bar is not built — the selection bar carries "Add to an album…" | M22.6 ✅, M22.20 ✅, M22.21 ✅ |
+| Albums | `photocat_3` | the card grid at the root, the control row (filter, order, cards/list, the primary "+"), the counters over the cover, "size · date", the breadcrumb; the **tree stays inside an album** (§5 q. 7, revised in M22.20); the cover is a mosaic of up to four photos, each filling its cell (M22.21, cropped from M22.29); the mock-up's floating album bar is not built — the selection bar carries "Add to an album…" | M22.6 ✅, M22.20 ✅, M22.21 ✅, M22.29 ✅ |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 ✅ |
 | Duplicates | — | no mock-up: same strips, header, `card_block` per group, `draw_cell`, amber "keep", red-free everywhere | M22.9 ✅ |
 | Faces | — | same panels, face tile metrics unchanged, caption in mono 10, accent only on a picked face | M22.9 ✅ |
@@ -982,7 +982,8 @@ The owner: "делай вёрстку альбомов и добавь меха�
 
 1. **The card grid is the root of the Albums view.** An album card is the mock-up's: a `card`-tone
    frame with 10 px of air, a 16:10 `canvas` cover with the first snapshot fitted whole (a preview
-   is never cropped), two dark plates over the cover — "N sub-albums" at the top left, "N files" at
+   is never cropped — reversed for the mosaic in M22.29), two dark plates over the cover — "N
+   sub-albums" at the top left, "N files" at
    the bottom right, mono 10 on black 60 % — the name at 13 px and "size · date" in mono 10; the
    open album keeps the 2 px accent frame and the accent name, the hovered one the 1 px accent line.
    The card is 100–260 px wide by the "Tiles" slider (`album_card_size`).
@@ -1034,8 +1035,9 @@ The owner: "доработать работу с альбомами. сейча�
    a file in the trash or without a preview. `cover_cells` splits the 16:10 frame: one photo whole,
    two columns, three as a left half and a right stack, four as a 2×2 grid, 2 px seams; the card and
    the list row paint it with `paint_cover_mosaic` and keep `paint_thumb`'s fitted whole preview, so
-   no snapshot is cropped (M22.15's rule).
-3. **Refused:** storing a cover in the DB, a mosaic of more than four photos, cropping a cell.
+   no snapshot is cropped (M22.15's rule; reversed in M22.29 — a cell is filled and cropped).
+3. **Refused:** storing a cover in the DB, a mosaic of more than four photos, cropping a cell (the
+   third refused point was reversed in M22.29).
 
 **Result.** `cargo test` 305, `cargo test --test source_language` 3, `cargo clippy --all-targets`
 clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. New tests: a click on a root
@@ -1112,10 +1114,108 @@ frame or word leaves the window, and that the tile widths are equal before and a
 
 **Files.** `src/app.rs` (the identity row, the "All files" switch, one test), `docs/UI.md`, `plan/`.
 
+### M22.26 — the People screen after the owner's look ✅
+
+The owner: the face tiles still carry two worded buttons ("pick" and "not him"), the card of a file
+has no business in the right panel of this screen, and the ribbon's "Tile / Rows / List" switch does
+nothing there. The tile targets are now round 24 px icons: an empty tick circle at the top left,
+filled with the accent and a tick when picked; a head with a slash at the top right, drawn only
+inside one group — in "All people" there is nothing to split off. The two words went away, their
+hints stayed and are translated. The right panel of the screen is the group list now: the same 44 px
+band with the face glyph and "Groups" but no "×", since the list is content and not a toggle; every
+row carries the best face of its group as its icon (`face_avatar` reuses the tile texture cache, the
+face glyph stands in for a missing crop), the "together" tick and the name with its photo count. The
+list left the left panel, which keeps only the threshold, the pass, "Rebuild groups" and the
+"together" search; below 1200 px the list falls back into the left panel, as the file card does.
+The details toggle of the top strip is not drawn on this screen, and the ribbon keeps no cell-view
+switch: the face tiles have one look of their own.
+
+**Result.** The group list is drawn at x ≥ 960 of a 1240 px window, the tile buttons paint no words,
+and neither "Tile", "Rows", "List" nor "Details" appears on the screen. `cargo test` 310,
+`cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors; the window lives through `timeout 6`. On a copy of the real DB
+the screen costs p50 10.27 ms / p95 12.16 ms (dark) and 9.61 / 11.08 ms (light) against 8.07–8.49 ms
+before — the 617-row list with a face icon per row, still below 16.7 ms. The new test
+`the_faces_screen_keeps_its_list_in_the_right_panel` holds the position of "Groups" and "All people"
+and the absence of the dead controls; the palette and caption tests of the screen were updated.
+
+**Files.** `src/app.rs` (`Icon::Pick`/`Icon::NotHim`, `tile_icon_target`, `face_list_rows`,
+`face_avatar`, `faces_panel`, the panel wiring and the top strip, three tests), `docs/UI.md`,
+`plan/I18N.md`, `plan/`.
+
+### M22.27 — the trash's restore is an icon ✅
+
+The owner: the word "restore" on a trashed tile should be an icon. The tile and the list row now
+carry the same round 24 px target as a face tile — a dark scrim, the accent on hover, the restore
+glyph (`tile_icon_target`, shared with M22.26) — and the word lives in the hint: "Restore: back into
+the usual views — the file was untouched on disk", translated. Nothing else on the screen changed:
+"Restore all" keeps its word, and "Empty the trash (N)" keeps the one `danger` border. A click on the
+target no longer selects the row or the tile as well.
+
+**Result.** The trash screen and its confirmation paint no word "restore"; the guard test
+`every_button_of_the_window_has_an_icon` no longer needs an exception for it. `cargo test` 310,
+`cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors; the window lives through `timeout 6`.
+
+**Files.** `src/app.rs` (`restore_icon`, `tile_icon_target`, `draw_cell`, `draw_list`, two tests),
+`src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`, `plan/`.
+
+### M22.28 — the full screen: a close target, face boxes on demand, a panel of one face's photos ✅
+
+The owner, three words about the viewer: it has no button that closes it, the face boxes are on all
+the time, and a face should lead to its other photos. The header now ends with the mock-up's 22 px
+"×" (the close target of the screen, its hint "close the full screen — Esc"); "Back to the grid"
+stays the worded way back. The boxes are a tool: "Show faces" in the tools row, the face silhouette
+and the picked state, off by default, disabled with the hint "no faces found in this file" while the
+model found none. Every box is a click target — `db::FaceBox` now carries the face `id` and its
+`cluster_id` — and a click opens the right column of 280 px, the same slot the inspector uses: the
+44 px band with the face glyph, the name of the group and a "×", the count, and every photo of that
+face, oldest first (`App::face_focus_for`), as 64×48 rows with the name, the date and the size; the
+row of the frame on screen carries the accent. A row opens its photo in place, a click on the empty
+part of the frame or the "×" closes the panel, and paging closes it as well. An ungrouped face lists
+only the frame and says so.
+
+**Result.** `cargo test` 311, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors; the window lives through
+`timeout 6`. `the_full_screen_hides_the_face_boxes_until_asked` checks the off state and the tool;
+`a_picked_face_lists_its_photos_in_the_right_panel` checks the chronological group, the panel words
+and the ungrouped case.
+
+**Files.** `src/app.rs` (`Viewer`, `FaceFocus`, `viewer_modal`, `viewer_face_panel`,
+`face_focus_for`, `draw_viewer_image`, `paint_face_chips`, two tests), `src/db.rs` (`FaceBox`),
+`src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`, `plan/`.
+
+### M22.29 — an album cover has no margins ✅
+
+The owner: the mosaic of photo previews on an album card must not be shown at the photo's own size
+with margins around it — the previews should be squeezed into the square of their cell. The mosaic
+kept `paint_thumb`'s fitted whole preview (M22.21, M22.15's rule), so every cell showed the photo's
+ratio on the `canvas`: a 16:10 cover of 4:3 photos left a band on all four cells at once.
+
+1. **A cell is filled and cropped.** `paint_cover_mosaic` paints through
+   `paint_thumb_as(..., ThumbFit::Filling)`: the preview covers its cell edge to edge and the sides
+   that do not fit are cut evenly — the centring crop of the grid tile (`cover_rect`). No stretching,
+   no margins; the `canvas` shows only through the 2 px seams.
+2. **The cover keeps its 4 px radius.** The crop would square the corners of the well, so the mosaic
+   ends with `round_preview(ui, rect, RADIUS_CTRL, bg, true)`, `bg` being the tone under the well —
+   `card` on an album card, `canvas` in the list row of the albums. The card and the row share the
+   same call, so the mosaic looks the same in both looks.
+3. **Refused:** a square cover, a separate "cover crop" setting, more than four cells; the fitted
+   whole preview stays everywhere else (the calendar, the series strip, the file card).
+
+**Result.** `cargo test` 311, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors; the window lives through
+`timeout 6`. `the_album_cover_paints_four_previews` now also checks that each of the four painted
+rectangles covers its cell, so a return of the margins fails the test.
+
+**Files.** `src/app.rs` (`paint_cover_mosaic`, `ThumbFit`, `draw_album_cell`, `draw_album_row`, one
+test), `docs/UI.md`, `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".
 - Bundled fonts until the owner's decision (q. 2).
-- Cropped 4:3 previews outside the grid tile, a floating selection bar, an icon font (icons are
-  geometry, M22.8, ADR 0048). The tile crop itself is M22.15.
+- Cropped 4:3 previews outside the grid tile (the album cover filled and cropped in M22.29 is the
+  second exception), a floating selection bar, an icon font (icons are geometry, M22.8, ADR 0048).
+  The tile crop itself is M22.15.
 - Any function from §5 q. 5; any network call; any file operation.

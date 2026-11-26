@@ -286,7 +286,8 @@ aligned faces, not "roughly the same area of the photo". The cosine over normali
 simple threshold and union-find — like duplicates (ADR 0004), without training on the archive.
 
 **Data.** Faces, vectors and crops are derivative: `faces`, `face_clusters`, `face_scans`, files in
-`~/.cache/photocat/faces/`. A group's name and a split ("not him") live in the DB. A group with a name
+`~/.cache/photocat/faces/`. A group's name and a split (the crossed-head button of a face tile)
+live in the DB. A group with a name
 or a manual face is pinned and survives a rebuild by threshold; empty unnamed ones are deleted on the
 next rebuild. Replacing `files.sha256` wipes the faces and the pass mark, but does not touch the
 originals.

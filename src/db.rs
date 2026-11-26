@@ -1210,11 +1210,15 @@ pub struct FaceView {
 /// in it. The coordinates are image pixels of the file as it is seen (EXIF orientation applied).
 #[derive(Debug, Clone)]
 pub struct FaceBox {
+    /// The row of `faces`: a click on the box opens the photos of this very face (M22.28).
+    pub id: i64,
     pub x: i32,
     pub y: i32,
     pub w: i32,
     pub h: i32,
     pub score: f32,
+    /// The group of the face; `None` while it is not clustered yet.
+    pub cluster_id: Option<i64>,
     /// The name of the group; empty while the group has no name.
     pub label: String,
 }
@@ -1351,18 +1355,20 @@ pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec
 /// screen. An unnamed group gives an empty label.
 pub fn load_face_boxes(conn: &Connection, file_id: i64) -> Result<Vec<FaceBox>> {
     let mut st = conn.prepare(
-        "SELECT f.x,f.y,f.w,f.h,f.score,COALESCE(c.label,'')
+        "SELECT f.id,f.x,f.y,f.w,f.h,f.score,f.cluster_id,COALESCE(c.label,'')
          FROM faces f LEFT JOIN face_clusters c ON c.id=f.cluster_id
          WHERE f.file_id=?1 ORDER BY f.quality DESC, f.id",
     )?;
     let rows = st.query_map([file_id], |r| {
         Ok(FaceBox {
-            x: r.get(0)?,
-            y: r.get(1)?,
-            w: r.get(2)?,
-            h: r.get(3)?,
-            score: r.get(4)?,
-            label: r.get(5)?,
+            id: r.get(0)?,
+            x: r.get(1)?,
+            y: r.get(2)?,
+            w: r.get(3)?,
+            h: r.get(4)?,
+            score: r.get(5)?,
+            cluster_id: r.get(6)?,
+            label: r.get(7)?,
         })
     })?;
     let mut out = Vec::new();
@@ -2637,6 +2643,8 @@ mod tests {
         assert_eq!(boxes.len(), 1);
         assert_eq!((boxes[0].x, boxes[0].y, boxes[0].w, boxes[0].h), (10, 20, 30, 40));
         assert_eq!(boxes[0].label, "Лиза");
+        assert_eq!(boxes[0].id, face_id);
+        assert_eq!(boxes[0].cluster_id, Some(clustered));
         assert!((boxes[0].score - 0.9).abs() < 1e-6);
 
         let split = split_face(&mut c, face_id).unwrap();

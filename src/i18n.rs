@@ -712,13 +712,13 @@ const PAIRS: &[(&str, &str)] = &[
     ("Save the name", "Сохранить имя"),
     (
         "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is \
-         split by the “not him” button on the tile.",
+         split by the crossed-head button on the tile.",
         "Подпись закрепляет группу: пересборка по порогу её не перемешает. Ложную склейку \
-         разъединяет кнопка «не он» на плитке.",
+         разъединяет кнопка с перечёркнутой головой на плитке.",
     ),
     (
-        "Pick a group on the left to name it, or split the tiles.",
-        "Выберите группу слева, чтобы дать ей имя, или разъединяйте плитки.",
+        "Pick a group in the list to name it, or split the tiles.",
+        "Выберите группу в списке, чтобы дать ей имя, или разъединяйте плитки.",
     ),
     ("People picked", "Выбрано лиц"),
     ("name for the picked people", "имя для выбранных"),
@@ -734,9 +734,7 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("No faces in this group.", "В этой группе нет лиц."),
     ("no frame", "нет кадра"),
-    ("not him", "не он"),
     ("split this face into a new group", "отделить это лицо в новую группу"),
-    ("pick", "выбрать"),
     ("mark this face for a shared name", "отметить это лицо для общего имени"),
     ("no faces found", "лица не найдены"),
     ("groups not built", "группы не собраны"),
@@ -769,8 +767,10 @@ const PAIRS: &[(&str, &str)] = &[
     ("file not restored", "файл не вернуть"),
     ("trash not emptied", "корзина не очищена"),
     ("in trash", "в корзине"),
-    ("restore", "вернуть"),
-    ("bring the file back into the usual views; on disk it was untouched", "вернуть файл в обычные виды; на диске он не менялся"),
+    (
+        "Restore: back into the usual views — the file was untouched on disk",
+        "Вернуть: снова в обычные виды — файл на диске не менялся",
+    ),
     ("Empty the trash?", "Очистить корзину?"),
     (
         "Nothing is deleted for good inside the app: the files stay in the OS trash until you \
@@ -1220,6 +1220,21 @@ const PAIRS: &[(&str, &str)] = &[
     ("face", "лицо"),
     ("photo {} of the day", "снимок {} за день"),
     ("close the full screen — Esc", "закрыть полный экран — Esc"),
+    ("Show faces", "Показать лица"),
+    (
+        "the boxes of the found faces — a click on a face lists its photos",
+        "рамки найденных лиц; клик по лицу покажет его снимки",
+    ),
+    ("no faces found in this file", "в этом файле лица не найдены"),
+    (
+        "all photos with this face",
+        "все снимки с этим лицом",
+    ),
+    ("close the face panel", "закрыть панель лиц"),
+    (
+        "This face is not in a group yet.",
+        "Это лицо ещё не в группе.",
+    ),
     (
         "100 % fits the frame into the window",
         "100 % — кадр целиком в окне",

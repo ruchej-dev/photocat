@@ -118,7 +118,7 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   cache, never deleted (see ADR 0045).
 - `faces.embedding`: the ArcFace vector, 512 f32 (2 KiB), of an aligned face; `thumb` is the 112 px
   crop in the cache, key `<sha256[..24]>-<face number>`. `manual=1` means the owner split the face
-  off with the "not him" button; such groups are not rebuilt. Replacing `files.sha256` via a trigger
+  off with the crossed-head button of the tile; such groups are not rebuilt. Replacing `files.sha256` via a trigger
   wipes the faces and the pass mark.
 - `faces.cluster_id`: the group; `face_clusters.label` is the name given by hand. A non-empty label
   also pins the group during a rebuild.
@@ -583,6 +583,7 @@ not with a different labelled set.
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M22.15) | the 160-frame scrolling measurement of 2026-11-24 again, six runs (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored grid_scroll_measurement`) | p50 6.55–6.64 ms (151–153 fps), p95 6.72–7.19 ms, p99 6.90–12.48 ms — the per-picture clip rect and the larger source area of the cover crop cost nothing measurable against the 6.4–6.7 ms of the fitted tile |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M22.16) | the whole window with a selected file in both languages; every painted rectangle and word (`cargo test the_file_card_keeps_the_mock_ups_band_and_air`, plus a temporary dump of the panel's geometry) | the right panel now owns its 280 px (the default side-panel frame used to leave 8 px on each side, so the 1 px line stood 9 px inside and the card had 263 px): the header band is 279×44 px at y 31–75, the "×" 22×22 px at x 1206–1228, the file card 255 px wide at x 973–1228 — 12 px of air on both sides — and every word and rectangle of the panel stays inside the window in English and in Russian; the two card actions no longer wrap in Russian (a 20 px row) |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M22.21) | the Albums screen with eight sub-album cards, every card carrying a mosaic of four real previews (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored albums_measurement --nocapture`) | p50 7.38 ms (135 fps), p95 9.87 ms, p99 9.87 ms over 16 frames; the one-preview card of the same run before M22.21 was p50 7.41 ms / p95 12.40 ms, so three extra previews per card cost nothing measurable; the first sub-album card sits at y 686 and the snapshot grid keeps its place under it |
+| 2026-11-26 | the real DB, 2232 files, 2498 faces in 617 groups, 1240×840 headless frames (M22.26) | 40 frames of each screen without a mock-up, the group list in the right panel with the best face of every group as its row icon (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored screens_without_a_mock_up_measurement`) | faces p50 10.27 ms (97 fps), p95 12.16 ms in the dark palette and p50 9.61 ms, p95 11.08 ms in the light one — up from the 8.07–8.49 ms of M22.9: that is the price of the 617-row list with a face icon on every row, still inside the 16.7 ms of a 60 fps frame; duplicates, trash and integrity stay at 5.1–6.1 ms, and no word, fill or line fell off either palette on the real previews and crops |
 
 Rule: numbers without a corpus and a date do not enter the table.
 
