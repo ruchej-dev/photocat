@@ -1701,7 +1701,58 @@ fn album_visible(albums: &[db::AlbumNode], node: &db::AlbumNode, expanded: &BTre
     true
 }
 
-/// The album tree: an indent by depth, a collapse triangle, counters.
+/// One row of the album tree (M22.24): a folder glyph, the name and the facts, in the selected
+/// tone of the screen. The whole row is one click target — the glyph is not a second, dead spot.
+fn album_tree_row(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    let th = theme(ui);
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width().max(60.0), 26.0),
+        egui::Sense::click(),
+    );
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if selected {
+            painter.rect_filled(
+                rect,
+                egui::CornerRadius::same(RADIUS_CTRL as u8),
+                th.accent_soft,
+            );
+            painter.rect_filled(
+                egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())),
+                0.0,
+                th.accent,
+            );
+        } else if resp.hovered() {
+            painter.rect_filled(
+                rect,
+                egui::CornerRadius::same(RADIUS_CTRL as u8),
+                th.card,
+            );
+        }
+        let color = if selected { th.accent } else { th.text };
+        let icon = if selected { th.accent } else { th.text_med };
+        paint_icon(
+            painter,
+            egui::pos2(rect.left() + 11.0, rect.center().y),
+            14.0 * 0.34,
+            Icon::Folder,
+            icon,
+        );
+        painter.with_clip_rect(rect.shrink(2.0)).text(
+            egui::pos2(rect.left() + 24.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            shorten(text, ((rect.width() - 30.0) / 7.0).max(6.0) as usize),
+            egui::FontId::proportional(14.0),
+            color,
+        );
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    resp
+}
+
+/// The album tree: an indent by depth, a collapse triangle, the folder glyph and counters.
 /// Returns the selected node; a click on the triangle does not change the selection.
 fn draw_album_tree(
     ui: &mut egui::Ui,
@@ -1753,15 +1804,15 @@ fn draw_album_tree(
                     db::human_in(lang, node.bytes).to_string(),
                 ],
             );
-            if ui
-                .selectable_label(selected == Some(node.id), text)
-                .on_hover_text(if !node.note.trim().is_empty() {
-                    node.note.clone()
-                } else if !node.covers.is_empty() {
-                    t(lang, "open the album; the cover shows its first photos in order").to_string()
-                } else {
-                    t(lang, "open the album").to_string()
-                })
+            let hint = if !node.note.trim().is_empty() {
+                node.note.clone()
+            } else if !node.covers.is_empty() {
+                t(lang, "open the album; the cover shows its first photos in order").to_string()
+            } else {
+                t(lang, "open the album").to_string()
+            };
+            if album_tree_row(ui, &text, selected == Some(node.id))
+                .on_hover_text(hint)
                 .clicked()
             {
                 chosen = Some(node.id);
@@ -1939,11 +1990,11 @@ fn draw_album_cell(
         let drawn = paint_cover_mosaic(ui, ctx, cs, covers, cover_rect) > 0;
         if !drawn {
             // An album without a snapshot keeps the empty canvas and a folder mark, not a placeholder.
-            painter.text(
+            paint_icon(
+                painter,
                 cover_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "▸",
-                egui::FontId::proportional(18.0),
+                18.0 * 0.34,
+                Icon::Folder,
                 th.text_dim,
             );
         }
@@ -2051,11 +2102,11 @@ fn draw_album_row(
         );
         ui.painter().rect_filled(tr, RADIUS_CTRL, th.canvas);
         if paint_cover_mosaic(ui, ctx, cs, covers, tr) == 0 {
-            ui.painter().text(
+            paint_icon(
+                ui.painter(),
                 tr.center(),
-                egui::Align2::CENTER_CENTER,
-                "▸",
-                egui::FontId::proportional(12.0),
+                12.0 * 0.34,
+                Icon::Folder,
                 th.text_dim,
             );
         }
@@ -20453,6 +20504,42 @@ mod tests {
         check(&mut app, "the root of the albums");
         app.album_open(root);
         check(&mut app, "inside an album");
+    }
+
+    /// M22.24: an album tree row carries a folder glyph, and the whole row — the glyph too — opens
+    /// the album: the icon is not a dead spot next to the text.
+    #[test]
+    fn a_click_on_the_folder_glyph_of_a_tree_row_opens_the_album() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-glyph-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let child;
+        {
+            let conn = db::open(&path).unwrap();
+            let root = db::create_album(&conn, 0, "Summer 2024", "").unwrap();
+            child = db::create_album(&conn, root, "May", "").unwrap();
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        app.album_open(app.albums.iter().find(|n| n.parent_id == 0).map(|n| n.id).unwrap());
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let at = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .filter(|(w, _)| w == "May")
+            .min_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+            .expect("the tree row of the sub-album is on screen")
+            .1;
+        // The glyph sits 12 px left of the name; the row, not only the word, answers the click.
+        click_at(&mut app, &ctx, egui::pos2(at.left() - 12.0, at.center().y));
+        assert_eq!(app.album_selected, Some(child), "the folder glyph opens the album");
     }
 
     /// M22.20: the breadcrumb is the way up from an open album — one press per level, and the

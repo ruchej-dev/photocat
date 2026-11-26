@@ -1075,6 +1075,24 @@ ribbon's "Плитка / Ряды" gone).
 **Files.** `src/app.rs` (the ribbon, the album control row, `grid_cell_style`, two tests),
 `docs/UI.md`, `plan/`.
 
+### M22.24 — the album lists carry folder icons ✅
+
+The owner: "почему у списков альбомов нет иконок? сделай". The tree rows were bare
+`selectable_label`s, and an album without a preview showed a "▸" mark in its card or list-row well.
+Every tree row now has a 14 px folder glyph (`album_tree_row`), and the whole row is one click
+target: the glyph, the name and the facts select the album, and the glyph is not a second, dead
+spot. The open row keeps the `accent_soft` fill and the 2 px accent edge, the hovered one the `card`
+tone. An empty album draws the real folder icon in its card cover and in the list row instead of the
+"▸" text.
+
+**Result.** `cargo test` 308, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. The test
+`a_click_on_the_folder_glyph_of_a_tree_row_opens_the_album` clicks 12 px left of the name — on the
+glyph — and lands in the sub-album.
+
+**Files.** `src/app.rs` (`album_tree_row`, `draw_album_tree`, the empty covers of `draw_album_cell`
+and `draw_album_row`, one test), `docs/UI.md`, `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".

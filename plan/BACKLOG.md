@@ -1081,7 +1081,10 @@ while no album was open — and its cover is a mosaic of up to four of its first
 control row is the only look switch there, and the switch now has a click test in both languages) —
 2026-11-26; M22.23 (on the whole Albums screen the ribbon's cell views are hidden and its "Cards /
 List" drives both the album cards and the album's photos — `App::grid_cell_style`, the global cell
-view of the other screens stays; an album without sub-albums no longer looks dead) — 2026-11-26.
+view of the other screens stays; an album without sub-albums no longer looks dead) — 2026-11-26;
+M22.24 (every album tree row carries a 14 px folder glyph and is one click target, the glyph
+included; an album without a preview gets the real folder icon instead of the "▸" mark on its card
+and in the list row) — 2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
