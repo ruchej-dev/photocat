@@ -953,11 +953,6 @@ pub fn tag_above(scores: &[(String, f32)], want: &str, show: f32) -> bool {
         .any(|(tag, score)| tag == want && *score >= show)
 }
 
-/// The strongest weight among the tags of one file; `None` if there are no tags.
-pub fn max_score(scores: &[(String, f32)]) -> Option<f32> {
-    scores.iter().map(|(_, s)| *s).reduce(f32::max)
-}
-
 /// The distribution of the weight of each tag over the folder, descending — for the percentile threshold.
 /// Computed once when the tags are loaded, not on every interface frame.
 pub fn tag_distributions(
@@ -973,13 +968,6 @@ pub fn tag_distributions(
         v.sort_by(|a, b| b.total_cmp(a));
     }
     out
-}
-
-/// The distribution of the best weight of every file, descending — the "all tags" percentile.
-pub fn top_score_distribution(tags: &HashMap<i64, Vec<(String, f32)>>) -> Vec<f32> {
-    let mut v: Vec<f32> = tags.values().filter_map(|t| max_score(t)).collect();
-    v.sort_by(|a, b| b.total_cmp(a));
-    v
 }
 
 /// A percentile threshold over a descending list: 0% — all, 100% — only the strongest.
@@ -2037,7 +2025,6 @@ mod tests {
         let d = tag_distributions(&tags);
         assert_eq!(d["мебель"], vec![0.4, 0.1]);
         assert_eq!(d["дети"], vec![0.3, 0.2]);
-        assert_eq!(top_score_distribution(&tags), vec![0.4, 0.3]);
         // At 100% every tag keeps at least one photo.
         for v in d.values() {
             assert!(percentile_threshold(v, 100).is_some());

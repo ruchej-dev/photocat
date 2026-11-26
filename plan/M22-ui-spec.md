@@ -863,8 +863,9 @@ chip; the highlight must mean the tags the photos are filtered by.
    chip's right edge. The "×" turns `danger` under the pointer and carries the removal hint, the word
    carries the action hint; the two zones never overlap, so a click that meant "show the others" can
    not hide a tag.
-2. **The word filters.** A click on the word of an AI tag or of an own tag sets `tag_filter` — the
-   same filter as the left panel's tag chips — and a second click on the highlighted chip clears it.
+2. **The word filters.** A click on the word of an AI tag or of an own tag adds the tag to
+   `tag_filters` (M25.1) — the same accumulating filter as the left panel's tag chips — and a second
+   click on the highlighted chip removes it.
    The accent now marks that filter and nothing else; the confident tag keeps its place in the caps
    row ("CLIP 84%") and in the line "tag: <name>".
 3. **The album chip opens the album.** Its word goes to the "Albums" view with the album open (the

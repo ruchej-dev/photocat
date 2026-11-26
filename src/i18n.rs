@@ -577,10 +577,18 @@ const PAIRS: &[(&str, &str)] = &[
         "открыть альбом в виде «Альбомы»",
     ),
     (
-        "show only the photos that carry this tag",
-        "показать только снимки с этим тегом",
+        "add this tag to the filter",
+        "добавить этот тег в фильтр",
     ),
-    ("clear the tag filter", "снять фильтр по тегу"),
+    (
+        "remove this tag from the filter",
+        "убрать этот тег из фильтра",
+    ),
+    ("reset the tag filter", "сбросить фильтр по тегам"),
+    (
+        "no photos carry all the picked tags above their thresholds — lower the threshold slider in the left panel",
+        "нет снимков со всеми выбранными тегами выше их порогов — опустите ползунок порога в левой панели",
+    ),
     ("photo removed from the album", "снимок убран из альбома"),
     ("cannot remove from the album", "из альбома не убрать"),
     ("AI tags", "Теги ИИ"),

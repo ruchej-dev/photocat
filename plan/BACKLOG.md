@@ -1270,7 +1270,7 @@ on them.
    geocoder — the network (forbidden by §1) or an offline data set (a new dependency and an ADR).
    The card shows the coordinates; M25.9 adds "copy" and records the choice.
 
-**Tasks.** M25.1 the accumulating tag filter; M25.2 the year cloud (the five newest years, "…" for
+**Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 the year cloud (the five newest years, "…" for
   the older ones, the kept "All years"); M25.3 the path/date field; M25.4 "No date" and "No preview"
   as filters; M25.5 the summary leaves; M25.6 the pinned threshold and no "Model settings";
   M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
@@ -1301,6 +1301,24 @@ second click on "sea" leaves "document"; the reset clears the set; the chips row
 and each "×" removes exactly one; one test covers the panel cloud and one the card.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**Done (2026-11-26).** `App::tag_filters: Vec<String>` — sorted, no duplicates — with `tag_picked`,
+`toggle_tag` and `clear_tag_filters`; `filtered()` demands every picked tag above its own threshold
+(an own tag still matches the same word), and `PickScope.tag` became `Vec<String>`, so a change of
+the set drops the selection as before. The "all tags" chip is gone: the cloud sits under a caps
+"Tags" heading with a bare 20 px "×" (`tags_heading`) that clears the whole set and is drawn only
+while a tag is picked; a click on a chip of the panel, of the AI tags or of the own tags adds its
+tag and a second click removes it, and the card chips say "add this tag to the filter" / "remove
+this tag from the filter". The chips row draws one chip per tag and each "×" removes exactly one,
+while "Reset" clears them all; the count on a chip still means the photos that carry this tag alone.
+The "all tags" percentile went with the chip: `embed::max_score` and `top_score_distribution` and
+`App::top_scores` are removed, and the empty grid names one tag as before or says that no photo
+carries all the picked tags. Tests: `the_panel_tag_cloud_accumulates_the_filter` (a click adds, a
+second click removes, the AND narrowing, the two "×" of the chips row and "Reset"),
+`the_reset_beside_the_tags_heading_clears_the_filter`, the extended
+`a_click_on_a_tag_in_the_card_filters_the_photos` and the updated
+`the_tag_chips_do_not_jump_when_a_tag_is_picked`. `cargo test` 313 passed + 3 guard tests,
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
 
 **M25.2 — the year cloud: the newest years, "…" for the rest, and the kept "All years".**
 **Goal.** The cloud stays short and dense — the five newest years, an ellipsis that filters the

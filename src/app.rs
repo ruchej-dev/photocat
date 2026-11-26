@@ -499,7 +499,7 @@ struct PickScope {
     view: View,
     query: String,
     kind: KindFilter,
-    tag: Option<String>,
+    tags: Vec<String>,
     hits: Option<usize>,
     sort: db::GridSort,
     layout: db::GridLayout,
@@ -1476,7 +1476,7 @@ fn tag_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> bool {
 /// A snapshot of the active filters for the row of chips.
 struct Chips {
     query: String,
-    tag: Option<String>,
+    tags: Vec<String>,
     kind: KindFilter,
     /// The language the chips are written in; the snapshot is taken once per frame.
     lang: i18n::Lang,
@@ -1494,7 +1494,7 @@ impl Chips {
     /// (M22.19 — the row is drawn only while a filter is on).
     fn any(&self) -> bool {
         !self.query.is_empty()
-            || self.tag.is_some()
+            || !self.tags.is_empty()
             || self.album.is_some()
             || self.kind != KindFilter::All
             || self.hits.is_some()
@@ -1505,7 +1505,10 @@ impl Chips {
 #[derive(Default, Clone, Copy)]
 struct FilterClear {
     query: bool,
-    tag: bool,
+    /// The index of the tag whose chip was clicked: one "×" removes exactly that tag (M25.1).
+    tag_at: Option<usize>,
+    /// "Reset" or a year-like reset: the whole tag filter goes.
+    tags: bool,
     kind: bool,
     hits: bool,
     /// Close the open album: go back to the album tree.
@@ -1539,10 +1542,10 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
                 clear.query = true;
             }
         }
-        if let Some(tag) = &chips.tag {
+        for (i, tag) in chips.tags.iter().enumerate() {
             let text = format!("{} {}", t(lang, "tag:"), shorten(tag, 24));
             if filter_chip(ui, &text, lang) {
-                clear.tag = true;
+                clear.tag_at = Some(i);
             }
         }
         if let Some(album) = &chips.album {
@@ -1569,7 +1572,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
         {
             clear = FilterClear {
                 query: true,
-                tag: true,
+                tags: true,
                 kind: true,
                 hits: true,
                 album: true,
@@ -2473,14 +2476,15 @@ struct App {
     tag_json_path: String,
     /// Recomputing the tags over stored vectors (without running CLIP over the photos again).
     retag_rx: Option<mpsc::Receiver<Result<embed::RetagStats>>>,
-    /// The weight distribution of every tag (descending) and of the best tag of a file: the
-    /// percentile threshold of the filter is computed from it, without sorting on every frame.
+    /// The weight distribution of every tag (descending): the percentile threshold of the filter
+    /// is computed from it, without sorting on every frame.
     tag_dists: HashMap<String, Vec<f32>>,
-    top_scores: Vec<f32>,
     /// The owner's own tags: file_id → labels.
     user_tags: HashMap<i64, Vec<String>>,
     user_tag_input: String,
-    tag_filter: Option<String>,
+    /// The picked tags (M25.1): a file passes only when it carries every one of them above its
+    /// own threshold. Sorted and without duplicates; empty means no tag filter.
+    tag_filters: Vec<String>,
     semantic_query: String,
     /// The results of the semantic search in descending similarity.
     semantic_hits: Option<Vec<i64>>,
@@ -2659,7 +2663,7 @@ impl App {
                 view: View::Grid,
                 query: String::new(),
                 kind: KindFilter::All,
-                tag: None,
+                tags: Vec::new(),
                 hits: None,
                 sort: db::GridSort::DateDesc,
                 layout: db::GridLayout::Months,
@@ -2682,10 +2686,9 @@ impl App {
             tag_json_path: String::new(),
             retag_rx: None,
             tag_dists: HashMap::new(),
-            top_scores: Vec::new(),
             user_tags: HashMap::new(),
             user_tag_input: String::new(),
-            tag_filter: None,
+            tag_filters: Vec::new(),
             semantic_query: String::new(),
             semantic_hits: None,
             ml_model: None,
@@ -2894,7 +2897,6 @@ impl App {
                 self.items = rows;
                 self.trash_items = trashed;
                 self.tag_dists = embed::tag_distributions(&tags);
-                self.top_scores = embed::top_score_distribution(&tags);
                 self.tags = tags;
                 self.user_tags = user_tags;
                 self.hidden_tags = hidden;
@@ -5959,7 +5961,7 @@ impl App {
         let lang = self.settings.lang;
         self.query.clear();
         self.kind_filter = KindFilter::All;
-        self.tag_filter = None;
+        self.tag_filters.clear();
         self.semantic_hits = None;
         self.ocr_snippets.clear();
         self.status = t(lang, "the filters are reset").into();
@@ -6469,7 +6471,7 @@ impl App {
             .flatten();
         Chips {
             query: self.query.trim().to_string(),
-            tag: self.tag_filter.clone(),
+            tags: self.tag_filters.clone(),
             kind: self.kind_filter,
             lang: self.settings.lang,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
@@ -7211,7 +7213,9 @@ impl App {
                 ui.label(
                     egui::RichText::new(free).size(11.0).color(dim(ui)),
                 );
-                // The number next to a tag is how many photos carry it at the current threshold.
+                // The tag cloud under its own heading (M25.1). The number next to a tag is how
+                // many photos carry it at the current threshold.
+                self.tags_heading(ui);
                 let counts = self.tag_chips(ui);
                 ui.add_space(4.0);
                 ui.label(
@@ -7778,12 +7782,12 @@ impl App {
             );
             // A click on the word filters the grid by the tag; the accent marks the tags the grid
             // is filtered by, not "the confident one" (M22.17).
-            let mut filter: Option<Option<String>> = None;
+            let mut toggle: Option<String> = None;
             let body_hint = |chosen: bool| {
                 if chosen {
-                    t(lang, "clear the tag filter")
+                    t(lang, "remove this tag from the filter")
                 } else {
-                    t(lang, "show only the photos that carry this tag")
+                    t(lang, "add this tag to the filter")
                 }
             };
             let top = if confident.is_some() { tags.len() } else { 3.min(tags.len()) };
@@ -7795,7 +7799,7 @@ impl App {
                         i18n::word(lang, tag),
                         score * 100.0
                     );
-                    let chosen = self.tag_filter.as_deref() == Some(tag.as_str());
+                    let chosen = self.tag_picked(tag);
                     let body = body_hint(chosen);
                     let (body, remove) = match pct {
                         Some(p) => (
@@ -7808,9 +7812,7 @@ impl App {
                         ),
                     };
                     match card_chip(ui, &label, None, chosen, &body, &remove) {
-                        ChipClick::Body => {
-                            filter = Some(if chosen { None } else { Some(tag.clone()) })
-                        }
+                        ChipClick::Body => toggle = Some(tag.clone()),
                         ChipClick::Remove => hide = Some(tag.clone()),
                         ChipClick::None => {}
                     }
@@ -7828,7 +7830,7 @@ impl App {
                                     i18n::word(lang, tag),
                                     score * 100.0
                                 );
-                                let chosen = self.tag_filter.as_deref() == Some(tag.as_str());
+                                let chosen = self.tag_picked(tag);
                                 let body = body_hint(chosen);
                                 let (body, remove) = match pct {
                                     Some(p) => (
@@ -7841,10 +7843,7 @@ impl App {
                                     ),
                                 };
                                 match card_chip(ui, &label, None, chosen, &body, &remove) {
-                                    ChipClick::Body => {
-                                        filter =
-                                            Some(if chosen { None } else { Some(tag.clone()) })
-                                    }
+                                    ChipClick::Body => toggle = Some(tag.clone()),
                                     ChipClick::Remove => hide = Some(tag.clone()),
                                     ChipClick::None => {}
                                 }
@@ -7852,8 +7851,8 @@ impl App {
                         });
                     });
             }
-            if let Some(pick) = filter {
-                self.tag_filter = pick;
+            if let Some(tag) = toggle {
+                self.toggle_tag(&tag);
             }
         } else {
             ui.add_space(8.0);
@@ -7907,26 +7906,24 @@ impl App {
         }
         let mut remove_own: Option<String> = None;
         let remove_hint = t(lang, "remove");
-        let mut own_filter: Option<Option<String>> = None;
+        let mut own_toggle: Option<String> = None;
         ui.horizontal_wrapped(|ui| {
             for tag in &own {
-                let chosen = self.tag_filter.as_deref() == Some(tag.as_str());
+                let chosen = self.tag_picked(tag);
                 let body = if chosen {
-                    t(lang, "clear the tag filter")
+                    t(lang, "remove this tag from the filter")
                 } else {
-                    t(lang, "show only the photos that carry this tag")
+                    t(lang, "add this tag to the filter")
                 };
                 match card_chip(ui, tag, None, chosen, body, remove_hint) {
-                    ChipClick::Body => {
-                        own_filter = Some(if chosen { None } else { Some(tag.clone()) })
-                    }
+                    ChipClick::Body => own_toggle = Some(tag.clone()),
                     ChipClick::Remove => remove_own = Some(tag.clone()),
                     ChipClick::None => {}
                 }
             }
         });
-        if let Some(pick) = own_filter {
-            self.tag_filter = pick;
+        if let Some(tag) = own_toggle {
+            self.toggle_tag(&tag);
         }
         if let Some(tag) = remove_own {
             match db::remove_user_tag(&self.db_path, id, &tag) {
@@ -9644,7 +9641,7 @@ impl App {
             view: self.view,
             query: self.query.trim().to_lowercase(),
             kind: self.kind_filter,
-            tag: self.tag_filter.clone(),
+            tags: self.tag_filters.clone(),
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
             sort: self.settings.grid_sort,
             layout: self.settings.grid_layout,
@@ -9667,7 +9664,7 @@ impl App {
             t(lang, "the folder and date filter changed")
         } else if now.kind != self.pick_scope.kind {
             t(lang, "the photo and video filter changed")
-        } else if now.tag != self.pick_scope.tag {
+        } else if now.tags != self.pick_scope.tags {
             t(lang, "the tag filter changed")
         } else if now.hits != self.pick_scope.hits {
             t(lang, "the search changed")
@@ -9837,16 +9834,15 @@ impl App {
                     || r.path.to_lowercase().contains(&q)
                     || r.taken_at.clone().unwrap_or_default().contains(&q)
             })
-            .filter(|(_, r)| match &self.tag_filter {
-                None => true,
-                Some(want) => {
+            .filter(|(_, r)| {
+                self.tag_filters.iter().all(|want| {
                     self.user_tags
                         .get(&r.id)
                         .is_some_and(|tags| tags.iter().any(|t| t == want))
                         || self.tags.get(&r.id).is_some_and(|t| {
                             embed::tag_above(t, want, self.tag_threshold(want))
                         })
-                }
+                })
             })
             .map(|(i, _)| i)
             .collect();
@@ -9859,10 +9855,57 @@ impl App {
         out
     }
 
+    /// Whether the tag filter holds this tag (M25.1).
+    fn tag_picked(&self, tag: &str) -> bool {
+        self.tag_filters.iter().any(|t| t == tag)
+    }
+
+    /// A click on a tag: it joins the filter, a second click removes it. The set stays sorted, so
+    /// the chips row and the panel draw the picked tags in one order (M25.1).
+    fn toggle_tag(&mut self, tag: &str) {
+        match self.tag_filters.iter().position(|t| t == tag) {
+            Some(i) => {
+                self.tag_filters.remove(i);
+            }
+            None => {
+                self.tag_filters.push(tag.to_string());
+                self.tag_filters.sort();
+                self.tag_filters.dedup();
+            }
+        }
+    }
+
+    fn clear_tag_filters(&mut self) {
+        self.tag_filters.clear();
+    }
+
+    /// The "Tags" heading of the cloud and the reset beside it (M25.1): the bare 20 px target
+    /// stands where the filter is set and is drawn only while something is picked — the folder
+    /// block's "+" pattern, so an empty filter spends no room on a reset.
+    fn tags_heading(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        let mut reset = false;
+        ui.horizontal(|ui| {
+            caps_label(ui, t(lang, "Tags"));
+            if !self.tag_filters.is_empty() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if icon_button(ui, Icon::Close, 20.0, t(lang, "reset the tag filter")).clicked()
+                    {
+                        reset = true;
+                    }
+                });
+            }
+        });
+        if reset {
+            self.clear_tag_filters();
+        }
+    }
+
     /// The tags as chips (M22.3): the word with the count of photos after a middle dot, the
-    /// picked one in the accent, a click on the picked one clears it. The dictionary does not need
-    /// a menu; the count next to a word honestly says "zero" before a click. Returns the counts,
-    /// so the model block can warn that no tag passes the threshold.
+    /// picked one in the accent, a click adds the tag to the filter and a second click removes it
+    /// (M25.1). The dictionary does not need a menu; the count next to a word honestly says
+    /// "zero" before a click. Returns the counts, so the model block can warn that no tag passes
+    /// the threshold.
     fn tag_chips(&mut self, ui: &mut egui::Ui) -> Vec<usize> {
         let lang = self.settings.lang;
         let labels = self.tag_labels();
@@ -9870,21 +9913,18 @@ impl App {
         let mut own_tags: Vec<String> = self.user_tags.values().flatten().cloned().collect();
         own_tags.sort();
         own_tags.dedup();
-        let mut picked: Option<Option<String>> = None;
+        let mut clicked: Vec<String> = Vec::new();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-            if tag_chip(ui, t(lang, "all tags"), self.tag_filter.is_none()) {
-                picked = Some(None);
-            }
             for (label, n) in labels.iter().zip(&counts) {
-                let chosen = self.tag_filter.as_deref() == Some(label.as_str());
+                let chosen = self.tag_filters.iter().any(|t| t == label);
                 let text = format!("{} · {n}", i18n::word(lang, label));
                 if tag_chip(ui, &text, chosen) {
-                    picked = Some(if chosen { None } else { Some(label.clone()) });
+                    clicked.push(label.clone());
                 }
             }
             for label in &own_tags {
-                let chosen = self.tag_filter.as_deref() == Some(label.as_str());
+                let chosen = self.tag_filters.iter().any(|t| t == label);
                 let n = self
                     .user_tags
                     .values()
@@ -9892,12 +9932,12 @@ impl App {
                     .count();
                 let text = format!("{}: {label} · {n}", t(lang, "mine"));
                 if tag_chip(ui, &text, chosen) {
-                    picked = Some(if chosen { None } else { Some(label.clone()) });
+                    clicked.push(label.clone());
                 }
             }
         });
-        if let Some(tag) = picked {
-            self.tag_filter = tag;
+        for tag in clicked {
+            self.toggle_tag(&tag);
         }
         counts
     }
@@ -9955,15 +9995,6 @@ impl App {
         self.tag_dists
             .get(tag)
             .and_then(|d| embed::percentile_threshold(d, pct))
-            .unwrap_or(self.settings.tag_show)
-    }
-
-    /// The "all tags" threshold: a percentile over the best weight of every file.
-    fn top_threshold(&self) -> f32 {
-        if self.tags.len() < 100 {
-            return self.settings.tag_show;
-        }
-        embed::percentile_threshold(&self.top_scores, self.settings.tag_show_pct)
             .unwrap_or(self.settings.tag_show)
     }
 
@@ -13053,11 +13084,11 @@ impl eframe::App for App {
         let pick_order: Vec<i64> = ordered.iter().map(|&i| self.items[i].id).collect();
         // The snapshot of the filters is taken before the grid borrows `&mut self.textures`.
         let chips = self.chips_snapshot();
-        let tag_filter_now = self.tag_filter.clone();
+        let tag_filter_now = self.tag_filters.clone();
         let tag_filter_raw = tag_filter_now
-            .as_deref()
+            .iter()
             .map(|t| self.tag_threshold(t))
-            .unwrap_or_else(|| self.top_threshold());
+            .fold(0.0_f32, f32::max);
         let items = std::mem::take(&mut self.items);
         let grid_cell_style = self.grid_cell_style();
         let mut cells = Cells {
@@ -13361,18 +13392,28 @@ impl eframe::App for App {
                 }
                 if visible.is_empty() {
                     ui.add_space(12.0);
-                    match &tag_filter_now {
-                        Some(tag) => ui.label(i18n::fill(
-                            lang,
-                            "no photos with the tag “{}” above the threshold {}% ({}) — lower the threshold slider in the left panel",
-                            &[
-                                tag.clone(),
-                                self.settings.tag_show_pct.to_string(),
-                                format!("{tag_filter_raw:.2}"),
-                            ]
-                        )),
-                        None => ui.label(t(lang, "nothing found")),
-                    };
+                    match tag_filter_now.len() {
+                        0 => {
+                            ui.label(t(lang, "nothing found"));
+                        }
+                        1 => {
+                            ui.label(i18n::fill(
+                                lang,
+                                "no photos with the tag “{}” above the threshold {}% ({}) — lower the threshold slider in the left panel",
+                                &[
+                                    tag_filter_now[0].clone(),
+                                    self.settings.tag_show_pct.to_string(),
+                                    format!("{tag_filter_raw:.2}"),
+                                ],
+                            ));
+                        }
+                        _ => {
+                            ui.label(t(
+                                lang,
+                                "no photos carry all the picked tags above their thresholds — lower the threshold slider in the left panel",
+                            ));
+                        }
+                    }
                     if word_button(ui, Icon::Close, t(lang, "Reset the filter")).clicked() {
                         reset = true;
                     }
@@ -15053,8 +15094,13 @@ impl eframe::App for App {
         if clear_chips.query {
             self.query.clear();
         }
-        if clear_chips.tag {
-            self.tag_filter = None;
+        if let Some(i) = clear_chips.tag_at
+            && i < self.tag_filters.len()
+        {
+            self.tag_filters.remove(i);
+        }
+        if clear_chips.tags {
+            self.tag_filters.clear();
         }
         if clear_chips.kind {
             self.kind_filter = KindFilter::All;
@@ -15550,6 +15596,77 @@ mod tests {
         }
         out.drop_without_applying_deltas();
         (used, texts)
+    }
+
+    /// A click on a chip of the cloud drawn alone: the press and the release in two frames of
+    /// the same context, as `click_at` does for the whole window.
+    fn chips_click(app: &mut App, width: f32, at: egui::Pos2) {
+        let ctx = egui::Context::default();
+        super::style(&ctx);
+        // Frames in order: the chips under the pointer, the press, the release.
+        let frames: Vec<Vec<egui::Event>> = vec![
+            vec![egui::Event::PointerMoved(at)],
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        ];
+        for events in frames {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run_ui(raw, |ui| {
+                app.tag_chips(ui);
+            });
+            out.drop_without_applying_deltas();
+        }
+    }
+
+    /// The "Tags" heading drawn alone: every filled rectangle of the row, so a test can see
+    /// whether the 20 px reset target is there or not.
+    fn tags_heading_frame(
+        app: &mut App,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::Rect> {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(236.0, 100.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let out = ctx.run_ui(raw, |ui| {
+            ui.set_width(236.0);
+            app.tags_heading(ui);
+        });
+        let mut fills = Vec::new();
+        for c in &out.shapes {
+            collect_fills(&c.shape, &mut fills);
+        }
+        out.drop_without_applying_deltas();
+        fills.into_iter().map(|(r, _)| r).collect()
     }
 
     /// One frame of the full-screen viewer without a window: returns all the drawn text.
@@ -18650,8 +18767,8 @@ mod tests {
         let r = chip(&mut app);
         click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
         assert_eq!(
-            app.tag_filter.as_deref(),
-            Some("beach"),
+            app.tag_filters,
+            vec!["beach".to_string()],
             "a click on the tag filters the photos by it"
         );
         assert_eq!(app.tags.get(&1).map(Vec::len), Some(2), "nothing is removed");
@@ -18659,10 +18776,33 @@ mod tests {
             accented_chip(&mut app),
             "the chip of the active filter is in the accent"
         );
-        // A second click on the highlighted chip clears the filter.
+        // A second tag joins the filter instead of replacing it (M25.1).
+        let r = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "sea 30%")
+            .unwrap_or_else(|| panic!("the second tag chip is on screen"))
+            .1;
+        click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
+        assert_eq!(
+            app.tag_filters,
+            vec!["beach".to_string(), "sea".to_string()],
+            "the second tag is added to the filter, not swapped in"
+        );
+        // A second click on one chip removes only that tag.
         let r = chip(&mut app);
         click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
-        assert_eq!(app.tag_filter, None, "a second click clears the filter");
+        assert_eq!(
+            app.tag_filters,
+            vec!["sea".to_string()],
+            "a second click removes exactly its own tag"
+        );
+        let r = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "sea 30%")
+            .unwrap_or_else(|| panic!("the second tag chip is on screen"))
+            .1;
+        click_at(&mut app, &ctx, egui::pos2(r.left() + 4.0, r.center().y));
+        assert!(app.tag_filters.is_empty(), "the last click clears the set");
         assert!(!accented_chip(&mut app), "no chip is accented after the reset");
     }
 
@@ -18976,7 +19116,6 @@ mod tests {
             );
         }
         app.tag_dists = embed::tag_distributions(&app.tags);
-        app.top_scores = embed::top_score_distribution(&app.tags);
         app.settings.tag_show_pct = 100;
         assert!((app.tag_threshold("мебель") - 119.0 / 120.0).abs() < 1e-6);
         assert!((app.tag_threshold("дети") - 1.0).abs() < 1e-6);
@@ -19795,10 +19934,10 @@ mod tests {
         );
         app.tag_dists = embed::tag_distributions(&app.tags);
         app.settings.lang = i18n::Lang::En;
-        app.tag_filter = None;
+        app.tag_filters.clear();
         let _ = chips_layout(&mut app, 236.0);
         let (plain_size, plain) = chips_layout(&mut app, 236.0);
-        app.tag_filter = Some("beach".into());
+        app.tag_filters = vec!["beach".into()];
         let _ = chips_layout(&mut app, 236.0);
         let (picked_size, picked) = chips_layout(&mut app, 236.0);
         assert_eq!(
@@ -19816,8 +19955,127 @@ mod tests {
             "no chip with a count: {picked:?}"
         );
         assert!(
-            picked.iter().any(|(t, _)| t == "all tags"),
-            "no way back to all tags: {picked:?}"
+            !picked.iter().any(|(t, _)| t == "all tags"),
+            "the permanent “all tags” chip is gone (M25.1): {picked:?}"
+        );
+    }
+
+    /// M25.1: a click on a tag chip adds it to the filter, a second click removes it, a reset
+    /// beside the "Tags" heading clears the set. The grid keeps only the photos that carry every
+    /// picked tag.
+    #[test]
+    fn the_panel_tag_cloud_accumulates_the_filter() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-tags-and.db"));
+        app.items = vec![
+            file_row(1, "image", "a.jpg"),
+            file_row(2, "image", "b.jpg"),
+            file_row(3, "image", "c.jpg"),
+        ];
+        app.tags.insert(1, vec![("beach".into(), 0.9)]);
+        app.tags.insert(
+            2,
+            vec![("beach".into(), 0.8), ("document".into(), 0.7)],
+        );
+        app.tags.insert(3, vec![("document".into(), 0.6)]);
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        app.settings.lang = i18n::Lang::En;
+        let click = |app: &mut App, word: &str| {
+            let _ = chips_layout(app, 236.0);
+            let (_, chips) = chips_layout(app, 236.0);
+            let pos = chips
+                .iter()
+                .find(|(text, _)| text == word)
+                .unwrap_or_else(|| panic!("the chip “{word}” is drawn"))
+                .1;
+            chips_click(app, 236.0, pos + egui::vec2(4.0, 5.0));
+        };
+        click(&mut app, "beach · 2");
+        assert_eq!(app.tag_filters, vec!["beach".to_string()]);
+        click(&mut app, "document · 2");
+        assert_eq!(
+            app.tag_filters,
+            vec!["beach".to_string(), "document".to_string()],
+            "the second tag joins the filter"
+        );
+        let names: Vec<String> = app
+            .filtered()
+            .iter()
+            .map(|&i| super::file_name(&app.items[i].path))
+            .collect();
+        assert_eq!(names, ["b.jpg"], "a file must carry every picked tag: {names:?}");
+        // A second click on one chip leaves the other tag in the filter.
+        click(&mut app, "beach · 2");
+        assert_eq!(app.tag_filters, vec!["document".to_string()]);
+        // Two tags in the filter: the chips row says both, and each "×" removes exactly one.
+        app.tag_filters = vec!["beach".to_string(), "document".to_string()];
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let word = |app: &mut App, want: &str| {
+            window_word_rects_at(app, &ctx, size)
+                .into_iter()
+                .find(|(text, _)| text == want)
+                .unwrap_or_else(|| panic!("“{want}” is on screen"))
+                .1
+        };
+        let r = word(&mut app, "tag: beach ×");
+        click_at(&mut app, &ctx, r.center());
+        assert_eq!(
+            app.tag_filters,
+            vec!["document".to_string()],
+            "the “×” of a chip removes exactly its own tag"
+        );
+        let r = word(&mut app, "tag: document ×");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.tag_filters.is_empty(), "the last chip clears the row");
+        // "Reset" clears the whole set in one press.
+        app.tag_filters = vec!["beach".to_string(), "document".to_string()];
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let r = word(&mut app, "Reset");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.tag_filters.is_empty(), "Reset clears every picked tag");
+    }
+
+    /// M25.1: the reset beside the "Tags" heading is drawn only while a tag is picked and clears
+    /// the whole set — an empty filter spends no room on a reset.
+    #[test]
+    fn the_reset_beside_the_tags_heading_clears_the_filter() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-tags-reset.db"));
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let plain = tags_heading_frame(&mut app, &ctx, Vec::new());
+        app.tag_filters = vec!["beach".to_string(), "document".to_string()];
+        let with_reset = tags_heading_frame(&mut app, &ctx, Vec::new());
+        let target = |rects: &[egui::Rect]| {
+            rects
+                .iter()
+                .find(|r| (r.width() - 20.0).abs() < 0.5 && (r.height() - 20.0).abs() < 0.5)
+                .copied()
+        };
+        assert!(
+            target(&plain).is_none(),
+            "no reset target while the filter is empty: {plain:?}"
+        );
+        let at = target(&with_reset)
+            .unwrap_or_else(|| panic!("the reset target is drawn while a tag is picked"))
+            .center();
+        let press = |pressed: bool| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let _ = tags_heading_frame(&mut app, &ctx, press(true));
+        let _ = tags_heading_frame(&mut app, &ctx, press(false));
+        assert!(
+            app.tag_filters.is_empty(),
+            "the reset clears every picked tag: {:?}",
+            app.tag_filters
         );
     }
 
