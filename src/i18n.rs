@@ -148,6 +148,7 @@ const NOUNS: &[(&str, [&str; 2], [&str; 3])] = &[
     ("group", ["group", "groups"], ["группа", "группы", "групп"]),
     ("tag", ["tag", "tags"], ["тег", "тега", "тегов"]),
     ("album", ["album", "albums"], ["альбом", "альбома", "альбомов"]),
+    ("year", ["year", "years"], ["год", "года", "лет"]),
     (
         "sub_album",
         ["sub-album", "sub-albums"],
@@ -386,6 +387,10 @@ const PAIRS: &[(&str, &str)] = &[
     ("FILTER", "ФИЛЬТР"),
     ("YEARS", "ГОДЫ"),
     ("All years", "Все годы"),
+    ("the years of the archive", "годы архива"),
+    ("No files in this year.", "В этом году файлов нет."),
+    ("No files in the archive.", "В архиве нет файлов."),
+    ("double-click to open the months of the year", "двойной клик откроет месяцы года"),
     (
         "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.",
         "Поле буквальное: часть пути или даты в ISO без учёта регистра — «2024-05» найдёт май 2024, «vacation» — папку или файл с этим словом. Поиск по тому, что на фотографии, — в верхней полосе: «Смысловой / По тексту».",

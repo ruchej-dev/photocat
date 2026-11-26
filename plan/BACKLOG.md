@@ -1274,7 +1274,7 @@ on them.
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
   M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 (done 2026-11-26) the state word moves into the status bar;
-  M25.9 (done 2026-11-26) the location row; M25.10 the year and month layers; M25.11 the week and day layers;
+  M25.9 (done 2026-11-26) the location row; M25.10 (done 2026-11-26) the year and month layers; M25.11 the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
 
 **M25.1 — the tag filter accumulates.**
@@ -1630,6 +1630,28 @@ decimals and a working copy; no GPS → no row). `cargo test` 322 passed + 3 gua
 layer down; a headless frame and the M22.5 measurement are redone on the corpus.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**Done (2026-11-26).** The "Year" tab now draws the archive's years, newest first, as cards of the
+month card's height (`paint_arch_card`, shared by both layers): the year at 12 px, its counter, a
+16:10 cover of the year's first snapshot fitted whole, a volume bar against the fullest year and the
+size; a click picks a year, a double click opens its months. The twelve month cards moved to "Month"
+(the layer "Year" drew before), and the month's day grid left with them; the week and day layers keep
+their old code until M25.11. The ribbon facts name the layer (`the years of the archive`, `2024`), the
+arrows step by the layer's own unit (a year inside the archive's range, a month with files), and
+"Today" lands on the months of today's year. An empty year says "No files in this year." and offers
+"Go to <the nearest month with files>". Two fixes came with it: `i18n::count` gained the `year` noun,
+and `tag_counts` now computes one threshold per label instead of twice per frame (the pinned
+threshold of M25.6 and the cloud both call it) — the measurement below shows the win. Tests:
+`the_years_layer_draws_the_archive_years_and_drills_on_a_double_click` (three years newest first, the
+click picks, the double click opens the months), the reworked
+`the_month_layer_draws_twelve_months_with_counts_and_sizes`,
+`the_picked_month_and_day_are_framed_in_the_accent` (a year card on the years layer, a month card on
+the months layer, a day cell on the week layer), `an_empty_year_offers_the_nearest_month_with_files`
+and `english_translates_the_calendar`. Measured on the corpus (2232 files, 10 years, 1240×840):
+years layer p50 4.63 ms (216 fps), p95 4.91; months p50 4.69 (213 fps), p95 5.17; the oldest card at
+y 436; the grid scroll again p50 5.72 ms (175 fps), p95 6.14 — better than M22.2b's 6.4–6.7 ms.
+`cargo test` 323 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors.
 
 **M25.11 — the calendar's week and day layers.**
 **Goal.** "Week" shows the weeks of the chosen month, "Day" the days of the chosen week.

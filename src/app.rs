@@ -697,6 +697,7 @@ const CAL_GAP: f32 = 6.0;
 /// A month card of the year layer: the header, the cover and the footer with the volume and the size.
 const CAL_CARD_H: f32 = 92.0;
 /// A day cell of the month layer: the number, the counter, up to three previews and the volume bar.
+#[allow(dead_code)] // the day and week layers of M25.11.
 const CAL_DAY_H: f32 = 96.0;
 
 // Scrolling (M22.2b). Below is the only place its profile is set: the wheel, the touchpad
@@ -6814,8 +6815,10 @@ impl App {
             self.only_no_preview = !self.only_no_preview;
         }
         // The threshold is pinned (M25.6): it cuts the cloud that scrolls below it, so it must not
-        // scroll away from the chips it explains.
-        self.threshold_block(ui);
+        // scroll away from the chips it explains. The counts are computed once for the slider's
+        // note and for the chips below (M25.10's measurement caught the double cost).
+        let tag_counts = self.tag_counts();
+        self.threshold_block(ui, &tag_counts);
 
         egui::ScrollArea::vertical()
             .id_salt("left-scroll")
@@ -6827,7 +6830,7 @@ impl App {
                 if embed::model_present(&self.settings) {
                     ui.add_space(2.0);
                     self.tags_heading(ui);
-                    let _ = self.tag_chips(ui);
+                    self.tag_chips(ui, &tag_counts);
                     ui.add_space(4.0);
                     hairline(ui);
                 }
@@ -7426,9 +7429,8 @@ impl App {
     /// The tag threshold, pinned in the left panel above the scroll (M25.6): the slider, its
     /// percentage and the two notes about it. It cuts the tag cloud that scrolls below, so the two
     /// must not leave each other.
-    fn threshold_block(&mut self, ui: &mut egui::Ui) {
+    fn threshold_block(&mut self, ui: &mut egui::Ui, counts: &[usize]) {
         let lang = self.settings.lang;
-        let counts = self.tag_counts();
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(t(lang, "Filter threshold"))
@@ -10110,19 +10112,17 @@ impl App {
     /// The tags as chips (M22.3): the word with the count of photos after a middle dot, the
     /// picked one in the accent, a click adds the tag to the filter and a second click removes it
     /// (M25.1). The dictionary does not need a menu; the count next to a word honestly says
-    /// "zero" before a click. Returns the counts, so the model block can warn that no tag passes
-    /// the threshold.
-    fn tag_chips(&mut self, ui: &mut egui::Ui) -> Vec<usize> {
+    /// "zero" before a click. The counts come from the caller, so one frame computes them once.
+    fn tag_chips(&mut self, ui: &mut egui::Ui, counts: &[usize]) {
         let lang = self.settings.lang;
         let labels = self.tag_labels();
-        let counts = self.tag_counts();
         let mut own_tags: Vec<String> = self.user_tags.values().flatten().cloned().collect();
         own_tags.sort();
         own_tags.dedup();
         let mut clicked: Vec<String> = Vec::new();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-            for (label, n) in labels.iter().zip(&counts) {
+            for (label, n) in labels.iter().zip(counts) {
                 let chosen = self.tag_filters.iter().any(|t| t == label);
                 let text = format!("{} · {n}", i18n::word(lang, label));
                 if tag_chip(ui, &text, chosen) {
@@ -10145,7 +10145,6 @@ impl App {
         for tag in clicked {
             self.toggle_tag(&tag);
         }
-        counts
     }
 
     /// The cut-off threshold in the filter is a percentile over the chosen tag (ADR 0032).
@@ -10238,12 +10237,18 @@ impl App {
     fn tag_counts(&self) -> Vec<usize> {
         let labels = self.tag_labels();
         let mut counts = vec![0usize; labels.len()];
+        // One threshold per label, computed once: `tag_threshold` is not free, and the counts are
+        // read every frame by the pinned threshold and the cloud.
+        let index: HashMap<&str, (usize, f32)> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, label)| (label.as_str(), (i, self.tag_threshold(label))))
+            .collect();
         for scores in self.tags.values() {
             for (tag, score) in scores {
-                if *score < self.tag_threshold(tag) {
-                    continue;
-                }
-                if let Some(i) = labels.iter().position(|l| l == tag) {
+                if let Some(&(i, threshold)) = index.get(tag.as_str())
+                    && *score >= threshold
+                {
                     counts[i] += 1;
                 }
             }
@@ -10908,6 +10913,7 @@ fn monday_of(d: chrono::NaiveDate) -> chrono::NaiveDate {
     d - chrono::Duration::days(d.weekday().num_days_from_monday() as i64)
 }
 
+#[allow(dead_code)] // the calendar's week and day layers of M25.11.
 fn days_in_month(year: i32, month: u32) -> u32 {
     let (ny, nm) = shift_month(year, month, 1);
     let next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1);
@@ -10918,6 +10924,7 @@ fn days_in_month(year: i32, month: u32) -> u32 {
     }
 }
 
+#[allow(dead_code)] // the calendar's week and day layers of M25.11.
 fn first_weekday_monday(year: i32, month: u32) -> u32 {
     chrono::NaiveDate::from_ymd_opt(year, month, 1)
         .map(|d| d.weekday().num_days_from_monday())
@@ -10985,6 +10992,105 @@ fn cal_cell(ui: &egui::Ui, rect: egui::Rect, radius: f32, has_files: bool, picke
             .rect_stroke(rect, corners, stroke, egui::StrokeKind::Inside);
     }
     th
+}
+
+/// A card of the year or the month layer (M25.10): the mono lead, the name beside it, the counter
+/// at the right edge, the first snapshot as a cover fitted whole, a volume bar against the fullest
+/// card of the layer and the size at the right. One helper for both layers, so they cannot drift.
+#[allow(clippy::too_many_arguments)]
+fn paint_arch_card(
+    ui: &egui::Ui,
+    ctx: &egui::Context,
+    cells: &mut Cells,
+    items: &[db::FileRow],
+    rect: egui::Rect,
+    lead: &str,
+    name: &str,
+    count: usize,
+    bytes: i64,
+    first: Option<usize>,
+    selected: bool,
+    busiest: usize,
+    lang: i18n::Lang,
+) {
+    let th = cal_cell(ui, rect.shrink(1.0), RADIUS_CARD, count > 0, selected);
+    let r = rect.shrink(1.0);
+    let pad = 8.0;
+    // The lead is the mono index of a month ("01"); a year has none and its name starts at the edge.
+    let name_x = if lead.is_empty() {
+        r.left() + pad
+    } else {
+        ui.painter().text(
+            egui::pos2(r.left() + pad, r.top() + 6.0),
+            egui::Align2::LEFT_TOP,
+            lead,
+            egui::FontId::monospace(10.0),
+            th.text_dim,
+        );
+        r.left() + pad + 18.0
+    };
+    ui.painter().text(
+        egui::pos2(name_x, r.top() + 4.0),
+        egui::Align2::LEFT_TOP,
+        name,
+        egui::FontId::proportional(12.0),
+        if selected {
+            th.accent
+        } else if count > 0 {
+            th.text
+        } else {
+            th.text_dim
+        },
+    );
+    ui.painter().text(
+        egui::pos2(r.right() - pad, r.top() + 5.0),
+        egui::Align2::RIGHT_TOP,
+        format!("{count}"),
+        egui::FontId::monospace(10.0),
+        if selected { th.accent } else { th.text_med },
+    );
+    // The cover: the first snapshot of the cell, fitted whole — a preview is never cropped.
+    let cover = egui::Rect::from_min_max(
+        egui::pos2(r.left() + pad, r.top() + 23.0),
+        egui::pos2(r.right() - pad, r.bottom() - 17.0),
+    );
+    if cover.height() > 8.0 {
+        ui.painter()
+            .rect_filled(cover, egui::CornerRadius::same(RADIUS_CTRL as u8), th.canvas);
+        if let Some(i) = first {
+            paint_thumb(ui, ctx, cells, &items[i], cover);
+        }
+    }
+    // The footer: the volume at the left edge and the size at the right one.
+    let bar = egui::Rect::from_min_size(
+        egui::pos2(r.left() + pad, r.bottom() - 9.0),
+        egui::vec2(44.0, 4.0),
+    );
+    if count > 0 && busiest > 0 {
+        cal_bar(ui, bar, count as f32 / busiest as f32);
+        ui.painter().text(
+            egui::pos2(r.right() - pad, r.bottom() - 5.0),
+            egui::Align2::RIGHT_BOTTOM,
+            db::human_in(lang, bytes),
+            egui::FontId::monospace(10.0),
+            th.text_dim,
+        );
+    }
+}
+
+/// The first and the last year that have files: "2024-05" keys of the calendar's month set
+/// (M25.10). The years layer's arrows step inside this range, never into an empty year.
+fn year_bounds(months: &BTreeSet<String>) -> (Option<i32>, Option<i32>) {
+    let mut first: Option<i32> = None;
+    let mut last: Option<i32> = None;
+    for key in months {
+        let Some(year) = key.get(0..4).and_then(|y| y.parse::<i32>().ok()) else {
+            continue;
+        };
+        first = Some(first.map_or(year, |f| f.min(year)));
+        last = Some(last.map_or(year, |l| l.max(year)));
+    }
+    (first, last)
 }
 
 /// The volume of a calendar cell as a bar: the share of the fullest month of the year or the
@@ -13403,10 +13509,8 @@ impl eframe::App for App {
             View::Calendar => (
                 t(lang, "Calendar").to_string(),
                 match cal_scale {
-                    CalScale::Year => format!("{cal_year}"),
-                    CalScale::Month => {
-                        format!("{} {cal_year}", i18n::month_name(lang, cal_month as usize))
-                    }
+                    CalScale::Year => t(lang, "the years of the archive").to_string(),
+                    CalScale::Month => format!("{cal_year}"),
                     CalScale::Week => format!(
                         "{} — {}",
                         cal_week.format("%d.%m"),
@@ -14246,15 +14350,18 @@ impl eframe::App for App {
                                 CalScale::Week => "next week",
                                 CalScale::Day => "next day",
                             };
+                            // The arrows step by the layer's own unit (M25.10): a year on the
+                            // years layer, a month with files on the months layer.
+                            let (first_year, last_year) = year_bounds(&months);
                             let prev_enabled = match cal_scale {
-                                CalScale::Year => cal_year > 1900,
+                                CalScale::Year => first_year.is_some_and(|y| cal_year > y),
                                 CalScale::Week | CalScale::Day => true,
                                 CalScale::Month => {
                                     shift_to_file_month(&months, cal_year, cal_month, -1).is_some()
                                 }
                             };
                             let next_enabled = match cal_scale {
-                                CalScale::Year => cal_year < 2199,
+                                CalScale::Year => last_year.is_some_and(|y| cal_year < y),
                                 CalScale::Week | CalScale::Day => true,
                                 CalScale::Month => {
                                     shift_to_file_month(&months, cal_year, cal_month, 1).is_some()
@@ -14271,12 +14378,8 @@ impl eframe::App for App {
                                 nav = -1;
                             }
                             let title = match cal_scale {
-                                CalScale::Year => format!("{cal_year}"),
-                                CalScale::Month => format!(
-                                    "{} {}",
-                                    i18n::month_name(lang, cal_month as usize),
-                                    cal_year
-                                ),
+                                CalScale::Year => t(lang, "the years of the archive").to_string(),
+                                CalScale::Month => format!("{cal_year}"),
                                 CalScale::Week => {
                                     let end = cal_week + chrono::Duration::days(6);
                                     format!(
@@ -14315,7 +14418,10 @@ impl eframe::App for App {
                         if nav != 0 {
                             match cal_scale {
                                 CalScale::Year => {
-                                    cal_year = (cal_year + nav).clamp(1900, 2199);
+                                    let (first_year, last_year) = year_bounds(&months);
+                                    let lo = first_year.unwrap_or(1900);
+                                    let hi = last_year.unwrap_or(2199);
+                                    cal_year = (cal_year + nav).clamp(lo, hi);
                                     cal_day = None;
                                 }
                                 CalScale::Month => {
@@ -14352,6 +14458,122 @@ impl eframe::App for App {
 
                         match cal_scale {
                             CalScale::Year => {
+                                // The archive's years, newest first (M25.10): the year, its counter
+                                // and size, its first snapshot as a cover and a volume bar against
+                                // the fullest year.
+                                let mut by_year: Vec<(String, usize, i64, Option<usize>)> =
+                                    Vec::new();
+                                for (day, ids) in &by_day {
+                                    let Some(year) = day.get(0..4) else {
+                                        continue;
+                                    };
+                                    if !year.bytes().all(|b| b.is_ascii_digit()) {
+                                        continue;
+                                    }
+                                    let bytes: i64 = ids.iter().map(|&i| items[i].size).sum();
+                                    match by_year.iter_mut().find(|e| e.0 == year) {
+                                        Some(entry) => {
+                                            entry.1 += ids.len();
+                                            entry.2 += bytes;
+                                        }
+                                        None => by_year.push((
+                                            year.to_string(),
+                                            ids.len(),
+                                            bytes,
+                                            ids.first().copied(),
+                                        )),
+                                    }
+                                }
+                                by_year.sort_by(|a, b| b.0.cmp(&a.0));
+                                if by_year.is_empty() {
+                                    ui.add_space(8.0);
+                                    ui.label(t(lang, "No files in the archive."));
+                                    return;
+                                }
+                                let total_n: usize = by_year.iter().map(|e| e.1).sum();
+                                let total_bytes: i64 = by_year.iter().map(|e| e.2).sum();
+                                let busiest = by_year.iter().map(|e| e.1).max().unwrap_or(0);
+                                ui.horizontal(|ui| {
+                                    caps_label(ui, t(lang, "the years of the archive"));
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let facts = i18n::fill(
+                                                lang,
+                                                "{} · {} · {}",
+                                                &[
+                                                    i18n::count(lang, by_year.len(), "year"),
+                                                    i18n::count(lang, total_n, "file"),
+                                                    db::human_in(lang, total_bytes),
+                                                ],
+                                            );
+                                            ui.label(num(ui, facts, 10.0).color(dim(ui)));
+                                        },
+                                    );
+                                });
+                                ui.add_space(6.0);
+                                let cell_w =
+                                    ((ui.available_width() - 3.0 * CAL_GAP) / 4.0).max(40.0);
+                                let rows = by_year.len().div_ceil(4);
+                                for row in 0..rows {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = CAL_GAP;
+                                        for col in 0..4usize {
+                                            let Some((year, count, bytes, first)) =
+                                                by_year.get(row * 4 + col)
+                                            else {
+                                                ui.allocate_space(egui::vec2(
+                                                    cell_w,
+                                                    CAL_CARD_H,
+                                                ));
+                                                continue;
+                                            };
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                egui::vec2(cell_w, CAL_CARD_H),
+                                                egui::Sense::click(),
+                                            );
+                                            let resp = resp.on_hover_text(t(
+                                                lang,
+                                                "double-click to open the months of the year",
+                                            ));
+                                            if ui.is_rect_visible(rect) {
+                                                let selected = *year == cal_year.to_string();
+                                                paint_arch_card(
+                                                    ui,
+                                                    ctx,
+                                                    &mut cells,
+                                                    &items,
+                                                    rect,
+                                                    "",
+                                                    year,
+                                                    *count,
+                                                    *bytes,
+                                                    *first,
+                                                    selected,
+                                                    busiest,
+                                                    lang,
+                                                );
+                                            }
+                                            if resp.double_clicked() {
+                                                if let Ok(y) = year.parse::<i32>() {
+                                                    cal_year = y;
+                                                }
+                                                cal_day = None;
+                                                if let Some(next) = cal_scale.deeper() {
+                                                    cal_scale = next;
+                                                }
+                                            } else if resp.clicked() {
+                                                if let Ok(y) = year.parse::<i32>() {
+                                                    cal_year = y;
+                                                }
+                                                cal_day = None;
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(CAL_GAP);
+                                }
+                            }
+                            CalScale::Month => {
                                 // The month cards of the year: their counters, their volumes and
                                 // the first snapshot of each for the cover.
                                 let mut per_month = Vec::with_capacity(12);
@@ -14399,160 +14621,11 @@ impl eframe::App for App {
                                         },
                                     );
                                 });
-                                ui.add_space(6.0);
-                                let cell_w =
-                                    ((ui.available_width() - 3.0 * CAL_GAP) / 4.0).max(40.0);
-                                for row in 0..3u32 {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = CAL_GAP;
-                                        for col in 0..4u32 {
-                                            let m = row * 4 + col + 1;
-                                            let (count, bytes, first) = per_month[(m - 1) as usize];
-                                            let (rect, resp) = ui.allocate_exact_size(
-                                                egui::vec2(cell_w, CAL_CARD_H),
-                                                egui::Sense::click(),
-                                            );
-                                            let resp = resp.on_hover_text(t(
-                                                lang,
-                                                "double-click to open the month",
-                                            ));
-                                            if ui.is_rect_visible(rect) {
-                                                let selected = cal_month == m;
-                                                let r = rect.shrink(1.0);
-                                                let th = cal_cell(
-                                                    ui,
-                                                    r,
-                                                    RADIUS_CARD,
-                                                    count > 0,
-                                                    selected,
-                                                );
-                                                let pad = 8.0;
-                                                // "01 January" — the mono number and the month's
-                                                // name, the counter at the right edge.
-                                                ui.painter().text(
-                                                    egui::pos2(r.left() + pad, r.top() + 6.0),
-                                                    egui::Align2::LEFT_TOP,
-                                                    format!("{m:02}"),
-                                                    egui::FontId::monospace(10.0),
-                                                    th.text_dim,
-                                                );
-                                                ui.painter().text(
-                                                    egui::pos2(r.left() + pad + 18.0, r.top() + 4.0),
-                                                    egui::Align2::LEFT_TOP,
-                                                    i18n::month_name(lang, m as usize),
-                                                    egui::FontId::proportional(12.0),
-                                                    if selected {
-                                                        th.accent
-                                                    } else if count > 0 {
-                                                        th.text
-                                                    } else {
-                                                        th.text_dim
-                                                    },
-                                                );
-                                                ui.painter().text(
-                                                    egui::pos2(r.right() - pad, r.top() + 5.0),
-                                                    egui::Align2::RIGHT_TOP,
-                                                    format!("{count}"),
-                                                    egui::FontId::monospace(10.0),
-                                                    if selected { th.accent } else { th.text_med },
-                                                );
-                                                // The cover: the first snapshot of the month,
-                                                // fitted whole — a preview is never cropped.
-                                                let cover = egui::Rect::from_min_max(
-                                                    egui::pos2(
-                                                        r.left() + pad,
-                                                        r.top() + 23.0,
-                                                    ),
-                                                    egui::pos2(
-                                                        r.right() - pad,
-                                                        r.bottom() - 17.0,
-                                                    ),
-                                                );
-                                                if cover.height() > 8.0 {
-                                                    ui.painter().rect_filled(
-                                                        cover,
-                                                        egui::CornerRadius::same(
-                                                            RADIUS_CTRL as u8,
-                                                        ),
-                                                        th.canvas,
-                                                    );
-                                                    if let Some(i) = first {
-                                                        paint_thumb(
-                                                            ui, ctx, &mut cells, &items[i], cover,
-                                                        );
-                                                    }
-                                                }
-                                                // The footer: the volume at the left edge and
-                                                // the size of the month at the right one.
-                                                let bar = egui::Rect::from_min_size(
-                                                    egui::pos2(r.left() + pad, r.bottom() - 9.0),
-                                                    egui::vec2(44.0, 4.0),
-                                                );
-                                                if count > 0 && busiest > 0 {
-                                                    cal_bar(
-                                                        ui,
-                                                        bar,
-                                                        count as f32 / busiest as f32,
-                                                    );
-                                                    ui.painter().text(
-                                                        egui::pos2(r.right() - pad, r.bottom() - 5.0),
-                                                        egui::Align2::RIGHT_BOTTOM,
-                                                        db::human_in(lang, bytes),
-                                                        egui::FontId::monospace(10.0),
-                                                        th.text_dim,
-                                                    );
-                                                }
-                                            }
-                                            if resp.double_clicked() {
-                                                cal_month = m;
-                                                cal_day = None;
-                                                if let Some(next) = cal_scale.deeper() {
-                                                    cal_scale = next;
-                                                }
-                                            } else if resp.clicked() {
-                                                cal_month = m;
-                                                cal_day = None;
-                                            }
-                                        }
-                                    });
-                                    ui.add_space(CAL_GAP);
-                                }
-                            }
-                            CalScale::Month => {
-                                let key = month_key(cal_year, cal_month);
-                                let month_n: usize = by_day
-                                    .iter()
-                                    .filter(|(d, _)| d.starts_with(&key))
-                                    .map(|(_, v)| v.len())
-                                    .sum();
-                                let month_bytes: i64 = by_day
-                                    .iter()
-                                    .filter(|(d, _)| d.starts_with(&key))
-                                    .flat_map(|(_, v)| v.iter())
-                                    .map(|&i| items[i].size)
-                                    .sum();
-                                // The busiest day of the month: the day counters are drawn as the
-                                // mock-up's bar, so the shape of the month is visible at a glance.
-                                let busiest = by_day
-                                    .iter()
-                                    .filter(|(d, _)| d.starts_with(&key))
-                                    .map(|(_, v)| v.len())
-                                    .max()
-                                    .unwrap_or(0);
-                                let facts = i18n::fill(
-                                    lang,
-                                    "{} this month, {}",
-                                    &[
-                                        i18n::count(lang, month_n, "file"),
-                                        db::human_in(lang, month_bytes),
-                                    ],
-                                );
-                                ui.label(num(ui, facts, 11.0).color(dim(ui)));
-                                if month_n == 0 {
+                                // A year without files names the nearest month that has them, so
+                                // an empty year is a stop on the way, not a dead end (M25.10).
+                                if year_n == 0 {
                                     ui.add_space(8.0);
-                                    ui.label(t(lang, "No files in this month."));
-                                    // The nearest month with files, so an empty month is a
-                                    // stop on the way, not a dead end.
+                                    ui.label(t(lang, "No files in this year."));
                                     if let Some((y, m)) =
                                         nearest_file_month(&months, cal_year, cal_month)
                                     {
@@ -14576,177 +14649,51 @@ impl eframe::App for App {
                                     }
                                     return;
                                 }
-
-                                ui.add_space(4.0);
-                                // The weekday row of the mock-up: caps labels over the columns.
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = CAL_GAP;
-                                    let wd_w =
-                                        (ui.available_width() - 6.0 * CAL_GAP) / 7.0;
-                                    for wd in 0..7u32 {
-                                        ui.allocate_ui(egui::vec2(wd_w, 16.0), |ui| {
-                                            ui.label(
-                                                egui::RichText::new(
-                                                    i18n::weekday(lang, wd as usize)
-                                                        .to_uppercase(),
-                                                )
-                                                .size(10.0)
-                                                .color(dim(ui)),
-                                            );
-                                        });
-                                    }
-                                });
-                                let cell_w = ((ui.available_width() - 6.0 * CAL_GAP) / 7.0)
-                                    .max(32.0);
-                                let cell_h = CAL_DAY_H;
-                                let first = first_weekday_monday(cal_year, cal_month);
-                                let n_days = days_in_month(cal_year, cal_month);
-                                let mut day = 1u32;
-                                for _week in 0..6 {
-                                    if day > n_days {
-                                        break;
-                                    }
+                                ui.add_space(6.0);
+                                let cell_w =
+                                    ((ui.available_width() - 3.0 * CAL_GAP) / 4.0).max(40.0);
+                                for row in 0..3u32 {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = CAL_GAP;
-                                        for wd in 0..7u32 {
-                                            if day > n_days {
-                                                ui.allocate_space(egui::vec2(cell_w, cell_h));
-                                                continue;
-                                            }
-                                            if wd < first && day == 1 {
-                                                ui.allocate_space(egui::vec2(cell_w, cell_h));
-                                                continue;
-                                            }
-                                            let date =
-                                                format!("{cal_year:04}-{cal_month:02}-{day:02}");
-                                            let ids: &[usize] = by_day
-                                                .get(&date)
-                                                .map_or(&[], |v| v.as_slice());
+                                        for col in 0..4u32 {
+                                            let m = row * 4 + col + 1;
+                                            let (count, bytes, first) = per_month[(m - 1) as usize];
                                             let (rect, resp) = ui.allocate_exact_size(
-                                                egui::vec2(cell_w, cell_h),
+                                                egui::vec2(cell_w, CAL_CARD_H),
                                                 egui::Sense::click(),
                                             );
                                             let resp = resp.on_hover_text(t(
                                                 lang,
-                                                "double-click to open the week",
+                                                "double-click to open the month",
                                             ));
                                             if ui.is_rect_visible(rect) {
-                                                let selected = cal_day.as_deref()
-                                                    == Some(date.as_str());
-                                                let n = ids.len();
-                                                let th = cal_cell(
+                                                let selected = cal_month == m;
+                                                paint_arch_card(
                                                     ui,
-                                                    rect.shrink(1.0),
-                                                    RADIUS_CTRL,
-                                                    n > 0,
+                                                    ctx,
+                                                    &mut cells,
+                                                    &items,
+                                                    rect,
+                                                    &format!("{m:02}"),
+                                                    i18n::month_name(lang, m as usize),
+                                                    count,
+                                                    bytes,
+                                                    first,
                                                     selected,
+                                                    busiest,
+                                                    lang,
                                                 );
-                                                let r = rect.shrink(1.0);
-                                                let pad = 5.0;
-                                                ui.painter().text(
-                                                    egui::pos2(r.left() + pad, r.top() + 4.0),
-                                                    egui::Align2::LEFT_TOP,
-                                                    day.to_string(),
-                                                    egui::FontId::monospace(11.0),
-                                                    if selected {
-                                                        th.accent
-                                                    } else if n > 0 {
-                                                        th.text
-                                                    } else {
-                                                        th.text_dim
-                                                    },
-                                                );
-                                                if n > 0 {
-                                                    // The counter as a badge, as on the mock-up's
-                                                    // day cell: digit on a soft accent pill.
-                                                    let label = n.to_string();
-                                                    let badge = egui::Rect::from_min_size(
-                                                        egui::pos2(
-                                                            r.right() - pad - 6.0 * label.len() as f32 - 4.0,
-                                                            r.top() + 3.0,
-                                                        ),
-                                                        egui::vec2(
-                                                            6.0 * label.len() as f32 + 8.0,
-                                                            13.0,
-                                                        ),
-                                                    );
-                                                    ui.painter().rect_filled(
-                                                        badge,
-                                                        egui::CornerRadius::same(
-                                                            RADIUS_CTRL as u8,
-                                                        ),
-                                                        th.accent_soft,
-                                                    );
-                                                    ui.painter().text(
-                                                        badge.center(),
-                                                        egui::Align2::CENTER_CENTER,
-                                                        label,
-                                                        egui::FontId::monospace(10.0),
-                                                        th.accent,
-                                                    );
-                                                    let area = egui::Rect::from_min_max(
-                                                        egui::pos2(r.left() + 4.0, r.top() + 22.0),
-                                                        egui::pos2(
-                                                            r.right() - 4.0,
-                                                            r.bottom() - 10.0,
-                                                        ),
-                                                    );
-                                                    let shown = n.min(3);
-                                                    let tw = ((area.width()
-                                                        - (shown as f32 - 1.0) * 2.0)
-                                                        / shown as f32)
-                                                        .max(8.0);
-                                                    for (k, &i) in
-                                                        ids.iter().take(shown).enumerate()
-                                                    {
-                                                        let tr = egui::Rect::from_min_size(
-                                                            egui::pos2(
-                                                                area.left()
-                                                                    + k as f32 * (tw + 2.0),
-                                                                area.top(),
-                                                            ),
-                                                            egui::vec2(tw, area.height()),
-                                                        );
-                                                        ui.painter().rect_filled(
-                                                            tr,
-                                                            2.0,
-                                                            th.canvas,
-                                                        );
-                                                        paint_thumb(
-                                                            ui, ctx, &mut cells, &items[i], tr,
-                                                        );
-                                                    }
-                                                    // The volume of the day against the busiest
-                                                    // day of the month.
-                                                    let bar = egui::Rect::from_min_size(
-                                                        egui::pos2(r.left() + 4.0, r.bottom() - 7.0),
-                                                        egui::vec2((r.width() - 8.0).max(4.0), 3.0),
-                                                    );
-                                                    let share = if busiest > 0 {
-                                                        n as f32 / busiest as f32
-                                                    } else {
-                                                        0.0
-                                                    };
-                                                    cal_bar(ui, bar, share);
-                                                }
                                             }
                                             if resp.double_clicked() {
-                                                cal_day = Some(date.clone());
-                                                if let Some(d) = parse_date(&date) {
-                                                    cal_week = monday_of(d);
-                                                    cal_year = d.year();
-                                                    cal_month = d.month();
-                                                }
+                                                cal_month = m;
+                                                cal_day = None;
                                                 if let Some(next) = cal_scale.deeper() {
                                                     cal_scale = next;
                                                 }
                                             } else if resp.clicked() {
-                                                cal_day = Some(date.clone());
-                                                if let Some(d) = parse_date(&date) {
-                                                    cal_week = monday_of(d);
-                                                }
+                                                cal_month = m;
+                                                cal_day = None;
                                             }
-                                            day += 1;
                                         }
                                     });
                                     ui.add_space(CAL_GAP);
@@ -15816,7 +15763,8 @@ mod tests {
         };
         let mut used = egui::Vec2::ZERO;
         let out = ctx.run_ui(raw, |ui| {
-            app.tag_chips(ui);
+            let counts = app.tag_counts();
+            app.tag_chips(ui, &counts);
             used = ui.min_rect().size();
         });
         let mut texts = Vec::new();
@@ -15864,7 +15812,8 @@ mod tests {
                 ..Default::default()
             };
             let out = ctx.run_ui(raw, |ui| {
-                app.tag_chips(ui);
+                let counts = app.tag_counts();
+                app.tag_chips(ui, &counts);
             });
             out.drop_without_applying_deltas();
         }
@@ -16905,7 +16854,10 @@ mod tests {
             ms
         }
         let mut t = 0.0_f64;
-        for (scale, word) in [(CalScale::Year, "year"), (CalScale::Month, "month")] {
+        for (scale, word) in [
+            (CalScale::Year, "years"),
+            (CalScale::Month, "months"),
+        ] {
             app.cal_scale = scale;
             for _ in 0..4 {
                 drive(&mut app, &ctx, &mut frame, size, t);
@@ -16926,17 +16878,19 @@ mod tests {
                 p(0.99)
             );
         }
-        // The year layer fits: the last card of December and the day strip below are on the screen.
+        // The years layer fits a 1240×840 window: its last year card is on the screen.
         app.cal_scale = CalScale::Year;
         let drawn = window_layout(&mut app, &ctx, size);
-        let last_month = i18n::month_name(app.settings.lang, 12);
-        let december = drawn
+        let years = app.year_counts();
+        let last_year = years.last().map(|(y, _)| y.clone()).unwrap_or_default();
+        let last = drawn
             .iter()
-            .find(|(text, _)| text == last_month)
+            .find(|(text, _)| text == &last_year)
             .map(|(_, pos)| *pos);
         println!(
-            "{} files, year layer at 1240×840: December at {december:?}",
-            app.items.len()
+            "{} files, {} years; the oldest card “{last_year}” at {last:?} in a 1240×840 window",
+            app.items.len(),
+            years.len()
         );
     }
 
@@ -17324,36 +17278,64 @@ mod tests {
         }
     }
 
-    /// M21.4b: the calendar is translated completely — the layers, the months, the weekdays, the
-    /// navigation and the captions of empty days. The month and weekday names live in `i18n`, not in `app`.
+    /// M21.4b, M25.10: the calendar is translated completely — the four layer tabs, the years and
+    /// the months of the two upper layers, the weekdays of the week layer and the facts of each.
     #[test]
     fn english_translates_the_calendar() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-calendar-i18n.db"));
-        app.items = vec![file_row(1, "image", "may.jpg")];
+        let mut may = file_row(1, "image", "may.jpg");
+        may.taken_at = Some("2024-05-01T09:10".into());
+        app.items = vec![may];
         app.settings.lang = i18n::Lang::En;
         app.view = View::Calendar;
         app.cal_year = 2024;
         app.cal_month = 5;
-        let texts = window_frame(&mut app, &egui::Context::default());
-        for needle in ["Year", "Month", "Week", "Day", "Today", "May 2024"] {
+        let ctx = egui::Context::default();
+        // The years layer: its tabs, its heading and the year card.
+        app.cal_scale = CalScale::Year;
+        let texts = window_frame(&mut app, &ctx);
+        for needle in [
+            "Year",
+            "Month",
+            "Week",
+            "Day",
+            "Today",
+            "the years of the archive",
+            "2024",
+            "1 year · 1 file · 1 B",
+        ] {
             assert!(
                 texts.iter().any(|t| t == needle),
                 "missing “{needle}”: {texts:?}"
             );
         }
-        // The weekday row of the month layer is a row of caps labels (M22.5), so it is upper case.
-        for needle in ["MON", "SUN"] {
+        assert!(
+            texts.iter().any(|t| t == "THE YEARS OF THE ARCHIVE"),
+            "the caps heading of the years layer is not translated: {texts:?}"
+        );
+        // The month layer: the twelve cards of the picked year.
+        app.cal_scale = CalScale::Month;
+        let texts = window_frame(&mut app, &ctx);
+        for needle in ["12 MONTHS OF 2024", "1 file in the year · 1 B", "May", "2024"] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "missing “{needle}” in the month layer: {texts:?}"
+            );
+        }
+        // The week layer: the weekday names of its day columns.
+        app.cal_scale = CalScale::Week;
+        app.cal_week = super::monday_of(
+            chrono::NaiveDate::from_ymd_opt(2024, 5, 1).expect("a valid date"),
+        );
+        let texts = window_frame(&mut app, &ctx);
+        for needle in ["Mon", "Sun"] {
             assert!(
                 texts.iter().any(|t| t == needle),
                 "no weekday “{needle}”: {texts:?}"
             );
         }
-        assert!(
-            texts.iter().any(|t| t.contains("1 file this month")),
-            "the month summary is not translated: {texts:?}"
-        );
         for ru in [
-            "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая", "ПН", "ВС",
+            "Год", "Месяц", "Неделя", "День", "Сегодня", "Пн", "Вс", "мая", "годы архива",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
@@ -19593,13 +19575,13 @@ mod tests {
         app
     }
 
-    /// M22.5: the year layer is 12 month cards, each with a counter and a size in mono digits, and
-    /// a line above them saying what the whole year holds. An empty month is drawn, so the gaps of
-    /// the archive are visible instead of hidden.
+    /// M22.5, M25.10: the month layer is 12 month cards, each with a counter and a size in mono
+    /// digits, and a line above them saying what the whole year holds. An empty month is drawn, so
+    /// the gaps of the archive are visible instead of hidden.
     #[test]
-    fn the_year_layer_draws_twelve_months_with_counts_and_sizes() {
+    fn the_month_layer_draws_twelve_months_with_counts_and_sizes() {
         let mut app = calendar_app();
-        app.cal_scale = CalScale::Year;
+        app.cal_scale = CalScale::Month;
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
             texts.iter().any(|t| t == "12 MONTHS OF 2024"),
@@ -19631,6 +19613,56 @@ mod tests {
         );
     }
 
+    /// M25.10: the years layer draws the archive's years, newest first, one card each; a click picks
+    /// a year and a double click opens its months.
+    #[test]
+    fn the_years_layer_draws_the_archive_years_and_drills_on_a_double_click() {
+        let mut app = calendar_app();
+        let mut middle = file_row(4, "image", "middle.jpg");
+        middle.taken_at = Some("2023-03-01T10:00".into());
+        app.items.push(middle);
+        let mut older = file_row(5, "image", "old.jpg");
+        older.taken_at = Some("2022-03-01T10:00".into());
+        app.items.push(older);
+        app.cal_scale = CalScale::Year;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let drawn = window_layout(&mut app, &ctx, size);
+        let pos = |needle: &str| {
+            drawn
+                .iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, pos)| *pos)
+                .unwrap_or_else(|| panic!("“{needle}” is not drawn: {drawn:?}"))
+        };
+        // Three years, the newest first: on the same row, left to right 2024, 2023, 2022.
+        assert!(pos("2024").x < pos("2023").x, "2024 is not first: {drawn:?}");
+        assert!(pos("2023").x < pos("2022").x, "2023 is not second: {drawn:?}");
+        assert_eq!(pos("2024").y, pos("2022").y, "the cards are not in one row");
+        let texts: Vec<&str> = drawn.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("3 years")),
+            "the layer does not count its years: {texts:?}"
+        );
+        // A click picks the year, a double click opens its months.
+        let rects = window_word_rects_at(&mut app, &ctx, size);
+        let card = rects
+            .iter()
+            .find(|(text, _)| text == "2023")
+            .expect("the 2023 card is drawn")
+            .1;
+        click_at(&mut app, &ctx, card.center());
+        assert_eq!(app.cal_year, 2023, "the click does not pick the year");
+        click_at(&mut app, &ctx, card.center());
+        assert_eq!(
+            app.cal_scale,
+            CalScale::Month,
+            "the double click does not open the months"
+        );
+        assert_eq!(app.cal_year, 2023);
+    }
+
     /// M22.5: the picked month carries the accent frame and no other card does; the frame is 1 px of
     /// the palette accent, not the blue of the old calendar.
     #[test]
@@ -19651,19 +19683,22 @@ mod tests {
                 .map(|(r, _)| r)
                 .collect()
         };
+        // The years layer frames the picked year and nothing else.
         app.cal_scale = CalScale::Year;
-        app.cal_month = 5;
+        app.cal_year = 2024;
         let year_frames = framed(&mut app);
-        assert_eq!(year_frames.len(), 1, "one picked month, not {year_frames:?}");
-        // The frame of the picked month sits at the middle of the second row of four columns:
-        // January starts at the left edge of the grid, May is the fifth card.
+        assert_eq!(year_frames.len(), 1, "one picked year, not {year_frames:?}");
+        // The month layer frames the picked month and nothing else.
         app.cal_scale = CalScale::Month;
-        app.cal_day = None;
-        assert!(
-            framed(&mut app).is_empty(),
-            "a day cell is framed while no day is picked"
-        );
+        app.cal_month = 5;
+        let month_frames = framed(&mut app);
+        assert_eq!(month_frames.len(), 1, "one picked month, not {month_frames:?}");
+        // The week layer frames the picked day, a day cell and not a card.
+        app.cal_scale = CalScale::Week;
         app.cal_day = Some("2024-05-01".into());
+        app.cal_week = super::monday_of(
+            chrono::NaiveDate::from_ymd_opt(2024, 5, 1).expect("a valid date"),
+        );
         let day_frames = framed(&mut app);
         assert_eq!(day_frames.len(), 1, "one picked day, not {day_frames:?}");
         assert!(
@@ -19715,29 +19750,23 @@ mod tests {
         );
     }
 
-    /// M22.5: an empty month is a stop on the way, not a dead end: the button names the nearest
+    /// M25.10: an empty year is a stop on the way, not a dead end: the button names the nearest
     /// month that has files (backwards first, as `nearest_file_month`).
     #[test]
-    fn an_empty_month_offers_the_nearest_month_with_files() {
+    fn an_empty_year_offers_the_nearest_month_with_files() {
         let mut app = calendar_app();
         app.cal_scale = CalScale::Month;
-        app.cal_month = 3;
+        app.cal_year = 2023;
+        app.cal_month = 6;
         app.cal_day = None;
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(
-            texts.iter().any(|t| t == "No files in this month."),
-            "no message of an empty month: {texts:?}"
+            texts.iter().any(|t| t == "No files in this year."),
+            "no message of an empty year: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t == "Go to April 2024"),
-            "the way out of an empty month is not named: {texts:?}"
-        );
-        // June lies forward: with nothing behind it, that is where the button leads.
-        app.cal_month = 6;
-        let texts = window_frame(&mut app, &egui::Context::default());
-        assert!(
-            texts.iter().any(|t| t == "Go to May 2024"),
-            "no forward way out of an empty month: {texts:?}"
+            "the way out of an empty year is not named: {texts:?}"
         );
     }
 
