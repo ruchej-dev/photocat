@@ -1814,7 +1814,7 @@ M26.5 the face settings move to the People screen; M26.6 the layout survives a n
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
-together.
+together; M26.11 a named person is recognized in every catalog.
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -2146,6 +2146,51 @@ tiles; with two faces ticked, "Split the picked (2)" leaves the group open, empt
 drops the group's face count by two. A headless frame shows both actions in both languages.
 
 **Files.** `src/app.rs`, `src/db.rs`, `src/faces.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**M26.11 — a named person is recognized in every catalog.**
+**Goal.** A face named once is found everywhere: a face computed in another folder that resembles a
+named person joins that person's group by itself — the owner does not walk over 20 catalogs and name
+the same grandmother again. Detection already runs over every catalog where the pass is allowed; what
+does not happen today is the match of a *new* face to an *already named* group — that is this task.
+
+**Acceptance criteria.**
+1. One matching step, `faces::match_named(db_path, settings)`, runs (a) at the end of the face pass
+   (right after clustering), (b) immediately after a group is named (the Settings-free path: the
+   People screen's "Save the name" and `faces label`), and (c) in `faces --recluster`; the step is
+   reported: "matched 12 faces to 3 named people; 4 left — the lead was too small".
+2. A face is a candidate only when it is free: `manual = 0` and it does not sit in a named group. It
+   joins the best named group only when the cosine to the closest member of that group is at least
+   `settings.face_match` (default 0.50) **and** leads the second named group by
+   `settings.face_match_margin` (default 0.03) — a relative's face is left alone rather than guessed.
+   Both numbers are in the People settings (M26.5) with the hint "a face joins a named person only
+   when it is at least X close and leads the next person by Y; a wrong match is split off the tile".
+   A named group is never a target of another named group; unnamed groups are not targets.
+3. The owner's decisions win: a face with `manual = 1` (named by hand, grouped by hand, split off) is
+   never moved by the step; a catalog with the faces pass off (M26.9) is skipped; nothing on disk and
+   no row of the archive is touched.
+4. The result is visible and undoable: `db::FaceView` carries `manual`, so the group's tiles mark an
+   automatically matched face ("auto" in mono 10, its similarity in the hint) apart from the ones the
+   owner named or moved by hand; the crossed-head split (M26.10) undoes one, and a group action
+   "Detach the auto-matched (N)" moves all `manual = 0` faces of the group into one unnamed group
+   (confirmation, derived rows only).
+5. The step is cheap and bounded: the named groups' members are read once, the free faces once, and
+   only the free faces are compared (2 500 faces × the named members on the corpus, one pass of
+   milliseconds); it never runs per frame.
+6. `settings.face_match` and `settings.face_match_margin` are new key/value rows (no schema change,
+   no `SCHEMA_VERSION` bump) with the defaults above; an unknown/absent value reads as the default.
+7. The CLI and the GUI print the same numbers in `settings.lang`; `faces --dry-run` reports how many
+   faces would be matched without writing; `docs/UI.md` § Screens (People) and § Settings,
+   `docs/ARCHITECTURE.md` § the face flow, `plan/I18N.md`; the strings are in `PAIRS`.
+
+**Acceptance.** A fixture with two named people (A, B) and free faces: close to A → joins A; close to
+B but with A within the margin → left with the reason; far from both → left; a `manual = 1` face close
+to A → untouched; a face of a catalog with faces off → not considered; the same run over two
+different root paths matches both. A UI test: naming a group matches the existing free faces at once
+and the People screen shows the "auto" mark; "Detach the auto-matched" empties them back. A headless
+frame with the numbers in both languages.
+
+**Files.** `src/faces.rs`, `src/db.rs`, `src/app.rs`, `src/i18n.rs`, `src/main.rs`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`.
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
