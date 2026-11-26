@@ -197,18 +197,18 @@ pub fn run(
 }
 
 /// What the index already holds for this path.
-struct Existing {
-    size: i64,
-    mtime: i64,
-    sha_ok: bool,
-    thumb: bool,
-    duration: bool,
-    kind: String,
+pub(crate) struct Existing {
+    pub(crate) size: i64,
+    pub(crate) mtime: i64,
+    pub(crate) sha_ok: bool,
+    pub(crate) thumb: bool,
+    pub(crate) duration: bool,
+    pub(crate) kind: String,
 }
 
 /// The file is unchanged — no need to read and decode it again.
 /// A video without a cover frame or a duration is processed again: that is an old index.
-fn can_skip(e: Option<&Existing>, size: i64, mtime: i64, kind: &str) -> bool {
+pub(crate) fn can_skip(e: Option<&Existing>, size: i64, mtime: i64, kind: &str) -> bool {
     let Some(e) = e else {
         return false;
     };

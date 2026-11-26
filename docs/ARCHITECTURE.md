@@ -59,7 +59,9 @@ walkdir → Vec<PathBuf> → rayon(par_iter, jobs threads)
   skipped. A video without a cover or a duration is processed again: that is an old index. On the
   corpus of 2230 files an old DB is caught up by 259 files (258 videos + 1 broken JPEG) in 10.2 s;
   a repeat takes 0.024 s. `Stats.skipped` and the line "unchanged N" show this in the GUI and the
-  CLI.
+  CLI. Clearing the cache ("Settings → Storage → Clear the previews") also nulls `files.thumb`
+  (`storage::clear_thumbs` → `forget_thumbs`), so the rule reads "no preview" and the next pass
+  rebuilds it instead of skipping the file forever (M25.4).
 - `Progress` is atomics + a `Mutex<String>`; the GUI and the console read it without blocking the
   workers.
 - An error in one file does not sink the run: the `errors` counter grows and the file is skipped.

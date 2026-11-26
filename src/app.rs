@@ -525,6 +525,9 @@ struct PickScope {
     kind: KindFilter,
     tags: Vec<String>,
     year: Option<YearPick>,
+    /// The two "missing" filters (M25.4): no date, no preview.
+    no_date: bool,
+    no_preview: bool,
     hits: Option<usize>,
     sort: db::GridSort,
     layout: db::GridLayout,
@@ -1482,12 +1485,65 @@ fn years_range(years: &[(String, usize)], skip: usize) -> String {
     }
 }
 
+/// A toggle chip of the filter block (M25.4): the 20 px chip of a tag with the word and the count
+/// after a middle dot, the picked one on the accent, dimmed and dead at zero files, the reason in
+/// the hint. Returns whether it was clicked while enabled.
+fn toggle_chip(
+    ui: &mut egui::Ui,
+    text: &str,
+    selected: bool,
+    enabled: bool,
+    hint: &str,
+) -> bool {
+    let th = theme(ui);
+    let font = egui::FontId::monospace(11.0);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, th.text_med);
+    let size = egui::vec2(galley.size().x + 14.0, 20.0);
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+    if ui.is_rect_visible(rect) {
+        let (fill, border, color) = if !enabled {
+            (th.field, th.border, th.text_dim)
+        } else if selected {
+            (th.accent_soft, th.accent, th.accent)
+        } else if resp.hovered() {
+            (th.card, th.border_strong, th.text)
+        } else {
+            (th.field, th.border, th.text_med)
+        };
+        let radius = egui::CornerRadius::same(RADIUS_CTRL as u8);
+        ui.painter().rect_filled(rect, radius, fill);
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter()
+            .galley(rect.center() - galley.size() / 2.0, galley, color);
+    }
+    if enabled && resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let resp = resp.on_hover_text(hint);
+    enabled && resp.clicked()
+}
+
 /// A snapshot of the active filters for the row of chips.
 struct Chips {
     query: String,
     tags: Vec<String>,
     /// The year filter as a chip ("year: 2019" or "older than 2020"), M25.2.
     year: Option<String>,
+    /// The two "missing" filters (M25.4).
+    no_date: bool,
+    no_preview: bool,
     kind: KindFilter,
     /// The language the chips are written in; the snapshot is taken once per frame.
     lang: i18n::Lang,
@@ -1507,6 +1563,8 @@ impl Chips {
         !self.query.is_empty()
             || !self.tags.is_empty()
             || self.year.is_some()
+            || self.no_date
+            || self.no_preview
             || self.album.is_some()
             || self.kind != KindFilter::All
             || self.hits.is_some()
@@ -1523,6 +1581,9 @@ struct FilterClear {
     tags: bool,
     /// The year chip of the chips row: clear the year filter.
     year: bool,
+    /// The two "missing" filters (M25.4).
+    no_date: bool,
+    no_preview: bool,
     kind: bool,
     hits: bool,
     /// Close the open album: go back to the album tree.
@@ -1579,6 +1640,12 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
         {
             clear.kind = true;
         }
+        if chips.no_date && filter_chip(ui, t(lang, "No date"), lang) {
+            clear.no_date = true;
+        }
+        if chips.no_preview && filter_chip(ui, t(lang, "No preview"), lang) {
+            clear.no_preview = true;
+        }
         if let Some(n) = chips.hits
             && filter_chip(ui, &i18n::relevance(lang, n), lang)
         {
@@ -1593,6 +1660,8 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
                 query: true,
                 tags: true,
                 year: true,
+                no_date: true,
+                no_preview: true,
                 kind: true,
                 hits: true,
                 album: true,
@@ -2484,6 +2553,13 @@ struct App {
     /// The year filter (M25.2): independent of the path/date field, so a typed word survives a
     /// click on a year. `None` means "all years".
     year_filter: Option<YearPick>,
+    /// The two "missing" filters of the left panel (M25.4): only files without a date, only files
+    /// whose preview is missing.
+    only_no_date: bool,
+    only_no_preview: bool,
+    /// The files whose `thumb` path is recorded but whose preview is not on disk — read once per
+    /// `reload`, so the filter does not stat the cache on every frame (M25.4).
+    previews_missing: HashSet<i64>,
     progress: Option<Arc<Progress>>,
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
     /// CLIP tags: file_id → [(tag, weight)] descending.
@@ -2688,6 +2764,8 @@ impl App {
                 kind: KindFilter::All,
                 tags: Vec::new(),
                 year: None,
+                no_date: false,
+                no_preview: false,
                 hits: None,
                 sort: db::GridSort::DateDesc,
                 layout: db::GridLayout::Months,
@@ -2701,6 +2779,9 @@ impl App {
             query: String::new(),
             kind_filter: KindFilter::All,
             year_filter: None,
+            only_no_date: false,
+            only_no_preview: false,
+            previews_missing: HashSet::new(),
             progress: None,
             rx: None,
             tags: HashMap::new(),
@@ -2920,6 +3001,7 @@ impl App {
                 // the term changes once a day.
                 self.verify_due = db::verify_due(&self.settings, chrono::Utc::now());
                 self.items = rows;
+                self.refresh_missing_previews();
                 self.trash_items = trashed;
                 self.tag_dists = embed::tag_distributions(&tags);
                 self.tags = tags;
@@ -4536,7 +4618,7 @@ impl App {
         if confirmed {
             self.storage_confirm = None;
             let res = match action {
-                StorageAction::Thumbs => storage::clear_thumbs(),
+                StorageAction::Thumbs => storage::clear_thumbs(&self.db_path),
                 StorageAction::Faces => storage::clear_faces(&self.db_path),
                 StorageAction::Index => {
                     storage::reset_index(&self.db_path).map(|()| storage::Cleared::default())
@@ -5988,6 +6070,8 @@ impl App {
         self.kind_filter = KindFilter::All;
         self.tag_filters.clear();
         self.year_filter = None;
+        self.only_no_date = false;
+        self.only_no_preview = false;
         self.semantic_hits = None;
         self.ocr_snippets.clear();
         self.status = t(lang, "the filters are reset").into();
@@ -6506,6 +6590,8 @@ impl App {
             query: self.query.trim().to_string(),
             tags: self.tag_filters.clone(),
             year,
+            no_date: self.only_no_date,
+            no_preview: self.only_no_preview,
             kind: self.kind_filter,
             lang: self.settings.lang,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
@@ -6673,6 +6759,51 @@ impl App {
                 }
             }
         });
+        ui.add_space(4.0);
+        // The two "missing" filters (M25.4): the numbers of the summary become filters. They take
+        // the 20 px chip of a tag, narrow the grid together with the rest and with each other, and
+        // are dead at zero — a filter that promises nothing does not invite a click.
+        let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
+        let no_preview = self
+            .items
+            .iter()
+            .filter(|r| self.has_no_preview(r))
+            .count();
+        let preview_hint = t(
+            lang,
+            "the preview could not be built or is no longer in the cache: HEIC/AVIF (the decoder cannot read them), a broken file, a video without a cover (no ffmpeg or an ffmpeg error), or previews cleared in Settings → Storage. Index the folder again to rebuild them",
+        );
+        let mut date_click = false;
+        let mut preview_click = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            let date_text = format!("{} · {no_date}", t(lang, "No date"));
+            if toggle_chip(
+                ui,
+                &date_text,
+                self.only_no_date,
+                no_date > 0,
+                t(lang, "only the files without a date"),
+            ) {
+                date_click = true;
+            }
+            let preview_text = format!("{} · {no_preview}", t(lang, "No preview"));
+            if toggle_chip(
+                ui,
+                &preview_text,
+                self.only_no_preview,
+                no_preview > 0,
+                preview_hint,
+            ) {
+                preview_click = true;
+            }
+        });
+        if date_click {
+            self.only_no_date = !self.only_no_date;
+        }
+        if preview_click {
+            self.only_no_preview = !self.only_no_preview;
+        }
         ui.add_space(4.0);
 
         // In a wide window the summary is pressed to the bottom of the panel. In a narrow one the card and
@@ -7393,12 +7524,10 @@ impl App {
         ui.add_space(2.0);
         let n = self.items.len();
         let bytes: i64 = self.items.iter().map(|r| r.size).sum();
-        let no_date = self.items.iter().filter(|r| r.taken_at.is_none()).count();
-        let no_thumb = self.items.iter().filter(|r| r.thumb.is_none()).count();
         stat_row(ui, t(lang, "Files:"), &n.to_string());
         stat_row(ui, t(lang, "Size:"), &db::human_in(lang, bytes));
-        stat_row(ui, t(lang, "No date:"), &no_date.to_string());
-        stat_row(ui, t(lang, "No preview:"), &no_thumb.to_string());
+        // "No date" and "No preview" are the counts of the two filter chips above (M25.4): a number
+        // printed twice would drift apart the moment the two are computed differently.
         let no_cover = self
             .items
             .iter()
@@ -9693,6 +9822,8 @@ impl App {
             kind: self.kind_filter,
             tags: self.tag_filters.clone(),
             year: self.year_filter.clone(),
+            no_date: self.only_no_date,
+            no_preview: self.only_no_preview,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
             sort: self.settings.grid_sort,
             layout: self.settings.grid_layout,
@@ -9719,6 +9850,10 @@ impl App {
             t(lang, "the tag filter changed")
         } else if now.year != self.pick_scope.year {
             t(lang, "the year filter changed")
+        } else if now.no_date != self.pick_scope.no_date
+            || now.no_preview != self.pick_scope.no_preview
+        {
+            t(lang, "the no-date and no-preview filters changed")
         } else if now.hits != self.pick_scope.hits {
             t(lang, "the search changed")
         } else if now.album != self.pick_scope.album {
@@ -9891,6 +10026,8 @@ impl App {
                 None => true,
                 Some(pick) => pick.matches(r.taken_at.as_deref()),
             })
+            .filter(|(_, r)| !self.only_no_date || r.taken_at.is_none())
+            .filter(|(_, r)| !self.only_no_preview || self.has_no_preview(r))
             .filter(|(_, r)| {
                 self.tag_filters.iter().all(|want| {
                     self.user_tags
@@ -9910,6 +10047,28 @@ impl App {
             out.sort_by_key(|&i| rank.get(&self.items[i].id).copied().unwrap_or(usize::MAX));
         }
         out
+    }
+
+    /// Whether this file has no preview (M25.4): either the index never built one, or the preview
+    /// it names is no longer on disk.
+    fn has_no_preview(&self, r: &db::FileRow) -> bool {
+        r.thumb.is_none() || self.previews_missing.contains(&r.id)
+    }
+
+    /// The files whose preview is recorded but missing on disk. Read once per `reload`, so the
+    /// filter does not stat the cache on every frame (M25.4).
+    fn refresh_missing_previews(&mut self) {
+        let thumbs = self.thumbs_dir.clone();
+        self.previews_missing = self
+            .items
+            .iter()
+            .filter(|r| {
+                r.thumb
+                    .as_deref()
+                    .is_some_and(|rel| !thumbs.join(rel).exists())
+            })
+            .map(|r| r.id)
+            .collect();
     }
 
     /// Whether the tag filter holds this tag (M25.1).
@@ -15162,6 +15321,12 @@ impl eframe::App for App {
         if clear_chips.year {
             self.year_filter = None;
         }
+        if clear_chips.no_date {
+            self.only_no_date = false;
+        }
+        if clear_chips.no_preview {
+            self.only_no_preview = false;
+        }
         if clear_chips.kind {
             self.kind_filter = KindFilter::All;
         }
@@ -17062,7 +17227,14 @@ mod tests {
         assert_eq!(app.groups.len(), 1, "one group of exact copies");
         app.settings.lang = i18n::Lang::En;
         app.view = View::Dupes;
-        let texts = window_frame(&mut app, &egui::Context::default());
+        // A taller frame: the two "missing" filter chips (M25.4) start the scrolling part 28 px
+        // lower, so the last control of the duplicates block needs the room the test gives it.
+        let texts = window_frame_at(
+            &mut app,
+            &egui::Context::default(),
+            Vec::new(),
+            egui::vec2(1240.0, 1000.0),
+        );
         for needle in [
             "Duplicates & series",
             "Find groups",
@@ -17820,8 +17992,9 @@ mod tests {
             "Summary",
             "Files:",
             "Size:",
-            "No date:",
-            "No preview:",
+            // The two missing numbers are the counts of the filter chips (M25.4), not summary rows.
+            "No date · 0",
+            "No preview · 1",
         ] {
             assert!(
                 texts.iter().any(|t| t == want),
@@ -17836,7 +18009,7 @@ mod tests {
             "Сводка",
             "Файлов:",
             "Объём:",
-            "Без даты:",
+            "Без даты ·",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
@@ -20009,6 +20182,129 @@ mod tests {
             i18n::t(i18n::Lang::En, super::PATH_DATE_HINT),
             super::PATH_DATE_HINT
         );
+    }
+
+    /// M25.4: clearing the previews nulls the `thumb` column, and the index sees a file without a
+    /// preview as one that must be read again — otherwise a cleared cache would never heal.
+    #[test]
+    fn a_cleared_preview_makes_the_file_processed_again() {
+        let db_path = std::env::temp_dir().join("photocat-test-cleared-thumbs.db");
+        let conn = crate::db::open(&db_path).expect("the test DB opens");
+        conn.execute("DELETE FROM files", [])
+            .expect("the test DB starts empty");
+        let row = crate::db::FileRow {
+            id: 0,
+            path: "/tmp/a.jpg".into(),
+            size: 10,
+            mtime: 100,
+            sha256: "abc".into(),
+            kind: "image".into(),
+            width: 1,
+            height: 1,
+            taken_at: None,
+            taken_src: "file".into(),
+            lat: None,
+            lon: None,
+            camera: None,
+            dhash: None,
+            sharpness: None,
+            duration_s: None,
+            thumb: Some("ab/x.jpg".into()),
+            decision: None,
+            trashed_at: None,
+        };
+        crate::db::insert(&conn, &row).expect("the row is inserted");
+        let existing = || {
+            let rows = crate::db::load_all(&conn).expect("the rows are read");
+            let r = &rows[0];
+            crate::index::Existing {
+                size: r.size,
+                mtime: r.mtime,
+                sha_ok: !r.sha256.is_empty(),
+                thumb: r.thumb.is_some(),
+                duration: r.duration_s.is_some(),
+                kind: r.kind.clone(),
+            }
+        };
+        assert!(
+            crate::index::can_skip(Some(&existing()), 10, 100, "image"),
+            "an unchanged file with a preview is skipped"
+        );
+        crate::storage::forget_thumbs(&db_path).expect("the preview paths are cleared");
+        assert!(
+            !crate::index::can_skip(Some(&existing()), 10, 100, "image"),
+            "a file without a preview is read again"
+        );
+    }
+
+    /// M25.4: the two "missing" chips show how many files have no date and how many have no
+    /// preview (over the whole index), narrow the grid together and with each other, are dead at
+    /// zero, and the chips row removes each filter on its own.
+    #[test]
+    fn the_no_date_and_no_preview_chips_filter_the_grid() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-missing.db"));
+        let dir = std::env::temp_dir().join("photocat-test-missing-thumbs");
+        std::fs::create_dir_all(dir.join("ab")).expect("the test thumbs folder is made");
+        std::fs::write(dir.join("ab/on.jpg"), b"x").expect("the test preview is written");
+        app.thumbs_dir = dir;
+        let row = |id: i64, name: &str, at: Option<&str>, thumb: Option<&str>| {
+            let mut r = file_row(id, "image", name);
+            r.taken_at = at.map(|s| s.to_string());
+            r.thumb = thumb.map(|s| s.to_string());
+            r
+        };
+        app.items = vec![
+            row(1, "dated-on.jpg", Some("2024-05-01T08:00"), Some("ab/on.jpg")),
+            row(2, "dated-gone.jpg", Some("2024-06-01T08:00"), Some("ab/gone.jpg")),
+            row(3, "undated.jpg", None, None),
+        ];
+        app.refresh_missing_previews();
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let word = |app: &mut App, want: &str| {
+            window_word_rects_at(app, &ctx, size)
+                .into_iter()
+                .find(|(text, _)| text == want)
+                .unwrap_or_else(|| panic!("“{want}” is not drawn"))
+                .1
+        };
+        // The count is over the whole index: one file has no date, two have no preview (one row
+        // never got a preview, one names a file that is gone from the cache).
+        let r = word(&mut app, "No preview · 2");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.only_no_preview, "the chip is a toggle");
+        let names = |app: &App| -> Vec<String> {
+            app.filtered()
+                .iter()
+                .map(|&i| super::file_name(&app.items[i].path))
+                .collect()
+        };
+        assert_eq!(names(&app), ["dated-gone.jpg", "undated.jpg"]);
+        // The two filters work together: only the file with neither a date nor a preview passes.
+        let r = word(&mut app, "No date · 1");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.only_no_date && app.only_no_preview);
+        assert_eq!(names(&app), ["undated.jpg"]);
+        // Each "×" of the chips row removes exactly its own filter.
+        let r = word(&mut app, "No preview ×");
+        click_at(&mut app, &ctx, r.center());
+        assert!(!app.only_no_preview && app.only_no_date);
+        let r = word(&mut app, "No date ×");
+        click_at(&mut app, &ctx, r.center());
+        assert!(!app.only_no_date);
+        assert_eq!(names(&app).len(), 3, "every file is back");
+        // At zero the chip is dead: a filter that promises nothing does not invite a click.
+        for r in &mut app.items {
+            r.taken_at = Some("2024-01-01T00:00".into());
+            r.thumb = Some("ab/on.jpg".into());
+        }
+        app.refresh_missing_previews();
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let r = word(&mut app, "No date · 0");
+        click_at(&mut app, &ctx, r.center());
+        assert!(!app.only_no_date, "a chip with zero files does nothing");
     }
 
     /// M25.2: the cloud keeps the five newest years and a "…" that filters exactly the older

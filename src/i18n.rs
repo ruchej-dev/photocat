@@ -499,6 +499,16 @@ const PAIRS: &[(&str, &str)] = &[
     ("Flat", "Подряд"),
     ("By months", "По месяцам"),
     ("No date", "Без даты"),
+    ("No preview", "Без превью"),
+    ("only the files without a date", "только файлы без даты"),
+    (
+        "the no-date and no-preview filters changed",
+        "фильтры «без даты» и «без превью» изменились",
+    ),
+    (
+        "the preview could not be built or is no longer in the cache: HEIC/AVIF (the decoder cannot read them), a broken file, a video without a cover (no ffmpeg or an ffmpeg error), or previews cleared in Settings → Storage. Index the folder again to rebuild them",
+        "превью не построилось или его больше нет в кэше: HEIC/AVIF (декодер их не читает), битый файл, видео без обложки (нет ffmpeg или ошибка ffmpeg) или превью, очищенные в «Настройки → Хранилище». Проиндексируйте папку снова, чтобы вернуть их",
+    ),
     ("path/date:", "путь/дата:"),
     ("tag:", "тег:"),
     ("by relevance:", "по релевантности:"),

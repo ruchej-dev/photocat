@@ -89,9 +89,21 @@ fn clear_cache_dir(dir: &Path) -> Result<Cleared> {
     Ok(Cleared { files, bytes })
 }
 
-/// Previews of photos and video covers. After cleanup the grid shows "no preview" until a re-index.
-pub fn clear_thumbs() -> Result<Cleared> {
-    clear_cache_dir(&db::cache_dir().join("thumbs"))
+/// Previews of photos and video covers. The rows lose their preview path too, so the next index
+/// rebuilds every preview instead of skipping the file (M25.4).
+pub fn clear_thumbs(db_path: &Path) -> Result<Cleared> {
+    let cleared = clear_cache_dir(&db::cache_dir().join("thumbs"))?;
+    forget_thumbs(db_path)?;
+    Ok(cleared)
+}
+
+/// Null the `thumb` column: `index::can_skip` asks it, so a cleared preview comes back with the
+/// next pass. Split from the folder removal, which touches the owner's cache and is not called in
+/// tests (M25.4).
+pub fn forget_thumbs(db_path: &Path) -> Result<()> {
+    let conn = db::open(db_path)?;
+    conn.execute("UPDATE files SET thumb = NULL", [])?;
+    Ok(())
 }
 
 /// Face crops together with the face rows: a repeated pass finds the faces again.

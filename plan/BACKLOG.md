@@ -1271,7 +1271,7 @@ on them.
    The card shows the coordinates; M25.9 adds "copy" and records the choice.
 
 **Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
-  the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 "No date" and "No preview"
+  the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
   as filters; M25.5 the summary leaves; M25.6 the pinned threshold and no "Model settings";
   M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
   M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
@@ -1426,6 +1426,26 @@ tests cover `clear_thumbs` + `can_skip` and the filter.
 
 **Files.** `src/app.rs`, `src/storage.rs`, `src/index.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
+
+**Done (2026-11-26).** Two 20 px toggle chips under the kind row (`App::only_no_date`,
+`App::only_no_preview`, `toggle_chip`): "No date · N" and "No preview · N", the picked one on the
+accent, dimmed and dead at zero. The counts are over the whole index, and "no preview" is honest:
+`files.thumb IS NULL` or the preview named by it is not on disk — `App::previews_missing` is filled
+by `refresh_missing_previews` once per `reload`. The two narrow the grid with the rest and with each
+other (`filtered()`), appear in the chips row as "no date ×" / "no preview ×"
+(`FilterClear.no_date` / `no_preview`), and `PickScope` carries both, so a change drops the
+selection. `storage::clear_thumbs(db_path)` now also calls `forget_thumbs`, which nulls the `thumb`
+column: `index::can_skip` no longer skips a file whose preview was cleared, so the next pass
+rebuilds it (the `docs/ARCHITECTURE.md` § Indexing flow claim is true now). The summary stops
+printing "No date:" and "No preview:" — their numbers are the chips now, and a second number
+computed differently would drift; the remaining summary goes in M25.5. Tests:
+`the_no_date_and_no_preview_chips_filter_the_grid` (the counts, a click, the two together, both
+"×", a dead chip at zero) and
+`a_cleared_preview_makes_the_file_processed_again` (`forget_thumbs` + `can_skip`). `cargo test` 317
+passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors. The two new chips cost the pinned part 28 px: at 840 px the
+last control of the duplicates block needs a scroll, so the duplicates translation test draws a
+1240×1000 frame (M25.5 gives the panel 40 px back).
 
 **M25.5 — the summary leaves the left panel.**
 **Goal.** No doubled numbers and no block that only repeats the status bar.
