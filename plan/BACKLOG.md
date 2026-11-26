@@ -1275,7 +1275,7 @@ on them.
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
   M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 (done 2026-11-26) the state word moves into the status bar;
   M25.9 (done 2026-11-26) the location row; M25.10 (done 2026-11-26) the year and month layers; M25.11 (done 2026-11-26) the week and day layers;
-  M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
+  M25.12 (done 2026-11-26) the photos of the period follow the cell view; M25.13 the text block moves into Settings.
 
 **M25.1 — the tag filter accumulates.**
 **Goal.** A click adds a tag, a second click removes it; a reset is one click on the picked tag or
@@ -1702,6 +1702,21 @@ photos are exactly the files of the period (a test per layer); the year layer ov
 inside a 60 fps frame, and the M22.5 measurement is redone with the photos in it.
 
 **Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`, `docs/ARCHITECTURE.md` § Measurements.
+
+**Done (2026-11-26).** Under the tiles of every layer stand exactly the files of the picked period,
+drawn by `draw_files` in the ribbon's cell view (`cells.cell_style`): the year, the month, the week or
+the day, above a heading in the words of a month heading ("2024", "May 2024", "12–18 May", "Wed,
+01.05.2024") with "· N files, size". Only the day layer keeps the time in the caption instead of the
+repeated date. The fixed `day_strip` and its `draw_cell` grid are gone; "No date" stays a collapsible
+group at the bottom of every layer; the calendar keeps its one `ScrollArea`, so the photos scroll with
+the tiles. An empty period says "No files in this period.". Tests:
+`the_calendar_photos_are_exactly_the_periods` (four layers × two cell views: the drawn names are
+exactly the period's, and the list draws "date · size" where the tile caption does not) and the
+reworked `the_day_layer_shows_the_photos_of_the_day_in_the_cell_view`. Measured on the corpus with
+the photos under the tiles: years p50 4.62 ms (216 fps), months 4.83, weeks 4.66, days 13.66 ms
+(73 fps) — the day layer is the heaviest and still inside a 60 fps frame. `cargo test` 326 passed + 3
+guard tests, `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .`
+0 errors.
 
 **M25.13 — "Text on the photo" moves where OCR is expected.**
 **Goal.** The left panel stops carrying a feature that is used once a month.

@@ -11170,30 +11170,6 @@ fn day_heading(ui: &mut egui::Ui, title: &str, files: usize, bytes: i64, lang: i
     ui.add_space(4.0);
 }
 
-/// The snapshots of one day under the calendar (M22.5): the date and its facts, then the files as
-/// a list with the time instead of the full date. Within one day the date part is noise, and the
-/// list is the view that shows the time and the size side by side; the owner's cell view is
-/// overridden for this strip only, so every other screen keeps his choice.
-fn day_strip(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    cs: &mut Cells,
-    key: &str,
-    idxs: &[usize],
-    items: &[FileRow],
-    lang: i18n::Lang,
-) {
-    let bytes: i64 = idxs.iter().map(|&i| items[i].size).sum();
-    day_heading(ui, &day_title(lang, key), idxs.len(), bytes, lang);
-    let style = cs.cell_style;
-    cs.cell_style = db::CellStyle::List;
-    cs.time_only = true;
-    let row: Vec<&FileRow> = idxs.iter().map(|&i| &items[i]).collect();
-    draw_files(ui, ctx, cs, &row);
-    cs.time_only = false;
-    cs.cell_style = style;
-}
-
 /// A text fragment with the matches: FTS5 marks them with « », the UI paints them with the accent.
 fn highlight_job(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     let normal = theme(ui).text;
@@ -14925,23 +14901,70 @@ impl eframe::App for App {
                                 });
                             }
                         }
-                        {
-                            hairline(ui);
-                            ui.add_space(8.0);
-                            match cal_day.as_deref().map(|d| (d, by_day.get(d))) {
-                                Some((day, Some(idxs))) if !idxs.is_empty() => {
-                                    day_strip(ui, ctx, &mut cells, day, idxs, &items, lang);
+                        // The photos of the picked period under the tiles (M25.12): the same cell
+                        // view as the grid, above a heading in the words of a month heading.
+                        let mut period: Vec<usize> = Vec::new();
+                        let title = match cal_scale {
+                            CalScale::Year => {
+                                let prefix = format!("{cal_year:04}-");
+                                for (day, ids) in &by_day {
+                                    if day.starts_with(&prefix) {
+                                        period.extend(ids);
+                                    }
                                 }
-                                Some(_) => {
-                                    ui.label(t(lang, "No files on this day."));
-                                }
-                                None => {
-                                    ui.label(t(
-                                        lang,
-                                        "Pick a day in the calendar — its photos appear below.",
-                                    ));
-                                }
+                                format!("{cal_year}")
                             }
+                            CalScale::Month => {
+                                let prefix = format!("{cal_year:04}-{cal_month:02}-");
+                                for (day, ids) in &by_day {
+                                    if day.starts_with(&prefix) {
+                                        period.extend(ids);
+                                    }
+                                }
+                                format!(
+                                    "{} {}",
+                                    i18n::month_name(lang, cal_month as usize),
+                                    cal_year
+                                )
+                            }
+                            CalScale::Week => {
+                                for d in 0..7i64 {
+                                    let key = (cal_week + chrono::Duration::days(d))
+                                        .format("%Y-%m-%d")
+                                        .to_string();
+                                    if let Some(ids) = by_day.get(&key) {
+                                        period.extend(ids);
+                                    }
+                                }
+                                week_range(lang, cal_week)
+                            }
+                            CalScale::Day => {
+                                let day = cal_day.clone().unwrap_or_else(|| {
+                                    chrono::Local::now()
+                                        .date_naive()
+                                        .format("%Y-%m-%d")
+                                        .to_string()
+                                });
+                                if let Some(ids) = by_day.get(&day) {
+                                    period.extend(ids);
+                                }
+                                day_title(lang, &day)
+                            }
+                        };
+                        hairline(ui);
+                        ui.add_space(8.0);
+                        if period.is_empty() {
+                            ui.label(t(lang, "No files in this period."));
+                        } else {
+                            let bytes: i64 = period.iter().map(|&i| items[i].size).sum();
+                            day_heading(ui, &title, period.len(), bytes, lang);
+                            // Within one day the date is the same on every caption, so the day
+                            // layer shows the time instead (M22.5's rule kept for the new list).
+                            cells.time_only = cal_scale == CalScale::Day;
+                            let row: Vec<&FileRow> =
+                                period.iter().map(|&i| &items[i]).collect();
+                            draw_files(ui, ctx, &mut cells, &row);
+                            cells.time_only = false;
                         }
                         if let Some(idxs) = by_day.get("no date") {
                             hairline(ui);
@@ -19872,13 +19895,87 @@ mod tests {
         );
     }
 
-    /// M22.5: the day list under the calendar is a list with the time, the name and the size — one
-    /// date for every row, so the date part is not repeated. The heading names the day itself.
+    /// M25.12: under the tiles of every layer stand exactly the files of its period, drawn by the
+    /// owner's cell view — the switch changes the drawing of every layer, not only of the grid.
     #[test]
-    fn the_day_strip_shows_the_time_name_and_size() {
-        let mut app = calendar_app();
-        app.cal_scale = CalScale::Month;
+    fn the_calendar_photos_are_exactly_the_periods() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-cal-periods.db"));
+        let names = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"];
+        let months = [
+            "2024-05-01T10:00",
+            "2024-05-02T10:00",
+            "2024-04-30T10:00",
+            "2023-06-01T10:00",
+        ];
+        app.items = names
+            .iter()
+            .zip(months)
+            .enumerate()
+            .map(|(i, (name, at))| {
+                let mut r = file_row(i as i64 + 1, "image", name);
+                r.taken_at = Some(at.into());
+                r
+            })
+            .collect();
+        app.settings.lang = i18n::Lang::En;
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
+        app.view = View::Calendar;
+        app.cal_year = 2024;
+        app.cal_month = 5;
+        app.cal_week = super::monday_of(
+            chrono::NaiveDate::from_ymd_opt(2024, 5, 1).expect("a valid date"),
+        );
         app.cal_day = Some("2024-05-01".into());
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 1200.0);
+        for (scale, expected) in [
+            (CalScale::Year, vec!["a.jpg", "b.jpg", "c.jpg"]),
+            (CalScale::Month, vec!["a.jpg", "b.jpg"]),
+            (CalScale::Week, vec!["a.jpg", "b.jpg", "c.jpg"]),
+            (CalScale::Day, vec!["a.jpg"]),
+        ] {
+            for style in [db::CellStyle::List, db::CellStyle::Tiles] {
+                app.cal_scale = scale;
+                app.settings.cell_style = style;
+                let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+                let drawn: Vec<&str> = names
+                    .iter()
+                    .copied()
+                    .filter(|n| texts.iter().any(|t| t == n))
+                    .collect();
+                assert_eq!(
+                    drawn, expected,
+                    "{scale:?} in {style:?} does not hold exactly its period: {texts:?}"
+                );
+                // The list draws "date · size" in one row; the tile caption keeps the date only.
+                // The day layer lists the time, because the date is the same on every row.
+                let row = if scale == CalScale::Day {
+                    "10:00 · 1 B"
+                } else {
+                    "2024-05-01 10:00 · 1 B"
+                };
+                let meta = texts.iter().any(|t| t == row);
+                assert_eq!(
+                    meta,
+                    style == db::CellStyle::List,
+                    "the cell view does not change {scale:?}: {texts:?}"
+                );
+            }
+        }
+    }
+
+    /// M25.12: on the day layer the photos of the day follow the tiles in the owner's cell view —
+    /// the list shows the time instead of the repeated date, above the day's heading.
+    #[test]
+    fn the_day_layer_shows_the_photos_of_the_day_in_the_cell_view() {
+        let mut app = calendar_app();
+        app.cal_scale = CalScale::Day;
+        app.cal_day = Some("2024-05-01".into());
+        app.cal_week = super::monday_of(
+            chrono::NaiveDate::from_ymd_opt(2024, 5, 1).expect("a valid date"),
+        );
+        app.settings.cell_style = db::CellStyle::List;
         let ctx = egui::Context::default();
         let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1200.0));
         assert!(
@@ -19900,16 +19997,27 @@ mod tests {
                 "no row “{needle}” in the day list: {texts:?}"
             );
         }
-        // The full date would be the caption of a grid tile; inside one day it is noise.
+        // The full date would repeat on every row of one day; the time is what tells them apart.
         assert!(
             !texts.iter().any(|t| t.contains("2024-05-01 09:10")),
             "the day list repeats the date: {texts:?}"
+        );
+        // The same files in the tile view are the same period, drawn by the same `draw_files`.
+        app.settings.cell_style = db::CellStyle::Tiles;
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1200.0));
+        assert!(
+            texts.iter().any(|t| t == "breakfast.jpg") && texts.iter().any(|t| t == "walk.jpg"),
+            "the tile view lost the day's photos: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t == "09:10 · 2.0 KiB"),
+            "the tile view still draws the list rows: {texts:?}"
         );
         // A day without files says so instead of drawing an empty list.
         app.cal_day = Some("2024-05-03".into());
         let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1200.0));
         assert!(
-            texts.iter().any(|t| t == "No files on this day."),
+            texts.iter().any(|t| t == "No files in this period."),
             "an empty day is silent: {texts:?}"
         );
     }
