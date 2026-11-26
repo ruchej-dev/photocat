@@ -386,6 +386,10 @@ const PAIRS: &[(&str, &str)] = &[
     ("FILTER", "ФИЛЬТР"),
     ("YEARS", "ГОДЫ"),
     ("All years", "Все годы"),
+    (
+        "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.",
+        "Поле буквальное: часть пути или даты в ISO без учёта регистра — «2024-05» найдёт май 2024, «vacation» — папку или файл с этим словом. Поиск по тому, что на фотографии, — в верхней полосе: «Смысловой / По тексту».",
+    ),
     ("clear the year filter", "снять фильтр по годам"),
     ("year:", "год:"),
     ("older than {}", "раньше {}"),

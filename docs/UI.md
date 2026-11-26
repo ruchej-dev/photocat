@@ -317,6 +317,17 @@ The full rules are in `.pi/skills/ui-design/references/vzaimodeystvie.md`. In sh
 - **Vocabulary:** file, snapshot, video, tile, group, face, tag, model, pass, index. One notion — one
   word in every view.
 
+### Filters
+
+- **The path/date field** is literal, not smart: the typed text is a case-insensitive substring of
+  the file path or of the ISO date, so "2024-05" finds May 2024 and "vacation" finds a folder or a
+  file whose path holds that word. The hint stays "2024-05, vacation"; the tooltip says the same in
+  words and names the field of the content search. A year click no longer writes into this field
+  (M25.2): the year cloud is a filter of its own, and the chips row draws the word and the year as
+  two chips with two "×".
+- **The content search is another field:** "Semantic / By text" in the top bar searches the meaning
+  (CLIP) or the recognized text (OCR), never the path.
+
 ## Findable in a second
 
 The rule: a needed function is visible without scrolling and without hovering and is done with
@@ -330,7 +341,7 @@ a rare one.
 | Search (semantic / by text) | top bar, row 2 | 1 |
 | Six views | left panel, two groups with numbers | 1 |
 | Copy comparison and manifest | "Integrity" → fields and buttons on the screen | 1 |
-| Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section | 0–1 |
+| Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section (the field's tooltip says what it compares) | 0–1 |
 | One year of the archive | left panel, the "Years" cloud: the five newest as chips and a "…" for the older years; the picked one in the accent, "All years" is the way back | 1 |
 | Active filters and reset | above the grid, chips with "×" | 1 |
 | Filter by a tag seen on a photo | the tag chips of the file card: a click on the word adds the tag to the filter, a second click removes it (the filter accumulates; the "×" removes the tag from the photo) | 1 |

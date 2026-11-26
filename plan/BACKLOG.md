@@ -1271,7 +1271,7 @@ on them.
    The card shows the coordinates; M25.9 adds "copy" and records the choice.
 
 **Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
-  the older ones, the kept "All years"); M25.3 the path/date field; M25.4 "No date" and "No preview"
+  the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 "No date" and "No preview"
   as filters; M25.5 the summary leaves; M25.6 the pinned threshold and no "Model settings";
   M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
   M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
@@ -1388,6 +1388,17 @@ in it.
 are drawn, each "×" removes exactly one; the tooltip is in `PAIRS` and reads in both languages.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**Done (2026-11-26).** The split itself came with M25.2: `set_year` writes `App::year_filter`, not
+`query`, and the chips row draws a year chip and a path chip with two "×". This task adds the field's
+tooltip (`PATH_DATE_HINT`, one source for the window and the test): the typed text is a
+case-insensitive part of the path or of the ISO date, with the two examples, and the content search
+is "Semantic / By text" in the top bar. The hint stays `2024-05, vacation`. `docs/UI.md` gained a
+§ Filters subsection that says the same and names the other field. Test:
+`the_path_word_and_the_year_are_two_filters_with_two_crosses` (the word and the year apply together —
+only `vacation-c.jpg` remains —, each chip's "×" removes exactly its own filter, and the tooltip is in
+`PAIRS` and reads in Russian). `cargo test` 315 passed + 3 guard tests, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
 
 **M25.4 — "No date" and "No preview" are filters.**
 **Goal.** The two numbers of the summary become two filters, and the preview count stops lying after

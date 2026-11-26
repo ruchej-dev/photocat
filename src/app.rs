@@ -668,6 +668,9 @@ const RIBBON_H: f32 = 44.0;
 const RADIUS_CTRL: f32 = 4.0;
 const RADIUS_ITEM: f32 = 6.0;
 const RADIUS_CARD: f32 = 8.0;
+/// The tooltip of the path/date field (M25.3): the filter is literal, and the content search lives
+/// in another field. One source for the hint and the test.
+const PATH_DATE_HINT: &str = "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.";
 /// The height of a year chip in the left panel's cloud (M25.2): a tag chip is 20 px, a year is
 /// 18 px, and the cloud stays dense enough to be seen without a scroll.
 const YEARS_CHIP_H: f32 = 18.0;
@@ -6649,7 +6652,8 @@ impl App {
             egui::TextEdit::singleline(&mut self.query)
                 .hint_text(t(lang, "2024-05, vacation"))
                 .desired_width(f32::INFINITY),
-        );
+        )
+        .on_hover_text(t(lang, PATH_DATE_HINT));
         ui.add_space(4.0);
         // The format is one choice instead of a checkbox: everything, photos or video (PhotoPrism: Images/Video).
         ui.horizontal(|ui| {
@@ -19942,6 +19946,69 @@ mod tests {
         assert!(app.query.is_empty());
         assert!(app.year_filter.is_none());
         assert_eq!(app.filtered().len(), 4, "all years are back");
+    }
+
+    /// M25.3: the path word and the year are two filters with two chips and two "×", and the
+    /// field explains itself before a key is pressed: the text is a case-insensitive part of the
+    /// path or of the ISO date, and the content search lives in the top bar.
+    #[test]
+    fn the_path_word_and_the_year_are_two_filters_with_two_crosses() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-path-year.db"));
+        let dated = |id: i64, path: &str, at: &str| {
+            let mut r = file_row(id, "image", path);
+            r.taken_at = Some(at.into());
+            r
+        };
+        app.items = vec![
+            dated(1, "trip-a.jpg", "2024-05-01T08:00"),
+            dated(2, "vacation-b.jpg", "2023-06-01T08:00"),
+            dated(3, "vacation-c.jpg", "2024-07-01T08:00"),
+        ];
+        app.settings.lang = i18n::Lang::En;
+        app.query = "vacation".into();
+        app.set_year(Some(super::YearPick::Year("2024".into())));
+        let visible: Vec<String> = app
+            .filtered()
+            .iter()
+            .map(|&i| super::file_name(&app.items[i].path))
+            .collect();
+        assert_eq!(
+            visible,
+            ["vacation-c.jpg"],
+            "the word and the year apply together: {visible:?}"
+        );
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let word = |app: &mut App, want: &str| {
+            window_word_rects_at(app, &ctx, size)
+                .into_iter()
+                .find(|(text, _)| text == want)
+                .unwrap_or_else(|| panic!("“{want}” is not drawn"))
+                .1
+        };
+        let r = word(&mut app, "path/date: vacation ×");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.query.is_empty(), "the path chip removes the word");
+        assert_eq!(
+            app.year_filter,
+            Some(super::YearPick::Year("2024".into())),
+            "the year survives the word"
+        );
+        let r = word(&mut app, "year: 2024 ×");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.year_filter.is_none(), "the year chip removes the year");
+        // The tooltip is in the table and reads in both languages.
+        let ru = i18n::t(i18n::Lang::Ru, super::PATH_DATE_HINT);
+        assert_ne!(ru, super::PATH_DATE_HINT, "the hint is not in PAIRS");
+        assert!(
+            ru.chars().any(|c| c.is_alphabetic() && !c.is_ascii()),
+            "the hint is not translated: {ru}"
+        );
+        assert_eq!(
+            i18n::t(i18n::Lang::En, super::PATH_DATE_HINT),
+            super::PATH_DATE_HINT
+        );
     }
 
     /// M25.2: the cloud keeps the five newest years and a "…" that filters exactly the older
