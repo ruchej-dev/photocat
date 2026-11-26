@@ -1792,3 +1792,196 @@ changes a measurement.
 
 **Files.** `src/app.rs`, `src/storage.rs`, `src/index.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`, `plan/`.
+
+---
+
+## M26 — the Windows build review: folders that can be switched off, limited features, and a layout that survives a narrow window (planned 2026-11-26)
+
+**Goal.** The owner ran the Windows release and wrote down what is wrong or missing. A folder of the
+archive can be switched off without losing its rows; a limited feature says so before the owner
+finds out; the app finds installed programs instead of asking for paths; the Windows top strip is
+as tall as the design says; the face settings live on the People screen; and the layout does not
+fall apart when the window is narrow.
+
+**Source.** The owner's message of 2026-11-26 with the screenshot
+`/home/alx/Pictures/Screenshots/Screenshot from 2026-11-26 22-18-14.png` (Windows, 2539 px wide,
+the top strip visibly taller than 32 logical px) and the report "при узком окне вся вёрстка плывёт,
+элементы в центральной части наезжают друг на друга".
+
+**Tasks.** M26.1 folders can be switched off; M26.2 a warning mark for a limited feature and its
+info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
+M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window.
+
+**M26.1 — an archive folder can be switched off without losing its rows.**
+**Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
+back with one switch, no re-index.
+
+**Acceptance criteria.**
+1. A new `settings` key `roots_off` holds the switched-off paths in the same one-string form as
+   `roots` (`settings.roots`); an empty value means every folder is on. No schema change, no
+   `SCHEMA_VERSION` bump.
+2. The "Folders" dialog gives every root a switch ("shown" / "off") with the hint "off: its files
+   are hidden from every view; the rows, the previews and the files on disk stay". A switched-off
+   folder shows its state in the list (dimmed path, the word "off") and a "Turn on" / "Turn off"
+   action, not a delete.
+3. One filter, one place: `App::reload` drops the rows under a switched-off root before they reach
+   `items`, so the grid, the calendar, the albums, duplicates, faces, the trash, the semantic
+   search, the counters of the navigation and the status bar all see the same visible set. The
+   counters that come from the DB alone (face photos, OCR files, the trash) are recomputed over the
+   visible set.
+4. Indexing skips a switched-off root (no new rows), and a re-enable needs no pass: the rows are
+   still there. Background passes may keep the whole index up to date — the switch is about showing,
+   not about deleting (state that in the hint and `docs/ARCHITECTURE.md`).
+5. The CLI `stats` names the switched-off folders and counts their files separately from the shown
+   ones; `index` says that a switched-off folder was skipped.
+6. `docs/UI.md` § Screens (the folders dialog) and `docs/ARCHITECTURE.md` (the settings keys) are
+   updated.
+
+**Acceptance.** A test with two roots: switching one off hides exactly its files from `items`, the
+grid and the counters; switching it back restores them without a single file read; the DB rows and
+`thumbs/` are intact; a headless frame shows the switch in the dialog.
+
+**Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `src/main.rs`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`.
+
+**M26.2 — a limited feature shows a warning mark, and the mark explains itself.**
+**Goal.** The owner sees that something is limited before hunting for the reason, and one click
+tells what is lost and what to do — per operating system.
+
+**Acceptance criteria.**
+1. When at least one external program is missing (`ffmpeg`, `ffprobe`, `tesseract` — the same
+   detection `doctor` uses), the status bar shows a warning mark (a new `Icon::Warning` glyph with
+   its contact-sheet entry) next to the state word, with the hint "some features are limited —
+   click for the details". No mark when all are found.
+2. A click opens an info dialog: one line per missing program — what is disabled (video covers,
+   duration, resolution; text on photos), and how to fix it on the system in use. The dialog is
+   built from the running OS (`cfg!(target_os)`, not a guessed string) and shows the command to
+   copy and the path in "Settings":
+   - Arch: `sudo pacman -S ffmpeg tesseract tesseract-data-rus tesseract-data-eng`;
+   - Debian/Ubuntu: `sudo apt install ffmpeg tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng`;
+   - Windows: `winget install Gyan.FFmpeg` and `winget install UB-Mannheim.TesseractOCR` (the
+     installer offers the rus/eng packs), or the official download pages;
+   - macOS: `brew install ffmpeg tesseract tesseract-lang`.
+   The text says that the app itself installs and downloads nothing, and points at "Find the
+   programs" (M26.3) and the path fields.
+3. No network call and no browser opened by the app: the command is copied to the clipboard, the
+   download pages are named in the text, not opened.
+4. The dialog and the mark are translated, in `PAIRS`, and the mark disappears in the same frame the
+   programs become available (after "Find the programs" or a path is saved).
+5. The per-block honest lines ("videos without ffmpeg", "tesseract does not start") stay as they are.
+
+**Acceptance.** With `tesseract` missing the mark appears and the dialog names OCR only; with all
+three found there is no mark; a click opens the dialog (a headless test), the OS-specific line is
+chosen by the target, and the text is in both languages.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `src/tools.rs`, `docs/UI.md`.
+
+**M26.3 — "Find the programs": one press instead of typing paths.**
+**Goal.** The owner does not need to know where the system keeps `ffmpeg` and `tesseract`.
+
+**Acceptance criteria.**
+1. A "Find the programs" button in "Settings → External programs" (and in "Text on photos" for the
+   same search) looks for each program in this order: a non-empty field the owner already set, the
+   `PATH`, then the standard places of the system —
+   - Windows: `%ProgramFiles%\ffmpeg\bin`, `%ProgramFiles%\tesseract-ocr`, `%LOCALAPPDATA%\Programs`,
+     `%LOCALAPPDATA%\Microsoft\WinGet\Links`, scoop/chocolatey shims;
+   - Linux: `/usr/bin`, `/usr/local/bin`, `/opt/*/bin`;
+   - macOS: `/opt/homebrew/bin`, `/usr/local/bin`.
+2. It fills only empty fields — an explicit path is never overwritten — then runs the same version
+   check as "Check and save the programs" and reports one line per program: "found ffmpeg 6.1 at
+   …" / "not found: tesseract".
+3. It never installs and never downloads; when something is not found, it names the package for the
+   system (the same OS-specific lines as M26.2) and says to press again after installing.
+4. The button is disabled while a check is running; a missing program does not stop the others.
+5. A unit test covers the candidate list (field, `PATH`, standard places) and the empty-only rule
+   with a temporary directory and a fake program file.
+
+**Acceptance.** On a machine with the programs in `PATH`, one press fills all three fields and shows
+the versions; a set field is not overwritten; a missing one is named with the package to install; no
+network call.
+
+**Files.** `src/app.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**M26.4 — the Windows top strip is as tall as the design says.**
+**Goal.** The strip is exactly `TOP_H` (32 logical px) with its bottom line at any Windows scaling;
+the screenshot shows it roughly twice that.
+
+**Acceptance criteria.**
+1. Measure the strip at 100, 125, 150 and 200 % Windows scaling (the screenshot is 2539 px wide, the
+   strip's band is visibly above `TOP_H`) and name the child that raises the top panel above it
+   (the search well, the tile pill, a spacing constant or a `pixels_per_point` rounding).
+2. The top strip is 32 logical px plus the 1 px line; the content panel begins right below it; no
+   dead band between the strip and the ribbon. The OS title bar is the system's own and is not
+   counted or styled.
+3. The strip's height is computed in logical pixels and does not depend on `pixels_per_point`; the
+   search field, the "Tiles" pill, the details toggle and "Settings" stay on its one row at every
+   scale and never overlap.
+4. A headless test renders the window at `pixels_per_point` 1.0, 1.5 and 2.0 and asserts the band's
+   height is `TOP_H`; the existing top-strip width test follows.
+5. `docs/UI.md` § Metrics (the top strip) states the height and the rule.
+
+**Acceptance.** The measured band equals 32 logical px at every scale; the Windows screenshot's
+band is gone; the test per scale; the owner's review on the real window.
+
+**Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**M26.5 — the face settings live on the People screen.**
+**Goal.** The People screen owns its model, threshold and passes, as the calendar owns its layers —
+the settings dialog stops carrying a second screen for one view.
+
+**Acceptance criteria.**
+1. The "People" settings pane moves onto the People screen: the model state and its licence, the
+   consent, "Download the face model" with the progress and "Stop", the merge threshold and "Rebuild
+   groups" (the threshold applies to unpinned faces; names and splits are kept). The screen's layout
+   follows `.pi/skills/ui-design` and `docs/UI.md` — a control row above the group list or a
+   `card_block`, not a dialog inside the screen.
+2. The list of settings sections loses "People"; `SettingsTab::Faces` and its `settings_faces` pane
+   are removed; the section-list test, the pane translation test and `docs/UI.md` § Settings follow.
+3. The face pass and its progress row in the top strip behave as before; the right panel keeps the
+   list of groups (M22.26).
+4. Nothing about the archive, the DB schema or the face tables changes.
+
+**Acceptance.** No "People" section in Settings; the People screen carries the model download with
+consent, the threshold and "Rebuild groups"; the pass starts, stops and reports; a headless frame of
+the screen in both languages.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**M26.6 — the layout survives a narrow window.**
+**Goal.** At any width from 700 to 2539 px no control overlaps another, nothing is cut off and the
+grid recomputes its columns — the owner's "при узком окне вся вёрстка плывёт" is gone.
+
+**Acceptance criteria.**
+1. The breakpoints are written down in `docs/UI.md` § Layout and implemented once: ≥1600 both side
+   panels, 1200–1600 the right panel still on its own, <1200 the card moves into the left panel,
+   <900 the ribbon wraps to two rows and the cell-view/layout/sort controls wrap instead of
+   colliding, <700 the least important ribbon controls move into the "Sort" menu or disappear with a
+   hint; the left panel scrolls and never clips its pinned part.
+2. The content ribbon is one row at a wide window and wraps at a narrow one; the view title and its
+   facts never run under the controls (the owner's screenshot shows them on one line, and at a
+   narrow width they collide). The filter chips row wraps too.
+3. Every dialog is at most the window width minus the margins and scrolls its body; the right panel
+   is hidden when there is no room; nothing is painted outside the window at any size.
+4. A test renders the window at 700×600, 900×700, 1100×800, 1240×840, 1691×1021 and 2539×1000 and
+   asserts: no rectangle outside the window; no two interactive targets overlap (overlays and
+   popups excepted); the view title, the cell views, the layout switch and "Sort" are inside the
+   content panel and do not overlap.
+5. `docs/UI.md` § Layout, the `ui-design` skill's normative layout and the panel-budget numbers are
+   updated; the measurements go to `plan/STATUS.md`.
+
+**Acceptance.** The six frames pass the overlap and bounds tests; a screenshot at 900×700 shows a
+readable central panel; the owner's review on the real window.
+
+**Files.** `src/app.rs`, `docs/UI.md`, `.pi/skills/ui-design/SKILL.md`, `plan/STATUS.md`.
+
+**Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
+or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
+is enough); a responsive web-style reflow of every screen (the six breakpoints are the contract).
+
+**Checks for every task.** `cargo test`, `cargo clippy --all-targets`,
+`cargo test --test source_language`, `bash .pi/skills/enforce-architecture/scripts/check.sh`, a
+headless frame of the changed screen at 1240×840 (and at the narrow sizes for M26.6), and the
+numbers in `plan/STATUS.md` when a measurement changes.
+
+**Files.** `src/app.rs`, `src/db.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`, `plan/`.
