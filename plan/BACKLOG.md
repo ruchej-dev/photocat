@@ -1236,3 +1236,324 @@ dependency is `ureq` + `rustls`, the binary grew by 2.4 MB.
 
 **Files.** `src/embed.rs`, `src/tools.rs`, `src/app.rs`, `README.md`, `docs/DECISIONS.md`,
 `plan/STATUS.md`.
+
+---
+
+## M25 — the left panel, the calendar and the card after the owner's review (planned 2026-11-26)
+
+**Goal.** The owner read the window of M22.29 and wrote down what does not speak for itself. The
+left panel must explain itself without a manual: a filter accumulates, every reset stands where its
+filter was set, the numbers say what they count, and every action carries a hint. The calendar
+becomes four period layers instead of one mixed layer, and the photos under the period obey the
+cell view. The answers to the questions the owner asked stand first, next to the tasks that build
+on them.
+
+**Answers (what the questions were about).**
+1. "Search by path or date" is literal, not smart: a case-insensitive substring of the path or of the
+   ISO date (`2024-05` — May 2024, `vacation` — a folder or a file whose name contains it). Search
+   by the content of a photo is the top bar's field with the "Semantic / By text" mode. Today a
+   year click writes the year into this field, so the two look like one control — M25.3 separates
+   them.
+2. "No preview" is a file whose preview could not be built or is no longer in the cache: HEIC/AVIF
+   (`image` cannot read them), a broken JPEG/PNG, a video without a cover (no `ffmpeg` or an ffmpeg
+   error), or previews cleared in "Settings → Storage". The tile says "no preview". The summary
+   counts `files.thumb IS NULL`, which stops being true after a cache cleanup — M25.4 makes the
+   count honest and lets a re-index bring the previews back.
+3. "Synced / Syncing" is not a synchronisation: it says that a background pass is running (indexing,
+   CLIP, OCR, faces, the trash, an export, an integrity check) or that none is. Nothing is sent
+   anywhere. It says nothing about the archive, so it moves into the status bar with a tooltip that
+   names the passes — M25.8.
+4. "Start indexing" walks the folders, reads only new and changed files (path + size + mtime decide)
+   and writes to the cache DB and `thumbs/`; "Refresh" re-reads the DB into the window and reads no
+   file; neither touches the archive. Both get a tooltip that says exactly this — M25.7.
+5. A place name is not in a photograph: EXIF carries the coordinates only. A name needs a reverse
+   geocoder — the network (forbidden by §1) or an offline data set (a new dependency and an ADR).
+   The card shows the coordinates; M25.9 adds "copy" and records the choice.
+
+**Tasks.** M25.1 the accumulating tag filter; M25.2 the year cloud (the five newest years, "…" for
+  the older ones, the kept "All years"); M25.3 the path/date field; M25.4 "No date" and "No preview"
+  as filters; M25.5 the summary leaves; M25.6 the pinned threshold and no "Model settings";
+  M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
+  M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
+  M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
+
+**M25.1 — the tag filter accumulates.**
+**Goal.** A click adds a tag, a second click removes it; a reset is one click on the picked tag or
+one reset control, not a permanent "all tags" cell.
+
+**Acceptance criteria.**
+1. `tag_filter: Option<String>` becomes `tag_filters: Vec<String>`, sorted and without duplicates;
+   an empty set means "no tag filter". A file passes only when it carries **every** picked tag above
+   that tag's threshold (AND); a word that exists both as a CLIP tag and as an own tag keeps
+   matching both.
+2. One rule in every tag cloud: the left panel chips, the AI tags and the own tags of the file card
+   (M22.17), and the filter chips row above the grid — one chip per tag there.
+3. The "all tags" chip is gone. A caps heading "Tags" carries a bare 20 px `Icon::Close` target at
+   its right with the hint "reset the tag filter", drawn only while at least one tag is picked
+   (the folder block's "+" pattern).
+4. A chip's number keeps its meaning — how many photos carry this tag above its threshold, not the
+   size of the intersection — so the promise "this click shows N photos" stays true and the row
+   never moves on a click.
+5. The card chip's hint becomes "add this tag to the filter" / "remove this tag from the filter".
+
+**Acceptance.** "sea" then "document" → both chips lit, the grid holds only photos with both; a
+second click on "sea" leaves "document"; the reset clears the set; the chips row shows both tags
+and each "×" removes exactly one; one test covers the panel cloud and one the card.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**M25.2 — the year cloud: the newest years, "…" for the rest, and the kept "All years".**
+**Goal.** The cloud stays short and dense — the five newest years, an ellipsis that filters the
+older ones, the counts in the hint, and "All years" as the way back (the owner's word of
+2026-11-26: "keep the All years button and add an ellipsis that works as a filter — all the rest of
+the years").
+
+**Acceptance criteria.**
+1. Every drawn year is a wrapped chip instead of the 3-column 20 px rows: mono 11, 18 px, the width
+   from the text, 4 px gaps — the geometry of a tag chip, so the block is dense.
+2. The cloud holds the five newest years. A sixth chip "…" appears only when the index has older
+   years and narrows the grid to exactly those older years; the year filter becomes
+   `year_filter: Option<YearPick>` — one year or "older than the oldest year in the cloud" —
+   matched against the prefix of `taken_at`. The "…" is a filter, not an expander: the cloud never
+   grows.
+3. No number is drawn inside a chip; the hover hint says "2019 · 1 234 files" through `i18n::count`;
+   the "…" hint says "older than 2019 · N files" and names the range of the old years.
+4. "All years" stays, drawn only while a year or the "…" is picked (as in M22.3): it clears the year
+   filter. No second reset stands next to the "Years" heading — the owner kept this chip as the way
+   back, and two controls that clear the same filter are one too many.
+5. The year no longer writes into the path/date field (M25.3); the chips row shows "year: 2019 ×" or
+   "older than 2019 ×".
+6. `year_counts` returns every year of the index; the block takes the five newest for the cloud and
+   knows whether the rest exists.
+
+**Acceptance.** An archive of 2004–2024 draws five years and "…"; the "…" shows only the files of
+2004–2019; a second click on the picked year or on "…" clears the pick; "All years" clears either;
+the count lives only in the hint; a typed path word survives a year click; a headless 1240×840
+frame draws the cloud without growing the pinned part; the M22.3 panel budget is measured again and
+written to `plan/STATUS.md`.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**M25.3 — the path/date field explains itself.**
+**Goal.** The owner knows what the field compares before typing into it, and the year stops living
+in it.
+
+**Acceptance criteria.**
+1. The label stays "Search by path or date"; the field carries a tooltip: the typed text is a
+   case-insensitive substring of the path and of the ISO date, with the two examples "2024-05" and
+   "vacation", plus where the content search lives ("Semantic / By text" in the top bar).
+2. The year no longer writes into `query` (M25.2): `pick_year` becomes a setter of `year_filter`, and
+   the chips row shows the year and the path word as two chips with two "×".
+3. The hint text stays "2024-05, vacation"; `docs/UI.md` § Filters describes the field and says that
+   a word search by content is another field.
+
+**Acceptance.** A test types "vacation" and picks a year: both filters apply together, both chips
+are drawn, each "×" removes exactly one; the tooltip is in `PAIRS` and reads in both languages.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**M25.4 — "No date" and "No preview" are filters.**
+**Goal.** The two numbers of the summary become two filters, and the preview count stops lying after
+a cache cleanup.
+
+**Acceptance criteria.**
+1. Two toggle chips in the left panel filter block, under the kind row: "No date · N" and "No
+   preview · N", the 20 px chip of a tag, the picked one on the accent, dimmed and disabled at
+   zero.
+2. They narrow the grid together with the rest and with each other: "no date" = `taken_at IS NULL`;
+   "no preview" = `files.thumb IS NULL` **or the preview is not on disk** (the check runs once per
+   `reload`, not per frame).
+3. `storage::clear_thumbs` also runs `UPDATE files SET thumb = NULL`: a cleared cache must be
+   healed by the next index. Today the skip rule (`can_skip` asks `thumb`) sees the old path, skips
+   the file and the preview never comes back — `docs/ARCHITECTURE.md` § Indexing flow says "until a
+   re-index", which is not true yet. No new column, so `SCHEMA_VERSION` is not bumped.
+4. The hint of "No preview" names the four causes (HEIC/AVIF, a broken file, a video without a
+   cover, cleared previews) and the way back ("index the folder again").
+5. The counts are taken over the whole index, not over the current filter.
+
+**Acceptance.** On a folder with one HEIC and a video indexed without `ffmpeg` the chips show the
+count and a click shows exactly those files; after "Settings → Storage → Clear the previews" the
+count equals the number of files, and one `index` pass nulls to zero and rebuilds every preview;
+tests cover `clear_thumbs` + `can_skip` and the filter.
+
+**Files.** `src/app.rs`, `src/storage.rs`, `src/index.rs`, `src/i18n.rs`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`.
+
+**M25.5 — the summary leaves the left panel.**
+**Goal.** No doubled numbers and no block that only repeats the status bar.
+
+**Acceptance criteria.**
+1. "Summary" is removed from the left panel in both layouts: the pinned bottom of a wide window and
+   the block after the card in a narrow one.
+2. Files and size are already in the status bar (`N files · X`), so nothing moves there; the other
+   three numbers (no date, no preview, videos without a cover) become the counts of the M25.4 chips;
+   "videos without a cover" is a subset of "no preview" and is named in that chip's hint.
+3. "press “Index” — ffmpeg will create the covers" moves into the same hint.
+4. The panel budget test and the translation test of the panel are updated; the frame gains the
+   40 px the summary took.
+
+**Acceptance.** "Summary" appears in neither language; the status bar keeps one row; no number is
+printed twice; a 1240×840 frame shows the tag cloud, the years and the model block with the summary
+gone.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**M25.6 — the threshold is pinned; the model is set in Settings only.**
+**Goal.** The threshold slider never scrolls away, and the left panel stops being a second settings
+screen.
+
+**Acceptance criteria.**
+1. The tag threshold (the slider, its percentage, the "few tags" and "no tag passes the threshold"
+   notes) leaves `model_block` and is drawn in the pinned part of the left panel, under the kind and
+   the two new filter rows and directly above the scroll.
+2. The tag cloud becomes the first block of the scroll, so the threshold stands next to the chips it
+   cuts; the years and the model block follow. M22.3's "the years open the scrolling part" is undone
+   on purpose, and its measurement is redone.
+3. The "Model settings" button leaves the panel: the model's path, size limit and choice live only
+   in "Settings → AI model". The model state and "Compute tags" stay in the block.
+4. The threshold's tooltip keeps the percentile explanation and says what the slider does to the
+   cloud below it.
+
+**Acceptance.** At 840 px the slider is visible without a scroll and stays put while the cloud
+scrolls; no "Model settings" in the panel; the settings dialog is the only route to the model; the
+panel budget is measured and recorded.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**M25.7 — the two archive buttons explain themselves.**
+**Goal.** "Start indexing" and "Refresh" say what they do before a click.
+
+**Acceptance criteria.**
+1. "Start indexing"'s tooltip: it walks the folders, reads only new and changed files (path + size +
+   mtime), computes the hash, the date, the dimensions, the sharpness and a preview, gives a video a
+   cover through `ffmpeg`, writes to the cache only, can be stopped and resumed, and changes nothing
+   on disk.
+2. "Refresh"'s tooltip: it re-reads the database into the window, reads no file, indexes nothing and
+   changes nothing; it is for a change made by the CLI or in another window.
+3. Both strings go through `t()`; `docs/UI.md` names both in the controls.
+
+**Acceptance.** Both tooltips read in both languages and match the code (`index::can_skip`,
+`App::reload`); `cargo test --test source_language` passes.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**M25.8 — the state word moves from the strip into the status bar.**
+**Goal.** "Synced" stops looking like a synchronisation feature and says where it belongs.
+
+**Acceptance criteria.**
+1. The "Synced / Syncing" pill leaves the top strip; the width it took goes to the search field.
+2. The status bar carries the state: its dot and word name the running pass ("Indexing", "CLIP",
+   "OCR", "People", "Trash", "Export", "Integrity"); two or more passes show "N passes"; when
+   nothing runs the last status message stays as it is.
+3. The hint lists all seven passes that `busy()` counts and says that their progress rows are in the
+   top strip under the search field.
+4. `sync_word` becomes the status bar's word; the top-strip width test and the translation test
+   follow.
+
+**Acceptance.** The strip has no state pill at 1240 px; the bottom bar names the running pass within
+one frame; the hint names all seven; the search field is wider by the pill's former width.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**M25.9 — the location row: the coordinates, and the place-name question.**
+**Goal.** The card shows what a photo itself knows about its place, and the missing half is named
+instead of faked.
+
+**Acceptance criteria.**
+1. The "Location" row of the card keeps the EXIF coordinates (5 decimals) and gains a copy target
+   with the hint "copy the coordinates".
+2. The hint says that a place name is not in the file, and why: a name needs a reverse geocoder —
+   the network is forbidden by §1 of `AGENTS.md`, an offline data set is a dependency and an ADR.
+3. The choice is recorded in `docs/DECISIONS.md` as an open question for the owner: no place name /
+   an offline data set (size, license, what it covers — country, region or city) / a lookup by an
+   explicit click, which sends the coordinates and therefore needs a change of the rule.
+4. No map link and no network call in this task.
+
+**Acceptance.** A photo with GPS shows "Location", the coordinates and a working copy; a photo
+without GPS shows no row; nothing opens a browser; a test covers both rows.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/DECISIONS.md`.
+
+**M25.10 — the calendar's year and month layers.**
+**Goal.** "Year" shows years, "Month" shows the months of the chosen year.
+
+**Acceptance criteria.**
+1. "Year" draws the years of the archive as tiles, newest first: the year, the count, the size, the
+   volume bar against the fullest year and the year's first snapshot as the cover; a click picks a
+   year, a double click opens its months.
+2. "Month" draws the twelve month cards of the picked year — the layer that "Year" draws today
+   (count, size, cover, volume, empty months dimmed, "Go to the nearest month with files").
+3. The arrows step by the layer's own unit (a year, a month with files); "Today" picks today's year
+   and month and lands on the layer it can keep.
+4. The ribbon's facts name the layer: the years of the archive, "2024", "May 2024", "12–18 May".
+
+**Acceptance.** Each tab draws the tiles of its own period; the number of tiles matches the period; the picked one is on the accent; a double click drills one
+layer down; a headless frame and the M22.5 measurement are redone on the corpus.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**M25.11 — the calendar's week and day layers.**
+**Goal.** "Week" shows the weeks of the chosen month, "Day" the days of the chosen week.
+
+**Acceptance criteria.**
+1. "Week" draws the weeks that touch the picked month as 4–6 tiles: the date range (a week that
+   starts in the previous month says so), the count, the size, the first snapshot as the cover and
+   the volume bar.
+2. "Day" draws the seven days of the picked week: the weekday and the date, the count, up to three
+   thumbs and the volume bar; a double click on a day ends the drill-down.
+3. The arrows step by week and by day; "Today" lands on today's week and day.
+
+**Acceptance.** The week tiles cover the month exactly once; the day tiles are Monday–Sunday of the
+picked week; a click picks, a double click opens the photos below; one test per layer.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**M25.12 — the photos of the period obey the cell view.**
+**Goal.** The "Tile / Rows / List" switch works on the calendar, on the photos under the period.
+
+**Acceptance criteria.**
+1. Under the tiles, the photos of the picked period are drawn by `draw_files` with the ribbon's cell
+   view: the year for the year layer, the month for the month layer, the week and the day; the
+   heading "May 2024 · 132 files · 5.4 GiB" stands above them.
+2. The fixed `day_strip` and the day-only footer are gone; the switch now changes the calendar
+   visibly.
+3. "No date" stays a collapsible group at the bottom of the year layer.
+4. One `ScrollArea` for the calendar as before, the photos follow the tiles inside it.
+
+**Acceptance.** Switching the cell view changes the photos of every layer in the same frame; the
+photos are exactly the files of the period (a test per layer); the year layer over the corpus stays
+inside a 60 fps frame, and the M22.5 measurement is redone with the photos in it.
+
+**Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`, `docs/ARCHITECTURE.md` § Measurements.
+
+**M25.13 — "Text on the photo" moves where OCR is expected.**
+**Goal.** The left panel stops carrying a feature that is used once a month.
+
+**Acceptance criteria.**
+1. The OCR block (the tesseract state, the recognized counts, the candidates left, "Recognize
+   documents / Resume (N) / Stop") leaves the left panel.
+2. A new "Settings → Text on photos" pane holds the state and the run, and the `tesseract` path and
+   the language packs move there from "External tools", which keeps `ffmpeg`/`ffprobe`; the pane
+   explains the candidate rule and says that without tesseract the button is disabled.
+3. The per-photo button in the file card stays. The "By text" mode of the top search, when nothing
+   is recognized, points at the pane instead of saying "no recognized text yet" alone.
+4. The "OCR" progress row and its Stop behave as before.
+5. The new strings are in `PAIRS`, the settings tab list and `docs/UI.md` § Settings.
+
+**Acceptance.** The left panel has no OCR block; the new pane starts, stops and resumes a pass; a
+clean cache disables the button with one honest line; the 357-candidate corpus pass runs from the
+pane.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**Not doing.** Renaming or deleting originals; a network geocoder or a map link; tag filters that
+combine with OR; a permanent "all tags" or "all years" cell; a third theme; sending coordinates
+anywhere.
+
+**Checks for every task.** `cargo test`, `cargo clippy --all-targets`,
+`cargo test --test source_language`, `bash .pi/skills/enforce-architecture/scripts/check.sh`, a
+headless 1240×840 frame of the changed screen, and a number in `plan/STATUS.md` when the task
+changes a measurement.
+
+**Files.** `src/app.rs`, `src/storage.rs`, `src/index.rs`, `src/i18n.rs`, `docs/UI.md`,
+`docs/DECISIONS.md`, `docs/ARCHITECTURE.md`, `plan/`.
