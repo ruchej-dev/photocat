@@ -9089,11 +9089,33 @@ fn fit_rect(bounds: egui::Rect, size: egui::Vec2) -> egui::Rect {
     egui::Rect::from_center_size(bounds.center(), size * scale)
 }
 
+/// The tile filling: the picture covers the whole frame keeping its proportions, so the sides that
+/// do not fit are cut evenly on both edges (never stretched) — the mock-up's 4:3 crop (M22.15).
+/// The result is wider or taller than the frame, so a painter of this picture clips it to the frame.
+fn cover_rect(bounds: egui::Rect, size: egui::Vec2) -> egui::Rect {
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return bounds;
+    }
+    let scale = (bounds.width() / size.x).max(bounds.height() / size.y);
+    egui::Rect::from_center_size(bounds.center(), size * scale)
+}
+
 /// The offset of a zoomed frame: the frame does not leave the edges of the area, and when it
 /// is fitted (one of the sides is not bigger than the area) it is centred along that side.
 fn clamp_pan(pan: egui::Vec2, image: egui::Vec2, area: egui::Rect) -> egui::Vec2 {
     let room = ((image - area.size()) / 2.0).max(egui::Vec2::ZERO);
     egui::vec2(pan.x.clamp(-room.x, room.x), pan.y.clamp(-room.y, room.y))
+}
+
+/// How a preview sits in the frame it is drawn into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ThumbFit {
+    /// The whole frame: the picture is fitted and the margins remain (the calendar, the series
+    /// strip, the album cover, the file card — a preview is never cropped there).
+    Whole,
+    /// The whole tile: the picture fills the frame edge to edge and the sides that do not fit are
+    /// cut (the grid tile, M22.15).
+    Filling,
 }
 
 /// One way to draw a preview: the grid, the calendar and the day thumbnails all use it.
@@ -9104,6 +9126,28 @@ fn paint_thumb(
     cs: &mut Cells,
     f: &FileRow,
     rect: egui::Rect,
+) -> bool {
+    paint_thumb_as(ui, ctx, cs, f, rect, ThumbFit::Whole)
+}
+
+/// A preview that fills its frame: used by the grid tile only (M22.15).
+fn paint_thumb_filling(
+    ui: &egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    f: &FileRow,
+    rect: egui::Rect,
+) -> bool {
+    paint_thumb_as(ui, ctx, cs, f, rect, ThumbFit::Filling)
+}
+
+fn paint_thumb_as(
+    ui: &egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    f: &FileRow,
+    rect: egui::Rect,
+    fit: ThumbFit,
 ) -> bool {
     if !cs.textures.contains_key(&f.id) && !cs.missing.contains(&f.id) {
         if cs.budget == 0 {
@@ -9125,9 +9169,16 @@ fn paint_thumb(
         }
     }
     if let Some(t) = cs.textures.get(&f.id) {
-        ui.painter().image(
+        let size = t.size_vec2();
+        let dst = match fit {
+            ThumbFit::Whole => fit_rect(rect, size),
+            ThumbFit::Filling => cover_rect(rect, size),
+        };
+        // A filling picture is bigger than the frame on one side: the frame clips the cut-off part.
+        let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+        painter.image(
             t.id(),
-            fit_rect(rect, t.size_vec2()),
+            dst,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
@@ -10460,9 +10511,9 @@ fn draw_files(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     }
 }
 
-/// The main view from the mock-up: tiles of equal width, a 4:3 frame, the photo fitted
-/// whole (neither stretched nor cropped), a caption strip under the frame. The columns split
-/// the width of the area, as `grid-cols-6` does in the mock-up.
+/// The main view from the mock-up: tiles of equal width, a 4:3 frame, the photo filling the
+/// whole frame (the sides that do not fit are cut, never stretched), a caption strip under the
+/// frame. The columns split the width of the area, as `grid-cols-6` does in the mock-up.
 fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&FileRow]) {
     if files.is_empty() {
         return;
@@ -10474,13 +10525,13 @@ fn draw_tiles(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&
     let w = ((avail - gap * (per_row.saturating_sub(1)) as f32) / per_row as f32)
         .floor()
         .max(24.0);
-    // The 4:3 frame is the proportion of the mock-up tile; the photo is fitted into it whole.
+    // The 4:3 frame is the proportion of the mock-up tile; the photo fills it (M22.15).
     let h = (w * 0.75).round();
     for row in files.chunks(per_row) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
             for &f in row {
-                draw_cell(ui, ctx, cs, f, w, h);
+                draw_cell(ui, ctx, cs, f, w, h, ThumbFit::Filling);
             }
         });
         ui.add_space(gap);
@@ -10686,7 +10737,7 @@ fn draw_flow(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
             for &f in &files[i..i + n] {
                 let w = (h * frame_aspect(f)).round().clamp(24.0, avail);
-                draw_cell(ui, ctx, cs, f, w, h);
+                draw_cell(ui, ctx, cs, f, w, h, ThumbFit::Whole);
             }
         });
         ui.add_space(gap);
@@ -10725,8 +10776,18 @@ fn caption_name(
 }
 
 /// A file tile: the card = the frame (w×h) + a 22 px caption strip (mock-up: thumbnail
-/// card). The frame fills the tile completely: the tile proportion equals the photo proportion.
-fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow, w: f32, h: f32) {
+/// card). The frame owns the whole w×h rect; how the snapshot sits in it is up to `fit`.
+/// `fit` says how the preview sits in the frame: the grid tile fills it edge to edge, the
+/// proportion rows fit it whole (their tile already has the photo's proportion).
+fn draw_cell(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    f: &FileRow,
+    w: f32,
+    h: f32,
+    fit: ThumbFit,
+) {
     let th = theme(ui);
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(w, h + CELL_CAPTION_H),
@@ -10755,12 +10816,15 @@ fn draw_cell(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, f: &FileRow
             se: RADIUS_CARD as u8,
         };
         // The card body and the well of the preview: the mock-up's tile is a card tone with the
-        // snapshot on the lighter `surface-container-highest` well, so a photo that does not fill
-        // the 4:3 frame still sits visibly inside a tile instead of floating on the canvas.
+        // lighter `surface-container-highest` well under the snapshot, so a preview that has not
+        // loaded yet and the frame around a video's cover still read as a tile (M22.15).
         ui.painter().rect_filled(rect, RADIUS_CARD, th.card);
         ui.painter().rect_filled(img_rect, top, th.field);
         ui.painter().rect_filled(cap_rect, bottom, th.panel);
-        let drawn = paint_thumb(ui, ctx, cs, f, img_rect);
+        let drawn = match fit {
+            ThumbFit::Whole => paint_thumb(ui, ctx, cs, f, img_rect),
+            ThumbFit::Filling => paint_thumb_filling(ui, ctx, cs, f, img_rect),
+        };
         if drawn {
             round_preview(ui, img_rect, RADIUS_CARD, cs.bg, false);
         }
@@ -11577,7 +11641,7 @@ impl eframe::App for App {
                             db::CellStyle::Tiles,
                             Icon::GridView,
                             t(lang, "Tile"),
-                            t(lang, "as in the mock-up: a 4:3 frame, the snapshot fitted whole"),
+                            t(lang, "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut"),
                         ),
                         (
                             db::CellStyle::Rows,
@@ -13307,7 +13371,8 @@ mod tests {
     use super::{
         AlbumDialog, App, COAST_DECAY_S, CalScale, IntegrityJob, IntegrityOutcome, IntegrityPlan,
         KindFilter, PickClick, Scroll, SettingsTab, StorageAction, View, Viewer, WHEEL_NOTCH_PTS,
-        clamp_pan, album_card_size, days_in_month, db, first_weekday_monday, fit_rect, list_meta_px,
+        clamp_pan, album_card_size, cover_rect, days_in_month, db, first_weekday_monday, fit_rect,
+        list_meta_px,
         list_name_px,
         list_row_height, monday_of, month_groups, nearest_file_month, one_to_one_zoom, parse_date,
         pick_kind, rotate_rect, rotated_size, score_percentile, shift_month, shift_to_file_month,
@@ -13347,6 +13412,26 @@ mod tests {
             egui::Shape::Vec(v) => {
                 for s in v {
                     collect_text(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The boxes of the drawn pictures: a preview is a mesh on the texture, and its box says
+    /// whether it was fitted into the frame or covers it (M22.15).
+    fn collect_meshes(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Mesh(m) => {
+                let mut r = egui::Rect::NOTHING;
+                for v in &m.vertices {
+                    r.extend_with(v.pos);
+                }
+                out.push(r);
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_meshes(s, out);
                 }
             }
             _ => {}
@@ -16333,6 +16418,112 @@ mod tests {
     fn a_zero_size_does_not_break_the_layout() {
         let r = fit_rect(bounds(), egui::vec2(0.0, 0.0));
         assert_eq!(r, bounds());
+    }
+
+    /// M22.15: a tile preview covers the frame — the whole tile, no margin. A portrait is cut at
+    /// the top and the bottom, the proportions are kept (the picture is never stretched).
+    #[test]
+    fn a_portrait_covers_the_tile_and_keeps_its_proportions() {
+        let r = cover_rect(bounds(), egui::vec2(320.0, 640.0));
+        assert!((r.width() - 150.0).abs() < 0.01, "the frame is full: {r:?}");
+        assert!((r.height() - 300.0).abs() < 0.01, "the edges are cut: {r:?}");
+        assert!((r.center().x - bounds().center().x).abs() < 0.01);
+        assert!((r.center().y - bounds().center().y).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_panorama_covers_the_tile_by_height() {
+        let r = cover_rect(bounds(), egui::vec2(1200.0, 400.0));
+        assert!((r.width() - 450.0).abs() < 0.01, "the sides are cut: {r:?}");
+        assert!((r.height() - 150.0).abs() < 0.01, "the frame is full: {r:?}");
+    }
+
+    #[test]
+    fn a_square_covers_the_whole_tile() {
+        let r = cover_rect(bounds(), egui::vec2(320.0, 320.0));
+        assert!((r.width() - 150.0).abs() < 0.01);
+        assert!((r.height() - 150.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_zero_size_does_not_break_the_cover() {
+        let r = cover_rect(bounds(), egui::vec2(0.0, 0.0));
+        assert_eq!(r, bounds());
+    }
+
+    /// M22.15 end to end: a portrait preview is drawn bigger than the 4:3 tile frame, so the frame
+    /// shows a cropped photograph with no field margins — the state the owner asked to bring back.
+    #[test]
+    fn the_tile_draws_the_preview_over_the_whole_frame() {
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-app-tile-fill-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        image::RgbImage::from_pixel(160, 320, image::Rgb([200, 120, 60]))
+            .save(dir.join("p.png"))
+            .unwrap();
+        let mut f = file_row(1, "image", "p.png");
+        f.thumb = Some("p.png".into());
+        let mut textures = std::collections::HashMap::new();
+        let mut missing = std::collections::HashSet::new();
+        let picked = BTreeSet::new();
+        let ctx = egui::Context::default();
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let mut frame = egui::Rect::NOTHING;
+        let out = ctx.run_ui(raw(), |ui| {
+            let mut cs = super::Cells {
+                bg: egui::Color32::BLACK,
+                cell_style: db::CellStyle::Tiles,
+                time_only: false,
+                textures: &mut textures,
+                missing: &mut missing,
+                thumbs_dir: &dir,
+                selected: None,
+                picked: &picked,
+                clicked: None,
+                open_clicked: None,
+                show_keep: false,
+                keep_clicked: None,
+                trash_mode: false,
+                restore_clicked: None,
+                tile: 150.0,
+                lang: i18n::Lang::En,
+                budget: 4,
+            };
+            super::draw_cell(ui, &ctx, &mut cs, &f, 200.0, 150.0, super::ThumbFit::Filling);
+            frame = egui::Rect::from_min_size(ui.min_rect().min, egui::vec2(200.0, 150.0));
+        });
+        let mut meshes = Vec::new();
+        for c in &out.shapes {
+            collect_meshes(&c.shape, &mut meshes);
+        }
+        out.drop_without_applying_deltas();
+        let picture = meshes
+            .first()
+            .unwrap_or_else(|| panic!("the preview is drawn: {meshes:?}"));
+        assert!(
+            (picture.width() - 200.0).abs() < 1.0,
+            "the photograph fills the frame's width: {picture:?} in {frame:?}"
+        );
+        assert!(
+            picture.top() < frame.top() && picture.bottom() > frame.bottom(),
+            "the portrait is cut above and below instead of leaving margins: {picture:?} in {frame:?}"
+        );
+        assert!(
+            (picture.height() - 400.0).abs() < 1.0,
+            "the proportions are kept: {picture:?}"
+        );
     }
 
     #[test]

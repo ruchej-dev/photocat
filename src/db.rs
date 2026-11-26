@@ -392,7 +392,8 @@ impl ThemeMode {
 /// How files are shown in the grid (M22): the mock-up tile, proportion rows or a list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellStyle {
-    /// The mock-up tile: a 4:3 frame, the snapshot fitted whole, the caption below.
+    /// The mock-up tile: a 4:3 frame, the snapshot filling it (the sides are cut), the caption
+    /// below.
     #[default]
     Tiles,
     /// Proportion rows: the row height comes from the slider, the tile width from the frame.

@@ -86,8 +86,8 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 - Grid: **three cell views**, `settings.cell_style`, the segment "Tile / Rows / List" in the
   content panel header. **Tile** (default, the mock-up) — one width from the "Tiles" slider
   (100–260 px, 150 by default), the columns share the width, a **4:3 frame** + a **22 px** caption
-  band, the preview fitted inside whole (no crop, no stretch) on a `field` well, the card body on
-  `card` and the caption on `panel` (M22.14). **Rows** — the row height from the slider (never below
+  band, the preview covering the whole frame (a centring crop, M22.15) on a `field` well, the card
+  body on `card` and the caption on `panel` (M22.14). **Rows** — the row height from the slider (never below
   70 % of it), the row fills the width, the tile's width follows its frame's aspect and the preview
   fills the tile (no margins). **List** — a row 44 px with a 58×40 thumbnail, the name, the date and
   the size. A file without dimensions gets 4:3.
@@ -174,7 +174,8 @@ choice (the picked people, the trash counter with its two actions) stands where 
    of a snapshot and contradicts "the preview fits entirely". *Recommendation: keep the fit; the grid
    looks denser with the mock-up's gap, not by cropping.* **Answer: keep the fit; the tile view is
    the mock-up's (a 4:3 frame with the snapshot fitted whole), the proportion rows stay as a second
-   view, and a list view is added — §2.4.**
+   view, and a list view is added — §2.4.** The owner reversed this in M22.15: the tile fills the
+   frame (the mock-up's crop), every other preview stays fitted.
 5. **Functions the mock-up shows that do not exist and are refused.** Favourites and star ratings,
    "Share", permanent "Delete", an archive quota (`64.8 / 70.0 GB`), RAW/CR2 with 14-bit colour,
    camera/lens EXIF beyond what is indexed (camera name only), histogram and colour profile, GPU/NPU
@@ -233,8 +234,9 @@ in the same commit.
    view context, pinned summary; separators are 1 px hairlines.
 4. Content: canvas background, title 18 px + facts 12 px mono, the group-by/sort controls, chips row.
 5. Three cell views in the header ("Tile" by default, "Rows", "List"): the tile is an 8 px card
-   with a 1 px frame, a 4:3 frame and a 22 px caption band (name + date, mono 10), the preview fitted
-   inside whole; rows fill the tile with the frame's own aspect; the list is a 44 px row. Gap 10 px,
+   with a 1 px frame, a 4:3 frame and a 22 px caption band (name + date, mono 10), the preview
+   covering the frame (a centring crop, M22.15); rows fill the tile with the frame's own aspect; the
+   list is a 44 px row. Gap 10 px,
    the `▶ M:SS` strip, accent selection with a square check flag.
 6. Previews follow the EXIF orientation (`load_oriented`), the DB stores the displayed dimensions,
    and a stale preview is overwritten when its dimensions do not match (ADR 0045, `SCHEMA_VERSION` 8).
@@ -752,9 +754,41 @@ frame leaves the window. `the_light_ground_is_neutral_and_the_tile_well_is_the_f
 **Files.** `src/app.rs` (`draw_cell`, `round_preview`, `card_block`, `caps_row`, `card_chip`,
 `file_card`, `details_panel`, the tests), `src/i18n.rs`, `docs/UI.md`, `plan/`.
 
+### M22.15 — the tile preview fills the tile frame ✅
+
+The owner after M22.14: "in tile mode the photograph is shown in its own proportions and fitted
+into the tile square; it must fill the whole tile, as it used to be".
+
+1. **The tile fills its frame.** `cover_rect` scales the preview by the larger of the two ratios and
+   centres it, so the picture covers the 4:3 frame edge to edge and the sides that do not fit are
+   cut evenly — the proportions are kept, nothing is stretched and no margin is left (`fit_rect`
+   would have left the letterbox). The painter clips the picture to the frame, so a portrait loses
+   its top and bottom and a panorama its sides. This is the mock-up's own 4:3 crop that §5 q. 4 had
+   refused; the owner's answer now is to follow the mock-up.
+2. **Only the grid tile fills.** `draw_cell` takes a `ThumbFit` (the tile view passes `Filling`, the
+   proportion rows `Whole`) and `paint_thumb` keeps fitting for the calendar, the series strip, the
+   album cover and the file card — a preview is still never cropped anywhere the whole shot matters.
+   The rows view keeps its fit: its tile already has the photo's proportion.
+3. **The tooltip tells the truth:** the cell-view segment now reads "as in the mock-up: a 4:3
+   frame, the snapshot fills it, the sides are cut" (the old text promised a fitted whole snapshot).
+
+**Result.** A tile of the grid, the calendar's day layer, the album and the duplicates grids shows a
+photograph with no `field` margins; a portrait is cut above and below, a panorama at the sides; the
+field well shows only while a preview loads. `a_portrait_covers_the_tile_and_keeps_its_proportions`,
+`a_panorama_covers_the_tile_by_height`, `a_square_covers_the_whole_tile`,
+`a_zero_size_does_not_break_the_cover` and `the_tile_draws_the_preview_over_the_whole_frame` (a real
+160×320 preview drawn into a 200×150 frame: a 200×400 picture, no margin) cover it; `cargo test`
+284, `cargo test --test source_language` 3, `clippy` clean, `check.sh` 55 checks, `rust-analyzer
+diagnostics` 0 errors.
+
+**Files.** `src/app.rs` (`cover_rect`, `ThumbFit`, `paint_thumb_as`, `paint_thumb_filling`,
+`draw_cell`, `draw_tiles`, the tooltip, five tests), `src/i18n.rs`, `src/db.rs` (the `CellStyle`
+doc), `docs/UI.md`, `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".
 - Bundled fonts until the owner's decision (q. 2).
-- Cropped 4:3 previews, a floating selection bar, an icon font (icons are geometry, M22.8, ADR 0048).
+- Cropped 4:3 previews outside the grid tile, a floating selection bar, an icon font (icons are
+  geometry, M22.8, ADR 0048). The tile crop itself is M22.15.
 - Any function from §5 q. 5; any network call; any file operation.

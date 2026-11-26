@@ -449,8 +449,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("Rows", "Ряды"),
     ("List", "Список"),
     (
-        "as in the mock-up: a 4:3 frame, the snapshot fitted whole",
-        "как в макете: кадр 4:3, снимок вписан целиком",
+        "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut",
+        "как в макете: кадр 4:3, снимок заполняет его целиком, края обрезаны",
     ),
     (
         "proportion rows: the tile width follows the frame",

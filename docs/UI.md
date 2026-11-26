@@ -57,11 +57,12 @@ the interface rules at the end of the file.
   sections 12, before a heading 8.
 - **Three cell views, the mock-up's tile is the main one** (M22, `settings.cell_style`): the
   segment "Tile / Rows / List" in the content panel header, next to the size slider.
-  **Tile** (default) — one width for all tiles, a **4:3 frame**, the preview *fitted inside it whole*
-  (no crop, no stretch), a 22 px caption band; the columns share the available width. The tile is a
+  **Tile** (default) — one width for all tiles, a **4:3 frame**, the preview *covering the whole
+  frame* (a centring crop: the proportions are kept, the sides that do not fit are cut, the picture
+  is never stretched), a 22 px caption band; the columns share the available width. The tile is a
   card: the body on the `card` tone, the well of the preview on `field` (the mock-up's
-  `surface-container-highest`), the caption on `panel` — so a snapshot that does not fill the 4:3
-  frame sits visibly inside a tile instead of floating on the canvas (M22.14). **Rows** —
+  `surface-container-highest`), the caption on `panel`; the well shows while a preview is loading
+  (M22.14, the fill itself M22.15). **Rows** —
   the row height comes from the slider, the row fills the width, so a tile's width follows its
   frame's aspect and the preview fills the tile with no margins; a row is never lower than 70 % of
   the slider and the last row keeps the target height. **List** — one row whose height comes from the
@@ -132,8 +133,9 @@ the interface rules at the end of the file.
   (`max_height 250`).
 - **A place for a tile is always reserved**: no preview — the text goes in the same rectangle. There
   are no layout jumps while loading.
-- **A tile:** a card with an 8 px radius and a 1 px frame → the preview, fitted whole into the
-  frame (4:3 in the tile view, the frame's own ratio in the rows view) → a 16 px video bar → the
+- **A tile:** a card with an 8 px radius and a 1 px frame → the preview, covering the frame edge to
+  edge in the tile view (a centring crop, the sides that do not fit are cut) and fitted whole in the
+  rows view (its frame already has the photo's ratio) → a 16 px video bar → the
   decision mark → a 22 px caption band (`panel` tone, a mono 10 file name on the left, the date in
   `text_dim` on the right) → a 2 px accent selection outline and a square check flag. The list view
   keeps the same words and accent: a row with a 58×40 thumbnail, the name and the date · size.
@@ -305,7 +307,7 @@ a rare one.
 
 | What | Value | Where |
 |---|---|---|
-| Cell view "Tile" (default) | one tile width from the "Tiles" slider (100–260 px, 150 by default), the columns share the available width; a 4:3 frame + a 22 px caption band; the preview fitted inside whole (no crop) on a `field` well, the body on `card`, the caption on `panel`, a 1 px `border` and the 8 px card radius; a video gets a "▶ M:SS" bar at the bottom of the frame | `app.rs::draw_tiles`, `draw_cell` |
+| Cell view "Tile" (default) | one tile width from the "Tiles" slider (100–260 px, 150 by default), the columns share the available width; a 4:3 frame + a 22 px caption band; the preview covers the frame (a centring crop, no stretch — M22.15) on a `field` well, the body on `card`, the caption on `panel`, a 1 px `border` and the 8 px card radius; a video gets a "▶ M:SS" bar at the bottom of the frame | `app.rs::draw_tiles`, `draw_cell`, `cover_rect` |
 | Cell view "Rows" | the row height comes from the slider and never falls below 70 % of it; the row fills the available width, so a tile's width follows its frame's aspect; the preview fills the tile (no crop, no margins) | `app.rs::draw_flow`, `row_fit` |
 | Cell view "List" | the row height `24 + 0.16 × slider` (40 px at 100, 66 px at 260), a 4:3 thumbnail `row − 8` high, the name at 12–14 px, the date · size in mono 10–12, the kind/duration on the right in mono; the two text lines are centred as one block and never leave the row; gap 4 px | `app.rs::draw_list`, `list_row_height` |
 | Grid step | 10 px between tiles inside a row and between rows (the mock-up's `gap-2.5`); other screens live on the common `item_spacing` 8×6 | `app.rs::draw_tiles`, `draw_flow` |
