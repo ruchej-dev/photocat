@@ -1052,22 +1052,28 @@ a file without a preview drop out).
 
 ### M22.22 — the albums hold one look switch ✅
 
-The owner: "не работают кнопки переключения в список и плитку альбомов". The album switch itself
-worked — the stored choice and the drawn list row are covered by a click test in both languages — but
-the ribbon above it kept the grid's "Tile / Rows / List" switch, and at the albums root its "List"
-changed nothing: no snapshot grid is drawn there. The ribbon switch is hidden at the albums root, so
-the album control row's "Cards / List" is the only look switch of that screen; inside an album the
-ribbon switch returns together with the snapshot grid. `settings.album_list` and the two looks are
-unchanged.
+The owner: "не работают кнопки переключения в список и плитку альбомов". The album switch did not
+act on the photos either: it changed only the sub-album cards, so an album without sub-albums looked
+dead. Two steps finished it:
+
+1. **M22.22** hid the ribbon's dead "Tile / Rows / List" at the albums root, where no snapshot grid
+   is drawn.
+2. **M22.23** hid the ribbon's cell views on the whole Albums screen — the owner's screenshot from
+   inside the album ("Садик", four files) showed the bottom "Список / Плитки" still doing nothing to
+   the four snapshots — and made the album control row's "Cards / List" the only look switch of the
+   screen. It drives both the album cards and the album's photos: `App::grid_cell_style` returns
+   `List` for cards-on/list and `Tiles` otherwise while the view is Albums, and
+   `settings.cell_style` of the other screens is left alone.
 
 **Result.** `cargo test` 307, `cargo test --test source_language` 3, `cargo clippy --all-targets`
 clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. Tests:
-`the_album_look_switches_between_cards_and_list` (a click on "List" stores the choice and moves the
-album name to the row position; a click on "Cards" brings the grid back) and
-`the_albums_root_hides_the_dead_cell_view_switch` (one "Список" at the albums root, the ribbon's
-three buttons back inside an album).
+`the_album_look_switch_changes_the_photos` (inside an album with two photos a click on "Список"
+stores the choice and makes the grid a list, "Плитки" brings the tiles back, the global Rows view
+stays) and `the_albums_view_holds_one_look_switch` (one "Список" at the root and inside an album, the
+ribbon's "Плитка / Ряды" gone).
 
-**Files.** `src/app.rs` (the ribbon, two tests), `docs/UI.md`, `plan/`.
+**Files.** `src/app.rs` (the ribbon, the album control row, `grid_cell_style`, two tests),
+`docs/UI.md`, `plan/`.
 
 ## 7. Not doing in M22
 

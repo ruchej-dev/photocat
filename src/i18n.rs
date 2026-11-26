@@ -461,6 +461,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Album order", "Порядок альбома"),
     // The album cards, the album order and the way into an album (M22.20).
     ("Cards", "Плитки"),
+    ("the album cards or rows, and its photos as tiles or a list", "карточки или строки альбома и его снимки плиткой или списком"),
     ("By update", "По обновлению"),
     ("By name", "По названию"),
     ("By file count", "По числу файлов"),

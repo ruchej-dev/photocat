@@ -1079,7 +1079,9 @@ while no album was open — and its cover is a mosaic of up to four of its first
 2×2 grid with 2 px seams) — 2026-11-26; M22.22 (the albums root hides the ribbon's dead
 "Tile / Rows / List" switch — the root has no snapshot grid — so the "Cards / List" of the album
 control row is the only look switch there, and the switch now has a click test in both languages) —
-2026-11-26.
+2026-11-26; M22.23 (on the whole Albums screen the ribbon's cell views are hidden and its "Cards /
+List" drives both the album cards and the album's photos — `App::grid_cell_style`, the global cell
+view of the other screens stays; an album without sub-albums no longer looks dead) — 2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`
