@@ -12603,42 +12603,49 @@ impl eframe::App for App {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         // The cell view (M22): the mock-up tile is the main one, the rows and the
                         // list come second. The tile size is the pill of the top bar (M22.19).
-                        let mut style = self.settings.cell_style;
-                        for (value, icon, label, hint) in [
-                            (
-                                db::CellStyle::Tiles,
-                                Icon::GridView,
-                                t(lang, "Tile"),
-                                t(lang, "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut"),
-                            ),
-                            (
-                                db::CellStyle::Rows,
-                                Icon::ViewAgenda,
-                                t(lang, "Rows"),
-                                t(lang, "proportion rows: the tile width follows the frame"),
-                            ),
-                            (
-                                db::CellStyle::List,
-                                Icon::ViewList,
-                                t(lang, "List"),
-                                t(lang, "a list: name, date and size in one row"),
-                            ),
-                        ] {
-                            if ui
-                                .add(WordButton::picked(icon, label, style == value).compact())
-                                .on_hover_text(hint)
-                                .clicked()
-                            {
-                                style = value;
+                        // At the root of the Albums view there is no snapshot grid to switch, so
+                        // the control is hidden there: the "Cards / List" of the album control
+                        // row is the only look switch of the albums, and no dead "List" sits
+                        // above it (M22.22).
+                        let album_root = view == View::Albums && self.album_selected.is_none();
+                        if !album_root {
+                            let mut style = self.settings.cell_style;
+                            for (value, icon, label, hint) in [
+                                (
+                                    db::CellStyle::Tiles,
+                                    Icon::GridView,
+                                    t(lang, "Tile"),
+                                    t(lang, "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut"),
+                                ),
+                                (
+                                    db::CellStyle::Rows,
+                                    Icon::ViewAgenda,
+                                    t(lang, "Rows"),
+                                    t(lang, "proportion rows: the tile width follows the frame"),
+                                ),
+                                (
+                                    db::CellStyle::List,
+                                    Icon::ViewList,
+                                    t(lang, "List"),
+                                    t(lang, "a list: name, date and size in one row"),
+                                ),
+                            ] {
+                                if ui
+                                    .add(WordButton::picked(icon, label, style == value).compact())
+                                    .on_hover_text(hint)
+                                    .clicked()
+                                {
+                                    style = value;
+                                }
                             }
+                            if style != self.settings.cell_style {
+                                self.settings.cell_style = style;
+                                view_save = true;
+                            }
+                            ui.add_space(6.0);
+                            hairline_vertical(ui);
+                            ui.add_space(6.0);
                         }
-                        if style != self.settings.cell_style {
-                            self.settings.cell_style = style;
-                            view_save = true;
-                        }
-                        ui.add_space(6.0);
-                        hairline_vertical(ui);
-                        ui.add_space(6.0);
                         // The order is available in the grid and inside an album (M19), but not
                         // in the tree.
                         let album_scope_now =
@@ -20289,6 +20296,116 @@ mod tests {
                     "“{name}” leaves the content panel: {r:?} in [{left}, {right}]"
                 );
             }
+        }
+    }
+
+    /// M22.22: the Cards/List switch of the Albums control row is a real switch: a click on
+    /// "List" draws the rows, a click on "Cards" brings the grid back, and the choice is stored.
+    #[test]
+    fn the_album_look_switches_between_cards_and_list() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-look-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let conn = db::open(&path).unwrap();
+            db::create_album(&conn, 0, "Summer 2024", "").unwrap();
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::Ru;
+        app.view = View::Albums;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let card_x = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "Summer 2024")
+            .expect("the album card is on screen")
+            .1
+            .left();
+        let at = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, r)| w == "Список" && r.center().y > 100.0)
+            .expect("the List button of the albums is on screen")
+            .1;
+        click_at(&mut app, &ctx, at.center());
+        assert!(app.settings.album_list, "List is chosen by the click");
+        let _ = window_frame(&mut app, &ctx);
+        // The list row puts the name after the cover, so it starts to the right of the card's name.
+        let row_x = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "Summer 2024")
+            .expect("the album row is on screen")
+            .1
+            .left();
+        assert!(
+            row_x > card_x + 10.0,
+            "the list look is drawn: the name at {row_x}, the card's at {card_x}"
+        );
+        let at = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, r)| w == "Плитки" && r.center().y > 100.0)
+            .expect("the Cards button is on screen")
+            .1;
+        click_at(&mut app, &ctx, at.center());
+        assert!(!app.settings.album_list, "Cards is chosen by the click");
+    }
+
+    /// M22.22: at the root of the Albums view there is no snapshot grid, so the ribbon's
+    /// "Tile / Rows / List" switch is hidden there — otherwise two "List" buttons stand above
+    /// each other and the upper one does nothing. Inside an album the switch returns for the grid.
+    #[test]
+    fn the_albums_root_hides_the_dead_cell_view_switch() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-ribbon-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let child;
+        {
+            let conn = db::open(&path).unwrap();
+            let root = db::create_album(&conn, 0, "Summer 2024", "").unwrap();
+            child = db::create_album(&conn, root, "May", "").unwrap();
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::Ru;
+        app.view = View::Albums;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let words = window_word_rects_at(&mut app, &ctx, size);
+        let lists: Vec<&egui::Rect> = words
+            .iter()
+            .filter(|(w, _)| w == "Список")
+            .map(|(_, r)| r)
+            .collect();
+        assert_eq!(lists.len(), 1, "only the album control row keeps its List: {words:?}");
+        assert!(
+            lists[0].center().y > 100.0,
+            "the surviving List is the album look switch: {:?}",
+            lists[0]
+        );
+        assert!(
+            words
+                .iter()
+                .any(|(w, r)| w == "Плитки" && r.center().y > 100.0),
+            "the Cards button of the album row is drawn: {words:?}"
+        );
+        // Inside an album the grid comes back, and with it the cell-view switch.
+        app.album_open(child);
+        let words = window_word_rects_at(&mut app, &ctx, size);
+        for name in ["Плитка", "Ряды", "Список"] {
+            assert!(
+                words.iter().any(|(w, r)| w == name && r.center().y < 100.0),
+                "the snapshot-grid switch “{name}” is back inside an album: {words:?}"
+            );
         }
     }
 

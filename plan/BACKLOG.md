@@ -1076,7 +1076,10 @@ selection bar and "Add the picked ones", with a new album made in the same press
 2026-11-26; M22.21 (the album card opens the album from the root — the action used to be dropped
 while no album was open — and its cover is a mosaic of up to four of its first photos,
 `AlbumNode::covers`; one photo whole, two in columns, three as a half and a right stack, four as a
-2×2 grid with 2 px seams) — 2026-11-26.
+2×2 grid with 2 px seams) — 2026-11-26; M22.22 (the albums root hides the ribbon's dead
+"Tile / Rows / List" switch — the root has no snapshot grid — so the "Cards / List" of the album
+control row is the only look switch there, and the switch now has a click test in both languages) —
+2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

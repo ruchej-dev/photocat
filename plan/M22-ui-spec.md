@@ -1050,6 +1050,25 @@ a file without a preview drop out).
 `draw_album_cards`, `album_apply`), `docs/UI.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
 `plan/`.
 
+### M22.22 — the albums hold one look switch ✅
+
+The owner: "не работают кнопки переключения в список и плитку альбомов". The album switch itself
+worked — the stored choice and the drawn list row are covered by a click test in both languages — but
+the ribbon above it kept the grid's "Tile / Rows / List" switch, and at the albums root its "List"
+changed nothing: no snapshot grid is drawn there. The ribbon switch is hidden at the albums root, so
+the album control row's "Cards / List" is the only look switch of that screen; inside an album the
+ribbon switch returns together with the snapshot grid. `settings.album_list` and the two looks are
+unchanged.
+
+**Result.** `cargo test` 307, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. Tests:
+`the_album_look_switches_between_cards_and_list` (a click on "List" stores the choice and moves the
+album name to the row position; a click on "Cards" brings the grid back) and
+`the_albums_root_hides_the_dead_cell_view_switch` (one "Список" at the albums root, the ribbon's
+three buttons back inside an album).
+
+**Files.** `src/app.rs` (the ribbon, two tests), `docs/UI.md`, `plan/`.
+
 ## 7. Not doing in M22
 
 - A third theme, an accent picker, a "compact mode".
