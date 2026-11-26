@@ -506,8 +506,8 @@ const PAIRS: &[(&str, &str)] = &[
         "фильтры «без даты» и «без превью» изменились",
     ),
     (
-        "the preview could not be built or is no longer in the cache: HEIC/AVIF (the decoder cannot read them), a broken file, a video without a cover (no ffmpeg or an ffmpeg error), or previews cleared in Settings → Storage. Index the folder again to rebuild them",
-        "превью не построилось или его больше нет в кэше: HEIC/AVIF (декодер их не читает), битый файл, видео без обложки (нет ffmpeg или ошибка ffmpeg) или превью, очищенные в «Настройки → Хранилище». Проиндексируйте папку снова, чтобы вернуть их",
+        "the preview could not be built or is no longer in the cache: HEIC/AVIF (the decoder cannot read them), a broken file, a video without a cover (no ffmpeg or an ffmpeg error), or previews cleared in Settings → Storage. Index the folder again: the pass rebuilds the previews, and “Index” runs ffmpeg to create the covers of the videos",
+        "превью не построилось или его больше нет в кэше: HEIC/AVIF (декодер их не читает), битый файл, видео без обложки (нет ffmpeg или ошибка ffmpeg) или превью, очищенные в «Настройки → Хранилище». Проиндексируйте папку снова: проход вернёт превью, а «Индексировать» запустит ffmpeg и создаст обложки видео",
     ),
     ("path/date:", "путь/дата:"),
     ("tag:", "тег:"),
@@ -967,16 +967,6 @@ const PAIRS: &[(&str, &str)] = &[
          a single photo — with the button in the file card",
         "долгий проход: документы и скриншоты без камеры и по уверенному тегу; \
          один снимок — кнопкой в карточке файла",
-    ),
-    ("Summary", "Сводка"),
-    ("Files:", "Файлов:"),
-    ("Size:", "Объём:"),
-    ("No date:", "Без даты:"),
-    ("No preview:", "Без превью:"),
-    ("Videos without a cover:", "Видео без обложки:"),
-    (
-        "press “Index” — ffmpeg will create the covers",
-        "нажмите «Индексировать» — обложки создаст ffmpeg",
     ),
     (
         "tags are not computed yet — press “Compute tags”",

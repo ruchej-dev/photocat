@@ -6771,7 +6771,7 @@ impl App {
             .count();
         let preview_hint = t(
             lang,
-            "the preview could not be built or is no longer in the cache: HEIC/AVIF (the decoder cannot read them), a broken file, a video without a cover (no ffmpeg or an ffmpeg error), or previews cleared in Settings → Storage. Index the folder again to rebuild them",
+            "the preview could not be built or is no longer in the cache: HEIC/AVIF (the decoder cannot read them), a broken file, a video without a cover (no ffmpeg or an ffmpeg error), or previews cleared in Settings → Storage. Index the folder again: the pass rebuilds the previews, and “Index” runs ffmpeg to create the covers of the videos",
         );
         let mut date_click = false;
         let mut preview_click = false;
@@ -6806,17 +6806,6 @@ impl App {
         }
         ui.add_space(4.0);
 
-        // In a wide window the summary is pressed to the bottom of the panel. In a narrow one the card and
-        // the summary go into a common scroll: otherwise the card is left with a 40 px strip.
-        if !show_card {
-            egui::Panel::bottom("left-stats")
-                .resizable(false)
-                .show(ui, |ui| {
-                    ui.add_space(4.0);
-                    hairline(ui);
-                    self.stats_block(ui);
-                });
-        }
         egui::ScrollArea::vertical()
             .id_salt("left-scroll")
             .auto_shrink([false, false])
@@ -6844,9 +6833,6 @@ impl App {
                     ui.add_space(8.0);
                     hairline(ui);
                     self.file_card(ui, self.selected);
-                    ui.add_space(8.0);
-                    hairline(ui);
-                    self.stats_block(ui);
                 }
             });
         panel_edge(ui, false);
@@ -7511,40 +7497,6 @@ impl App {
                 }
             }
         });
-    }
-
-    /// The summary at the bottom of the left panel: numbers with captions only, no actions.
-    fn stats_block(&mut self, ui: &mut egui::Ui) {
-        let lang = self.settings.lang;
-        ui.label(
-            egui::RichText::new(t(lang, "Summary"))
-                .size(11.0)
-                .color(dim(ui)),
-        );
-        ui.add_space(2.0);
-        let n = self.items.len();
-        let bytes: i64 = self.items.iter().map(|r| r.size).sum();
-        stat_row(ui, t(lang, "Files:"), &n.to_string());
-        stat_row(ui, t(lang, "Size:"), &db::human_in(lang, bytes));
-        // "No date" and "No preview" are the counts of the two filter chips above (M25.4): a number
-        // printed twice would drift apart the moment the two are computed differently.
-        let no_cover = self
-            .items
-            .iter()
-            .filter(|r| r.kind == "video" && r.thumb.is_none())
-            .count();
-        if no_cover > 0 {
-            stat_row(ui, t(lang, "Videos without a cover:"), &no_cover.to_string());
-            ui.label(
-                egui::RichText::new(t(
-                    lang,
-                    "press “Index” — ffmpeg will create the covers",
-                ))
-                .size(11.0)
-                .color(dim(ui)),
-            );
-        }
-        ui.add_space(4.0);
     }
 
     /// The right panel: details and actions for the selected file, in the composition of
@@ -16710,8 +16662,8 @@ mod tests {
         );
     }
 
-    /// The M25.2 panel budget on the real corpus: where the scrolling part, the year cloud and the
-    /// pinned summary stand in a 1240×840 window, and that the "…" is among the drawn chips.
+    /// The M25.5 panel budget on the real corpus: where the year cloud and the model block stand in
+    /// a 1240×840 window now that the pinned summary is gone, and that the cloud is fully on screen.
     /// `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
     /// cargo test --release -- --ignored panel_years_measurement --nocapture`.
     #[test]
@@ -16742,24 +16694,35 @@ mod tests {
         let heading = at("ГОДЫ");
         let first = at(cloud[0]);
         let ellipsis = at("…");
-        let summary = at("Сводка");
+        let model = at("Модель ИИ");
+        let tags = drawn
+            .iter()
+            .find(|(t, _)| t == "ТЕГИ")
+            .map(|(_, p)| p.y)
+            .map(|y| format!("{y:.1}"))
+            .unwrap_or_else(|| "below the strip".to_string());
+        let strip = 840.0 - 28.0;
         let last_old = years.last().map(|(y, _)| y.as_str()).unwrap_or("");
         println!(
             "corpus: {n} files, {} years ({last_old}–{}); the years heading at y {:.1}, the first \
-             chip at y {:.1}, the “…” chip at y {:.1} (h {:.1}), the cloud ends at {:.1}, the pinned \
-             summary at y {:.1}",
+             chip at y {:.1}, the “…” at y {:.1}, the cloud ends at {:.1}; the model block at y \
+             {:.1}, the tags heading at y {tags}; the bottom strip at y {strip:.1}",
             years.len(),
             cloud[0],
             heading.y,
             first.y,
             ellipsis.y,
-            super::YEARS_CHIP_H,
             ellipsis.y + super::YEARS_CHIP_H,
-            summary.y
+            model.y
         );
         assert!(
-            ellipsis.y + super::YEARS_CHIP_H <= summary.y,
-            "the cloud is cut off by the pinned summary"
+            ellipsis.y + super::YEARS_CHIP_H <= strip,
+            "the cloud is cut off by the bottom strip"
+        );
+        assert!(model.y < strip, "the model block is off screen");
+        assert!(
+            !drawn.iter().any(|(t, _)| t == "Сводка"),
+            "the summary is still drawn"
         );
     }
 
@@ -17977,8 +17940,6 @@ mod tests {
         app.settings.models_dir =
             std::env::temp_dir().join("photocat-test-models-never-downloaded");
         app.settings.lang = i18n::Lang::En;
-        // Two frames: the height of the bottom summary panel comes from the previous frame, so on
-        // the first one it is cropped and the checked lines appear on the second.
         let ctx = egui::Context::default();
         let size = egui::vec2(1240.0, 1100.0);
         window_frame_at(&mut app, &ctx, Vec::new(), size);
@@ -17989,10 +17950,8 @@ mod tests {
             "Model settings",
             "Text on the photo",
             "0 candidates, 0 left",
-            "Summary",
-            "Files:",
-            "Size:",
-            // The two missing numbers are the counts of the filter chips (M25.4), not summary rows.
+            // The two missing numbers are the counts of the filter chips (M25.4), not summary rows;
+            // the summary itself is gone (M25.5).
             "No date · 0",
             "No preview · 1",
         ] {
@@ -20431,11 +20390,11 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Все годы"), "{texts:?}");
     }
 
-    /// M22.3: the panel budget. At 840 px the folder block, two navigation groups and the filter are
-    /// pinned, and the year rows open the scrolling part — so all five are seen without a scroll, and
-    /// they stand above the summary, which is pinned at the bottom.
+    /// M25.5: the panel budget without the summary. At 1240×840 the filter block, the years cloud
+    /// and the model block fit the window — every year chip is seen and the model block starts
+    /// below them, with no "Summary" anywhere in either language.
     #[test]
-    fn the_left_panel_fits_the_years_above_the_summary() {
+    fn the_left_panel_fits_the_years_and_the_model_block() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-budget.db"));
         app.items = (0..5)
             .map(|i| {
@@ -20456,30 +20415,37 @@ mod tests {
                 .map(|(_, pos)| *pos)
                 .unwrap_or_else(|| panic!("“{needle}” is not drawn: {drawn:?}"))
         };
-        // Every year row is drawn: the guard inside `year_row` skips a row that is out of the
-        // viewport, so a drawn oldest row means the whole block is seen without a scroll.
+        // The summary is gone (M25.5): no block repeats the numbers of the status bar and the chips.
+        for gone in ["Сводка", "Summary", "Files:", "Size:", "No date:"] {
+            assert!(
+                !drawn.iter().any(|(text, _)| text == gone),
+                "“{gone}” is still drawn: {drawn:?}"
+            );
+        }
+        // Every year chip is drawn and lies above the bottom strip: the cloud needs no scroll.
         for year in ["2024", "2023", "2022", "2021", "2020"] {
             at(year);
         }
-        // The oldest row is the last one of the block; it must stand above the summary, which is
-        // pinned at the bottom of the panel, and above the bottom strip.
         let oldest = at("2020");
-        let summary = at("Сводка");
         assert!(
-            oldest.y + 20.0 <= summary.y,
-            "the year rows are cut off by the summary: {oldest:?} vs {summary:?}"
+            oldest.y + 18.0 <= 840.0 - 28.0,
+            "a year chip is under the bottom strip: {oldest:?}"
+        );
+        // The 40 px the summary took go to the scrolling part: the model block starts on screen
+        // right below the cloud, so the threshold and the tags are one wheel notch away.
+        let model = at("Модель ИИ");
+        assert!(
+            model.y > oldest.y,
+            "the model block is not below the cloud: {model:?} vs {oldest:?}"
         );
         assert!(
-            oldest.y + 20.0 <= 840.0 - 28.0,
-            "a year row is under the bottom strip: {oldest:?}"
+            model.y < 840.0 - 28.0,
+            "the model block is off screen: {model:?}"
         );
-        // Picking a year adds "All years" without growing the block: the chips wrap, so the
-        // summary does not move and nothing below the years is pushed off.
+        // A pick adds "All years" without growing the block: the chips wrap.
         app.set_year(Some(super::YearPick::Year("2024".into())));
         let _ = window_layout(&mut app, &ctx, size);
         let picked = window_layout(&mut app, &ctx, size);
-        // The picked year is also named in the chip of the grid and in the hint of the cloud, so
-        // the last match inside the left panel is the year chip itself.
         let at_picked = |needle: &str| {
             picked
                 .iter()
@@ -20487,11 +20453,10 @@ mod tests {
                 .map(|(_, pos)| *pos)
                 .unwrap_or_else(|| panic!("“{needle}” is not drawn after a pick: {picked:?}"))
         };
-        assert_eq!(at_picked("Все годы").y, at_picked("2024").y, "All years on the same row");
         assert_eq!(
-            at_picked("Сводка").y,
-            summary.y,
-            "the summary stays put when a year is picked"
+            at_picked("Все годы").y,
+            at_picked("2024").y,
+            "All years on the same row"
         );
         at_picked("2020");
     }

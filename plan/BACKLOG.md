@@ -1272,7 +1272,7 @@ on them.
 
 **Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
-  as filters; M25.5 the summary leaves; M25.6 the pinned threshold and no "Model settings";
+  as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 the pinned threshold and no "Model settings";
   M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
   M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
@@ -1465,6 +1465,21 @@ printed twice; a 1240×840 frame shows the tag cloud, the years and the model bl
 gone.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**Done (2026-11-26).** `stats_block` is gone with both of its callers: the pinned `Panel::bottom
+("left-stats")` of a wide window and the block after the file card in a narrow one. Files and size
+were already in the status bar; the two "missing" numbers became the M25.4 chips, and "videos
+without a cover" plus "press “Index” — ffmpeg will create the covers" moved into the "No preview"
+hint. The strings `Summary`, `Files:`, `Size:`, `No date:`, `No preview:`, `Videos without a
+cover:` and the ffmpeg line left `PAIRS`; `stat_row` stays for the storage pane. Measured on the
+corpus (2232 files, 1240×840 headless frame, release): the years heading at y 629, the first chip
+at 654.5, the "…" at 684.5, the cloud ends at 702.5, the model block starts at 717 and the bottom
+strip at 812 — the 40 px the summary took went to the scrolling part, so the model block is now on
+screen instead of hiding under the pinned block. The tag cloud inside the model block is still
+~13 px below the strip: M25.6 makes the cloud the first block of the scroll, which brings it into
+the frame (its acceptance names exactly that). `cargo test` 317 passed + 3 guard tests,
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors;
+`panel_years_measurement` prints the numbers.
 
 **M25.6 — the threshold is pinned; the model is set in Settings only.**
 **Goal.** The threshold slider never scrolls away, and the left panel stops being a second settings

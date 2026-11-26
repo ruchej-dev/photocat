@@ -370,7 +370,8 @@ year is picked (`the_left_panel_fits_the_years_above_the_summary`).
 18 px chips — the five newest years and a "…" that filters exactly the older ones — and the year no
 longer writes into the path/date field: it is a filter of its own (`App::year_filter`, `YearPick`),
 shown as "year: 2019 ×" or "older than 2020 ×" in the chips row. On the corpus at 1240×840 the cloud
-ends at 666.5 px and the pinned "Summary" starts at 692 px.
+ends at 666.5 px and the pinned "Summary" started at 692 px at the time; the summary left the panel in
+M25.5, so the scrolling part now runs to the bottom strip.
 The tag menu became chips: the word with the count of snapshots after a middle dot, 4 px apart,
 wrapping, idle `field` with `text_med`, picked — accent fill, accent 1 px border and accent text, the
 width following the text and never the state (`tag_chip`). The row therefore keeps every position

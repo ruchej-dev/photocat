@@ -166,15 +166,16 @@ the interface rules at the end of the file.
   columns (window ≥ 1200 px); below that the card moves into the left panel, so that the grid does
   not shrink to 2 columns. On the "People" screen the right panel holds the group list instead of
   the card; below 1200 px that list falls back to the left panel (M22.26).
-- **The left panel:** navigation and search are pinned on top and do not scroll; "Summary" is
-  pinned at the bottom; between them scroll the years, the view context, the model and text blocks,
-  and the file card (in a narrow window). The years open that scrolling part, so they are the first
-  thing under the pinned filter and need no scroll of their own; they are a filter of the grid and
-  of the calendar only — the duplicates, faces, trash and integrity screens have a context of their
-  own. The five years go in three columns of two rows (M22.19): six cells (five years and "All
-  years") always take two rows, so the block never changes height and the oldest year stays above
-  the pinned summary at 840 px. The "Catalog" heading carries a bare "+" that opens the folders
-  dialog (the worded path is the dialog itself).
+- **The left panel:** navigation, the folder block and the filter block are pinned on top and do
+  not scroll; everything else scrolls between them — the years, the view context, the model and
+  text blocks, and the file card (in a narrow window). The years open that scrolling part, so they
+  are the first thing under the pinned filter and need no scroll of their own; they are a filter of
+  the grid and of the calendar only — the duplicates, faces, trash and integrity screens have a
+  context of their own. The years are a wrapped cloud of 18 px chips (M25.2): the five newest and
+  a "…" for the older ones, "All years" while a pick is on. There is no "Summary" block (M25.5):
+  the files and the size live in the status bar, and the two "missing" numbers are the counts of
+  the filter chips. The "Catalog" heading carries a bare "+" that opens the folders dialog (the
+  worded path is the dialog itself).
 - **The right panel (M22.16, after `photocat_12`):** a 44 px header band on the `card` tone with a
   1 px line under it — the info glyph and "File details" at 12 px strong on the left, the mock-up's
   "×" at the right (a 22 px target, the hint "free up room for the grid and calendar"; the worded
@@ -366,12 +367,13 @@ a rare one.
   "Faces" → "Find faces (N)"; "Integrity" → "Compare the copies"; in the "Settings" dialog →
   "Download model" (if not downloaded).
 - **Left panel budget:** the folder block, two navigation groups (7 views) and 2 filter rows
-  (path/date, "All / Photos / Videos") are pinned, and the year cloud opens the scrolling part: at
-  840 px all five years and the "…" are seen without a scroll and stand above the pinned "Summary"
-  (checked by `app::tests::the_left_panel_fits_the_years_above_the_summary`; on the corpus the cloud
-  ends at 666.5 px, the summary starts at 692 px). A new function is not added to the panel if it
-  already scrolls when nothing is selected: move it into the view screen, into "Settings", or
-  replace an existing one.
+  (path/date, "All / Photos / Videos", the two "missing" chips) are pinned, and the year cloud
+  opens the scrolling part: at 840 px all five years and the "…" are seen without a scroll and the
+  model block starts right below them (checked by
+  `app::tests::the_left_panel_fits_the_years_and_the_model_block`; on the corpus the cloud ends at
+  702.5 px, the model block starts at 717 px, the bottom strip at 812 px). A new function is not
+  added to the panel if it already scrolls when nothing is selected: move it into the view screen,
+  into "Settings", or replace an existing one.
 - **A number next to an action** explains the cost before the press: "435 candidates", "still
   without faces: 0 of 1972", "135 marked spare, 214.1 MiB will be freed".
 - **The keyboard is an addition**, not an entrance: no action is available only on the keyboard and
@@ -410,7 +412,6 @@ a rare one.
 | Left panel | 260 px, width not draggable | `Panel::left(...).exact_size` |
 | Navigation row | 28 px, a 14 px icon and the word at 13 px, the count in mono 11 at the right edge, radius 6; the active row sits on the `card` tone with a 2 px accent edge on the left and its word and number in the accent — the same mark as the settings section list (M22.11); hovering shows the card tone as well | `app.rs::nav_item` |
 | Year chip | 18 px, mono 11, the width from the text, 4 px apart, wrapping — the geometry of a tag chip, so the cloud stays dense; idle — `field` fill and `text_med`, picked — `accent_soft`, an accent border and accent text; no number inside (the count is the hint "2019 · 1 234 files"); the five newest years and, when older years exist, a "…" whose hint says "older than 2019 · N files · 2004–2019"; "All years" appears only while a year or the "…" is picked and clears the pick (M25.2) | `app.rs::year_chip`, `cloud_chip`, `App::years_block` |
-| Summary row | 16 px: an 11 px caption on the left, an 11 px mono number at the right edge; four rows fit under the pinned "Summary" of the left panel | `app.rs::stat_row` |
 | Tag chip | 20 px high, mono 11, the word and the count of snapshots after a middle dot ("furniture · 669"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — accent fill, accent 1 px border and accent text; the width follows the text and never the state, so a click does not move the row | `app.rs::tag_chip` |
 | Filter toggle chip | 20 px high, mono 11, the word and the count after a middle dot ("No preview · 2"), 4 px apart, wrapping; idle — `field` fill and `text_med`, picked — `accent_soft`, an accent border and accent text; at zero files it is dimmed in `text_dim` and does not react to a click (M25.4); the count is over the whole index, never over the current filter | `app.rs::toggle_chip`, `App::has_no_preview` |
 | Card chip | 20 px high, mono 11, 7 px of padding on each side; the word, an optional 12 px glyph before it (the album's folder) and the "×" after a 4 px gap; two targets in one box — the word (the tag filter, the album) and the "×" (removal, `danger` under the pointer); idle — `field` fill and `text_med`, the tag the grid is filtered by — `accent_soft`, an accent border and accent text | `app.rs::card_chip`, `ChipClick` |
@@ -439,7 +440,7 @@ for text over a darkened frame, where the background is a photograph.
 
 | Screen | What is on it | Main action |
 |---|---|---|
-| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (a "+" in its heading, the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos", the two toggle chips "No date · N" / "No preview · N" under them), then, in the scrolling part, the "Years" cloud (the five newest years as chips, the "…" for the older ones, M25.2), the model and text blocks, with the summary pinned at the bottom; above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; in the model block — the tags as 20 px chips under the caps heading "Tags" with the snapshot count after a middle dot ("furniture · 669"), the picked chips in the accent (the filter accumulates, M25.1), the "×" at the right of the heading that resets the set while any tag is picked, and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
+| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (a "+" in its heading, the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos", the two toggle chips "No date · N" / "No preview · N" under them), then, in the scrolling part, the "Years" cloud (the five newest years as chips, the "…" for the older ones, M25.2), the model and text blocks; above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; in the model block — the tags as 20 px chips under the caps heading "Tags" with the snapshot count after a middle dot ("furniture · 669"), the picked chips in the accent (the filter accumulates, M25.1), the "×" at the right of the heading that resets the set while any tag is picked, and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed"; every group is a card of the `card` tone with "#N", the reason at 13 px, the facts in mono 11 and the advice "keep <name> — …", the pictures inside; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 month cards with counters, covers and sizes above the line "12 months of 2024" and the facts of the year, a month — a grid of weeks Mon–Sun with the caps weekday row, the day number, the counter badge and up to 3 thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects (an accent frame); on the "Day" layer — the snapshots in a `draw_cell` grid with the time in the caption; on the upper layers below — the selected day as a list with the time, the name and the size, and "No date"; an empty month says "No files in this month." and the button "Go to <the nearest month with files>" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups" and the "all together" switch in the left panel; the right panel with the 44 px band (the face glyph and "Groups") and the list of groups — "All people · N", then every group with the best face of the group as its icon, a "together" tick, its name and photo count; the open group's name at 14 px with its facts in mono 11; the face crops of the group with the date and the score in mono 10, the round tick circle and the head with a slash on every face tile inside a group, "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" title at 14 px; the ribbon has no cell-view switch and no details toggle (M22.26) | name a person, split off strangers and find photos where people are together |
@@ -531,9 +532,8 @@ for text over a darkened frame, where the background is a photograph.
   stay visible.
 - Nothing is selected → the right panel says "Pick a snapshot in the grid — the date, camera, tags
   and text will appear here"; the grid does not change width when the card appears.
-- The window is narrower than 1200 px → the right panel is not drawn, the card moves into the left
-  panel under the view blocks, and "Summary" moves into the common scroll: the grid keeps at least
-  4 columns.
+- The window is narrower than 1200 px → the right panel is not drawn and the card moves into the
+  left panel under the view blocks (in the same scroll): the grid keeps at least 4 columns.
 - "Settings" is open → a dialog over a dimmed background; it is closed by "Close", Esc and a click
   outside. Changes are applied and saved immediately, there is no "Cancel" button — there is nothing
   to cancel, the originals do not change.
