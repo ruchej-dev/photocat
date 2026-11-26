@@ -148,7 +148,12 @@ the interface rules at the end of the file.
   100–260 px slider, no number: the value is in the hint), the state pill (a dot and "Synced" /
   "Syncing", the counters in its hint), the details toggle (a 28 px icon that stays lit while the
   right panel is open) and "Settings". The third row is the pass progress only. The folder field
-  and "Index / Refresh" live in the left panel: working with the archive is not search.
+  and "Index / Refresh" live in the left panel: working with the archive is not search. Both
+  carry their tooltip (M25.7): "Start indexing" walks the folders, reads only the new and changed
+  files (path + size + mtime), computes the hash, the date, the dimensions, the sharpness and a
+  320 px preview, gives a video its cover through ffmpeg and writes to the cache only — never to the
+  archive — and can be stopped and resumed; "Refresh" re-reads the database into the window, reads
+  no file and changes nothing, for a change made by the CLI or in another window.
 - **The bottom strip is 28 px** (M22.19): a dot and the last fact on the left, then the count of
   files with their volume in the numeric family; on the right the selected file — its name, the
   frame ("6000×4000") and the size, or "N selected · volume".
@@ -343,7 +348,7 @@ a rare one.
 
 | What | Where | Clicks |
 |---|---|---|
-| Folder, "Index", "Refresh" | top bar | 0 |
+| Folder, "Index", "Refresh" | left panel, the catalog block, each with a tooltip that says what the pass reads and writes (M25.7) | 0 |
 | Progress and "Stop" | top bar, next to the start | 1 |
 | Search (semantic / by text) | top bar, row 2 | 1 |
 | Six views | left panel, two groups with numbers | 1 |

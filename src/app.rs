@@ -674,6 +674,10 @@ const RADIUS_CARD: f32 = 8.0;
 /// The tooltip of the path/date field (M25.3): the filter is literal, and the content search lives
 /// in another field. One source for the hint and the test.
 const PATH_DATE_HINT: &str = "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.";
+/// The tooltips of the two archive buttons (M25.7): what a pass does and what it never touches. One
+/// source for the window and the test.
+const INDEX_HINT: &str = "Walk the folders and read only the new and changed files — the path, the size and the modification time decide. The pass computes the hash, the date, the dimensions, the sharpness and a 320 px preview, and gives a video its cover through ffmpeg. It writes to the cache only — the database and the previews, never the archive — and it can be stopped and resumed.";
+const REFRESH_HINT: &str = "Re-read the database into the window: reads no file, indexes nothing and changes nothing. Use it after a change made by the CLI or in another window.";
 /// The height of a year chip in the left panel's cloud (M25.2): a tag chip is 20 px, a year is
 /// 18 px, and the cloud stays dense enough to be seen without a scroll.
 const YEARS_CHIP_H: f32 = 18.0;
@@ -6642,10 +6646,18 @@ impl App {
         ui.add_space(4.0);
         let index = WordButton::primary(Icon::Sync, t(lang, "Start indexing"));
         ui.horizontal(|ui| {
-            if ui.add(index).clicked() || enter {
+            if ui
+                .add(index)
+                .on_hover_text(t(lang, INDEX_HINT))
+                .clicked()
+                || enter
+            {
                 self.start_index();
             }
-            if word_button(ui, Icon::Refresh, t(lang, "Refresh")).clicked() {
+            if word_button(ui, Icon::Refresh, t(lang, "Refresh"))
+                .on_hover_text(t(lang, REFRESH_HINT))
+                .clicked()
+            {
                 self.reload();
             }
         });
@@ -20143,6 +20155,37 @@ mod tests {
         assert!(app.query.is_empty());
         assert!(app.year_filter.is_none());
         assert_eq!(app.filtered().len(), 4, "all years are back");
+    }
+
+    /// M25.7: the two archive buttons explain themselves before a click — the pass reads only new
+    /// and changed files (path + size + mtime, `index::can_skip`) and never writes to the archive;
+    /// "Refresh" reads no file at all (`App::reload` only re-reads the DB). Both hints are in
+    /// `PAIRS` and read in Russian.
+    #[test]
+    fn the_two_archive_buttons_carry_their_hints() {
+        for hint in [super::INDEX_HINT, super::REFRESH_HINT] {
+            let ru = i18n::t(i18n::Lang::Ru, hint);
+            assert_ne!(ru, hint, "the hint is not in PAIRS");
+            assert!(
+                ru.chars().any(|c| c.is_alphabetic() && !c.is_ascii()),
+                "the hint is not translated: {ru}"
+            );
+            assert_eq!(i18n::t(i18n::Lang::En, hint), hint);
+        }
+        // The words and the code agree: the skip rule names the three keys, the pass claims the
+        // cache only, and "Refresh" claims no file read.
+        assert!(
+            super::INDEX_HINT.contains("the path, the size and the modification time"),
+            "the index hint does not name the skip rule"
+        );
+        assert!(
+            super::INDEX_HINT.contains("never the archive"),
+            "the index hint does not promise the archive is untouched"
+        );
+        assert!(
+            super::REFRESH_HINT.contains("reads no file"),
+            "the refresh hint does not promise a read-free pass"
+        );
     }
 
     /// M25.3: the path word and the year are two filters with two chips and two "×", and the

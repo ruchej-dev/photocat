@@ -1273,7 +1273,7 @@ on them.
 **Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
-  M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
+  M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
   M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
 
@@ -1538,6 +1538,18 @@ clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
 `App::reload`); `cargo test --test source_language` passes.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**Done (2026-11-26).** `INDEX_HINT` and `REFRESH_HINT` are one source for the window and the test;
+"Start indexing" carries the first and "Refresh" the second through `on_hover_text`/`t()`. The
+index hint names the skip rule (path + size + mtime, what `index::can_skip` checks), the hash, the
+date, the dimensions, the sharpness and the 320 px preview, the video cover through ffmpeg, that
+the pass writes to the cache only and never to the archive, and that it can be stopped and resumed;
+the refresh hint says it re-reads the database, reads no file and changes nothing, and when to use
+it (a change from the CLI or another window). Test:
+`the_two_archive_buttons_carry_their_hints` (both strings in `PAIRS`, both read in Russian, and the
+wording still names the skip rule, the untouched archive and the read-free refresh).
+`cargo test` 319 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors; `cargo test --test source_language` 3.
 
 **M25.8 — the state word moves from the strip into the status bar.**
 **Goal.** "Synced" stops looking like a synchronisation feature and says where it belongs.

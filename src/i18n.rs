@@ -390,6 +390,14 @@ const PAIRS: &[(&str, &str)] = &[
         "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.",
         "Поле буквальное: часть пути или даты в ISO без учёта регистра — «2024-05» найдёт май 2024, «vacation» — папку или файл с этим словом. Поиск по тому, что на фотографии, — в верхней полосе: «Смысловой / По тексту».",
     ),
+    (
+        "Walk the folders and read only the new and changed files — the path, the size and the modification time decide. The pass computes the hash, the date, the dimensions, the sharpness and a 320 px preview, and gives a video its cover through ffmpeg. It writes to the cache only — the database and the previews, never the archive — and it can be stopped and resumed.",
+        "Обходит каталоги и читает только новые и изменившиеся файлы — решают путь, размер и время изменения. Проход считает хэш, дату, размеры, резкость и превью 320 px, а видео получает обложку через ffmpeg. Он пишет только в кэш — базу и превью, — никогда в архив, и его можно остановить и продолжить.",
+    ),
+    (
+        "Re-read the database into the window: reads no file, indexes nothing and changes nothing. Use it after a change made by the CLI or in another window.",
+        "Перечитывает базу в окно: не читает ни одного файла, ничего не индексирует и ничего не меняет. Нужен после изменения из CLI или из другого окна.",
+    ),
     ("clear the year filter", "снять фильтр по годам"),
     ("year:", "год:"),
     ("older than {}", "раньше {}"),
