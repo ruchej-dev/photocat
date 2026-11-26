@@ -1240,9 +1240,12 @@ features = ["progressbar", "onig"]`: the `esaxx-rs` C++ object forces `/MT` whil
 objects are `/MD`, and the link fails on the CRT mismatch (ADR 0050). The folder picker gained an
 editable path field with "Go" (Enter works) and, on Windows, a row of drive buttons from
 `GetLogicalDrives` — before it, the parent of `C:\` is `None`, so another disk was unreachable; the
-window also drops its console (`FreeConsole`) once the GUI starts.
+window also drops its console (`FreeConsole`) once the GUI starts. The picker's field and dialog have
+fixed widths: the first version asked for the available width, and a content-sized modal grew by its
+own padding on every frame (the owner saw it as an endless widening under the mouse); two tests and
+a source guard keep `available_width` out of the picker.
 
-**Checks.** `cargo test` 327 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh`
+**Checks.** `cargo test` 329 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh`
 55 checks; the exe smoke-tested under Wine: `--help`, `doctor`, `settings`, `index` of three images
 (3/3, 0 errors), `stats`, and the GUI through `WGPU_BACKEND=gl` (D3D12 shader compilation is a Wine
 limitation, not a Windows one); the data landed in `data\photocat.db` as the portable launcher

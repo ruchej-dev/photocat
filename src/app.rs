@@ -4375,7 +4375,10 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-roots"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(520.0);
+            // A fixed width, never the available one: a content-sized dialog that asks for
+            // "available − 90" grows by its own padding on every frame, which the mouse's
+            // movement makes visible as an endless widening.
+            ui.set_width(560.0);
             ui.label(egui::RichText::new(t(lang, "Archive folders")).size(14.0));
             ui.label(
                 egui::RichText::new(t(
@@ -4549,13 +4552,10 @@ impl App {
             // The path: type or paste it and press Enter (or "Go"). On Windows this is also the way
             // back from a drive root, whose parent does not exist.
             ui.horizontal(|ui| {
-                // The field keeps the room the "Go" button leaves; an infinite width here made
-                // the dialog 1 946 px wide and pushed its buttons off the screen.
-                let field_w = (ui.available_width() - 90.0).max(160.0);
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut path)
                         .hint_text(t(lang, "path to a folder"))
-                        .desired_width(field_w),
+                        .desired_width(440.0),
                 );
                 go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if word_button(ui, Icon::Next, t(lang, "Go")).clicked() {
@@ -4576,7 +4576,7 @@ impl App {
                     }
                 });
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if let Some(parent) = current.parent()
                     && word_button(ui, Icon::ArrowUp, t(lang, "Up")).clicked()
                 {
@@ -4601,6 +4601,7 @@ impl App {
             egui::ScrollArea::vertical()
                 .id_salt("picker-list")
                 .max_height(320.0)
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if entries.is_empty() {
                         ui.label(t(lang, "No subfolders."));
@@ -23548,6 +23549,82 @@ mod tests {
             temp.join("alpha"),
             "a click does not open the folder"
         );
+    }
+
+    /// The same rule as a source guard: the picker must not ask for the available width at all —
+    /// a content-sized dialog that does grows by its own padding on every frame, and the mouse's
+    /// movement turns that into an endless widening (seen on Windows).
+    #[test]
+    fn the_folder_picker_never_uses_the_available_width() {
+        let src = include_str!("app.rs");
+        let start = src.find("fn picker_modal").expect("the picker exists");
+        let end = src[start..]
+            .find("    /// The confirmation of cleaning the cache")
+            .map(|e| start + e)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            !body.contains("available_width"),
+            "the folder picker sizes itself to the available width, and the dialog will grow on              every frame"
+        );
+    }
+
+    /// The picker's width is fixed: a dialog that sizes itself to "available − N" grows by its own
+    /// padding on every frame, and the mouse's movement makes that an endless widening.
+    #[test]
+    fn the_folder_picker_keeps_its_width_while_the_mouse_moves() {
+        let temp = std::env::temp_dir().join("photocat-picker-width");
+        for i in 0..30 {
+            let name = format!("folder-{i:02}");
+            std::fs::create_dir_all(temp.join(name)).expect("the test folder");
+        }
+        for name in ["alpha", "beta", "gamma", "delta"] {
+            std::fs::create_dir_all(temp.join(name)).expect("the test folder");
+        }
+        let mut app = App::new(std::env::temp_dir().join("photocat-picker-width.db"));
+        app.settings.lang = i18n::Lang::En;
+        app.picker_current = temp;
+        app.picker_open = true;
+        app.refresh_picker();
+        let ctx = egui::Context::default();
+        // A modal knows its size only after a few frames; the measurement starts once it is drawn.
+        for i in 0..8 {
+            let at = egui::pos2(120.0 + i as f32 * 90.0, 200.0 + i as f32 * 40.0);
+            let _ = window_frame_with(&mut app, &ctx, vec![egui::Event::PointerMoved(at)]);
+        }
+        let mut widths: Vec<f32> = Vec::new();
+        for i in 0..8 {
+            // In and out of the dialog and its folder list: the scrollbar shows and hides while
+            // the pointer moves, and the dialog must not ratchet wider on every hover.
+            let at = if i % 2 == 0 {
+                egui::pos2(620.0, 600.0)
+            } else {
+                egui::pos2(60.0, 60.0)
+            };
+            let _ = window_frame_with(
+                &mut app,
+                &ctx,
+                vec![egui::Event::PointerMoved(at)],
+            );
+            let fills = window_fills(&mut app, &ctx);
+            let width = fills
+                .iter()
+                .filter(|(r, c)| {
+                    *c == super::DARK.card && r.width() > 300.0 && r.height() > 150.0
+                })
+                .map(|(r, _)| r.width())
+                .fold(0.0_f32, f32::max);
+            widths.push(width);
+        }
+        // The first `window_fills` frame after a modal opens still shows the backdrop only.
+        let first = widths[1];
+        assert!(first > 0.0, "the dialog was not found: {widths:?}");
+        for (i, w) in widths.iter().enumerate().skip(1) {
+            assert!(
+                (w - first).abs() < 0.5,
+                "the dialog width changed on frame {i}: {widths:?}"
+            );
+        }
     }
 
     /// M22.10: every dialog of the window is a card — the `card` tone, a 1 px `border` line, the

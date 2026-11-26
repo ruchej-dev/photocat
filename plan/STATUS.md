@@ -3656,8 +3656,16 @@ archive or the schema.
   Windows user was locked to the one disk the picker opened on; "not a folder" is said in the dialog
   instead of failing silently. The built-in picker stays — no system dialog and no new dependency.
 
-Checks: `cargo test` 327 passed + 3 guard tests (including
-`the_folder_picker_lists_folders_and_navigates`), `cargo clippy --all-targets` clean, `check.sh` 55
+The first build of the picker had a defect the owner saw at once: the dialog asked for
+"available width − 90" and, because a modal sizes itself to its content, it grew by its own padding
+on every frame — with the mouse moving, an endless widening. The field and the dialog now have fixed
+widths (560 / 440), the list fills its column and the rows wrap; a source guard
+(`the_folder_picker_never_uses_the_available_width`) fails if `available_width` comes back into the
+picker.
+
+Checks: `cargo test` 329 passed + 3 guard tests (including
+`the_folder_picker_lists_folders_and_navigates`, `the_folder_picker_keeps_its_width_while_the_mouse_moves`
+and the source guard), `cargo clippy --all-targets` clean, `check.sh` 55
 checks, `cargo test --test source_language` 3. The exe under Wine: `--help`, `doctor`, `settings`,
 `index` of three images (3/3, 0 errors), `stats`, and the GUI with `WGPU_BACKEND=gl` — D3D12 shader
 compilation is a Wine limitation, not a Windows one; the portable launcher wrote `data\photocat.db`.

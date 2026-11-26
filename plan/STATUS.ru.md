@@ -3520,8 +3520,15 @@ tesseract); `plan/I18N.md`; этот файл и `plan/BACKLOG.ru.md` закры
   теперь говорится в диалоге, а не молчит. Встроенный выбор остаётся — без системного диалога и без
   новой зависимости.
 
-Проверки: `cargo test` 327 прошли + 3 теста сторожа (включая
-`the_folder_picker_lists_folders_and_navigates`), `cargo clippy --all-targets` чисто, `check.sh` 55
+Первая сборка выбора каталога несла дефект, который владелец увидел сразу: диалог спрашивал
+«доступная ширина − 90», а модальное окно подстраивается под содержимое, поэтому росло на свои
+отступы каждый кадр — при движении мыши бесконечное расширение. Теперь поле и диалог имеют
+фиксированную ширину (560 / 440), список заполняет колонку, а ряды переносятся; сторож в исходнике
+(`the_folder_picker_never_uses_the_available_width`) падает, если `available_width` вернётся в пикер.
+
+Проверки: `cargo test` 329 прошли + 3 теста сторожа (включая
+`the_folder_picker_lists_folders_and_navigates`, `the_folder_picker_keeps_its_width_while_the_mouse_moves`
+и сторож исходника), `cargo clippy --all-targets` чисто, `check.sh` 55
 проверок, `cargo test --test source_language` 3. Exe под Wine: `--help`, `doctor`, `settings`,
 `index` трёх снимков (3/3, 0 ошибок), `stats`, и GUI с `WGPU_BACKEND=gl` — компиляция шейдеров D3D12
 это ограничение Wine, не Windows; переносимый запуск записал `data\photocat.db`.
