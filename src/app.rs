@@ -11078,6 +11078,43 @@ fn paint_arch_card(
     }
 }
 
+/// The Mondays of the weeks that touch the month (M25.11): 4–6 of them, the first may start in the
+/// previous month and the last may end in the next one.
+fn weeks_of_month(year: i32, month: u32) -> Vec<chrono::NaiveDate> {
+    let Some(first) = chrono::NaiveDate::from_ymd_opt(year, month, 1) else {
+        return Vec::new();
+    };
+    let last = first + chrono::Duration::days(days_in_month(year, month) as i64 - 1);
+    let mut out = Vec::new();
+    let mut monday = monday_of(first);
+    while monday <= last {
+        out.push(monday);
+        monday += chrono::Duration::days(7);
+    }
+    out
+}
+
+/// The label of a week tile (M25.11): "12–18 May" inside one month, "28 Apr – 4 May" across two.
+fn week_range(lang: i18n::Lang, monday: chrono::NaiveDate) -> String {
+    let sunday = monday + chrono::Duration::days(6);
+    if monday.month() == sunday.month() {
+        format!(
+            "{}–{} {}",
+            monday.day(),
+            sunday.day(),
+            i18n::month_name(lang, monday.month() as usize)
+        )
+    } else {
+        format!(
+            "{} {} – {} {}",
+            monday.day(),
+            i18n::month_name(lang, monday.month() as usize),
+            sunday.day(),
+            i18n::month_name(lang, sunday.month() as usize)
+        )
+    }
+}
+
 /// The first and the last year that have files: "2024-05" keys of the calendar's month set
 /// (M25.10). The years layer's arrows step inside this range, never into an empty year.
 fn year_bounds(months: &BTreeSet<String>) -> (Option<i32>, Option<i32>) {
@@ -13512,14 +13549,11 @@ impl eframe::App for App {
                     CalScale::Year => t(lang, "the years of the archive").to_string(),
                     CalScale::Month => format!("{cal_year}"),
                     CalScale::Week => format!(
-                        "{} — {}",
-                        cal_week.format("%d.%m"),
-                        (cal_week + chrono::Duration::days(6)).format("%d.%m.%Y")
+                        "{} {}",
+                        i18n::month_name(lang, cal_month as usize),
+                        cal_year
                     ),
-                    CalScale::Day => cal_day
-                        .as_deref()
-                        .map(|d| day_title(lang, d))
-                        .unwrap_or_else(|| t(lang, "no day selected").to_string()),
+                    CalScale::Day => week_range(lang, cal_week),
                 },
             ),
             View::Faces => (
@@ -14380,28 +14414,12 @@ impl eframe::App for App {
                             let title = match cal_scale {
                                 CalScale::Year => t(lang, "the years of the archive").to_string(),
                                 CalScale::Month => format!("{cal_year}"),
-                                CalScale::Week => {
-                                    let end = cal_week + chrono::Duration::days(6);
-                                    format!(
-                                        "{} — {}",
-                                        cal_week.format("%d.%m"),
-                                        end.format("%d.%m.%Y")
-                                    )
-                                }
-                                CalScale::Day => cal_day
-                                    .as_deref()
-                                    .and_then(parse_date)
-                                    .map(|d| {
-                                        format!(
-                                            "{}, {}",
-                                            i18n::weekday(
-                                                lang,
-                                                d.weekday().num_days_from_monday() as usize
-                                            ),
-                                            d.format("%d.%m.%Y")
-                                        )
-                                    })
-                                    .unwrap_or_else(|| t(lang, "no day selected").to_string()),
+                                CalScale::Week => format!(
+                                    "{} {}",
+                                    i18n::month_name(lang, cal_month as usize),
+                                    cal_year
+                                ),
+                                CalScale::Day => week_range(lang, cal_week),
                             };
                             ui.heading(title);
                             if ui
@@ -14700,9 +14718,108 @@ impl eframe::App for App {
                                 }
                             }
                             CalScale::Week => {
-                                let cell_w = ((ui.available_width() - 6.0 * CAL_GAP) / 7.0)
-                                    .max(32.0);
-                                let cell_h = 190.0;
+                                // The weeks that touch the picked month (M25.11): 4–6 tiles, each
+                                // with its date range, counter, size, first snapshot as a cover and
+                                // a volume bar against the fullest week.
+                                let mut weeks: Vec<(chrono::NaiveDate, usize, i64, Option<usize>)> =
+                                    Vec::new();
+                                for monday in weeks_of_month(cal_year, cal_month) {
+                                    let mut count = 0usize;
+                                    let mut bytes = 0i64;
+                                    let mut cover: Option<usize> = None;
+                                    for d in 0..7i64 {
+                                        let key =
+                                            (monday + chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+                                        if let Some(ids) = by_day.get(&key) {
+                                            count += ids.len();
+                                            bytes += ids.iter().map(|&i| items[i].size).sum::<i64>();
+                                            if cover.is_none() {
+                                                cover = ids.first().copied();
+                                            }
+                                        }
+                                    }
+                                    weeks.push((monday, count, bytes, cover));
+                                }
+                                let busiest = weeks.iter().map(|w| w.1).max().unwrap_or(0);
+                                let total_n: usize = weeks.iter().map(|w| w.1).sum();
+                                let total_bytes: i64 = weeks.iter().map(|w| w.2).sum();
+                                let facts = i18n::fill(
+                                    lang,
+                                    "{} · {} · {}",
+                                    &[
+                                        i18n::count(lang, weeks.len(), "week"),
+                                        i18n::count(lang, total_n, "file"),
+                                        db::human_in(lang, total_bytes),
+                                    ],
+                                );
+                                ui.label(num(ui, facts, 11.0).color(dim(ui)));
+                                ui.add_space(4.0);
+                                let cell_w =
+                                    ((ui.available_width() - 2.0 * CAL_GAP) / 3.0).max(60.0);
+                                for row in weeks.chunks(3) {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = CAL_GAP;
+                                        for (monday, count, bytes, cover) in row {
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                egui::vec2(cell_w, CAL_CARD_H),
+                                                egui::Sense::click(),
+                                            );
+                                            let resp = resp.on_hover_text(t(
+                                                lang,
+                                                "double-click to open the days of the week",
+                                            ));
+                                            if ui.is_rect_visible(rect) {
+                                                let selected = *monday == cal_week;
+                                                paint_arch_card(
+                                                    ui,
+                                                    ctx,
+                                                    &mut cells,
+                                                    &items,
+                                                    rect,
+                                                    "",
+                                                    &week_range(lang, *monday),
+                                                    *count,
+                                                    *bytes,
+                                                    *cover,
+                                                    selected,
+                                                    busiest,
+                                                    lang,
+                                                );
+                                            }
+                                            if resp.double_clicked() {
+                                                cal_week = *monday;
+                                                cal_year = monday.year();
+                                                cal_month = monday.month();
+                                                cal_day = None;
+                                                if let Some(next) = cal_scale.deeper() {
+                                                    cal_scale = next;
+                                                }
+                                            } else if resp.clicked() {
+                                                cal_week = *monday;
+                                                cal_year = monday.year();
+                                                cal_month = monday.month();
+                                                cal_day = None;
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(CAL_GAP);
+                                }
+                            }
+                            CalScale::Day => {
+                                // The seven days of the picked week (M25.11): the weekday and the
+                                // date, the counter, up to three thumbnails and the volume bar.
+                                let cell_w =
+                                    ((ui.available_width() - 6.0 * CAL_GAP) / 7.0).max(32.0);
+                                let cell_h = 150.0;
+                                let busiest = (0..7i64)
+                                    .map(|d| {
+                                        let key = (cal_week + chrono::Duration::days(d))
+                                            .format("%Y-%m-%d")
+                                            .to_string();
+                                        by_day.get(&key).map_or(0, |ids| ids.len())
+                                    })
+                                    .max()
+                                    .unwrap_or(0);
                                 ui.add_space(4.0);
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = CAL_GAP;
@@ -14716,7 +14833,7 @@ impl eframe::App for App {
                                         );
                                         let resp = resp.on_hover_text(t(
                                             lang,
-                                            "double-click to open the day",
+                                            "double-click to open the photos of the day",
                                         ));
                                         if ui.is_rect_visible(rect) {
                                             let selected = cal_day.as_deref()
@@ -14736,13 +14853,16 @@ impl eframe::App for App {
                                                 egui::Align2::LEFT_TOP,
                                                 i18n::weekday(lang, d as usize),
                                                 egui::FontId::proportional(11.0),
-                                                if selected { th.accent } else { th.text_med },
+                                                if selected {
+                                                    th.accent
+                                                } else if n > 0 {
+                                                    th.text
+                                                } else {
+                                                    th.text_dim
+                                                },
                                             );
                                             ui.painter().text(
-                                                egui::pos2(
-                                                    r.left() + pad + 26.0,
-                                                    r.top() + 5.0,
-                                                ),
+                                                egui::pos2(r.left() + pad + 26.0, r.top() + 5.0),
                                                 egui::Align2::LEFT_TOP,
                                                 date.format("%d.%m").to_string(),
                                                 egui::FontId::monospace(10.0),
@@ -14758,89 +14878,54 @@ impl eframe::App for App {
                                             if let Some(ids) = idxs {
                                                 let area = egui::Rect::from_min_max(
                                                     egui::pos2(r.left() + 4.0, r.top() + 22.0),
-                                                    egui::pos2(r.right() - 4.0, r.bottom() - 4.0),
+                                                    egui::pos2(r.right() - 4.0, r.bottom() - 10.0),
                                                 );
-                                                let rows = 3usize;
-                                                let cols = 2usize;
+                                                let shown = ids.len().min(3);
                                                 let tw = ((area.width()
-                                                    - (cols as f32 - 1.0) * 2.0)
-                                                    / cols as f32)
-                                                    .max(8.0);
-                                                let th_h = ((area.height()
-                                                    - (rows as f32 - 1.0) * 2.0)
-                                                    / rows as f32)
+                                                    - (shown as f32 - 1.0) * 2.0)
+                                                    / shown as f32)
                                                     .max(8.0);
                                                 for (k, &i) in
-                                                    ids.iter().take(rows * cols).enumerate()
+                                                    ids.iter().take(shown).enumerate()
                                                 {
                                                     let tr = egui::Rect::from_min_size(
                                                         egui::pos2(
                                                             area.left()
-                                                                + (k % cols) as f32
-                                                                    * (tw + 2.0),
-                                                            area.top()
-                                                                + (k / cols) as f32
-                                                                    * (th_h + 2.0),
+                                                                + k as f32 * (tw + 2.0),
+                                                            area.top(),
                                                         ),
-                                                        egui::vec2(tw, th_h),
+                                                        egui::vec2(tw, area.height()),
                                                     );
+                                                    ui.painter().rect_filled(tr, 2.0, th.canvas);
                                                     paint_thumb(
                                                         ui, ctx, &mut cells, &items[i], tr,
                                                     );
                                                 }
+                                                let bar = egui::Rect::from_min_size(
+                                                    egui::pos2(r.left() + 4.0, r.bottom() - 7.0),
+                                                    egui::vec2((r.width() - 8.0).max(4.0), 3.0),
+                                                );
+                                                let share = if busiest > 0 {
+                                                    n as f32 / busiest as f32
+                                                } else {
+                                                    0.0
+                                                };
+                                                cal_bar(ui, bar, share);
                                             }
                                         }
-                                        if resp.double_clicked() {
+                                        if resp.double_clicked() || resp.clicked() {
+                                            // A double click ends the drill-down: the photos of the
+                                            // day appear below the tiles (M25.11).
                                             cal_day = Some(key.clone());
                                             cal_year = date.year();
                                             cal_month = date.month();
                                             cal_week = monday_of(date);
-                                            if let Some(next) = cal_scale.deeper() {
-                                                cal_scale = next;
-                                            }
-                                        } else if resp.clicked() {
-                                            cal_day = Some(key.clone());
-                                            cal_year = date.year();
-                                            cal_month = date.month();
                                         }
                                     }
                                 });
                             }
-                            CalScale::Day => {
-                                ui.add_space(4.0);
-                                let day = cal_day.clone().unwrap_or_else(|| {
-                                    chrono::Local::now()
-                                        .date_naive()
-                                        .format("%Y-%m-%d")
-                                        .to_string()
-                                });
-                                match by_day.get(&day) {
-                                    Some(idxs) if !idxs.is_empty() => {
-                                        let bytes: i64 =
-                                            idxs.iter().map(|&i| items[i].size).sum();
-                                        day_heading(
-                                            ui,
-                                            &day_title(lang, &day),
-                                            idxs.len(),
-                                            bytes,
-                                            lang,
-                                        );
-                                        // The day layer keeps the owner's cell view (`draw_cell`):
-                                        // only the caption shows the time, the date is the same for
-                                        // every tile of the day.
-                                        cells.time_only = true;
-                                        let row: Vec<&FileRow> =
-                                            idxs.iter().map(|&i| &items[i]).collect();
-                                        draw_files(ui, ctx, &mut cells, &row);
-                                        cells.time_only = false;
-                                    }
-                                    _ => {
-                                        ui.label(t(lang, "No files on this day."));
-                                    }
-                                }
-                            }
                         }
-                        if cal_scale != CalScale::Day {
+                        {
                             hairline(ui);
                             ui.add_space(8.0);
                             match cal_day.as_deref().map(|d| (d, by_day.get(d))) {
@@ -16857,6 +16942,8 @@ mod tests {
         for (scale, word) in [
             (CalScale::Year, "years"),
             (CalScale::Month, "months"),
+            (CalScale::Week, "weeks"),
+            (CalScale::Day, "days"),
         ] {
             app.cal_scale = scale;
             for _ in 0..4 {
@@ -17322,11 +17409,20 @@ mod tests {
                 "missing “{needle}” in the month layer: {texts:?}"
             );
         }
-        // The week layer: the weekday names of its day columns.
+        // The week layer: its tiles with the date ranges.
         app.cal_scale = CalScale::Week;
         app.cal_week = super::monday_of(
             chrono::NaiveDate::from_ymd_opt(2024, 5, 1).expect("a valid date"),
         );
+        let texts = window_frame(&mut app, &ctx);
+        for needle in ["May 2024", "29 April – 5 May"] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "missing “{needle}” in the week layer: {texts:?}"
+            );
+        }
+        // The day layer: the weekday names of the seven days of the picked week.
+        app.cal_scale = CalScale::Day;
         let texts = window_frame(&mut app, &ctx);
         for needle in ["Mon", "Sun"] {
             assert!(
@@ -19610,6 +19706,74 @@ mod tests {
         assert!(
             texts.iter().any(|t| t == "5.0 KiB") && texts.iter().any(|t| t == "1.0 KiB"),
             "no size under the month cards: {texts:?}"
+        );
+    }
+
+    /// M25.11: the week tiles cover the picked month exactly once, and there are 4–6 of them.
+    #[test]
+    fn the_week_tiles_cover_the_month_exactly_once() {
+        use chrono::Datelike;
+        for (year, month, weeks) in [(2024, 5u32, 5usize), (2024, 2, 5), (2023, 1, 6)] {
+            let tiles = super::weeks_of_month(year, month);
+            assert_eq!(tiles.len(), weeks, "{month}/{year} has {} weeks", tiles.len());
+            assert!((4..=6).contains(&tiles.len()), "not 4–6 weeks");
+            let mut seen = std::collections::HashSet::new();
+            for monday in &tiles {
+                for d in 0..7i64 {
+                    let day = *monday + chrono::Duration::days(d);
+                    if day.year() == year && day.month() == month {
+                        assert!(
+                            seen.insert(day.day()),
+                            "the {day} of {month}/{year} is in two tiles"
+                        );
+                    }
+                }
+            }
+            let month_len = super::days_in_month(year, month) as usize;
+            assert_eq!(seen.len(), month_len, "a day of the month is in no tile");
+        }
+    }
+
+    /// M25.11: the day layer is the seven days Monday–Sunday of the picked week; a click (or a
+    /// double click that ends the drill-down) puts the photos of that day below.
+    #[test]
+    fn the_day_layer_shows_the_week_and_opens_a_day_below() {
+        let mut app = calendar_app();
+        app.cal_scale = CalScale::Day;
+        app.cal_week = super::monday_of(
+            chrono::NaiveDate::from_ymd_opt(2024, 5, 1).expect("a valid date"),
+        );
+        app.cal_day = None;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 1100.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        for day in ["Mon", "Tue", "Sun"] {
+            assert!(
+                texts.iter().any(|t| t == day),
+                "no weekday “{day}”: {texts:?}"
+            );
+        }
+        for date in ["29.04", "01.05", "05.05"] {
+            assert!(
+                texts.iter().any(|t| t == date),
+                "no date “{date}”: {texts:?}"
+            );
+        }
+        assert_eq!(texts.iter().filter(|t| *t == "Mon").count(), 1, "{texts:?}");
+        // A click on the 1st of May opens its two photos below.
+        let rects = window_word_rects_at(&mut app, &ctx, size);
+        let cell = rects
+            .iter()
+            .find(|(text, _)| text == "01.05")
+            .expect("the 1st of May is drawn")
+            .1;
+        click_at(&mut app, &ctx, egui::pos2(cell.left() + 8.0, cell.center().y));
+        assert_eq!(app.cal_day.as_deref(), Some("2024-05-01"));
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        assert!(
+            texts.iter().any(|t| t == "· 2 files, 5.0 KiB"),
+            "the photos of the day do not appear below: {texts:?}"
         );
     }
 

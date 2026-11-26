@@ -1274,7 +1274,7 @@ on them.
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
   M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 (done 2026-11-26) the state word moves into the status bar;
-  M25.9 (done 2026-11-26) the location row; M25.10 (done 2026-11-26) the year and month layers; M25.11 the week and day layers;
+  M25.9 (done 2026-11-26) the location row; M25.10 (done 2026-11-26) the year and month layers; M25.11 (done 2026-11-26) the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
 
 **M25.1 — the tag filter accumulates.**
@@ -1668,6 +1668,22 @@ y 436; the grid scroll again p50 5.72 ms (175 fps), p95 6.14 — better than M22
 picked week; a click picks, a double click opens the photos below; one test per layer.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**Done (2026-11-26).** "Week" draws the weeks that touch the picked month as 4–6 tiles, three to a
+row (`weeks_of_month`, `week_range`): the date range ("12–18 May"; "29 Apr – 5 May" when the week
+starts in the previous month), the counter, the size, the first snapshot as the cover and a volume
+bar; a click picks the week, a double click opens its days. "Day" draws the seven days Monday–Sunday
+of the picked week, each with the weekday, the date, the counter, up to three thumbnails and the
+bar; a click or a double click puts that day's photos in the list below (the old `draw_cell` day
+grid is gone and the day strip is drawn under every layer). The ribbon facts name the layer ("May
+2024", "12–18 May"); the arrows step by a week and by a day. Tests:
+`the_week_tiles_cover_the_month_exactly_once` (May 2024 five, February 2024 five, January 2023 six;
+every day of the month in exactly one tile) and
+`the_day_layer_shows_the_week_and_opens_a_day_below` (Mon…Sun, 29.04/01.05/05.05, a click on the 1st
+opens its two photos below), plus the week/day parts of `english_translates_the_calendar`. Measured
+on the corpus: weeks layer p50 4.44 ms (225 fps), p95 4.58; days p50 4.61 ms (217 fps), p95 4.74.
+`cargo test` 325 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors.
 
 **M25.12 — the photos of the period obey the cell view.**
 **Goal.** The "Tile / Rows / List" switch works on the calendar, on the photos under the period.
