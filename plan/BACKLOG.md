@@ -1270,7 +1270,7 @@ on them.
    geocoder — the network (forbidden by §1) or an offline data set (a new dependency and an ADR).
    The card shows the coordinates; M25.9 adds "copy" and records the choice.
 
-**Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 the year cloud (the five newest years, "…" for
+**Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
   the older ones, the kept "All years"); M25.3 the path/date field; M25.4 "No date" and "No preview"
   as filters; M25.5 the summary leaves; M25.6 the pinned threshold and no "Model settings";
   M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
@@ -1351,6 +1351,25 @@ frame draws the cloud without growing the pinned part; the M22.3 panel budget is
 written to `plan/STATUS.md`.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**Done (2026-11-26).** The year block is a wrapped cloud of 18 px chips (`cloud_chip`, `year_chip`,
+`YEARS_CHIP_H`): the five newest years and, when the index holds older ones, a sixth "…" chip. The
+year filter is its own field — `App::year_filter: Option<YearPick>` (`YearPick::Year` /
+`YearPick::Older(bound)`), matched against the prefix of `taken_at` — and `set_year` replaced
+`pick_year`, so the path/date field keeps its word (the M25.3 half of the split is done here too).
+`year_counts` returns every year; the cloud takes the five newest and knows whether the rest exists
+(`years_range` names "2004–2019" in the "…" hint). No number is drawn in a chip: the hint says
+"2019 · 1 234 files" through `i18n::count` (the "…" hint adds "older than 2020 · N files ·
+2004–2019"); "All years" is drawn only while a pick is on and clears either kind of pick. The chips
+row shows "year: 2019 ×" or "older than 2020 ×"; `FilterClear.year` and `PickScope.year` follow.
+Tests: `the_years_cloud_keeps_five_and_filters_the_older_ones` (five chips and "…", no 2019/2004 in
+the cloud, no number inside a chip, the "…" narrows to 2004–2019, the chips row, a second click, "All
+years"), the reworked `a_year_click_narrows_the_date_filter` (every year counted, the year is its own
+filter, a typed word survives the click) and the updated block and budget tests. Measured on the
+corpus (2232 files, 10 years, 1240×840 headless frame): the "Years" heading at y 593, the first chip
+at 618.5, the "…" at 648.5, the cloud ends at 666.5 and the pinned "Summary" starts at 692 — every
+chip is seen without a scroll. `cargo test` 314 passed + 3 guard tests, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
 
 **M25.3 — the path/date field explains itself.**
 **Goal.** The owner knows what the field compares before typing into it, and the year stops living

@@ -491,6 +491,30 @@ fn pick_kind(mods: &egui::Modifiers) -> PickClick {
     }
 }
 
+/// The year filter of the left panel and the chips row (M25.2): one year, or "all the years
+/// older than the newest five in the cloud". The cloud never grows — the ellipsis is a filter,
+/// not an expander.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum YearPick {
+    Year(String),
+    /// Everything strictly before this year: the boundary is the oldest year of the cloud.
+    Older(String),
+}
+
+impl YearPick {
+    /// Whether a file of this `taken_at` belongs to the pick. A file without a date belongs to
+    /// no year at all.
+    fn matches(&self, taken_at: Option<&str>) -> bool {
+        let Some(year) = taken_at.and_then(|d| d.get(0..4)) else {
+            return false;
+        };
+        match self {
+            YearPick::Year(want) => year == want,
+            YearPick::Older(bound) => year < bound.as_str(),
+        }
+    }
+}
+
 /// The set of files the selection was made in: the view, the filter, the search, the order.
 /// While it stays the same the selection lives; a change of any field clears it (M18), so
 /// that an action does not touch files that are no longer on the screen.
@@ -500,6 +524,7 @@ struct PickScope {
     query: String,
     kind: KindFilter,
     tags: Vec<String>,
+    year: Option<YearPick>,
     hits: Option<usize>,
     sort: db::GridSort,
     layout: db::GridLayout,
@@ -643,6 +668,9 @@ const RIBBON_H: f32 = 44.0;
 const RADIUS_CTRL: f32 = 4.0;
 const RADIUS_ITEM: f32 = 6.0;
 const RADIUS_CARD: f32 = 8.0;
+/// The height of a year chip in the left panel's cloud (M25.2): a tag chip is 20 px, a year is
+/// 18 px, and the cloud stays dense enough to be seen without a scroll.
+const YEARS_CHIP_H: f32 = 18.0;
 /// Below this window width the details move into the left panel: the grid needs 4 columns.
 const DETAILS_MIN_W: f32 = 1200.0;
 /// The gap inside the calendar grids: between the month cards of the year layer and between the
@@ -1242,55 +1270,6 @@ fn nav_section(ui: &mut egui::Ui, text: &str) {
     ui.add_space(2.0);
 }
 
-/// A cell of the year list: 20 px high and a fixed share of the panel width, the year in
-/// monospace on the left, the number of files in mono 10 at the right edge, the picked year in the
-/// accent. The geometry does not depend on the state, so the list does not twitch on a click
-/// (M22.3).
-fn year_row(ui: &mut egui::Ui, width: f32, text: &str, count: Option<usize>, selected: bool) -> bool {
-    let th = theme(ui);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        let fill = if selected {
-            th.accent_soft
-        } else if resp.hovered() {
-            th.card
-        } else {
-            egui::Color32::TRANSPARENT
-        };
-        if fill != egui::Color32::TRANSPARENT {
-            ui.painter()
-                .rect_filled(rect, egui::CornerRadius::same(RADIUS_CTRL as u8), fill);
-        }
-        let color = if selected {
-            th.accent
-        } else if resp.hovered() {
-            th.text
-        } else {
-            th.text_med
-        };
-        ui.painter().text(
-            rect.left_center() + egui::vec2(6.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            text,
-            egui::FontId::monospace(11.0),
-            color,
-        );
-        if let Some(n) = count {
-            ui.painter().text(
-                rect.right_center() + egui::vec2(-6.0, 0.0),
-                egui::Align2::RIGHT_CENTER,
-                n.to_string(),
-                egui::FontId::monospace(10.0),
-                th.text_dim,
-            );
-        }
-    }
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    resp.clicked()
-}
-
 /// An item of the left list in the "Settings" dialog (M22.8): the icon and the word of the
 /// section, the active row on the accent fill with a 2 px accent edge (`photocat_4`'s
 /// `border-l-[3px]`, rounded down to the 2 px line of our layout), a mono value at the right edge —
@@ -1441,12 +1420,25 @@ fn filter_chip(ui: &mut egui::Ui, text: &str, lang: Lang) -> bool {
 /// the accent. The width comes from the text and not from the state, so a click never moves the
 /// row (M22.3).
 fn tag_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> bool {
+    cloud_chip(ui, text, selected, 20.0).clicked()
+}
+
+/// A year chip of the cloud (M25.2): the geometry of a tag chip with an 18 px height and no
+/// number inside — the count lives in the hint. The width follows the text and never the state.
+fn year_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    cloud_chip(ui, text, selected, YEARS_CHIP_H)
+}
+
+/// The chip of a cloud: mono 11, the width from the text, the picked one on the accent. The
+/// height separates a tag chip (20 px) from a year chip (18 px); nothing else differs, so the
+/// two clouds cannot drift apart.
+fn cloud_chip(ui: &mut egui::Ui, text: &str, selected: bool, height: f32) -> egui::Response {
     let th = theme(ui);
     let font = egui::FontId::monospace(11.0);
     let galley = ui
         .painter()
         .layout_no_wrap(text.to_owned(), font.clone(), th.text_med);
-    let size = egui::vec2(galley.size().x + 14.0, 20.0);
+    let size = egui::vec2(galley.size().x + 14.0, height);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let (fill, border, color) = if selected {
@@ -1470,13 +1462,29 @@ fn tag_chip(ui: &mut egui::Ui, text: &str, selected: bool) -> bool {
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    resp.clicked()
+    resp
+}
+
+/// "2004–2019": the range of the years the "…" chip filters, or the only old year when there is
+/// one (M25.2). `skip` is how many of the newest years the cloud already draws.
+fn years_range(years: &[(String, usize)], skip: usize) -> String {
+    let Some((newest_old, _)) = years.get(skip) else {
+        return String::new();
+    };
+    let oldest = &years[years.len() - 1].0;
+    if oldest == newest_old {
+        oldest.clone()
+    } else {
+        format!("{oldest}–{newest_old}")
+    }
 }
 
 /// A snapshot of the active filters for the row of chips.
 struct Chips {
     query: String,
     tags: Vec<String>,
+    /// The year filter as a chip ("year: 2019" or "older than 2020"), M25.2.
+    year: Option<String>,
     kind: KindFilter,
     /// The language the chips are written in; the snapshot is taken once per frame.
     lang: i18n::Lang,
@@ -1495,6 +1503,7 @@ impl Chips {
     fn any(&self) -> bool {
         !self.query.is_empty()
             || !self.tags.is_empty()
+            || self.year.is_some()
             || self.album.is_some()
             || self.kind != KindFilter::All
             || self.hits.is_some()
@@ -1509,6 +1518,8 @@ struct FilterClear {
     tag_at: Option<usize>,
     /// "Reset" or a year-like reset: the whole tag filter goes.
     tags: bool,
+    /// The year chip of the chips row: clear the year filter.
+    year: bool,
     kind: bool,
     hits: bool,
     /// Close the open album: go back to the album tree.
@@ -1542,6 +1553,11 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
                 clear.query = true;
             }
         }
+        if let Some(year) = &chips.year
+            && filter_chip(ui, year, lang)
+        {
+            clear.year = true;
+        }
         for (i, tag) in chips.tags.iter().enumerate() {
             let text = format!("{} {}", t(lang, "tag:"), shorten(tag, 24));
             if filter_chip(ui, &text, lang) {
@@ -1573,6 +1589,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
             clear = FilterClear {
                 query: true,
                 tags: true,
+                year: true,
                 kind: true,
                 hits: true,
                 album: true,
@@ -2461,6 +2478,9 @@ struct App {
     path_input: String,
     query: String,
     kind_filter: KindFilter,
+    /// The year filter (M25.2): independent of the path/date field, so a typed word survives a
+    /// click on a year. `None` means "all years".
+    year_filter: Option<YearPick>,
     progress: Option<Arc<Progress>>,
     rx: Option<mpsc::Receiver<Result<index::Stats>>>,
     /// CLIP tags: file_id → [(tag, weight)] descending.
@@ -2664,6 +2684,7 @@ impl App {
                 query: String::new(),
                 kind: KindFilter::All,
                 tags: Vec::new(),
+                year: None,
                 hits: None,
                 sort: db::GridSort::DateDesc,
                 layout: db::GridLayout::Months,
@@ -2676,6 +2697,7 @@ impl App {
             path_input: String::new(),
             query: String::new(),
             kind_filter: KindFilter::All,
+            year_filter: None,
             progress: None,
             rx: None,
             tags: HashMap::new(),
@@ -5962,6 +5984,7 @@ impl App {
         self.query.clear();
         self.kind_filter = KindFilter::All;
         self.tag_filters.clear();
+        self.year_filter = None;
         self.semantic_hits = None;
         self.ocr_snippets.clear();
         self.status = t(lang, "the filters are reset").into();
@@ -6469,9 +6492,17 @@ impl App {
                 })
             })
             .flatten();
+        let lang = self.settings.lang;
+        let year = self.year_filter.as_ref().map(|pick| match pick {
+            YearPick::Year(y) => format!("{} {y}", t(lang, "year:")),
+            YearPick::Older(bound) => {
+                i18n::fill(lang, "older than {}", std::slice::from_ref(bound))
+            }
+        });
         Chips {
             query: self.query.trim().to_string(),
             tags: self.tag_filters.clone(),
+            year,
             kind: self.kind_filter,
             lang: self.settings.lang,
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
@@ -6686,45 +6717,66 @@ impl App {
         panel_edge(ui, false);
     }
 
-    /// The years of the archive: the five newest with the number of files, the picked one in the
-    /// accent. "All years" is the way back and is drawn only while a year is picked, so the panel
-    /// does not spend a row on a filter that is already empty (M22.3).
+    /// The years of the archive as a wrapped cloud (M25.2): the five newest as 18 px chips and,
+    /// when the index holds older years, a sixth "…" chip that filters exactly those older years.
+    /// No number is drawn inside a chip — the count lives in the hint — and "All years" is the way
+    /// back, drawn only while a pick is on, so the panel spends no room on an empty filter.
     fn years_block(&mut self, ui: &mut egui::Ui, years: &[(String, usize)]) {
         let lang = self.settings.lang;
-        let picked = self.picked_year();
-        // Three columns of two rows (M22.19): five years in two columns cost three rows and left
-        // the oldest one under the pinned summary at 840 px; with three columns six cells (five
-        // years and "All years") are always two rows, so the block never changes height.
-        // text, count, selected, the year the click sets (None — "All years", an empty filter)
-        let mut cells: Vec<(String, Option<usize>, bool, Option<String>)> = Vec::new();
-        if picked.is_some() {
-            cells.push((t(lang, "All years").to_string(), None, false, None));
-        }
-        for (year, count) in years {
-            let selected = picked.as_deref() == Some(year.as_str());
-            cells.push((year.clone(), Some(*count), selected, Some(year.clone())));
-        }
-        let gap = 4.0;
-        let w = ((ui.available_width() - 2.0 * gap) / 3.0).max(50.0);
-        let mut set: Option<Option<String>> = None;
-        for row in cells.chunks(3) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                for (text, count, selected, year) in row {
-                    if year_row(ui, w, text, *count, *selected) {
-                        // A second click on the picked year clears it: a toggle, as a chip behaves.
-                        set = Some(if *selected { None } else { year.clone() });
-                    }
+        const CLOUD: usize = 5;
+        let cloud = &years[..years.len().min(CLOUD)];
+        let older = (years.len() > CLOUD).then(|| {
+            let bound = years[CLOUD - 1].0.clone();
+            let count: usize = years[CLOUD..].iter().map(|(_, n)| *n).sum();
+            (bound, count)
+        });
+        let mut set: Option<Option<YearPick>> = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            if self.year_filter.is_some()
+                && year_chip(ui, t(lang, "All years"), false)
+                    .on_hover_text(t(lang, "clear the year filter"))
+                    .clicked()
+            {
+                set = Some(None);
+            }
+            for (year, count) in cloud {
+                let pick = YearPick::Year(year.clone());
+                let selected = self.year_filter.as_ref() == Some(&pick);
+                let hint = format!("{year} · {}", i18n::count(lang, *count, "file"));
+                if year_chip(ui, year, selected)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    // A second click on the picked year clears it: a toggle, as a chip behaves.
+                    set = Some(if selected { None } else { Some(pick) });
                 }
-            });
-        }
-        if let Some(year) = set {
-            self.pick_year(year.as_deref());
+            }
+            if let Some((bound, count)) = &older {
+                let pick = YearPick::Older(bound.clone());
+                let selected = self.year_filter.as_ref() == Some(&pick);
+                let hint = i18n::fill(
+                    lang,
+                    "older than {} · {}",
+                    &[bound.clone(), i18n::count(lang, *count, "file")],
+                );
+                let hint = format!("{hint} · {}", years_range(years, CLOUD));
+                if year_chip(ui, "…", selected)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    set = Some(if selected { None } else { Some(pick) });
+                }
+            }
+        });
+        if let Some(pick) = set {
+            self.set_year(pick);
         }
     }
 
-    /// The years of the index with the number of files: the newest first, five at most. A file
-    /// without a date belongs to no year and is not counted (M22.3).
+    /// The years of the index with the number of files: the newest first, every year of the
+    /// archive — the cloud takes the five newest and knows whether the rest exists (M25.2). A
+    /// file without a date belongs to no year and is not counted.
     fn year_counts(&self) -> Vec<(String, usize)> {
         let mut map: BTreeMap<String, usize> = BTreeMap::new();
         for r in &self.items {
@@ -6737,20 +6789,14 @@ impl App {
         }
         let mut out: Vec<(String, usize)> = map.into_iter().collect();
         out.sort_by(|a, b| b.0.cmp(&a.0));
-        out.truncate(5);
         out
     }
 
-    /// The year the date filter holds, if it holds exactly a year.
-    fn picked_year(&self) -> Option<String> {
-        let q = self.query.trim();
-        (q.len() == 4 && q.bytes().all(|b| b.is_ascii_digit())).then(|| q.to_string())
-    }
-
-    /// A year clicked in the panel: the date filter is the query field, so the year goes there.
-    /// A semantic search and the text snippets are dropped — a year is a date, not words.
-    fn pick_year(&mut self, year: Option<&str>) {
-        self.query = year.unwrap_or_default().to_string();
+    /// A year or "the older years" clicked in the panel: the filter is its own (`year_filter`),
+    /// so a typed path/date word survives the click (M25.2, M25.3). A semantic search and the
+    /// text snippets are dropped — a year is a date, not words.
+    fn set_year(&mut self, pick: Option<YearPick>) {
+        self.year_filter = pick;
         self.semantic_hits = None;
         self.ocr_snippets.clear();
     }
@@ -9642,6 +9688,7 @@ impl App {
             query: self.query.trim().to_lowercase(),
             kind: self.kind_filter,
             tags: self.tag_filters.clone(),
+            year: self.year_filter.clone(),
             hits: self.semantic_hits.as_ref().map(|h| h.len()),
             sort: self.settings.grid_sort,
             layout: self.settings.grid_layout,
@@ -9666,6 +9713,8 @@ impl App {
             t(lang, "the photo and video filter changed")
         } else if now.tags != self.pick_scope.tags {
             t(lang, "the tag filter changed")
+        } else if now.year != self.pick_scope.year {
+            t(lang, "the year filter changed")
         } else if now.hits != self.pick_scope.hits {
             t(lang, "the search changed")
         } else if now.album != self.pick_scope.album {
@@ -9833,6 +9882,10 @@ impl App {
                 q.is_empty()
                     || r.path.to_lowercase().contains(&q)
                     || r.taken_at.clone().unwrap_or_default().contains(&q)
+            })
+            .filter(|(_, r)| match &self.year_filter {
+                None => true,
+                Some(pick) => pick.matches(r.taken_at.as_deref()),
             })
             .filter(|(_, r)| {
                 self.tag_filters.iter().all(|want| {
@@ -15102,6 +15155,9 @@ impl eframe::App for App {
         if clear_chips.tags {
             self.tag_filters.clear();
         }
+        if clear_chips.year {
+            self.year_filter = None;
+        }
         if clear_chips.kind {
             self.kind_filter = KindFilter::All;
         }
@@ -16482,6 +16538,59 @@ mod tests {
             p(0.95),
             1000.0 / p(0.95),
             p(0.99)
+        );
+    }
+
+    /// The M25.2 panel budget on the real corpus: where the scrolling part, the year cloud and the
+    /// pinned summary stand in a 1240×840 window, and that the "…" is among the drawn chips.
+    /// `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
+    /// cargo test --release -- --ignored panel_years_measurement --nocapture`.
+    #[test]
+    #[ignore]
+    fn panel_years_measurement() {
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let mut app = App::new(std::path::PathBuf::from(path));
+        let n = app.items.len();
+        assert!(n > 100, "{n} files in the index — that is not the corpus");
+        app.settings.lang = i18n::Lang::Ru;
+        let years = app.year_counts();
+        let cloud: Vec<&str> = years.iter().take(5).map(|(y, _)| y.as_str()).collect();
+        assert_eq!(cloud.len(), 5, "the corpus needs at least five years");
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_layout(&mut app, &ctx, size);
+        let drawn = window_layout(&mut app, &ctx, size);
+        let at = |needle: &str| {
+            drawn
+                .iter()
+                .rfind(|(text, pos)| text == needle && pos.x < super::LEFT_W)
+                .map(|(_, pos)| *pos)
+                .unwrap_or_else(|| panic!("“{needle}” is not drawn"))
+        };
+        let heading = at("ГОДЫ");
+        let first = at(cloud[0]);
+        let ellipsis = at("…");
+        let summary = at("Сводка");
+        let last_old = years.last().map(|(y, _)| y.as_str()).unwrap_or("");
+        println!(
+            "corpus: {n} files, {} years ({last_old}–{}); the years heading at y {:.1}, the first \
+             chip at y {:.1}, the “…” chip at y {:.1} (h {:.1}), the cloud ends at {:.1}, the pinned \
+             summary at y {:.1}",
+            years.len(),
+            cloud[0],
+            heading.y,
+            first.y,
+            ellipsis.y,
+            super::YEARS_CHIP_H,
+            ellipsis.y + super::YEARS_CHIP_H,
+            summary.y
+        );
+        assert!(
+            ellipsis.y + super::YEARS_CHIP_H <= summary.y,
+            "the cloud is cut off by the pinned summary"
         );
     }
 
@@ -19762,9 +19871,10 @@ mod tests {
         }
     }
 
-    /// M22.3: the year block of the left panel is a filter, not a decoration. The counts come
-    /// from the dates of the index, a click writes the year into the date filter and a second
-    /// click (or "all years") clears it. A year without files is not in the list at all.
+    /// M22.3, M25.2: the year block of the left panel is a filter, not a decoration. The counts
+    /// come from the dates of the index, a click sets `year_filter` and a second click (or "all
+    /// years") clears it. A year without files is not in the list at all, and the year is a filter
+    /// of its own — the path/date field keeps its word.
     #[test]
     fn a_year_click_narrows_the_date_filter() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-years.db"));
@@ -19789,12 +19899,14 @@ mod tests {
         let list: Vec<&str> = years.iter().map(|(y, _)| y.as_str()).collect();
         assert_eq!(list, ["2024", "2023", "2020"], "the newest first: {list:?}");
         assert_eq!(years[0].1, 2, "two files in 2024");
-        // At most five rows, however deep the archive is.
+        // Every year of the index: the cloud takes the five newest and knows whether the rest
+        // exists, so the count here is not cut (M25.2).
         app.items = (0..9)
             .map(|i| dated(i + 1, "x.jpg", &format!("{}-05-01T08:00", 2010 + i)))
             .collect();
-        assert_eq!(app.year_counts().len(), 5);
+        assert_eq!(app.year_counts().len(), 9);
         assert_eq!(app.year_counts()[0].0, "2018");
+        assert_eq!(app.year_counts()[8].0, "2010");
 
         app.items = vec![
             dated(1, "a.jpg", "2024-05-01T08:00"),
@@ -19805,9 +19917,13 @@ mod tests {
         // A semantic search plus a year is a contradiction: the click drops the words.
         app.semantic_hits = Some(vec![1]);
         app.ocr_snippets.insert(1, "text".into());
-        app.pick_year(Some("2024"));
-        assert_eq!(app.query, "2024");
-        assert_eq!(app.picked_year().as_deref(), Some("2024"));
+        app.set_year(Some(super::YearPick::Year("2024".into())));
+        assert_eq!(
+            app.year_filter,
+            Some(super::YearPick::Year("2024".into())),
+            "the year has its own filter"
+        );
+        assert!(app.query.is_empty(), "the year no longer writes into the path field");
         assert!(app.semantic_hits.is_none(), "the words are gone with the year");
         assert!(app.ocr_snippets.is_empty());
         let visible: Vec<String> = app
@@ -19816,11 +19932,106 @@ mod tests {
             .map(|&i| super::file_name(&app.items[i].path))
             .collect();
         assert_eq!(visible, ["a.jpg", "b.jpg"], "only 2024: {visible:?}");
+        // A typed path word survives a year click: the two filters are independent (M25.3).
+        app.query = "vacation".into();
+        app.set_year(Some(super::YearPick::Year("2024".into())));
+        assert_eq!(app.query, "vacation", "the typed word survives a year click");
+        app.query.clear();
         // The way back: the filter is empty again and every file is visible.
-        app.pick_year(None);
+        app.set_year(None);
         assert!(app.query.is_empty());
-        assert!(app.picked_year().is_none());
+        assert!(app.year_filter.is_none());
         assert_eq!(app.filtered().len(), 4, "all years are back");
+    }
+
+    /// M25.2: the cloud keeps the five newest years and a "…" that filters exactly the older
+    /// ones; a second click clears either pick and "All years" is the one way back. No number is
+    /// drawn inside a chip.
+    #[test]
+    fn the_years_cloud_keeps_five_and_filters_the_older_ones() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-years-cloud.db"));
+        app.items = (0..21)
+            .map(|i| {
+                let mut r = file_row(i + 1, "image", "y.jpg");
+                r.taken_at = Some(format!("{}-05-01T08:00", 2004 + i));
+                r
+            })
+            .collect();
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let drawn = |app: &mut App| window_word_rects_at(app, &ctx, size);
+        let texts: Vec<String> = drawn(&mut app).into_iter().map(|(t, _)| t).collect();
+        for year in ["2024", "2023", "2022", "2021", "2020"] {
+            assert!(texts.iter().any(|t| t == year), "no chip “{year}”: {texts:?}");
+        }
+        assert!(
+            !texts.iter().any(|t| t == "2019" || t == "2004"),
+            "the cloud never grows: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "…"),
+            "no ellipsis for the older years: {texts:?}"
+        );
+        // No number is drawn inside a chip: the count lives in the hint.
+        assert!(
+            !texts.iter().any(|t| t == "2020 · 1 file"),
+            "the count is not a chip: {texts:?}"
+        );
+        let at = |app: &mut App, want: &str| {
+            drawn(app)
+                .into_iter()
+                .find(|(t, _)| t == want)
+                .unwrap_or_else(|| panic!("“{want}” is not drawn"))
+                .1
+        };
+        // The "…" narrows the grid to exactly the years older than the cloud's oldest one.
+        let r = at(&mut app, "…");
+        click_at(&mut app, &ctx, r.center());
+        assert_eq!(
+            app.year_filter,
+            Some(super::YearPick::Older("2020".into())),
+            "the ellipsis filters the older years"
+        );
+        let mut years: Vec<String> = app
+            .filtered()
+            .iter()
+            .map(|&i| app.items[i].taken_at.clone().unwrap()[0..4].to_string())
+            .collect();
+        years.sort();
+        years.dedup();
+        assert_eq!(
+            years,
+            ["2004", "2005", "2006", "2007", "2008", "2009", "2010", "2011", "2012", "2013",
+             "2014", "2015", "2016", "2017", "2018", "2019"],
+            "the older years only"
+        );
+        // The chips row names the pick.
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        assert!(
+            texts.iter().any(|t| t == "older than 2020 ×"),
+            "the chips row has no year chip: {texts:?}"
+        );
+        // A second click on "…" clears it.
+        let r = at(&mut app, "…");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.year_filter.is_none(), "a second click clears the ellipsis");
+        // "All years" is drawn only while a pick is on and clears it.
+        let texts = drawn(&mut app).into_iter().map(|(t, _)| t).collect::<Vec<_>>();
+        assert!(
+            !texts.iter().any(|t| t == "All years"),
+            "no way back while the filter is empty: {texts:?}"
+        );
+        let r = at(&mut app, "2021");
+        click_at(&mut app, &ctx, r.center());
+        assert_eq!(
+            app.year_filter,
+            Some(super::YearPick::Year("2021".into()))
+        );
+        let r = at(&mut app, "All years");
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.year_filter.is_none(), "All years is the way back");
     }
 
     /// M22.3: the year rows are drawn with their counts, and a year with zero files is not drawn.
@@ -19851,7 +20062,7 @@ mod tests {
         }
         // "All years" appears only while a year is picked: a way back, not a permanent row.
         assert!(!texts.iter().any(|t| t == "Все годы"), "{texts:?}");
-        app.pick_year(Some("2024"));
+        app.set_year(Some(super::YearPick::Year("2024".into())));
         let _ = window_frame(&mut app, &ctx);
         let texts = window_frame(&mut app, &ctx);
         assert!(texts.iter().any(|t| t == "Все годы"), "{texts:?}");
@@ -19899,13 +20110,13 @@ mod tests {
             oldest.y + 20.0 <= 840.0 - 28.0,
             "a year row is under the bottom strip: {oldest:?}"
         );
-        // Picking a year adds "All years" without growing the block: six cells are still three
-        // rows, so the summary does not move and nothing below the years is pushed off.
-        app.pick_year(Some("2024"));
+        // Picking a year adds "All years" without growing the block: the chips wrap, so the
+        // summary does not move and nothing below the years is pushed off.
+        app.set_year(Some(super::YearPick::Year("2024".into())));
         let _ = window_layout(&mut app, &ctx, size);
         let picked = window_layout(&mut app, &ctx, size);
-        // The picked year is also written in the query field above (and in the chip of the grid),
-        // so the last match inside the left panel is the year row itself.
+        // The picked year is also named in the chip of the grid and in the hint of the cloud, so
+        // the last match inside the left panel is the year chip itself.
         let at_picked = |needle: &str| {
             picked
                 .iter()

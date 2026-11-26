@@ -366,6 +366,11 @@ where the years live. Measured with a headless frame at 1240×840: the scrolling
 the years end at 680 px and the pinned "Summary" starts at 692 px — every year is seen without a
 scroll and stands 12 px above the summary, and the same frame proves the summary does not move when a
 year is picked (`the_left_panel_fits_the_years_above_the_summary`).
+**Superseded in part by M25.2 (2026-11-26):** the three columns of rows became a wrapped cloud of
+18 px chips — the five newest years and a "…" that filters exactly the older ones — and the year no
+longer writes into the path/date field: it is a filter of its own (`App::year_filter`, `YearPick`),
+shown as "year: 2019 ×" or "older than 2020 ×" in the chips row. On the corpus at 1240×840 the cloud
+ends at 666.5 px and the pinned "Summary" starts at 692 px.
 The tag menu became chips: the word with the count of snapshots after a middle dot, 4 px apart,
 wrapping, idle `field` with `text_med`, picked — accent fill, accent 1 px border and accent text, the
 width following the text and never the state (`tag_chip`). The row therefore keeps every position
