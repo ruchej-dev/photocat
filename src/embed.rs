@@ -1218,8 +1218,15 @@ pub fn embed_missing(
     }
     let rows = db::load_all(&conn)?;
     let done = db::embedding_shas(&conn, entry.id)?;
+    // A switched-off folder takes no part in the pass (M26.1): the owner switches it back on
+    // to let the pass catch up.
+    let rows: Vec<&FileRow> = rows
+        .iter()
+        .filter(|r| !settings.path_hidden(&r.path))
+        .collect();
     let todo: Vec<&FileRow> = rows
         .iter()
+        .copied()
         .filter(|r| r.thumb.is_some())
         .filter(|r| done.get(&r.id) != Some(&r.sha256))
         .collect();

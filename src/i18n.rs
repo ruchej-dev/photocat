@@ -1348,10 +1348,27 @@ const PAIRS: &[(&str, &str)] = &[
     // Archive folders and the folder picker.
     ("Archive folders", "Каталоги архива"),
     (
-        "You can index several folders. “Add a folder…” offers indexing straight away; \
-         “Remove from the index” deletes DB rows only — the files on disk are untouched.",
-        "Индексировать можно несколько каталогов. «Добавить каталог…» сразу предлагает \
-         индексацию; «Убрать из индекса» удаляет только строки БД — файлы на диске целы.",
+        "You can index several folders. The box switches a folder off: its files leave every view while the rows, the previews and the files on disk stay. “Add a folder…” offers indexing straight away; “Remove from the index” deletes DB rows only — the files on disk are untouched.",
+        "Индексировать можно несколько каталогов. Флажок выключает каталог: его файлы уходят \
+         из всех экранов, а строки, превью и файлы на диске остаются. «Добавить каталог…» \
+         сразу предлагает индексацию; «Убрать из индекса» удаляет только строки БД — файлы \
+         на диске целы.",
+    ),
+    (
+        "off: its files are hidden from every view; the rows, the previews and the files on disk stay",
+        "выкл.: файлы скрыты из всех экранов; строки, превью и файлы на диске остаются",
+    ),
+    (
+        "{} is switched off: its files are hidden from every view, the rows stay",
+        "{} выключен: его файлы скрыты из всех экранов, строки остаются",
+    ),
+    (
+        "{} is switched on again: the rows are back, nothing was read from disk",
+        "{} снова включён: строки вернулись, с диска ничего не читалось",
+    ),
+    (
+        " · {} in switched-off folders",
+        " · {} в выключенных каталогах",
     ),
     ("No folders yet — add one with the button below.", "Каталогов пока нет — добавьте кнопкой ниже."),
     ("Remove from the index", "Убрать из индекса"),
@@ -1408,6 +1425,12 @@ const PAIRS: &[(&str, &str)] = &[
     ("files", "файлов"),
     ("size", "объём"),
     ("total: {} files, {}", "всего: {} файлов, {}"),
+    ("switched off: {} — {}", "выключен: {} — {}"),
+    ("shown: {}", "показано: {}"),
+    (
+        "{} is switched off: its files are hidden and indexing skipped it — switch it on in the folder list",
+        "{} выключен: его файлы скрыты, индексация его пропустила — включите его в списке каталогов",
+    ),
     ("without a capture date: {}", "без даты съёмки: {}"),
     ("without a perceptual hash: {}", "без перцептивного хеша: {}"),
     ("unique sha256: {}  (exact copies: {})", "уникальных sha256: {}  (точных копий: {})"),
@@ -1797,6 +1820,11 @@ const PAIRS: &[(&str, &str)] = &[
     ("indexing {}…", "индексация {}…"),
     ("indexing {} folders…", "индексация {} каталогов…"),
     (" (skipped: {})", " (пропущено: {})"),
+    (" (switched off: {})", " (выключено: {})"),
+    (
+        "every folder is switched off: {} — switch one on in the folder list",
+        "все каталоги выключены: {} — включите один в списке каталогов",
+    ),
     ("indexing {}: {e}", "индексация {}: {e}"),
     ("remove the tag from this photo; the original does not change", "убрать тег у этого фото; оригинал не меняется"),
     ("the indexing failed: {e}", "индексация не удалась: {e}"),

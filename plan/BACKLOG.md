@@ -1808,7 +1808,7 @@ fall apart when the window is narrow.
 the top strip visibly taller than 32 logical px) and the report "при узком окне вся вёрстка плывёт,
 элементы в центральной части наезжают друг на друга".
 
-**Tasks.** M26.1 folders can be switched off; M26.2 a warning mark for a limited feature and its
+**Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 a warning mark for a limited feature and its
 info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
 M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
@@ -1818,7 +1818,7 @@ together; M26.11 a named person is recognized in every catalog; M26.12 (done 202
 built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
 separate window.
 
-**M26.1 — an archive folder can be switched off without losing its rows.**
+**M26.1 — an archive folder can be switched off without losing its rows.** ✅ (done 2026-11-26)
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
 back with one switch, no re-index.
 

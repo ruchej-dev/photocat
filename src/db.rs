@@ -564,6 +564,9 @@ pub struct Settings {
     pub album_list: bool,
     /// Folders indexed with one button; empty means the path from the top bar.
     pub roots: Vec<String>,
+    /// Folders switched off (M26.1): their files are hidden from every view, the rows, the
+    /// previews and the files on disk stay. The same newline-separated form as `roots`.
+    pub roots_off: Vec<String>,
     /// The integrity reminder (M10): the folder and the manifest the term belongs to,
     /// the interval in days (0 — the reminder is off) and the result of the last pass.
     pub verify_root: String,
@@ -604,6 +607,7 @@ impl Default for Settings {
             album_sort: AlbumSort::Position,
             album_list: false,
             roots: Vec::new(),
+            roots_off: Vec::new(),
             verify_root: String::new(),
             verify_manifest: String::new(),
             // 30 days is a calm term for a family archive; 0 switches the reminder off.
@@ -617,6 +621,66 @@ impl Default for Settings {
             theme: ThemeMode::Dark,
         }
     }
+}
+
+/// A root without its trailing separator; a lone `/` or `C:\` stays as it is, so the whole
+/// drive or the file system can still be named as a folder.
+fn trim_root(root: &str) -> &str {
+    let trimmed = root.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() { root } else { trimmed }
+}
+
+/// Whether `path` lies inside `root` (M26.1). A component-wise prefix, not a string one:
+/// `/archive2` is not inside `/archive`. A trailing separator on either side is ignored.
+pub fn under_root(path: &str, root: &str) -> bool {
+    if root.is_empty() {
+        return false;
+    }
+    std::path::Path::new(trim_root(path)).starts_with(std::path::Path::new(trim_root(root)))
+}
+
+impl Settings {
+    /// Whether a file path lies in a folder that is switched off (M26.1). The switch is about
+    /// showing, not about deleting: the rows stay in the DB.
+    pub fn path_hidden(&self, path: &str) -> bool {
+        self.roots_off.iter().any(|root| under_root(path, root))
+    }
+
+    /// Whether this very folder is switched off — the folder list and the catalog block.
+    pub fn root_off(&self, root: &str) -> bool {
+        let root = trim_root(root);
+        self.roots_off.iter().any(|r| trim_root(r) == root)
+    }
+
+    /// Switch a folder on or off (M26.1): only the setting changes, no row is touched.
+    pub fn set_root_off(&mut self, root: &str, off: bool) {
+        let root = trim_root(root).to_string();
+        if off {
+            if !self.root_off(&root) {
+                self.roots_off.push(root);
+            }
+        } else {
+            self.roots_off.retain(|r| trim_root(r) != root);
+        }
+    }
+}
+
+/// How many indexed files lie in each root, in the order of `roots`: the folder list says where
+/// the archive is. A switched-off root is counted too — the switch hides, it does not delete.
+pub fn root_file_counts(db: &Path, roots: &[String]) -> Result<Vec<(String, usize)>> {
+    let conn = open(db)?;
+    let paths: Vec<String> = {
+        let mut st = conn.prepare("SELECT path FROM files WHERE trashed_at IS NULL")?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<String>>>()?
+    };
+    Ok(roots
+        .iter()
+        .map(|root| {
+            let n = paths.iter().filter(|p| under_root(p, root)).count();
+            (root.clone(), n)
+        })
+        .collect())
 }
 
 pub fn load_settings(conn: &Connection) -> Settings {
@@ -654,6 +718,14 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "cell_style" => s.cell_style = CellStyle::parse(&v),
             "album_sort" => s.album_sort = AlbumSort::parse(&v),
             "album_list" => s.album_list = v == "1" || v == "true",
+            "roots_off" => {
+                s.roots_off = v
+                    .lines()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            }
             "roots" => {
                 s.roots = v
                     .lines()
@@ -707,6 +779,7 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
             if s.album_list { "1" } else { "0" }.to_string(),
         ),
         ("roots", s.roots.join("\n")),
+        ("roots_off", s.roots_off.join("\n")),
         ("verify_root", s.verify_root.clone()),
         ("verify_manifest", s.verify_manifest.clone()),
         ("verify_interval_days", s.verify_interval_days.to_string()),
@@ -1664,6 +1737,19 @@ pub fn ocr_summary(conn: &Connection) -> Result<(i64, i64)> {
     )?)
 }
 
+/// The recognized text of every file, file_id → characters: the window counts the files with
+/// text over the visible set (M26.1), not over the whole DB.
+pub fn ocr_file_counts(conn: &Connection) -> Result<HashMap<i64, i64>> {
+    let mut st = conn.prepare("SELECT file_id, chars FROM ocr")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let (id, chars) = r?;
+        out.insert(id, chars);
+    }
+    Ok(out)
+}
+
 /// The tag dictionary of a model in display order. Empty means the model has not been seeded yet.
 pub fn load_tag_defs(conn: &Connection, model: &str) -> Result<Vec<TagDef>> {
     let mut st = conn.prepare(
@@ -2509,6 +2595,57 @@ pub fn stats_text(lang: Lang, db_path: &Path) -> Result<String> {
         |r| r.get(0),
     )?;
     let _ = writeln!(out, "---");
+    // A switched-off folder is named with its own count (M26.1): the rows are still in the index
+    // and the totals below cover the whole DB, while the window and `index` work over the shown set.
+    let settings = load_settings(&conn);
+    if !settings.roots_off.is_empty() {
+        let all: Vec<(String, i64)> = {
+            let mut st = conn.prepare("SELECT path, size FROM files")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<rusqlite::Result<Vec<(String, i64)>>>()?
+        };
+        let mut hidden_n = 0usize;
+        let mut hidden_b = 0i64;
+        for root in &settings.roots_off {
+            let (n, b) = all
+                .iter()
+                .filter(|(p, _)| under_root(p, root))
+                .fold((0usize, 0i64), |(n, b), (_, size)| (n + 1, b + size));
+            hidden_n += n;
+            hidden_b += b;
+            let _ = writeln!(
+                out,
+                "{}",
+                i18n::fill(
+                    lang,
+                    "switched off: {} — {}",
+                    &[
+                        root.clone(),
+                        format!(
+                            "{} · {}",
+                            i18n::count(lang, n, "file"),
+                            human_in(lang, b)
+                        ),
+                    ]
+                )
+            );
+        }
+        let shown_n = all.len().saturating_sub(hidden_n);
+        let shown_b = all.iter().map(|(_, size)| size).sum::<i64>() - hidden_b;
+        let _ = writeln!(
+            out,
+            "{}",
+            i18n::fill(
+                lang,
+                "shown: {}",
+                &[format!(
+                    "{} · {}",
+                    i18n::count(lang, shown_n, "file"),
+                    human_in(lang, shown_b)
+                )]
+            )
+        );
+    }
     let _ = writeln!(
         out,
         "{}",
@@ -3564,6 +3701,74 @@ mod tests {
         init(&c).unwrap(); // a repeated init does not fail and does not duplicate tables or rows
         assert_eq!(albums_tree(&c).unwrap().len(), 1);
         assert_eq!(album_items(&c, album).unwrap().len(), 1);
+    }
+
+    /// M26.1: a root is matched by path components, never by a string prefix.
+    #[test]
+    fn a_root_is_matched_by_path_components() {
+        assert!(under_root("/archive/2024/a.jpg", "/archive/2024"));
+        assert!(under_root("/archive/2024/", "/archive/2024"));
+        assert!(!under_root("/archive/20242/a.jpg", "/archive/2024"));
+        assert!(!under_root("/archive/2024/a.jpg", ""));
+        assert!(under_root("/archive/2024/a.jpg", "/"));
+        let mut s = Settings::default();
+        s.set_root_off("/archive/2024/", true);
+        assert!(s.root_off("/archive/2024"));
+        assert!(s.path_hidden("/archive/2024/a.jpg"));
+        assert!(!s.path_hidden("/archive/2025/a.jpg"));
+        // A second switch adds no duplicate, a switch-on removes it.
+        s.set_root_off("/archive/2024", true);
+        assert_eq!(s.roots_off.len(), 1);
+        s.set_root_off("/archive/2024", false);
+        assert!(s.roots_off.is_empty());
+    }
+
+    /// M26.1: `stats` names the switched-off folders with their own counts, separately from the
+    /// shown files, and says nothing when every folder is on.
+    #[test]
+    fn the_statistics_name_the_switched_off_folders() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-stats-off-{}-{:?}-{:?}.db",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        {
+            let c = open(&path).unwrap();
+            insert(&c, &row("/archive/on/a.jpg", "aa", 1.0)).unwrap();
+            insert(&c, &row("/archive/off/b.jpg", "bb", 1.0)).unwrap();
+            let mut s = load_settings(&c);
+            s.roots_off = vec!["/archive/off".into()];
+            save_settings(&c, &s).unwrap();
+        }
+        let text = stats_text(Lang::En, &path).unwrap();
+        assert!(
+            text.contains("switched off: /archive/off — 1 file ·"),
+            "the switched-off folder is not named: {text}"
+        );
+        assert!(
+            text.contains("shown: 1 file ·"),
+            "the shown files are not counted apart: {text}"
+        );
+        let ru = stats_text(Lang::Ru, &path).unwrap();
+        assert!(
+            ru.contains("выключен: /archive/off"),
+            "the Russian report is missing the switched-off folder: {ru}"
+        );
+        {
+            let c = open(&path).unwrap();
+            let mut s = load_settings(&c);
+            s.roots_off.clear();
+            save_settings(&c, &s).unwrap();
+        }
+        let text = stats_text(Lang::En, &path).unwrap();
+        assert!(
+            !text.contains("switched off") && !text.contains("shown:"),
+            "a report with nothing switched off names switches: {text}"
+        );
     }
 
 }

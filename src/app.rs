@@ -2948,16 +2948,67 @@ impl App {
         match db::open(&self.db_path).and_then(|c| {
             let settings = db::load_settings(&c);
             let source = embed::tag_source(embed::active_entry(&settings));
-            let rows = db::load_all(&c)?;
-            let trashed = db::load_trashed(&c)?;
-            let tags = db::load_tags(&c, &source)?;
-            let user_tags = db::load_user_tags(&c)?;
-            let hidden = db::load_hidden_counts(&c)?;
-            let (ocr_files, ocr_chars) = db::ocr_summary(&c)?;
-            let face_clusters = db::load_face_clusters(&c)?;
-            let face_views = db::load_face_views(&c, None)?;
-            let (face_faces, face_photos, _) = db::face_summary(&c)?;
-            let (face_images, face_todo) = db::face_scan_plan(&c)?;
+            // A switched-off folder is hidden from every view (M26.1). The rows are dropped here,
+            // before they reach `items`, so the grid, the calendar, the albums, the duplicates,
+            // the faces, the trash, the search and the counters all see one visible set. Nothing
+            // is deleted: the rows, the previews and the files on disk stay, and switching the
+            // folder back on needs no pass.
+            let all_rows = db::load_all(&c)?;
+            let hidden_ids: std::collections::HashSet<i64> = all_rows
+                .iter()
+                .filter(|r| settings.path_hidden(&r.path))
+                .map(|r| r.id)
+                .collect();
+            let rows: Vec<db::FileRow> = all_rows
+                .into_iter()
+                .filter(|r| !hidden_ids.contains(&r.id))
+                .collect();
+            let trashed: Vec<db::FileRow> = db::load_trashed(&c)?
+                .into_iter()
+                .filter(|r| !settings.path_hidden(&r.path))
+                .collect();
+            let mut tags = db::load_tags(&c, &source)?;
+            let mut user_tags = db::load_user_tags(&c)?;
+            let mut hidden = db::load_hidden_counts(&c)?;
+            tags.retain(|id, _| !hidden_ids.contains(id));
+            user_tags.retain(|id, _| !hidden_ids.contains(id));
+            hidden.retain(|id, _| !hidden_ids.contains(id));
+            // The counters that come from the DB alone are recomputed over the visible set (M26.1).
+            let (ocr_files, ocr_chars) = {
+                let per = db::ocr_file_counts(&c)?;
+                let mut n = 0i64;
+                let mut chars = 0i64;
+                for r in &rows {
+                    if let Some(&c2) = per.get(&r.id) {
+                        n += 1;
+                        chars += c2;
+                    }
+                }
+                (n, chars)
+            };
+            let face_views: Vec<db::FaceView> = db::load_face_views(&c, None)?
+                .into_iter()
+                .filter(|v| !settings.path_hidden(&v.path))
+                .collect();
+            let visible_clusters: std::collections::HashSet<i64> =
+                face_views.iter().filter_map(|v| v.cluster_id).collect();
+            // A named group stays even when its photos are all hidden: the name is the owner's.
+            let face_clusters: Vec<db::FaceCluster> = db::load_face_clusters(&c)?
+                .into_iter()
+                .filter(|cl| !cl.label.is_empty() || visible_clusters.contains(&cl.id))
+                .collect();
+            let face_faces = face_views.len() as i64;
+            let face_photos = face_views
+                .iter()
+                .map(|v| v.file_id)
+                .collect::<std::collections::HashSet<i64>>()
+                .len() as i64;
+            let scans = db::face_scan_shas(&c)?;
+            let face_images = rows.iter().filter(|r| r.kind == "image").count();
+            let face_todo = rows
+                .iter()
+                .filter(|r| r.kind == "image" && scans.get(&r.id) != Some(&r.sha256))
+                .count();
             Ok((
                 settings,
                 rows,
@@ -3090,22 +3141,30 @@ impl App {
         }
         self.refresh_albums();
         self.refresh_root_counts();
+        // The state is visible, not guessed: the status line says how many files the switched-off
+        // folders keep out of the views (M26.1). The rows themselves are intact.
+        let hidden: usize = self
+            .settings
+            .roots_off
+            .iter()
+            .map(|r| self.root_counts.get(r).copied().unwrap_or(0))
+            .sum();
+        if hidden > 0 {
+            let lang = self.settings.lang;
+            self.status.push_str(&i18n::fill(
+                lang,
+                " · {} in switched-off folders",
+                &[i18n::count(lang, hidden, "file")],
+            ));
+        }
     }
 
     /// The files of each root for the folder list: one pass over the index, not one per frame.
+    /// A switched-off root is counted too — the switch hides, it does not delete (M26.1).
     fn refresh_root_counts(&mut self) {
-        self.root_counts = self
-            .roots
-            .iter()
-            .map(|root| {
-                let n = self
-                    .items
-                    .iter()
-                    .filter(|f| Path::new(&f.path).starts_with(root))
-                    .count();
-                (root.clone(), n)
-            })
-            .collect();
+        self.root_counts = db::root_file_counts(&self.db_path, &self.roots)
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
     }
 
     /// The album tree and the files of the open node (M19). DB rows only.
@@ -4368,7 +4427,8 @@ impl App {
         }
     }
 
-    /// The list of folders: add a new one, remove from the index (not from disk), index them all.
+    /// The list of folders: switch a folder off without losing its rows, add a new one, remove from
+    /// the index (not from disk), index them all.
     fn roots_modal(&mut self, ctx: &egui::Context) {
         if !self.roots_open {
             return;
@@ -4378,7 +4438,14 @@ impl App {
         let mut add = false;
         let mut index_all = false;
         let mut remove: Option<String> = None;
+        // A ticked box means the folder is shown (M26.1): clearing it hides the folder from every
+        // view — never removes a row and never touches a file on disk.
+        let mut toggle: Option<(String, bool)> = None;
         let roots = self.roots.clone();
+        let off: Vec<bool> = roots
+            .iter()
+            .map(|root| self.settings.root_off(root))
+            .collect();
         // How many indexed files lie in each root: the folder list says where the archive is.
         let counts: Vec<usize> = roots
             .iter()
@@ -4395,7 +4462,7 @@ impl App {
             ui.label(
                 egui::RichText::new(t(
                     lang,
-                    "You can index several folders. “Add a folder…” offers indexing straight away; “Remove from the index” deletes DB rows only — the files on disk are untouched.",
+                    "You can index several folders. The box switches a folder off: its files leave every view while the rows, the previews and the files on disk stay. “Add a folder…” offers indexing straight away; “Remove from the index” deletes DB rows only — the files on disk are untouched.",
                 ))
                 .size(11.0)
                 .color(dim(ui)),
@@ -4409,8 +4476,31 @@ impl App {
                 .max_height(260.0)
                 .show(ui, |ui| {
                     for (i, root) in roots.iter().enumerate() {
+                        let shown = !off.get(i).copied().unwrap_or(false);
                         ui.horizontal(|ui| {
-                            ui.label(root);
+                            let mut on = shown;
+                            if ui
+                                .checkbox(&mut on, "")
+                                .on_hover_text(t(
+                                    lang,
+                                    "off: its files are hidden from every view; the rows, the previews and the files on disk stay",
+                                ))
+                                .changed()
+                            {
+                                toggle = Some((root.clone(), on));
+                            }
+                            let mut name = egui::RichText::new(root);
+                            if !shown {
+                                name = name.color(dim(ui));
+                            }
+                            ui.label(name);
+                            if !shown {
+                                ui.label(
+                                    egui::RichText::new(t(lang, "off"))
+                                        .size(11.0)
+                                        .color(dim(ui)),
+                                );
+                            }
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -4466,11 +4556,31 @@ impl App {
             self.roots_open = false;
             self.start_index();
         }
+        if let Some((root, on)) = toggle {
+            self.settings.set_root_off(&root, !on);
+            self.save_settings();
+            self.reload();
+            let lang = self.settings.lang;
+            self.status = if on {
+                i18n::fill(
+                    lang,
+                    "{} is switched on again: the rows are back, nothing was read from disk",
+                    &[root],
+                )
+            } else {
+                i18n::fill(
+                    lang,
+                    "{} is switched off: its files are hidden from every view, the rows stay",
+                    &[root],
+                )
+            };
+        }
         if let Some(root) = remove {
             match db::remove_root(&self.db_path, &root) {
                 Ok(n) => {
                     self.roots.retain(|r| r != &root);
                     self.settings.roots = self.roots.clone();
+                    self.settings.set_root_off(&root, false);
                     self.save_settings();
                     self.reload();
                     self.status = format!(
@@ -10693,6 +10803,22 @@ impl App {
                 t(lang, "give a folder in the top bar or add one with the “Folders” button").into();
             return;
         }
+        // A switched-off folder is skipped: no new rows, and switching it back on needs no pass
+        // because the rows are still there (M26.1).
+        let closed: Vec<String> = roots
+            .iter()
+            .filter(|r| self.settings.root_off(&r.to_string_lossy()))
+            .map(|r| r.display().to_string())
+            .collect();
+        roots.retain(|r| !self.settings.root_off(&r.to_string_lossy()));
+        if roots.is_empty() {
+            self.status = i18n::fill(
+                lang,
+                "every folder is switched off: {} — switch one on in the folder list",
+                &[closed.join(", ")],
+            );
+            return;
+        }
         let missing: Vec<String> = roots
             .iter()
             .filter(|r| !r.is_dir())
@@ -10718,6 +10844,13 @@ impl App {
         };
         if !missing.is_empty() {
             self.status.push_str(&i18n::fill(lang, " (skipped: {})", &[missing.join(", ").to_string()]));
+        }
+        if !closed.is_empty() {
+            self.status.push_str(&i18n::fill(
+                lang,
+                " (switched off: {})",
+                &[closed.join(", ")],
+            ));
         }
         std::thread::spawn(move || {
             let t0 = std::time::Instant::now();
@@ -18744,6 +18877,148 @@ mod tests {
             );
         }
         app.picker_open = false;
+    }
+
+    /// M26.1: a folder is switched off, not deleted. Its files leave every view (the grid, the
+    /// counters, the trash, the tags), while the rows, the previews and the files on disk stay;
+    /// switching it back on restores everything without reading a single file.
+    #[test]
+    fn a_switched_off_folder_hides_its_files_and_keeps_its_rows() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let db_path = std::env::temp_dir().join(format!(
+            "photocat-roots-off-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let root_a = format!("/tmp/photocat-roots-off-a-{stamp}");
+        let root_b = format!("/tmp/photocat-roots-off-b-{stamp}");
+        let (id_a, id_trashed) = {
+            let conn = db::open(&db_path).expect("a temporary DB");
+            let mut a = file_row(0, "image", "a.jpg");
+            a.path = format!("{root_a}/a.jpg");
+            a.thumb = Some("aa/aaaaaaaaaaaaaaaaaaaaaaaa.jpg".into());
+            let mut b1 = file_row(0, "image", "b1.jpg");
+            b1.path = format!("{root_b}/b1.jpg");
+            let mut b2 = file_row(0, "image", "b2.jpg");
+            b2.path = format!("{root_b}/b2.jpg");
+            let mut gone = file_row(0, "image", "gone.jpg");
+            gone.path = format!("{root_a}/gone.jpg");
+            for row in [&a, &b1, &b2, &gone] {
+                db::insert(&conn, row).expect("a file row");
+            }
+            let id_of = |p: &str| -> i64 {
+                conn.query_row("SELECT id FROM files WHERE path=?1", [p], |r| r.get(0))
+                    .expect("a file id")
+            };
+            let id_a = id_of(&a.path);
+            let id_trashed = id_of(&gone.path);
+            conn.execute(
+                "UPDATE files SET trashed_at=1700000000 WHERE id=?1",
+                [id_trashed],
+            )
+            .expect("the trash mark");
+            let mut settings = db::load_settings(&conn);
+            settings.roots = vec![root_a.clone(), root_b.clone()];
+            db::save_settings(&conn, &settings).expect("the settings");
+            (id_a, id_trashed)
+        };
+        db::add_user_tag(&db_path, id_a, "summer").expect("an own tag");
+
+        let mut app = App::new(db_path.clone());
+        app.settings.lang = i18n::Lang::En;
+        app.refresh_root_counts();
+        assert_eq!(app.items.len(), 3, "two photos and one outside the trash");
+        assert_eq!(app.trash_items.len(), 1);
+        assert_eq!(app.root_counts.get(&root_a), Some(&1), "the trashed file is not counted");
+        assert_eq!(app.root_counts.get(&root_b), Some(&2));
+
+        // Switch the first folder off: exactly its files leave every view.
+        app.settings.set_root_off(&root_a, true);
+        app.save_settings();
+        app.reload();
+        assert_eq!(app.items.len(), 2, "only the files of the shown folder are left");
+        assert!(
+            app.items.iter().all(|r| r.path.starts_with(&root_b)),
+            "a file of the switched-off folder is still in the grid: {:?}",
+            app.items.iter().map(|r| r.path.clone()).collect::<Vec<_>>()
+        );
+        assert!(app.trash_items.is_empty(), "the trash of a hidden folder stays hidden");
+        assert!(!app.user_tags.contains_key(&id_a), "the tags of hidden files leave the filters");
+        assert_eq!(
+            app.root_counts.get(&root_a),
+            Some(&1),
+            "the folder list still counts the rows of a switched-off folder"
+        );
+        assert!(
+            app.status.contains("1 file in switched-off folders"),
+            "the status line does not name the hidden files: {}",
+            app.status
+        );
+
+        // Nothing is deleted: the rows, the preview and the tags are in the DB.
+        {
+            let conn = db::open(&db_path).expect("the DB is still there");
+            let files: i64 = conn
+                .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+                .expect("a count");
+            assert_eq!(files, 4, "a switched-off folder lost its rows");
+            let thumb: Option<String> = conn
+                .query_row("SELECT thumb FROM files WHERE id=?1", [id_a], |r| r.get(0))
+                .expect("the preview path");
+            assert_eq!(
+                thumb.as_deref(),
+                Some("aa/aaaaaaaaaaaaaaaaaaaaaaaa.jpg"),
+                "the preview of a hidden file was dropped"
+            );
+            let tags: i64 = conn
+                .query_row("SELECT COUNT(*) FROM user_tags WHERE file_id=?1", [id_a], |r| {
+                    r.get(0)
+                })
+                .expect("a count");
+            assert_eq!(tags, 1, "the own tags of a hidden file were deleted");
+            let rooted = db::load_settings(&conn);
+            assert!(rooted.root_off(&root_a), "the switch is not saved");
+            assert!(
+                rooted.path_hidden(&format!("{root_a}/a.jpg")),
+                "the saved switch does not hide the file"
+            );
+            assert!(!rooted.path_hidden(&format!("{root_a}2/a.jpg")));
+        }
+
+        // Back on: the rows return and no file is read from disk.
+        app.settings.set_root_off(&root_a, false);
+        app.save_settings();
+        app.reload();
+        assert_eq!(app.items.len(), 3);
+        assert_eq!(app.trash_items.len(), 1);
+        assert!(
+            app.user_tags.contains_key(&id_a),
+            "the tags of the folder did not come back"
+        );
+        assert!(
+            !app.status.contains("switched-off folders"),
+            "the status line still counts hidden files: {}",
+            app.status
+        );
+
+        // The dialog shows the switch and the word "off" for a switched-off folder.
+        app.settings.set_root_off(&root_a, true);
+        app.settings.lang = i18n::Lang::En;
+        app.roots_open = true;
+        let ctx = egui::Context::default();
+        let texts = modal_frame(&mut app, &ctx, App::roots_modal);
+        assert!(
+            texts.iter().any(|t| t == "off"),
+            "the folder list does not say that a folder is off: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("switches a folder off")),
+            "the folder list does not explain the switch: {texts:?}"
+        );
+        app.roots_open = false;
+        let _ = id_trashed;
     }
 
     /// M21.5: the confirmation of cleaning the cache and the index is translated — all three variants.

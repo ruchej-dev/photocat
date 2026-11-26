@@ -81,8 +81,8 @@ tag_hidden(file_id, tag, hidden_at)    -- the owner removed a tag from a photo
 user_tags(file_id, tag, created_at)    -- the owner's own tags, by hand
 embeddings(file_id, model, sha256, dim, vec, PRIMARY KEY(file_id, model))
 settings(key, value)                   -- model, path, limit, thresholds (dupes, tags, faces),
-                                       -- threads, OCR languages, program paths, roots, tile_size,
-                                       -- verify_*: the check reminder (M10)
+                                       -- threads, OCR languages, program paths, roots, roots_off,
+                                       -- tile_size, verify_*: the check reminder (M10)
 ocr(file_id, sha256, lang, text, chars, created_at)   -- text from a photo; PRIMARY KEY(file_id)
 ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='file_id'
 faces(id, file_id, sha256, x, y, w, h, score, quality, thumb,
@@ -109,6 +109,13 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   `WHERE trashed_at IS NULL`. This is not a physical delete: the file on disk is intact and
   `Restore` clears the field. `Empty the trash` moves the file to the OS trash and only then deletes
   the row (`recycle.rs`).
+- `settings.roots` / `settings.roots_off`: the archive folders and the ones switched off (M26.1),
+  both one newline-separated string; no schema change. Switching a folder off is a **view filter,
+  not a deletion**: `App::reload` drops the rows of a switched-off root before they reach `items`,
+  so the grid, the calendar, the albums, the duplicates, the faces, the trash, the semantic search
+  and the counters see one visible set. The rows, the previews and the files on disk stay, and
+  switching the folder back on needs no pass. Indexing and the face, tag and text passes skip a
+  switched-off root; `stats` names the switched-off folders with their own counts.
 - `user_tags`: the owner's own tags. They are not mixed with CLIP: the filter checks both sources
   and the card shows them in a separate block. A change of `sha256` does not wipe own tags — that is
   a human decision.
@@ -591,6 +598,7 @@ not with a different labelled set.
 | 2026-11-26 | the real DB, 2232 files, 10 years (2016–2026), 1240×840 headless frames (M25.10) | 16 frames of the calendar's years layer and 16 of the months layer after four warm-up frames (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored calendar_measurement --nocapture`) | years layer p50 4.63 ms (216 fps), p95 4.91 ms; months layer p50 4.69 ms (213 fps), p95 5.17 ms — faster than M22.5's 5.56 / 5.85 ms because the pinned threshold had computed every tag's threshold twice per frame and now computes them once (`tag_counts`); the 10 year cards of the new layer put the oldest at y 436 and every card fits a 1240×840 window. The same pass measured the grid scroll again: p50 5.72 ms (175 fps), p95 6.14 ms — against M22.2b's 6.4–6.7 ms, so the panel rework of M25.1–M25.6 costs the grid nothing |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M25.11) | 16 frames of the calendar's weeks layer (the weeks touching May) and 16 of the days layer (Monday–Sunday) after four warm-up frames (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored calendar_measurement --nocapture`) | weeks layer p50 4.44 ms (225 fps), p95 4.58 ms; days layer p50 4.61 ms (217 fps), p95 4.74 ms — the four layers now cost the same 4.4–4.6 ms, well inside the 16.7 ms of a 60 fps frame |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M25.12) | the four calendar layers with the period's photos under the tiles, 16 frames each after four warm-up frames (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored calendar_measurement --nocapture`) | years p50 4.62 ms (216 fps), p95 5.46; months p50 4.83 ms (207 fps), p95 5.16; weeks p50 4.66 ms (214 fps), p95 5.06; days p50 13.66 ms (73 fps), p95 14.82 — the day layer is the heaviest because its period can hold a whole busy day of tiles, and it still stays inside the 16.7 ms of a 60 fps frame; the year layer, the acceptance's case, costs 4.62 ms with all of the year's files below it |
+| 2026-11-26 | the real DB copied to `/tmp` (`roots` = `Фотографии с телефона` + `Pictures/wallpapers`), 2234 files, 21.2 GiB | `settings.roots_off = /home/alx/Pictures/wallpapers`, then `stats` under `lang=ru` and `index` on the switched-off root | the switched-off folder is named with its own count — 4 files, 4.8 MiB — the shown set is 2230 files, 21.2 GiB, the total stays 2234; `index` writes no row and says the folder is switched off, exit code 0; the rows, the tags and the previews of those 4 files are in the DB untouched and the folder comes back by the same switch with no pass |
 
 Rule: numbers without a corpus and a date do not enter the table.
 

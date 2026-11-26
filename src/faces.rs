@@ -501,7 +501,18 @@ pub struct Plan {
 
 pub fn plan(db_path: &Path) -> Result<Plan> {
     let conn = db::open(db_path)?;
-    let (images, todo) = db::face_scan_plan(&conn)?;
+    let settings = db::load_settings(&conn);
+    // A switched-off folder is not planned for (M26.1).
+    let rows: Vec<db::FileRow> = db::load_all(&conn)?
+        .into_iter()
+        .filter(|r| !settings.path_hidden(&r.path))
+        .collect();
+    let scans = db::face_scan_shas(&conn)?;
+    let images = rows.iter().filter(|r| r.kind == "image").count();
+    let todo = rows
+        .iter()
+        .filter(|r| r.kind == "image" && scans.get(&r.id) != Some(&r.sha256))
+        .count();
     Ok(Plan { images, todo })
 }
 
@@ -563,7 +574,12 @@ pub fn run(
     let t0 = std::time::Instant::now();
     let conn = db::open(db_path)?;
     let settings = db::load_settings(&conn);
-    let rows = db::load_all(&conn)?;
+    // A switched-off folder takes no part in the pass (M26.1): its files are hidden, and the
+    // owner switches it back on to let the pass catch up.
+    let rows: Vec<db::FileRow> = db::load_all(&conn)?
+        .into_iter()
+        .filter(|r| !settings.path_hidden(&r.path))
+        .collect();
     let scans = db::face_scan_shas(&conn)?;
     let images = rows.iter().filter(|r| r.kind == "image").count();
     let todo: Vec<db::FileRow> = rows

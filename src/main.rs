@@ -78,6 +78,20 @@ fn main() -> Result<()> {
                 }
             };
             let jobs = flag_num(&args, "--jobs", settings.index_jobs as u64);
+            // A switched-off folder is skipped (M26.1): no new rows are written, and switching it
+            // back on needs no pass because the rows are still in the index.
+            let full = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+            if settings.root_off(&full.to_string_lossy()) {
+                println!(
+                    "{}",
+                    i18n::fill(
+                        lang,
+                        "{} is switched off: its files are hidden and indexing skipped it — switch it on in the folder list",
+                        &[root.display().to_string()]
+                    )
+                );
+                return Ok(());
+            }
             let progress = Arc::new(Progress::default());
             let show = progress.clone();
             std::thread::spawn(move || {

@@ -135,7 +135,12 @@ pub fn plan(db_path: &Path, all: bool) -> Result<Plan> {
 
 fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>)> {
     let settings = db::load_settings(conn);
-    let rows = db::load_all(conn)?;
+    // A switched-off folder takes no part in the pass (M26.1): its files are hidden, and the
+    // owner switches it back on to let the pass catch up.
+    let rows: Vec<FileRow> = db::load_all(conn)?
+        .into_iter()
+        .filter(|r| !settings.path_hidden(&r.path))
+        .collect();
     let tags = db::load_visible_tags(conn)?;
     let images = rows.iter().filter(|r| r.kind == "image").count();
     // The labels of `document`/`screenshot` from every dictionary: the ids are stable, the words
