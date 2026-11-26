@@ -6804,18 +6804,27 @@ impl App {
         if preview_click {
             self.only_no_preview = !self.only_no_preview;
         }
-        ui.add_space(4.0);
+        // The threshold is pinned (M25.6): it cuts the cloud that scrolls below it, so it must not
+        // scroll away from the chips it explains.
+        self.threshold_block(ui);
 
         egui::ScrollArea::vertical()
             .id_salt("left-scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                // The years are the fast road into the archive: the five newest with their counts,
-                // a click narrows the date filter to one year (M22.3). They open the scrolling part
-                // and are the first thing under the pinned filter, so they need no scroll of their
-                // own; the model block follows a wheel notch lower, as before.
-                // The date filter drives the grid and the calendar; other screens have a context of
-                // their own (groups, faces, the trash), so the years are not drawn there.
+                // The tag cloud opens the scrolling part (M25.6): the threshold above it is pinned,
+                // and the chips it cuts stand right under it. It is the filter of the grid only,
+                // but the model block follows on every screen, so the cloud keeps its place.
+                if embed::model_present(&self.settings) {
+                    ui.add_space(2.0);
+                    self.tags_heading(ui);
+                    let _ = self.tag_chips(ui);
+                    ui.add_space(4.0);
+                    hairline(ui);
+                }
+                // The years follow the cloud (M25.6 undoes the M22.3 order on purpose): a click
+                // narrows the date filter to one year. They are drawn on the grid and the calendar
+                // only — other screens have a context of their own (groups, faces, the trash).
                 let years = self.year_counts();
                 if matches!(self.view, View::Grid | View::Calendar) && !years.is_empty() {
                     nav_section(ui, t(lang, "YEARS"));
@@ -7380,27 +7389,6 @@ impl App {
                 ui.label(
                     egui::RichText::new(free).size(11.0).color(dim(ui)),
                 );
-                // The tag cloud under its own heading (M25.1). The number next to a tag is how
-                // many photos carry it at the current threshold.
-                self.tags_heading(ui);
-                let counts = self.tag_chips(ui);
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(t(lang, "Filter threshold"))
-                        .size(11.0)
-                        .color(dim(ui)),
-                );
-                self.tag_filter_slider(ui);
-                if !self.tags.is_empty() && counts.iter().all(|n| *n == 0) {
-                    ui.label(
-                        egui::RichText::new(t(
-                            lang,
-                            "no tag passes the threshold — lower the slider",
-                        ))
-                        .size(11.0)
-                        .color(dim(ui)),
-                    );
-                }
                 if let Some(hits) = &self.semantic_hits {
                     ui.label(
                         egui::RichText::new(format!(
@@ -7421,11 +7409,35 @@ impl App {
                         .color(dim(ui)),
                 );
             }
-            if word_button(ui, Icon::Settings, t(lang, "Model settings")).clicked() {
-                self.settings_open = true;
-                self.settings_tab = SettingsTab::Model;
-            }
+            // The model's path, size limit and choice live in "Settings → AI model" only (M25.6):
+            // the panel keeps the state and the pass, not a second settings screen.
         });
+    }
+
+    /// The tag threshold, pinned in the left panel above the scroll (M25.6): the slider, its
+    /// percentage and the two notes about it. It cuts the tag cloud that scrolls below, so the two
+    /// must not leave each other.
+    fn threshold_block(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        let counts = self.tag_counts();
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(t(lang, "Filter threshold"))
+                .size(11.0)
+                .color(dim(ui)),
+        );
+        self.tag_filter_slider(ui);
+        if !self.tags.is_empty() && counts.iter().all(|n| *n == 0) {
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "no tag passes the threshold — lower the slider",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
+            );
+        }
+        ui.add_space(4.0);
     }
 
     /// The block of text on the photos: how much is recognized and how much is left.
@@ -10133,7 +10145,7 @@ impl App {
             )
             .on_hover_text(t(
                 lang,
-                "100% — the strongest photo of this tag, 0% — all; 70% — the top 30%",
+                "100% — the strongest photo of this tag, 0% — all; 70% — the top 30%. The cloud below counts the photos that pass this cut, tag by tag",
             ));
         if r.changed() {
             self.settings.tag_show_pct = pct;
@@ -15480,6 +15492,20 @@ mod tests {
         }
     }
 
+    /// A models folder with the active model's files present but empty (M25.6): the panel draws the
+    /// model block and the tag cloud without loading any weights, and the test does not depend on
+    /// the machine's cache.
+    fn fake_model_dir(app: &mut App) {
+        let dir = std::env::temp_dir().join("photocat-test-models-present");
+        let entry = embed::active_entry(&app.settings);
+        let model_dir = dir.join(entry.dir);
+        std::fs::create_dir_all(&model_dir).expect("the test models folder is made");
+        for f in entry.files {
+            std::fs::write(model_dir.join(f.name), b"").expect("the test model file is written");
+        }
+        app.settings.models_dir = dir;
+    }
+
     fn collect_text(shape: &egui::Shape, out: &mut Vec<String>) {
         match shape {
             egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
@@ -15844,6 +15870,44 @@ mod tests {
         }
         out.drop_without_applying_deltas();
         fills.into_iter().map(|(r, _)| r).collect()
+    }
+
+    /// The whole window with the wheel turned over the left panel: the pinned threshold must stay
+    /// and the cloud above which it sits must move (M25.6). The clock is shared, as in
+    /// `scrolled_grid`.
+    fn scrolled_left_panel(
+        app: &mut App,
+        ctx: &egui::Context,
+        clock: &mut f64,
+        notches: f32,
+    ) -> Vec<(String, egui::Pos2)> {
+        super::style(ctx);
+        // A tall window: the cloud and the years under it are both on screen before the scroll.
+        let size = egui::vec2(1240.0, 1100.0);
+        let mut drawn = Vec::new();
+        for pass in 0..24 {
+            let mut events = Vec::new();
+            if pass == 0 && notches != 0.0 {
+                // The wheel moves the area under the pointer: the scrolling part of the panel.
+                events.push(egui::Event::PointerMoved(egui::pos2(130.0, 800.0)));
+                events.push(wheel_event(-notches));
+            }
+            let raw = egui::RawInput {
+                time: Some(*clock),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            };
+            let mut window = eframe::Frame::_new_kittest();
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut window));
+            drawn.clear();
+            for c in &out.shapes {
+                collect_text_pos(&c.shape, &mut drawn);
+            }
+            out.drop_without_applying_deltas();
+            *clock += 1.0 / 60.0;
+        }
+        drawn
     }
 
     /// One frame of the full-screen viewer without a window: returns all the drawn text.
@@ -16662,8 +16726,8 @@ mod tests {
         );
     }
 
-    /// The M25.5 panel budget on the real corpus: where the year cloud and the model block stand in
-    /// a 1240×840 window now that the pinned summary is gone, and that the cloud is fully on screen.
+    /// The M25.6 panel budget on the real corpus: the threshold is pinned above the scroll, the tag
+    /// cloud opens it, and the years follow; at the owner's 1021 px they are on screen too.
     /// `PHOTOCAT_BENCH_DB=~/.cache/photocat/photocat.db \
     /// cargo test --release -- --ignored panel_years_measurement --nocapture`.
     #[test]
@@ -16681,47 +16745,46 @@ mod tests {
         let cloud: Vec<&str> = years.iter().take(5).map(|(y, _)| y.as_str()).collect();
         assert_eq!(cloud.len(), 5, "the corpus needs at least five years");
         let ctx = egui::Context::default();
-        let size = egui::vec2(1240.0, 840.0);
-        let _ = window_layout(&mut app, &ctx, size);
-        let drawn = window_layout(&mut app, &ctx, size);
-        let at = |needle: &str| {
-            drawn
+        for height in [840.0, 1021.0] {
+            let size = egui::vec2(1240.0, height);
+            let _ = window_layout(&mut app, &ctx, size);
+            let drawn = window_layout(&mut app, &ctx, size);
+            let at = |needle: &str| {
+                drawn
+                    .iter()
+                    .rfind(|(text, pos)| text == needle && pos.x < super::LEFT_W)
+                    .map(|(_, pos)| *pos)
+                    .unwrap_or_else(|| panic!("“{needle}” is not drawn"))
+            };
+            let below = |needle: &str| {
+                drawn
+                    .iter()
+                    .rfind(|(text, pos)| text == needle && pos.x < super::LEFT_W)
+                    .map(|(_, pos)| format!("{:.1}", pos.y))
+                    .unwrap_or_else(|| "below the strip".to_string())
+            };
+            let threshold = at("Порог фильтра");
+            let tags = at("ТЕГИ");
+            let strip = height - 28.0;
+            let last_old = years.last().map(|(y, _)| y.as_str()).unwrap_or("");
+            println!(
+                "corpus: {n} files, {} years ({last_old}–{}), window 1240×{height:.0}; the pinned \
+                 threshold at y {:.1}, the “Tags” heading at y {:.1}, the “Years” heading at y {}, \
+                 the model block at y {}; the bottom strip at y {strip:.1}",
+                years.len(),
+                cloud[0],
+                threshold.y,
+                tags.y,
+                below("ГОДЫ"),
+                below("Модель ИИ")
+            );
+            assert!(threshold.y < strip, "the pinned threshold is off screen");
+            assert!(tags.y < strip, "the cloud is off screen");
+        }
+        assert!(
+            !window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0))
                 .iter()
-                .rfind(|(text, pos)| text == needle && pos.x < super::LEFT_W)
-                .map(|(_, pos)| *pos)
-                .unwrap_or_else(|| panic!("“{needle}” is not drawn"))
-        };
-        let heading = at("ГОДЫ");
-        let first = at(cloud[0]);
-        let ellipsis = at("…");
-        let model = at("Модель ИИ");
-        let tags = drawn
-            .iter()
-            .find(|(t, _)| t == "ТЕГИ")
-            .map(|(_, p)| p.y)
-            .map(|y| format!("{y:.1}"))
-            .unwrap_or_else(|| "below the strip".to_string());
-        let strip = 840.0 - 28.0;
-        let last_old = years.last().map(|(y, _)| y.as_str()).unwrap_or("");
-        println!(
-            "corpus: {n} files, {} years ({last_old}–{}); the years heading at y {:.1}, the first \
-             chip at y {:.1}, the “…” at y {:.1}, the cloud ends at {:.1}; the model block at y \
-             {:.1}, the tags heading at y {tags}; the bottom strip at y {strip:.1}",
-            years.len(),
-            cloud[0],
-            heading.y,
-            first.y,
-            ellipsis.y,
-            ellipsis.y + super::YEARS_CHIP_H,
-            model.y
-        );
-        assert!(
-            ellipsis.y + super::YEARS_CHIP_H <= strip,
-            "the cloud is cut off by the bottom strip"
-        );
-        assert!(model.y < strip, "the model block is off screen");
-        assert!(
-            !drawn.iter().any(|(t, _)| t == "Сводка"),
+                .any(|(t, _)| t == "Сводка"),
             "the summary is still drawn"
         );
     }
@@ -17189,6 +17252,8 @@ mod tests {
         app.groups = crate::dupes::find_groups(&app.items, 6);
         assert_eq!(app.groups.len(), 1, "one group of exact copies");
         app.settings.lang = i18n::Lang::En;
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
         app.view = View::Dupes;
         // A taller frame: the two "missing" filter chips (M25.4) start the scrolling part 28 px
         // lower, so the last control of the duplicates block needs the room the test gives it.
@@ -17947,7 +18012,7 @@ mod tests {
         for want in [
             "AI model",
             "model not downloaded",
-            "Model settings",
+            "Filter threshold",
             "Text on the photo",
             "0 candidates, 0 left",
             // The two missing numbers are the counts of the filter chips (M25.4), not summary rows;
@@ -20272,6 +20337,8 @@ mod tests {
     #[test]
     fn the_years_cloud_keeps_five_and_filters_the_older_ones() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-years-cloud.db"));
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
         app.items = (0..21)
             .map(|i| {
                 let mut r = file_row(i + 1, "image", "y.jpg");
@@ -20360,6 +20427,8 @@ mod tests {
     #[test]
     fn the_years_block_draws_the_newest_five_with_counts() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-years-frame.db"));
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
         let dated = |id: i64, name: &str, at: &str| {
             let mut r = file_row(id, "image", name);
             r.taken_at = Some(at.into());
@@ -20390,19 +20459,15 @@ mod tests {
         assert!(texts.iter().any(|t| t == "Все годы"), "{texts:?}");
     }
 
-    /// M25.5: the panel budget without the summary. At 1240×840 the filter block, the years cloud
-    /// and the model block fit the window — every year chip is seen and the model block starts
-    /// below them, with no "Summary" anywhere in either language.
+    /// M25.6: the panel budget. At 1240×840 the filter block and the pinned threshold fit the
+    /// window, and the tag cloud opens the scrolling part right under the slider it is cut by.
     #[test]
-    fn the_left_panel_fits_the_years_and_the_model_block() {
+    fn the_left_panel_pins_the_threshold_above_the_tag_cloud() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-budget.db"));
-        app.items = (0..5)
-            .map(|i| {
-                let mut r = file_row(i + 1, "image", "y.jpg");
-                r.taken_at = Some(format!("{}-05-01T08:00", 2020 + i));
-                r
-            })
-            .collect();
+        fake_model_dir(&mut app);
+        app.items = vec![file_row(1, "image", "a.jpg"), file_row(2, "image", "b.jpg")];
+        app.tags.insert(1, vec![("beach".into(), 0.9)]);
+        app.tag_dists = embed::tag_distributions(&app.tags);
         app.settings.lang = i18n::Lang::Ru;
         let ctx = egui::Context::default();
         let size = egui::vec2(1240.0, 840.0);
@@ -20415,50 +20480,63 @@ mod tests {
                 .map(|(_, pos)| *pos)
                 .unwrap_or_else(|| panic!("“{needle}” is not drawn: {drawn:?}"))
         };
-        // The summary is gone (M25.5): no block repeats the numbers of the status bar and the chips.
-        for gone in ["Сводка", "Summary", "Files:", "Size:", "No date:"] {
+        // The summary is gone (M25.5) and "Model settings" left the panel (M25.6).
+        for gone in ["Сводка", "Настройки модели", "Summary", "Model settings", "Files:"] {
             assert!(
                 !drawn.iter().any(|(text, _)| text == gone),
                 "“{gone}” is still drawn: {drawn:?}"
             );
         }
-        // Every year chip is drawn and lies above the bottom strip: the cloud needs no scroll.
-        for year in ["2024", "2023", "2022", "2021", "2020"] {
-            at(year);
-        }
-        let oldest = at("2020");
+        // The pinned threshold is seen without a scroll at the minimum window.
+        let threshold = at("Порог фильтра");
         assert!(
-            oldest.y + 18.0 <= 840.0 - 28.0,
-            "a year chip is under the bottom strip: {oldest:?}"
+            threshold.y < 840.0 - 28.0,
+            "the threshold slider is off screen: {threshold:?}"
         );
-        // The 40 px the summary took go to the scrolling part: the model block starts on screen
-        // right below the cloud, so the threshold and the tags are one wheel notch away.
-        let model = at("Модель ИИ");
+        // The cloud is the first block of the scroll, right under the pinned threshold.
+        let cloud = at("ТЕГИ");
         assert!(
-            model.y > oldest.y,
-            "the model block is not below the cloud: {model:?} vs {oldest:?}"
+            cloud.y > threshold.y,
+            "the cloud is not below the threshold: {cloud:?} vs {threshold:?}"
         );
         assert!(
-            model.y < 840.0 - 28.0,
-            "the model block is off screen: {model:?}"
+            cloud.y < 840.0 - 28.0,
+            "the cloud is off screen: {cloud:?}"
         );
-        // A pick adds "All years" without growing the block: the chips wrap.
-        app.set_year(Some(super::YearPick::Year("2024".into())));
-        let _ = window_layout(&mut app, &ctx, size);
-        let picked = window_layout(&mut app, &ctx, size);
-        let at_picked = |needle: &str| {
-            picked
+    }
+
+    /// M25.6: the threshold is pinned above the scroll — the tag cloud scrolls under it while the
+    /// slider stays exactly where it was.
+    #[test]
+    fn the_threshold_stays_put_while_the_tag_cloud_scrolls() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-pinned-threshold.db"));
+        fake_model_dir(&mut app);
+        app.items = m17_rows();
+        app.tags.insert(1, vec![("beach".into(), 0.9)]);
+        app.tag_dists = embed::tag_distributions(&app.tags);
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let mut clock = 0.0;
+        let before = scrolled_left_panel(&mut app, &ctx, &mut clock, 0.0);
+        let after = scrolled_left_panel(&mut app, &ctx, &mut clock, 2.0);
+        let y = |drawn: &[(String, egui::Pos2)], needle: &str| {
+            drawn
                 .iter()
                 .rfind(|(text, pos)| text == needle && pos.x < super::LEFT_W)
-                .map(|(_, pos)| *pos)
-                .unwrap_or_else(|| panic!("“{needle}” is not drawn after a pick: {picked:?}"))
+                .map(|(_, pos)| pos.y)
+                .unwrap_or_else(|| panic!("“{needle}” is not drawn: {drawn:?}"))
         };
         assert_eq!(
-            at_picked("Все годы").y,
-            at_picked("2024").y,
-            "All years on the same row"
+            y(&after, "Filter threshold"),
+            y(&before, "Filter threshold"),
+            "the threshold scrolled away with the cloud"
         );
-        at_picked("2020");
+        assert!(
+            y(&after, "YEARS") < y(&before, "YEARS"),
+            "the cloud did not scroll: the years stand at {} before and {} after",
+            y(&before, "YEARS"),
+            y(&after, "YEARS")
+        );
     }
 
     /// M22.3: a tag chip only changes colour, never its place — so the panel does not jump when a

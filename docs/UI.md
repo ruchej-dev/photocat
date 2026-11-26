@@ -361,19 +361,21 @@ a rare one.
 | The main action of the view | left panel, the first group after navigation | 1 |
 | Totals and counters of the view | in the view title and in the navigation numbers | 0 |
 | File card | right panel | 0 |
-| Models, limits, thresholds, programs | "Settings" in the top bar, sections in the dialog | 1–2 (rare) |
+| Models, limits, programs, the tag dictionary | "Settings" in the top bar, sections in the dialog | 1–2 (rare) |
+| The tag filter threshold | left panel, pinned under the filter block, above the tag cloud (M25.6) | 0 |
 
 - **One main action per screen**: "All files" → "Index"/"Find"; "Duplicates" → "Find groups";
   "Faces" → "Find faces (N)"; "Integrity" → "Compare the copies"; in the "Settings" dialog →
   "Download model" (if not downloaded).
-- **Left panel budget:** the folder block, two navigation groups (7 views) and 2 filter rows
-  (path/date, "All / Photos / Videos", the two "missing" chips) are pinned, and the year cloud
-  opens the scrolling part: at 840 px all five years and the "…" are seen without a scroll and the
-  model block starts right below them (checked by
-  `app::tests::the_left_panel_fits_the_years_and_the_model_block`; on the corpus the cloud ends at
-  702.5 px, the model block starts at 717 px, the bottom strip at 812 px). A new function is not
-  added to the panel if it already scrolls when nothing is selected: move it into the view screen,
-  into "Settings", or replace an existing one.
+- **Left panel budget:** the folder block, two navigation groups (7 views), the filter rows
+  (path/date, "All / Photos / Videos", the two "missing" chips) and the tag threshold are pinned;
+  the tag cloud opens the scrolling part and the years follow it — M25.6 undoes the M22.3 order on
+  purpose, so the slider never leaves the chips it cuts. At 840 px the threshold stands at 621 px
+  and the "Tags" heading at 685.5 px without a scroll (checked by
+  `app::tests::the_left_panel_pins_the_threshold_above_the_tag_cloud`; on the corpus the years
+  heading lands at 941 px in the owner's 1021 px window, the bottom strip at 812 / 993 px). A new
+  function is not added to the panel if it already scrolls when nothing is selected: move it into
+  the view screen, into "Settings", or replace an existing one.
 - **A number next to an action** explains the cost before the press: "435 candidates", "still
   without faces: 0 of 1972", "135 marked spare, 214.1 MiB will be freed".
 - **The keyboard is an addition**, not an entrance: no action is available only on the keyboard and
@@ -440,7 +442,7 @@ for text over a darkened frame, where the background is a photograph.
 
 | Screen | What is on it | Main action |
 |---|---|---|
-| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (a "+" in its heading, the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos", the two toggle chips "No date · N" / "No preview · N" under them), then, in the scrolling part, the "Years" cloud (the five newest years as chips, the "…" for the older ones, M25.2), the model and text blocks; above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; in the model block — the tags as 20 px chips under the caps heading "Tags" with the snapshot count after a middle dot ("furniture · 669"), the picked chips in the accent (the filter accumulates, M25.1), the "×" at the right of the heading that resets the set while any tag is picked, and a 0–100% threshold slider (a percentile per selected tag: 100% is its strongest snapshot, 0% is all); "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
+| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (a "+" in its heading, the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos", the two toggle chips "No date · N" / "No preview · N" under them), then the pinned "Filter threshold" row — the 0–100% percentile slider with its notes, above the scrolling part; in the scroll: the tag cloud under the caps "Tags" with the count of snapshots after a middle dot ("furniture · 669"), the picked chips in the accent (the filter accumulates, M25.1), the "×" at the right of the heading that resets the set (M25.6 puts the cloud first, the threshold cuts it), then the "Years" cloud (the five newest years as chips, the "…" for the older ones, M25.2), then the model and text blocks; above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; the model block keeps the state and "Compute tags" only (M25.6): the model itself is chosen in Settings; "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed"; every group is a card of the `card` tone with "#N", the reason at 13 px, the facts in mono 11 and the advice "keep <name> — …", the pictures inside; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the month pages only through months with files, the day one by one), "Today"; a year — 4×3 month cards with counters, covers and sizes above the line "12 months of 2024" and the facts of the year, a month — a grid of weeks Mon–Sun with the caps weekday row, the day number, the counter badge and up to 3 thumbnails, a week — 7 days of 2×3 thumbnails; a double click on a month/day drills down a layer, a single click selects (an accent frame); on the "Day" layer — the snapshots in a `draw_cell` grid with the time in the caption; on the upper layers below — the selected day as a list with the time, the name and the size, and "No date"; an empty month says "No files in this month." and the button "Go to <the nearest month with files>" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups" and the "all together" switch in the left panel; the right panel with the 44 px band (the face glyph and "Groups") and the list of groups — "All people · N", then every group with the best face of the group as its icon, a "together" tick, its name and photo count; the open group's name at 14 px with its facts in mono 11; the face crops of the group with the date and the score in mono 10, the round tick circle and the head with a slash on every face tile inside a group, "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" title at 14 px; the ribbon has no cell-view switch and no details toggle (M22.26) | name a person, split off strangers and find photos where people are together |
@@ -510,9 +512,9 @@ for text over a darkened frame, where the background is a photograph.
   "marked spare M" is recomputed in the same frame, the spare tiles are dimmed with the word "spare".
 - Sharpness not computed (an old DB without re-indexing) → the duplicates panel shows "sharpness not
   computed for N snapshots — index the folder", the advice is computed from the resolution and size.
-- The model is not downloaded → the "AI model" block shows "the model is not downloaded" and a
-  "Model settings" button; the "Semantic" mode is disabled, next to "Find" it says "the model is not
-  downloaded"; the "By text" mode works if the text has already been recognized; the rest of the
+- The model is not downloaded → the "AI model" block shows "the model is not downloaded" and keeps
+  "Compute tags" only: the model's path, size limit and choice live in "Settings → AI model"
+  (M25.6); the "Semantic" mode is disabled, next to "Find" it says "the model is not downloaded"; the "By text" mode works if the text has already been recognized; the rest of the
   interface works.
 - The model is switched → the old vectors and tags stay in the DB, but search, tags, the filter and
   clusters read only the new one; switching back shows its tags without recomputation. The

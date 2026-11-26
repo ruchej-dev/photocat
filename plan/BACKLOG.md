@@ -1272,7 +1272,7 @@ on them.
 
 **Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
-  as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 the pinned threshold and no "Model settings";
+  as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
   M25.7 the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
   M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
@@ -1502,6 +1502,25 @@ scrolls; no "Model settings" in the panel; the settings dialog is the only route
 panel budget is measured and recorded.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**Done (2026-11-26).** `threshold_block` draws the slider, its percentage, the "few tags" note and
+"no tag passes the threshold — lower the slider" in the pinned part of the panel, under the two
+"missing" chips and directly above the scroll; the tooltip keeps the percentile explanation and
+adds what the slider does to the cloud below it. The scroll now opens with the tag cloud (the
+`Tags` heading and its reset, then the chips), and the years and the model block follow — M22.3's
+"the years open the scroll" is undone on purpose. `model_block` keeps the model state, "Compute
+tags", the confident-tag line and the free-search line; the cloud, the threshold and the "Model
+settings" button left it, so the model's path, size limit and choice live only in "Settings → AI
+model". Tests: `the_left_panel_pins_the_threshold_above_the_tag_cloud` (at 840 px the threshold and
+the cloud are on screen, the cloud below the slider, no "Model settings" in either language) and
+`the_threshold_stays_put_while_the_tag_cloud_scrolls` (24 frames with the wheel over the panel: the
+threshold keeps its y, the years under the cloud move up); the years tests point the models folder at
+a never-downloaded one so the cloud does not shift them, and a `fake_model_dir` helper makes the
+cloud test independent of the machine. Measured on the corpus with
+`panel_years_measurement`: 1240×840 — the pinned threshold at y 621, the "Tags" heading at 685.5,
+the years and the model block below the strip; 1240×1021 (the owner's height) — the "Years" heading
+at 941, the strip at 993. `cargo test` 318 passed + 3 guard tests, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
 
 **M25.7 — the two archive buttons explain themselves.**
 **Goal.** "Start indexing" and "Refresh" say what they do before a click.
