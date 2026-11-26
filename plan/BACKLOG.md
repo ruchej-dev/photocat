@@ -1814,7 +1814,8 @@ M26.5 the face settings move to the People screen; M26.6 the layout survives a n
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
-together; M26.11 a named person is recognized in every catalog.
+together; M26.11 a named person is recognized in every catalog; M26.12 the built-in player is
+the only player — a codec out of scope is an explicit offer, never an automatic separate window.
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -2190,6 +2191,56 @@ and the People screen shows the "auto" mark; "Detach the auto-matched" empties t
 frame with the numbers in both languages.
 
 **Files.** `src/faces.rs`, `src/db.rs`, `src/app.rs`, `src/i18n.rs`, `src/main.rs`, `docs/UI.md`,
+`docs/ARCHITECTURE.md`.
+
+**M26.12 — the video plays in the window, not in somebody else's: the fallback is explicit and the Windows reason is found.**
+**Goal.** The owner presses ▶ and the video plays in the frame he is looking at. The built-in player
+covers what the archive actually holds; a file it genuinely cannot open says *why* in the viewer and
+offers an external player only when the owner presses "Open in the system player" — the app never
+opens a second window by itself (the owner's report: "вместо кнопки play пишет ffplay в отдельном
+окне... так не годится").
+
+**What happens today.** `App::start_video_playback` calls `player::Player::open`; on any error it
+launches `ffplay` in its own window (then the system player), and the viewer shows the line "ffplay
+in its own window". The built-in player supports MP4/MOV/MKV with H.264, HEVC and AAC
+(`format_registry`, `codec_registry`); a file with another codec (AV1, VP9, MPEG‑4, 10‑bit HDR, a
+container the registry does not know) errors out and gets the automatic fallback. The reason is
+printed in the status bar for a moment, then the viewer only shows the ffplay line — a design the
+owner refuses.
+
+**Acceptance criteria.**
+1. No process is started by the app when a video is opened: neither `ffplay` nor the system player.
+   On `Player::open`'s error the viewer states the reason in the owner's language ("no decoder for
+   Av1", "unknown video format: .avi", "10-bit HEVC is not supported") and offers two worded,
+   explicit actions: "Open in the system player" and, when `ffplay` is found, "Play with ffplay in a
+   separate window" — each with a hint that the video leaves the app. The status bar names the same
+   reason. The "ffplay in its own window" placeholder disappears.
+2. A diagnostic that is easy to ask for: `photocat play <file> --decode-only` already prints the
+   reason; `photocat doctor` gains a "video" line listing the supported codecs and containers, and
+   the viewer offers "Copy the reason".
+3. The owner's files are identified before the decoders are chosen: the failing files are collected
+   (`play --decode-only` on Windows, the reason per file), the codecs and pixel formats of the
+   archive are counted, and the ones that dominate are added to the built-in player (the likely
+   candidates on a phone archive: 10-bit HEVC from HDR phones, AV1, MPEG‑4 Part 2; the corpus in this
+   repository is H.264 only, so the owner's D: archive has to be probed). A codec that is out of
+   scope after that is named honestly in the viewer and `docs/ARCHITECTURE.md`, not hidden behind a
+   window.
+4. Every supported file plays in the frame on Windows with the existing controls (▶/⏸, seek, sound,
+   "Stop the video"), the progress row is not needed, and the measurements of AGENTS §8 (1080p real
+   time, 2520×1080 ~23 fps) are repeated on the owner's machine and recorded in `plan/STATUS.md`.
+5. The built-in player is the default for a file it reports as supported; a file whose open fails is
+   not retried automatically, and the previous automatic fallback code is removed (the external
+   players remain only behind the explicit buttons).
+6. Tests: a generated H.264/AAC MP4 and an HEVC MP4 open and decode; a VP9/WebM and an `.avi` fail
+   with the codec/container named and **no process spawned** (`video_child` stays `None`, the viewer
+   shows the offer); a headless frame of the error state in both languages; `docs/UI.md` (the viewer's
+   error state), `docs/ARCHITECTURE.md` (the player's scope) updated.
+
+**Acceptance.** On the owner's Windows machine his videos play in the window; a codec out of scope
+shows the reason and waits for a press; nothing opens by itself; the measured numbers are in
+`plan/STATUS.md`.
+
+**Files.** `src/app.rs`, `src/player.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
