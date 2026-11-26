@@ -659,7 +659,9 @@ const TOP_H: f32 = 32.0;
 const STATUS_H: f32 = 28.0;
 /// The search field of the top bar is never wider than the mock-up's `max-w-xl` (576 px);
 /// below that it takes the room between the mark and the tools.
-const SEARCH_MAX_W: f32 = 576.0;
+// The mock-up's `max-w-xl` gave the search field 576 px; the state pill left the top strip in
+// M25.8 and its ~70 px went to the field, so the cap grew with it (measured with "Synced").
+const SEARCH_MAX_W: f32 = 646.0;
 /// The "Tiles" slider of the top bar: the mock-up's compact pill, not the whole panel width.
 const TILE_SLIDER_W: f32 = 84.0;
 /// The row of the content panel above the grid: the mock-up's `h-11`.
@@ -674,6 +676,9 @@ const RADIUS_CARD: f32 = 8.0;
 /// The tooltip of the path/date field (M25.3): the filter is literal, and the content search lives
 /// in another field. One source for the hint and the test.
 const PATH_DATE_HINT: &str = "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.";
+/// The hint of the state word in the status bar (M25.8): it names every pass the dot can report and
+/// says where their progress rows live.
+const PASS_HINT: &str = "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export or Integrity; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.";
 /// The tooltips of the two archive buttons (M25.7): what a pass does and what it never touches. One
 /// source for the window and the test.
 const INDEX_HINT: &str = "Walk the folders and read only the new and changed files — the path, the size and the modification time decide. The pass computes the hash, the date, the dimensions, the sharpness and a 320 px preview, and gives a video its cover through ffmpeg. It writes to the cache only — the database and the previews, never the archive — and it can be stopped and resumed.";
@@ -6083,7 +6088,7 @@ impl App {
 
     /// The top bar of `photocat_1`: the mark on the left, one search field in the middle (the
     /// mode switch, the query, "Search", "×") and the tools on the right — the tile size, the
-    /// state of the archive, the details toggle and "Settings". The folder and "Index" live in
+    /// details toggle and "Settings" (the state moved into the status bar, M25.8). The folder and "Index" live in
     /// the left panel: they are work with the archive, not a search (M22.19).
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
@@ -6096,19 +6101,13 @@ impl App {
         // the middle and the tools keep to the right edge.
         let brand_w = 20.0 + 8.0 + text_width(ui, "photocat", 14.0);
         let settings_w = WordButton::new(Icon::Settings, t(lang, "Settings")).size(ui).0;
-        let state = self.sync_word(lang);
-        let status_w = 8.0 + 6.0 + 6.0 + text_width(ui, &state, 11.0) + 8.0;
         let zoom_w = 8.0 + 14.0 + 6.0 + TILE_SLIDER_W + 8.0;
-        let with_state = row.width() >= 1100.0;
         // The details toggle has nothing to toggle on the "People" screen: its right panel always
         // holds the group list (M22.26).
         let details_toggle = self.view != View::Faces;
         let mut right_w = settings_w + zoom_w + gap;
         if details_toggle {
             right_w += 28.0 + gap;
-        }
-        if with_state {
-            right_w += status_w + gap;
         }
 
         // Left: the mark.
@@ -6148,39 +6147,6 @@ impl App {
                         self.details_open = !self.details_open;
                     }
                 }
-                if with_state {
-                    let facts = i18n::fill(
-                        lang,
-                        "{} files · {} with EXIF",
-                        &[
-                            self.items.len().to_string(),
-                            self.items
-                                .iter()
-                                .filter(|r| r.taken_src == "exif")
-                                .count()
-                                .to_string(),
-                        ],
-                    );
-                    let (rect, resp) =
-                        ui.allocate_exact_size(egui::vec2(status_w, 28.0), egui::Sense::hover());
-                    ui.painter().rect(
-                        rect,
-                        egui::CornerRadius::same(RADIUS_CTRL as u8),
-                        th.card,
-                        egui::Stroke::new(1.0, th.border),
-                        egui::StrokeKind::Inside,
-                    );
-                    let dot = egui::pos2(rect.left() + 11.0, rect.center().y);
-                    ui.painter().circle_filled(dot, 3.0, th.accent);
-                    ui.painter().text(
-                        egui::pos2(dot.x + 9.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        &state,
-                        egui::FontId::proportional(11.0),
-                        th.text_med,
-                    );
-                    resp.on_hover_text(facts);
-                }
                 self.tile_pill(ui);
             });
         });
@@ -6210,25 +6176,44 @@ impl App {
             .hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, th.border));
     }
 
-    /// One word for the state of the archive: a pass is running or everything is indexed. The
-    /// numbers live in the hint of the pill, the dot says "working" without a sentence.
-    fn sync_word(&self, lang: i18n::Lang) -> String {
-        if self.busy() {
-            t(lang, "Syncing").to_string()
-        } else {
-            t(lang, "Synced").to_string()
+    /// The background passes that are running, in the order of their progress rows (M25.8). The
+    /// labels are the same strings `pass_rows` prints: "CLIP" and "OCR" are names, the rest are
+    /// translated words.
+    fn running_passes(&self, lang: i18n::Lang) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.rx.is_some() {
+            out.push(t(lang, "Indexing"));
         }
+        if self.embed_rx.is_some() {
+            out.push("CLIP");
+        }
+        if self.ocr_rx.is_some() {
+            out.push("OCR");
+        }
+        if self.face_rx.is_some() {
+            out.push(t(lang, "People"));
+        }
+        if self.trash_rx.is_some() {
+            out.push(t(lang, "Trash"));
+        }
+        if self.export_rx.is_some() {
+            out.push(t(lang, "Export"));
+        }
+        if self.integrity_rx.is_some() {
+            out.push(t(lang, "Integrity"));
+        }
+        out
     }
 
-    /// Whether a background pass is running: any of them makes the top pill say "Syncing".
-    fn busy(&self) -> bool {
-        self.rx.is_some()
-            || self.embed_rx.is_some()
-            || self.ocr_rx.is_some()
-            || self.face_rx.is_some()
-            || self.trash_rx.is_some()
-            || self.export_rx.is_some()
-            || self.integrity_rx.is_some()
+    /// The word of the status bar (M25.8): the running pass, "N passes" for two or more, `None`
+    /// when nothing runs — then the last status message stays as it is.
+    fn state_word(&self, lang: i18n::Lang) -> Option<String> {
+        let passes = self.running_passes(lang);
+        match passes.len() {
+            0 => None,
+            1 => Some(passes[0].to_string()),
+            n => Some(i18n::fill(lang, "{} passes", &[n.to_string()])),
+        }
     }
 
     /// The search field of the top bar: the mock-up's one rounded well with the search glyph, the
@@ -6508,19 +6493,28 @@ impl App {
         let top = ui.max_rect();
         ui.painter()
             .hline(top.x_range(), top.top() + 0.5, egui::Stroke::new(1.0, th.border));
+        // The state word (M25.8): a running pass names itself, two or more say "N passes", and the
+        // last status message stays while nothing runs. The hint lists the seven passes and points
+        // at their progress rows in the top strip.
+        let state = self.state_word(lang);
+        let word = match &state {
+            Some(word) => word.as_str(),
+            None if self.status.is_empty() => t(lang, "Ready"),
+            None => self.status.as_str(),
+        };
+        let pass_hint = t(lang, PASS_HINT);
         ui.horizontal(|ui| {
             ui.set_min_height(STATUS_H - 6.0);
-            let (dot, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
+            let (dot, dot_resp) =
+                ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
             ui.painter().circle_filled(dot.center(), 3.0, th.accent);
+            dot_resp.on_hover_text(pass_hint);
             ui.label(
-                egui::RichText::new(if self.status.is_empty() {
-                    t(lang, "Ready")
-                } else {
-                    &self.status
-                })
-                .size(11.0)
-                .color(th.text_med),
-            );
+                egui::RichText::new(word)
+                    .size(11.0)
+                    .color(if state.is_some() { th.text } else { th.text_med }),
+            )
+            .on_hover_text(pass_hint);
             ui.add_space(4.0);
             hairline_vertical(ui);
             ui.add_space(4.0);
@@ -21299,9 +21293,16 @@ mod tests {
         }
         // The content of the screens (the view heading, the chips, the card) is translated by the
         // next M21 steps: here the shell is checked — the navigation, the top bar, the filter.
+        // The state pill left the top strip in M25.8: the status bar carries the state now.
         assert!(
-            texts.iter().any(|t| t == "Synced"),
-            "no English state word: {texts:?}"
+            !texts.iter().any(|t| t == "Synced" || t == "Syncing"),
+            "the state pill is still in the top strip: {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == "0 files in the index, 0 B"),
+            "the status bar lost the last message: {texts:?}"
         );
         assert!(
             texts.iter().any(|t| t == "Search"),
@@ -21311,6 +21312,73 @@ mod tests {
         let texts = window_frame(&mut app, &egui::Context::default());
         assert!(texts.iter().any(|t| t == "Все файлы"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Настройки"), "{texts:?}");
+    }
+
+    /// M25.8: the state moved from the top strip into the status bar — the bar names the running
+    /// pass within one frame, "N passes" for several, and keeps the last message when nothing runs.
+    #[test]
+    fn the_status_bar_names_the_running_pass() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-state-word.db"));
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let _ = window_frame(&mut app, &ctx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            !texts.iter().any(|t| t == "Synced" || t == "Syncing"),
+            "the top strip still carries a state pill: {texts:?}"
+        );
+        // One pass: its name, not a generic "syncing".
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.rx = Some(rx);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Indexing"),
+            "the status bar does not name the pass: {texts:?}"
+        );
+        // Two passes: the number instead of a list that would not fit.
+        let (_tx2, rx2) = std::sync::mpsc::channel();
+        app.ocr_rx = Some(rx2);
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "2 passes"),
+            "the status bar does not count the passes: {texts:?}"
+        );
+        // Nothing runs: the last message comes back.
+        app.rx = None;
+        app.ocr_rx = None;
+        app.status = "ready for a check".into();
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "ready for a check"),
+            "the last status message is lost: {texts:?}"
+        );
+    }
+
+    /// M25.8: the state pill left the top strip and the search field took its former width — the
+    /// field is the mock-up's 576 px plus the ~70 px the pill used.
+    #[test]
+    fn the_search_field_took_the_room_of_the_state_pill() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-search-width.db"));
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        let _ = window_frame(&mut app, &ctx);
+        let fills = window_fills(&mut app, &ctx);
+        // The frame of the well is the field's cap plus its 6 px of air on each side.
+        let field = fills.iter().find(|(r, _)| {
+            r.top() < 40.0
+                && (30.0..40.0).contains(&r.height())
+                && (r.width() - super::SEARCH_MAX_W).abs() <= 16.0
+        });
+        assert!(
+            field.is_some(),
+            "the search field is not about {} px wide: {fills:?}",
+            super::SEARCH_MAX_W
+        );
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            !texts.iter().any(|t| t == "Synced" || t == "Syncing"),
+            "the state pill is still in the top strip: {texts:?}"
+        );
     }
 
     /// The tiles go in rows by the frame proportion: the preview fills the tile completely, the

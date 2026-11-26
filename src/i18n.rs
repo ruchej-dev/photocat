@@ -427,8 +427,11 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("Hide details", "Скрыть сведения"),
     ("Details", "Сведения"),
-    ("Synced", "Синхронизировано"),
-    ("Syncing", "Синхронизация"),
+    (
+        "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export or Integrity; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.",
+        "Точка и слово называют идущий фоновый проход: индексация, CLIP, OCR, лица, корзина, экспорт или проверка целостности; два и больше показывают «N проходов». Их строки прогресса и «Стоп» — в верхней полосе, под полем поиска. Никуда ничего не отправляется.",
+    ),
+    ("{} passes", "{} проходов"),
     ("Ready", "Готов к работе"),
     ("Clear the search", "Очистить поиск"),
     (

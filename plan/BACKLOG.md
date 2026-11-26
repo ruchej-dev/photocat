@@ -1273,7 +1273,7 @@ on them.
 **Tasks.** M25.1 (done 2026-11-26) the accumulating tag filter; M25.2 (done 2026-11-26) the year cloud (the five newest years, "…" for
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
-  M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 the state word moves into the status bar;
+  M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 (done 2026-11-26) the state word moves into the status bar;
   M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
 
@@ -1568,6 +1568,20 @@ wording still names the skip rule, the untouched archive and the read-free refre
 one frame; the hint names all seven; the search field is wider by the pill's former width.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**Done (2026-11-26).** The "Synced / Syncing" pill left the top strip, and
+`SEARCH_MAX_W` grew from the mock-up's 576 to 646 px — the English pill's ~70 px go to the field.
+`App::running_passes` names the seven passes with the same strings their progress rows use
+(`Indexing`, `People`, `Trash`, `Export`, `Integrity` through `t()`; `CLIP` and `OCR` are names), and
+`state_word` returns one name, `{} passes` for two or more, or `None` — then the status bar keeps the
+last message exactly as before. The dot and the word carry `PASS_HINT`, which lists all seven and
+says their progress rows and "Stop" are in the top strip under the search field. `busy` and
+`sync_word` are gone with the pill, and `Synced`/`Syncing` left `PAIRS`. Tests:
+`the_status_bar_names_the_running_pass` (no pill; one channel → "Indexing"; two → "2 passes";
+nothing → the last message) and `the_search_field_took_the_room_of_the_state_pill` (a 646 px field
+frame in the strip, no state pill), plus the updated `english_translates_the_window_shell`.
+`cargo test` 321 passed + 3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics .` 0 errors.
 
 **M25.9 — the location row: the coordinates, and the place-name question.**
 **Goal.** The card shows what a photo itself knows about its place, and the missing half is named

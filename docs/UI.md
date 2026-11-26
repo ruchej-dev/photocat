@@ -145,9 +145,11 @@ the interface rules at the end of the file.
   photo-library glyph in the accent and "photocat" at 14 px), one search field in the middle (the
   search glyph, the "Semantic / By text" mode switch with its arrow, the query, "Search" in the
   accent and "×"), and the tools on the right — the "Tiles" pill (the grid glyph and a compact
-  100–260 px slider, no number: the value is in the hint), the state pill (a dot and "Synced" /
-  "Syncing", the counters in its hint), the details toggle (a 28 px icon that stays lit while the
-  right panel is open) and "Settings". The third row is the pass progress only. The folder field
+  100–260 px slider, no number: the value is in the hint), the details toggle (a 28 px icon that
+  stays lit while the right panel is open) and "Settings". The state pill is gone (M25.8): the
+  running pass is named in the status bar, and its former ~70 px went to the search field, which is
+  now 646 px at most and centred between the mark and the tools. The third row is the pass progress
+  only. The folder field
   and "Index / Refresh" live in the left panel: working with the archive is not search. Both
   carry their tooltip (M25.7): "Start indexing" walks the folders, reads only the new and changed
   files (path + size + mtime), computes the hash, the date, the dimensions, the sharpness and a
@@ -428,7 +430,7 @@ a rare one.
 | "Settings" dialog | 760×620 px of content inside the dialog frame, a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 14 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
 | Dialog | one `dialog_frame` for all seven: the `card` tone, a 1 px `border`, the 8 px radius and 16 px of air inside; the title 14 px, the body 13 px, hints 11–12 px; at most one accent button — the dialog's main action — and no accent at all on the settings dialog, where every change is saved at once; the trash confirmation is the one dialog whose button moves files, so it carries the `danger` border and no fill; a number stands in a facts row of its own in mono 11, never inside a translated sentence; a report body is mono 11 in its own scroll area with a copy button (M22.10) | `app.rs::dialog_frame`, the `*_modal` functions |
 | Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |
-| Top strip | 32 px, one row, `panel` tone, 1 px bottom line (M22.19, after `photocat_1`); the search field is at most 576 px and centred between the mark and the tools; the "Tiles" pill is 14 px of glyph, a 6 px gap and an 84 px slider, the state pill a dot and one word, the details toggle and "Settings" on the right | `App::top_bar`, `App::search_field`, `App::tile_pill` |
+| Top strip | 32 px, one row, `panel` tone, 1 px bottom line (M22.19, after `photocat_1`); the search field is at most 646 px (the mock-up's 576 plus the ~70 px of the state pill that left in M25.8) and centred between the mark and the tools; the "Tiles" pill is 14 px of glyph, a 6 px gap and an 84 px slider, the details toggle and "Settings" on the right | `App::top_bar`, `App::search_field`, `App::tile_pill` |
 | Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters: a dot and the last fact, the count of files and their volume; on the right the selected file (name · frame · size) | `App::status_bar` |
 | Selection | a 2 px accent outline on the selected tile and a square accent check flag; while anything is picked, a floating bar at the bottom edge of the grid (the mock-up's pill): a dot, "N selected · size" in mono 11 in the accent, then "Add to an album… (N)" while albums exist (M22.20), "Select all (M)" and "Clear selection" (M22.19); it lies over the grid on its own layer and never moves the tiles | `draw_cell`, `App::ui` (the "pick-bar") |
 | Album tree | a row 26 px, a 14 px indent per level, a 22 px triangle, a 14 px folder glyph and the name at 14 px; "N files · M subalbums · size" at 11 px next to it; the whole row is one click target (the glyph included); the open album keeps the `accent_soft` fill and the 2 px accent edge; the tree area no higher than 190 px | `draw_album_tree`, `album_tree_row` |
@@ -735,8 +737,11 @@ are what the owner sees in English mode. See `plan/I18N.md`.
 - Search mode: "Semantic" / "By text" (a switch inside the search field, the active one in the
   accent, with a down arrow); the field's hint names the mode ("cake, sea, furniture, document" or
   "receipt, invoice, 2024"); "Search" submits, "×" clears the field and the results.
-- Top strip: "photocat", then "Synced" / "Syncing" with the counters in the pill's hint, the
-  details toggle with "Details" / "Hide details" as its hint, "Settings".
+- Top strip: "photocat", the details toggle with "Details" / "Hide details" as its hint,
+  "Settings"; no state pill (M25.8).
+- Status bar: a dot and the running pass ("Indexing", "CLIP", "OCR", "People", "Trash", "Export",
+  "Integrity"; "N passes" for two or more) with the hint that names all seven and points at their
+  progress rows in the top strip; when nothing runs the last status message stays.
 - Content ribbon: the view title and its facts, the cell views "Tile / Rows / List", "By months /
   Flat", "Sort"; the filter chips — "path/date: … ×", "tag: … ×", "by relevance: … ×" (a chip has
   only one "×" and the tooltip "remove the filter") and "Reset".
