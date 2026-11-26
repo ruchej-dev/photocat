@@ -532,6 +532,8 @@ VideoToolbox дают только декодер без демуксера. Т�
 | `rff-codec-h264` → `rusty_h264` | Apache-2.0 / BSD-2-Clause | H.264 (весь корпус: 258/258 файлов) | видео не играет |
 | `rff-codec-hevc` → `rusty_h265` | Apache-2.0 | HEVC (iPhone по умолчанию) | HEVC уходит во внешний плеер |
 | `rff-codec-aac` | Apache-2.0 | AAC-LC | видео без звука |
+| `rff-codec-jpeg` | Apache-2.0 | MJPEG в `.MOV` — формат камеры Panasonic Lumix в архиве владельца; каждый пакет — JPEG | ролики Lumix уходят во внешний плеер |
+| `rff-codec-pcm` | Apache-2.0 | звук PCM в тех же `.MOV` (`sowt`) и варианты G.711/ADPCM | встроенный плеер показал бы картинку без звука |
 | `cpal` | Apache-2.0 | вывод PCM: ALSA/PipeWire, WASAPI, CoreAudio | своего аудиовыхода нет; ADR 0028 уже пробовал и удалил |
 
 Проверка на реальных данных: см. 0030. Все лицензии разрешительные, копилефта в дереве нет.

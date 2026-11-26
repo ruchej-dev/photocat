@@ -506,6 +506,10 @@ fn codec_registry() -> CodecRegistry {
     rff_codec_h264::register(&mut reg);
     rff_codec_hevc::register(&mut reg);
     rff_codec_aac::register(&mut reg);
+    // MJPEG in a `.MOV` is the Panasonic Lumix camera default (the owner's archive): every
+    // packet is a JPEG. PCM is the sound of the same files.
+    rff_codec_jpeg::register(&mut reg);
+    rff_codec_pcm::register(&mut reg);
     reg
 }
 
@@ -918,7 +922,12 @@ fn video_loop(
                     continue;
                 }
                 let tb = stream.time_base.as_f64();
-                while let Ok(Frame::Video(f)) = dec.receive_frame() {
+                while let Ok(Frame::Video(mut f)) = dec.receive_frame() {
+                    // A still-picture decoder (MJPEG) carries no timestamp of its own: the
+                    // packet's PTS is the frame's, or every frame would land at zero.
+                    if f.pts.is_none() {
+                        f.pts = pkt.pts;
+                    }
                     let pts = f.pts.map(|p| p as f64 * tb).unwrap_or(0.0);
                     frames.push(pts, f);
                 }
@@ -1587,6 +1596,26 @@ fn decode_only(path: &Path, limit: usize, convert: bool, indexed: bool, dump: Op
 mod tests {
     use super::*;
     use rff_core::{CodecId, ColorInfo, Rational};
+
+    /// The codecs the owner's archive actually holds: H.264/HEVC/AAC and, from a Panasonic
+    /// Lumix, MJPEG video in a `.MOV` with PCM sound. The registry is the only place that
+    /// decides; a missing entry is an honest "no decoder" in the viewer.
+    #[test]
+    fn the_registry_holds_the_codecs_of_the_archive() {
+        let reg = codec_registry();
+        for id in [
+            CodecId::H264,
+            CodecId::Hevc,
+            CodecId::Aac,
+            CodecId::Jpeg,
+            CodecId::Pcm,
+        ] {
+            assert!(
+                reg.find_decoder(id).is_ok(),
+                "no decoder registered for {id:?}"
+            );
+        }
+    }
 
     fn stream(w: u32, h: u32, matrix: u16, range: ColorRange) -> Stream {
         let mut s = Stream::new(0, CodecId::H264);

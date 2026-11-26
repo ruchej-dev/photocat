@@ -551,6 +551,8 @@ or renaming files (playback only reads).
 | `rff-codec-h264` → `rusty_h264` | Apache-2.0 / BSD-2-Clause | H.264 (the whole corpus: 258/258 files) | video does not play |
 | `rff-codec-hevc` → `rusty_h265` | Apache-2.0 | HEVC (the iPhone default) | HEVC goes to the external player |
 | `rff-codec-aac` | Apache-2.0 | AAC-LC | video without sound |
+| `rff-codec-jpeg` | Apache-2.0 | MJPEG in a `.MOV` — the Panasonic Lumix camera default of the owner's archive; every packet is a JPEG | the Lumix videos go to the external player |
+| `rff-codec-pcm` | Apache-2.0 | PCM sound in the same `.MOV` files (`sowt`) and the G.711/ADPCM variants | the built-in player would show the picture silently |
 | `cpal` | Apache-2.0 | PCM output: ALSA/PipeWire, WASAPI, CoreAudio | we have no audio output of our own; ADR 0028 already tried and removed it |
 
 The check on real data: see 0030. All licences are permissive, there is no copyleft in the tree.

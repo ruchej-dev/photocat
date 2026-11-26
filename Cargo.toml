@@ -19,6 +19,8 @@ rff-codec = "0.8"
 rff-codec-aac = "1.1"
 rff-codec-h264 = { version = "0.3", features = ["asm"] }
 rff-codec-hevc = "0.2"
+rff-codec-jpeg = "0.8"
+rff-codec-pcm = "0.8"
 rff-core = "0.8"
 rff-format = "0.8"
 rff-format-mkv = "0.8"

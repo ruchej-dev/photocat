@@ -256,7 +256,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
 - `plan/M3-clusters.md` is a local report with archive paths, it is not committed.
 - The app trash is not physical: "Empty trash" moves files to the OS trash via `trash`; cache cleanup
   removes only `<cache>/photocat/*`. Both actions require confirmation.
-- Video plays in the built-in player (M14, ADR 0030): H.264 and HEVC Main, AAC, sound through
+- Video plays in the built-in player (M14, ADR 0030): H.264 and HEVC Main, AAC, MJPEG in a `.MOV`
+  (the Panasonic Lumix camera; `rff-codec-jpeg`) and PCM sound (`rff-codec-pcm`), sound through
   `cpal`; no external programs needed. Three threads: video, audio, presentation. Audio is the
   master, only while it actually plays; otherwise wall-clock time drives the frames, and video never
   stalls. 1080p holds real time (29.8 fps for a 30 fps source), 2520×1080 — 22.9 fps with up to

@@ -25,7 +25,7 @@ L0  i18n.rs   derive.rs   tools.rs
 | L2 `faces` | L0/L1 + `ort`, `rayon`, `image`; ONNX SCRFD and ArcFace | egui, SQL strings |
 | L1 `storage` | `db` for the DB paths, `walkdir`; removes only `<cache>/photocat/` | archive, egui |
 | L2 `recycle` | `db`, the `trash` crate; moves to the OS trash after confirmation | previews, egui |
-| L2 `player` | `rff-format-*`/`rff-codec-*` (demux, H.264/HEVC/AAC decode), `cpal` (sound), `rayon` (frame conversion) | DB, egui, `tools` (the external ffplay is `app`'s business) |
+| L2 `player` | `rff-format-*`/`rff-codec-*` (demux, H.264/HEVC/MJPEG/PCM/AAC decode), `cpal` (sound), `rayon` (frame conversion) | DB, egui, `tools` (the external ffplay is `app`'s business) |
 | L3 `app` | everything below + `eframe`/`egui` | direct SQL strings, decoding on the UI thread |
 
 Language (M21) is a layer like everything else: `i18n` is allowed only to those who talk to the
@@ -240,7 +240,9 @@ photocat-player   clock and presentation: frame → RGBA (1280 px) → Shared.fr
   five frames takes 0.42 s.
 - **Memory.** A queue of 3 frames (YUV), an audio ring of ~2 s, one frame for presentation. Lag is
   dropped, not accumulated.
-- **Codecs.** H.264 (the whole corpus), HEVC Main 8/10 bit, AAC-LC. Other frame formats and codecs
+- **Codecs.** H.264 (the whole corpus), HEVC Main 8/10 bit, MJPEG in a `.MOV` (the Panasonic
+  Lumix camera; `rff-codec-jpeg`, the packet's PTS becomes the frame's when the still-picture
+  decoder has none), PCM sound (`rff-codec-pcm`) and AAC-LC. Other frame formats and codecs
   (VP9, Opus) are rejected by name and yield to `ffplay`.
 - **Build.** The decoder in a plain debug profile gives 2.2 fps instead of 41.9 — `cargo run`
   turned video into a slideshow. In `Cargo.toml` the dev profile is tuned: dependencies

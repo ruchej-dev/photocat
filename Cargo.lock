@@ -3596,6 +3596,8 @@ dependencies = [
  "rff-codec-aac",
  "rff-codec-h264",
  "rff-codec-hevc",
+ "rff-codec-jpeg",
+ "rff-codec-pcm",
  "rff-core",
  "rff-format",
  "rff-format-mkv",
@@ -4103,6 +4105,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rff-codec-jpeg"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac2629e469bb4a2735b8774cc856acd9cf671cb1e7d01443668381f9216f91ca"
+dependencies = [
+ "rff-codec",
+ "rff-core",
+ "rusty_jpeg",
+]
+
+[[package]]
+name = "rff-codec-pcm"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3bd89649fc399ae5fe5a9980f7aa344d0c52483834e3baa2b3b9893e9f6d502"
+dependencies = [
+ "rff-codec",
+ "rff-core",
+]
+
+[[package]]
 name = "rff-core"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4381,6 +4404,12 @@ name = "rusty_h265-accel"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b720c0ba8c4993b8ad835361827581eafb1de1eb5f57df0e3c768aeb031888"
+
+[[package]]
+name = "rusty_jpeg"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc69fa81cb3d73fc09c7576eadc03962c9721a3c52ea618376feae45843862a1"
 
 [[package]]
 name = "ryu"
