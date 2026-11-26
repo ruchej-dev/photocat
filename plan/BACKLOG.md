@@ -1812,7 +1812,7 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
 M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
-space back (VACUUM).
+space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text).
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -1836,8 +1836,9 @@ back with one switch, no re-index.
    counters that come from the DB alone (face photos, OCR files, the trash) are recomputed over the
    visible set.
 4. Indexing skips a switched-off root (no new rows), and a re-enable needs no pass: the rows are
-   still there. Background passes may keep the whole index up to date — the switch is about showing,
-   not about deleting (state that in the hint and `docs/ARCHITECTURE.md`).
+   still there. The face, tag and text passes skip it too (M26.9); switching it back on lets them
+   catch up. The switch is about showing, not about deleting (state that in the hint and
+   `docs/ARCHITECTURE.md`).
 5. The CLI `stats` names the switched-off folders and counts their files separately from the shown
    ones; `index` says that a switched-off folder was skipped.
 6. `docs/UI.md` § Screens (the folders dialog) and `docs/ARCHITECTURE.md` (the settings keys) are
@@ -2061,6 +2062,49 @@ facts.
 
 **Files.** `src/db.rs` (or `src/storage.rs`), `src/app.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
+
+**M26.9 — a catalog chooses which passes run over it: faces, tags, text.**
+**Goal.** A folder of paintings, screenshots or plain junk is indexed and browsable, but the expensive
+analysis does not chew on it: each catalog says whether the face pass, the CLIP tags and the OCR
+text run over its files. All three are on by default, so nothing changes for a normal archive.
+
+**Acceptance criteria.**
+1. The "Folders" dialog gives every root three checkboxes — "Faces", "Tags", "Text on photos" — all
+   ticked by default, each with a hint that names what the pass does and what is lost when it is off
+   (no groups and no face vectors; no tags, no semantic search hits from this folder; no text and no
+   "By text" hits). They are part of the catalog's settings from M26.7 (the dropdown opens the same
+   dialog on the selected root).
+2. The choice is data, not a schema change: a new `settings` key `root_passes` holds the exceptions
+   only, keyed by path (`serde_json` is already a dependency), so an empty or missing value means
+   "every pass on every root"; a root that is gone keeps no key. It survives a restart and is read
+   by the GUI and the CLI alike.
+3. One helper decides, and every pass uses it: `db::Settings::pass_allows(path, Pass)` with
+   `Pass::Faces | Tags | Text`. `embed`, `ocr` and `faces` skip a file whose root forbids the pass —
+   both the GUI passes and `photocat embed|ocr|faces`, including `--dry-run`, `--retag` and
+   `--recluster` (a rebuild keeps the groups of the allowed roots and ignores the forbidden ones).
+4. A pass shows the plan and the skip: "faces: 1 234 files, 219 skipped — their folders have faces
+   off"; the counts in the navigation and in the status follow the same rule as after any pass.
+5. Turning a pass off never deletes what a previous pass produced — the vectors, tags, text and faces
+   stay, and the pass simply stops updating them. A separate per-catalog action "Forget the faces,
+   tags and text of this catalog" (confirmation, derived rows only, the files and the archive are
+   untouched) removes them for an owner who wants a folder out of People and the tag cloud; it is
+   named in the hint. No automatic deletion anywhere.
+6. Indexing itself (path, size, mtime, sha256, date, dimensions, sharpness, previews, video covers)
+   is not part of this switch: the grid, the duplicates and the calendar need it for every catalog.
+   A catalog switched off for display (M26.1) is skipped by every pass as well; switching it back on
+   lets the passes catch up.
+7. `docs/UI.md` § Screens (the folders dialog) and § Settings, `docs/ARCHITECTURE.md` (the settings
+   keys and the pass flow), `plan/I18N.md`; the strings are in `PAIRS`.
+
+**Acceptance.** With two roots, one with "Tags" cleared: the embed plan reports the skip, the tags
+table has no rows for that root after a pass, its files still appear in the grid and `search
+--text`/`search` do not return it for a tag hit; ticking the box and running the pass fills it
+without a re-index; the choice survives a restart; the CLI and the GUI print the same skip; the
+"forget" action removes the derived rows only and the files on disk stay; the archive is untouched.
+A test on a temporary DB with two roots and a fake pass, plus a headless frame of the dialog.
+
+**Files.** `src/db.rs`, `src/embed.rs`, `src/ocr.rs`, `src/faces.rs`, `src/app.rs`, `src/main.rs`,
+`src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`.
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
