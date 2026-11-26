@@ -1812,7 +1812,9 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
 M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
-space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text).
+space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
+M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
+together.
 
 **M26.1 — an archive folder can be switched off without losing its rows.**
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -2105,6 +2107,45 @@ A test on a temporary DB with two roots and a fake pass, plus a headless frame o
 
 **Files.** `src/db.rs`, `src/embed.rs`, `src/ocr.rs`, `src/faces.rs`, `src/app.rs`, `src/main.rs`,
 `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`.
+
+**M26.10 — the People screen: a split does not throw the owner out of the group, and the ticked faces split together.**
+**Goal.** A wrong merge is undone on the spot: the crossed-head target takes the stranger out of the
+open group and the screen stays exactly where it was, on the same group and the same scroll. In the
+tick mode the owner marks several strangers and takes them all out in one press.
+
+**Acceptance criteria.**
+1. The single split keeps the place: after `faces::split` the open group is the one the owner was
+   looking at, not the new one — `face_selected_cluster` is left alone, `reload` runs, the split face
+   disappears from the tiles (it is another group now), the group's counters drop by one, and the
+   new unnamed group appears in the list without being opened. The status says "the face is in a
+   new group; the screen stays here" (the old text announced the jump).
+2. If the open group becomes empty and is unnamed, `delete_empty_face_clusters` removes it; then the
+   selection clears to "All people" **without** opening another group, the list simply loses the
+   row, and the status says the group was left empty. A named group stays and shows "No faces in
+   this group." The screen and the scroll are never moved to a different group.
+3. The tick mode gets a second action next to "Name the picked people": "Split the picked (N)",
+   enabled only inside a group and with at least one ticked face, with the hint "each picked face
+   leaves this group into its own new one; the rest stay". It is the inverse of naming — the ticked
+   strangers are different people, so each gets its own unnamed group, while "Name the picked
+   people" with an empty name still gathers them into one.
+4. The multi-split is one DB action, not N reloads: `db::split_faces(conn, &[ids])` moves every
+   picked face into a new cluster in one transaction (each moved face gets `manual = 1`, as the
+   single split does), then `delete_empty_face_clusters` runs once; the picked set clears, the open
+   group stays selected, and the status says how many left. A face that is not in the database is
+   reported and does not abort the others.
+5. The per-tile split stays where it is; its hint and the screen's help line say that the view does
+   not jump.
+6. `docs/UI.md` § Screens (People) and § Interaction, `plan/I18N.md`; the strings are in `PAIRS`.
+
+**Acceptance.** `db::split_faces` on a fixture: a named group of three faces, two split off — the
+named group keeps one face, two unnamed groups hold one face each, the moved rows carry
+`manual = 1`, other groups and their names are untouched; splitting the last face of an unnamed
+group deletes that group and leaves a named empty one alone. A UI test: with a group open, a click
+on the crossed-head keeps `face_selected_cluster` and the split face is no longer among the shown
+tiles; with two faces ticked, "Split the picked (2)" leaves the group open, empties the ticks and
+drops the group's face count by two. A headless frame shows both actions in both languages.
+
+**Files.** `src/app.rs`, `src/db.rs`, `src/faces.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
