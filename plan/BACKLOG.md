@@ -1275,7 +1275,7 @@ on them.
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
   M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 (done 2026-11-26) the state word moves into the status bar;
   M25.9 (done 2026-11-26) the location row; M25.10 (done 2026-11-26) the year and month layers; M25.11 (done 2026-11-26) the week and day layers;
-  M25.12 (done 2026-11-26) the photos of the period follow the cell view; M25.13 the text block moves into Settings.
+  M25.12 (done 2026-11-26) the photos of the period follow the cell view; M25.13 (done 2026-11-26) the text block moves into Settings.
 
 **M25.1 — the tag filter accumulates.**
 **Goal.** A click adds a tag, a second click removes it; a reset is one click on the picked tag or
@@ -1737,6 +1737,20 @@ clean cache disables the button with one honest line; the 357-candidate corpus p
 pane.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**Done (2026-11-26).** The OCR block left the left panel with `ocr_block`; its body became the new
+"Text on photos" settings pane (`SettingsTab::Text`, the eighth tab): the candidate rule, the
+`tesseract` row (path, version, "without it"), "Check and save the programs", the recognized counts
+and "Recognize documents (N)" / "Resume (N)" / "Stop", with one honest line when tesseract does not
+start. The `tesseract` path left "External tools", which keeps `ffmpeg`/`ffprobe` — both panes share
+`App::tool_row`. The per-photo button in the card and the OCR progress row are unchanged; the top
+bar's "By text", when nothing is recognized, now says
+`no recognized text yet — run it in Settings → Text on photos`. Tests: the settings pane check in
+`english_translates_the_settings_panes` (the pane's labels, the honest line, `tesseract` gone from
+the external tools) and the negative panel list in `english_translates_the_left_panel` ("Recognize
+documents" is no longer in the panel). `cargo test` 326 passed + 3 guard tests, `cargo clippy
+--all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. The pass itself
+is the same `start_ocr(None)` call and was not run on the owner's archive from this session.
 
 **Not doing.** Renaming or deleting originals; a network geocoder or a map link; tag filters that
 combine with OR; a permanent "all tags" or "all years" cell; a third theme; sending coordinates

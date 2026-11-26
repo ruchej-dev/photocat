@@ -376,17 +376,19 @@ enum SettingsTab {
     Tags,
     Faces,
     Storage,
+    Text,
     Tools,
 }
 
 impl SettingsTab {
-    const ALL: [SettingsTab; 7] = [
+    const ALL: [SettingsTab; 8] = [
         SettingsTab::Interface,
         SettingsTab::Model,
         SettingsTab::Index,
         SettingsTab::Tags,
         SettingsTab::Faces,
         SettingsTab::Storage,
+        SettingsTab::Text,
         SettingsTab::Tools,
     ];
 
@@ -400,6 +402,7 @@ impl SettingsTab {
             SettingsTab::Tags => Icon::Label,
             SettingsTab::Faces => Icon::Face,
             SettingsTab::Storage => Icon::Inventory,
+            SettingsTab::Text => Icon::TextFields,
             SettingsTab::Tools => Icon::Terminal,
         }
     }
@@ -414,6 +417,7 @@ impl SettingsTab {
                 SettingsTab::Tags => "Tags",
                 SettingsTab::Faces => "People",
                 SettingsTab::Storage => "Storage",
+                SettingsTab::Text => "Text on photos",
                 SettingsTab::Tools => "External tools",
             },
         )
@@ -5028,6 +5032,7 @@ impl App {
             SettingsTab::Tags => self.settings_tags(ui),
             SettingsTab::Faces => self.settings_faces(ui),
             SettingsTab::Storage => self.settings_storage(ui),
+            SettingsTab::Text => self.settings_text(ui),
             SettingsTab::Tools => self.settings_tools(ui),
         }
     }
@@ -6041,30 +6046,9 @@ impl App {
             .color(dim(ui)),
         );
         ui.add_space(8.0);
-        for (i, tool) in tools::ALL.into_iter().enumerate() {
-            ui.label(egui::RichText::new(tool.name()).size(12.0).color(dim(ui)));
-            ui.add_space(2.0);
-            let input = self.tools_input.get_mut(tool);
-            ui.add(
-                egui::TextEdit::singleline(input)
-                    .hint_text(t(lang, "empty — from PATH"))
-                    .desired_width(380.0),
-            );
-            ui.label(
-                egui::RichText::new(self.tool_states.get(i).map(String::as_str).unwrap_or(""))
-                    .size(11.0)
-                    .color(dim(ui)),
-            );
-            ui.label(
-                egui::RichText::new(format!(
-                    "{}: {}",
-                    t(lang, "without it"),
-                    tool.without(lang)
-                ))
-                .size(11.0)
-                .color(dim(ui)),
-            );
-            ui.add_space(8.0);
+        // tesseract moved to "Text on photos" (M25.13); the two programs that read the files stay.
+        for tool in [tools::Tool::Ffmpeg, tools::Tool::Ffprobe] {
+            self.tool_row(ui, tool);
         }
         if ui
             .add(WordButton::new(
@@ -6075,6 +6059,40 @@ impl App {
         {
             self.apply_tools();
         }
+    }
+
+    /// A row of an external program: the name, the path field, the version and what is lost
+    /// without it. Shared by "External tools" (ffmpeg, ffprobe) and "Text on photos" (tesseract,
+    /// M25.13).
+    fn tool_row(&mut self, ui: &mut egui::Ui, tool: tools::Tool) {
+        let lang = self.settings.lang;
+        let i = tools::ALL
+            .iter()
+            .position(|t| *t == tool)
+            .unwrap_or_default();
+        ui.label(egui::RichText::new(tool.name()).size(12.0).color(dim(ui)));
+        ui.add_space(2.0);
+        let input = self.tools_input.get_mut(tool);
+        ui.add(
+            egui::TextEdit::singleline(input)
+                .hint_text(t(lang, "empty — from PATH"))
+                .desired_width(380.0),
+        );
+        ui.label(
+            egui::RichText::new(self.tool_states.get(i).map(String::as_str).unwrap_or(""))
+                .size(11.0)
+                .color(dim(ui)),
+        );
+        ui.label(
+            egui::RichText::new(format!(
+                "{}: {}",
+                t(lang, "without it"),
+                tool.without(lang)
+            ))
+            .size(11.0)
+            .color(dim(ui)),
+        );
+        ui.add_space(8.0);
     }
 
     fn reset_filters(&mut self) {
@@ -6246,7 +6264,7 @@ impl App {
             if self.ocr_files > 0 {
                 t(lang, "receipt, invoice, 2024")
             } else {
-                t(lang, "no recognized text yet")
+                t(lang, "no recognized text yet — run it in Settings → Text on photos")
             }
         } else if ready {
             t(lang, "cake, sea, furniture, document")
@@ -6849,7 +6867,6 @@ impl App {
                     _ => {}
                 }
                 self.model_block(ui);
-                self.ocr_block(ui);
                 if show_card {
                     ui.add_space(8.0);
                     hairline(ui);
@@ -7451,78 +7468,106 @@ impl App {
         ui.add_space(4.0);
     }
 
-    /// The block of text on the photos: how much is recognized and how much is left.
-    fn ocr_block(&mut self, ui: &mut egui::Ui) {
+    /// The "Text on photos" pane (M25.13): the tesseract program, the state of the recognized text and
+    /// the pass itself — the left panel stopped carrying a feature used once a month.
+    fn settings_text(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
-        block(ui, |ui| {
-            ui.label(
-                egui::RichText::new(t(lang, "Text on the photo"))
-                    .size(11.0)
-                    .color(dim(ui)),
-            );
-            ui.add_space(2.0);
-            if self.tesseract.is_none() {
-                ui.label(
-                    egui::RichText::new(t(
-                        lang,
-                        "tesseract does not start — set its path in “Settings”",
-                    ))
-                    .size(11.0)
-                    .color(dim(ui)),
-                );
-            }
-            let images = self.items.iter().filter(|r| r.kind == "image").count();
-            let with_text = i18n::fill(
+        ui.label(
+            egui::RichText::new(t(
                 lang,
-                "with text: {} of {} photos",
-                &[self.ocr_files.to_string(), images.to_string()],
+                "The pass walks over the documents and screenshots without a camera and over the photos with a confident “document” or “screenshot” tag; a single photo is recognized with the button in the file card. The text goes to the database and is searched by the top bar's “By text”.",
+            ))
+            .size(11.0)
+            .color(dim(ui)),
+        );
+        ui.add_space(8.0);
+        self.tool_row(ui, tools::Tool::Tesseract);
+        if ui
+            .add(WordButton::new(
+                Icon::CheckCircle,
+                t(lang, "Check and save the programs"),
+            ))
+            .clicked()
+        {
+            self.apply_tools();
+        }
+        ui.add_space(12.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(t(lang, "Text on the photo"))
+                .size(12.0)
+                .strong(),
+        );
+        ui.add_space(2.0);
+        if self.tesseract.is_none() {
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "tesseract does not start — set its path above",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
             );
-            ui.label(egui::RichText::new(with_text).size(11.0).color(dim(ui)));
-            let candidates = i18n::fill(lang, "{} candidates, {} left", &[self.ocr_candidates.to_string(), self.ocr_remaining.to_string()]);
-            ui.label(egui::RichText::new(candidates).size(11.0).color(dim(ui)));
-            ui.add_space(4.0);
-            if self.ocr_rx.is_some() {
-                if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
-                    && let Some(p) = &self.ocr_progress
-                {
-                    p.cancel();
-                    self.status = t(lang, "OCR: stopping after the current files…").into();
-                }
-            } else {
-                let label = if self.ocr_remaining < self.ocr_candidates {
-                    format!("{} ({})", t(lang, "Resume"), self.ocr_remaining)
-                } else {
-                    format!(
-                        "{} ({})",
-                        t(lang, "Recognize documents"),
-                        self.ocr_candidates
-                    )
-                };
-                if ui
-                    .add_enabled(
-                        self.tesseract.is_some() && self.ocr_remaining > 0,
-                        WordButton::new(
-                            if self.ocr_remaining < self.ocr_candidates {
-                                Icon::Play
-                            } else {
-                                Icon::TextFields
-                            },
-                            label,
-                        ),
-                    )
-                    .on_hover_text(t(
-                        lang,
-                        "a long pass: documents and screenshots without a camera and with a confident tag; a single photo — with the button in the file card",
-                    ))
-                    .clicked()
-                {
-                    self.start_ocr(None);
-                }
+        }
+        let images = self.items.iter().filter(|r| r.kind == "image").count();
+        let with_text = i18n::fill(
+            lang,
+            "with text: {} of {} photos",
+            &[self.ocr_files.to_string(), images.to_string()],
+        );
+        ui.label(egui::RichText::new(with_text).size(11.0).color(dim(ui)));
+        let candidates = i18n::fill(
+            lang,
+            "{} candidates, {} left",
+            &[self.ocr_candidates.to_string(), self.ocr_remaining.to_string()],
+        );
+        ui.label(
+            egui::RichText::new(candidates).size(11.0).color(dim(ui)),
+        );
+        ui.add_space(4.0);
+        if self.ocr_rx.is_some() {
+            if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
+                && let Some(p) = &self.ocr_progress
+            {
+                p.cancel();
+                self.status = t(lang, "OCR: stopping after the current files…").into();
             }
-        });
+        } else {
+            let label = if self.ocr_remaining < self.ocr_candidates {
+                format!("{} ({})", t(lang, "Resume"), self.ocr_remaining)
+            } else {
+                format!(
+                    "{} ({})",
+                    t(lang, "Recognize documents"),
+                    self.ocr_candidates
+                )
+            };
+            let hover = t(
+                lang,
+                "a long pass: documents and screenshots without a camera and with a confident tag; a single photo — with the button in the file card",
+            );
+            if ui
+                .add_enabled(
+                    self.tesseract.is_some() && self.ocr_remaining > 0,
+                    WordButton::new(
+                        if self.ocr_remaining < self.ocr_candidates {
+                            Icon::Play
+                        } else {
+                            Icon::TextFields
+                        },
+                        label,
+                    ),
+                )
+                .on_hover_text(hover)
+                .clicked()
+            {
+                self.start_ocr(None);
+            }
+        }
     }
 
-    /// The right panel: details and actions for the selected file, in the composition of
+    /// The right panel: details and actions for the selected file, in the composition of    /// The right panel: details and actions for the selected file, in the composition of
     /// `photocat_12` (M22.16): a 44 px header band closed by a line and the card below it.
     fn details_panel(&mut self, ui: &mut egui::Ui) {
         panel_edge(ui, true);
@@ -18140,10 +18185,8 @@ mod tests {
             "AI model",
             "model not downloaded",
             "Filter threshold",
-            "Text on the photo",
-            "0 candidates, 0 left",
             // The two missing numbers are the counts of the filter chips (M25.4), not summary rows;
-            // the summary itself is gone (M25.5).
+            // the summary itself is gone (M25.5). The text block moved to the settings (M25.13).
             "No date · 0",
             "No preview · 1",
         ] {
@@ -18161,6 +18204,7 @@ mod tests {
             "Файлов:",
             "Объём:",
             "Без даты ·",
+            "Распознать документы",
         ] {
             assert!(
                 !texts.iter().any(|t| t == ru),
@@ -18259,10 +18303,39 @@ mod tests {
                 "missing “{want}” in the storage section: {storage:?}"
             );
         }
+        // The "Text on photos" pane (M25.13): the tesseract program, the state and the pass, and
+        // the honest line when the program does not start.
+        app.tesseract = None;
+        let text = settings_frame(&mut app, &ctx, SettingsTab::Text);
+        for want in [
+            "Text on photos",
+            "tesseract",
+            "with text: 0 of 0 photos",
+            "0 candidates, 0 left",
+            "Recognize documents (0)",
+        ] {
+            assert!(
+                text.iter().any(|t| t == want),
+                "missing “{want}” in the text pane: {text:?}"
+            );
+        }
+        assert!(
+            text.iter()
+                .any(|t| t == "tesseract does not start — set its path above"),
+            "the text pane does not say why the pass is disabled: {text:?}"
+        );
+        assert!(
+            text.iter().any(|t| t.starts_with("The pass walks over")),
+            "the candidate rule is not explained: {text:?}"
+        );
         let tools = settings_frame(&mut app, &ctx, SettingsTab::Tools);
         assert!(
             tools.iter().any(|t| t == "Check and save the programs"),
             "the save-programs button is missing: {tools:?}"
+        );
+        assert!(
+            !tools.iter().any(|t| t == "tesseract"),
+            "tesseract is still in the external tools: {tools:?}"
         );
         assert!(
             tools.iter().any(|t| t.starts_with("without it: ")),

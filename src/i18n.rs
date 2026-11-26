@@ -457,7 +457,19 @@ const PAIRS: &[(&str, &str)] = &[
     ("Search", "Найти"),
     ("Reset", "Сбросить"),
     ("loading model…", "загрузка модели…"),
-    ("no recognized text yet", "нет распознанного текста"),
+    (
+        "no recognized text yet — run it in Settings → Text on photos",
+        "нет распознанного текста — запустите его в «Настройки → Текст на фото»",
+    ),
+    ("Text on photos", "Текст на фото"),
+    (
+        "tesseract does not start — set its path above",
+        "tesseract не запускается — укажите его путь выше",
+    ),
+    (
+        "The pass walks over the documents and screenshots without a camera and over the photos with a confident “document” or “screenshot” tag; a single photo is recognized with the button in the file card. The text goes to the database and is searched by the top bar's “By text”.",
+        "Проход обходит документы и скриншоты без камеры и снимки с уверенным тегом «документ» или «скриншот»; одиночный снимок распознаётся кнопкой в карточке файла. Текст ложится в базу, и его ищет «По тексту» в верхней полосе.",
+    ),
     ("model not downloaded", "модель не скачана"),
     ("search cleared", "поиск сброшен"),
     // --- the grid, chips, order ------------------------------------------------
@@ -978,10 +990,6 @@ const PAIRS: &[(&str, &str)] = &[
         "ни один тег не проходит порог — опустите ползунок",
     ),
     ("search", "поиск"),
-    (
-        "tesseract does not start — set its path in “Settings”",
-        "tesseract не запускается — путь в «Настройках»",
-    ),
     (
         "OCR: stopping after the current files…",
         "OCR: останавливаю после текущих файлов…",
