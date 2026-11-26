@@ -1274,7 +1274,7 @@ on them.
   the older ones, the kept "All years"); M25.3 (done 2026-11-26) the path/date field; M25.4 (done 2026-11-26) "No date" and "No preview"
   as filters; M25.5 (done 2026-11-26) the summary leaves; M25.6 (done 2026-11-26) the pinned threshold and no "Model settings";
   M25.7 (done 2026-11-26) the two archive buttons explain themselves; M25.8 (done 2026-11-26) the state word moves into the status bar;
-  M25.9 the location row; M25.10 the year and month layers; M25.11 the week and day layers;
+  M25.9 (done 2026-11-26) the location row; M25.10 the year and month layers; M25.11 the week and day layers;
   M25.12 the photos of the period follow the cell view; M25.13 the text block moves into Settings.
 
 **M25.1 — the tag filter accumulates.**
@@ -1601,6 +1601,17 @@ instead of faked.
 without GPS shows no row; nothing opens a browser; a test covers both rows.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/DECISIONS.md`.
+
+**Done (2026-11-26).** The "Location" row keeps the two EXIF coordinates to five decimals and gains a
+20 px copy target (the hint `copy the coordinates`); a press copies "55.75580, 37.61730" to the
+clipboard and says `coordinates copied` in the status bar. The row and its pin carry `LOCATION_HINT`,
+which says that EXIF holds the coordinates only, that a place name needs a reverse geocoder, that the
+network is forbidden by §1 and an offline data set is a dependency and an ADR. ADR 0049 is that
+question for the owner: no place name (today), an offline set (size, licence, coverage) or a lookup
+by an explicit click (which sends the coordinates and needs a change of the rule). No map link and no
+network call. Test: `the_location_row_shows_and_copies_the_coordinates` (GPS → the row, the five
+decimals and a working copy; no GPS → no row). `cargo test` 322 passed + 3 guard tests,
+`cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors.
 
 **M25.10 — the calendar's year and month layers.**
 **Goal.** "Year" shows years, "Month" shows the months of the chosen year.

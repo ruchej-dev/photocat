@@ -391,6 +391,12 @@ const PAIRS: &[(&str, &str)] = &[
         "Поле буквальное: часть пути или даты в ISO без учёта регистра — «2024-05» найдёт май 2024, «vacation» — папку или файл с этим словом. Поиск по тому, что на фотографии, — в верхней полосе: «Смысловой / По тексту».",
     ),
     (
+        "EXIF carries the coordinates only — a place name is not in the file. A name needs a reverse geocoder: the network is forbidden by §1 of AGENTS.md, and an offline data set is a new dependency and an ADR (docs/DECISIONS.md). The button copies the coordinates.",
+        "EXIF несёт только координаты — названия места в файле нет. Названию нужен обратный геокодер: сеть запрещена §1 AGENTS.md, а офлайн-набор данных — новая зависимость и ADR (`docs/DECISIONS.md`). Кнопка копирует координаты.",
+    ),
+    ("copy the coordinates", "копировать координаты"),
+    ("coordinates copied", "координаты скопированы"),
+    (
         "Walk the folders and read only the new and changed files — the path, the size and the modification time decide. The pass computes the hash, the date, the dimensions, the sharpness and a 320 px preview, and gives a video its cover through ffmpeg. It writes to the cache only — the database and the previews, never the archive — and it can be stopped and resumed.",
         "Обходит каталоги и читает только новые и изменившиеся файлы — решают путь, размер и время изменения. Проход считает хэш, дату, размеры, резкость и превью 320 px, а видео получает обложку через ffmpeg. Он пишет только в кэш — базу и превью, — никогда в архив, и его можно остановить и продолжить.",
     ),

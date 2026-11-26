@@ -1308,3 +1308,35 @@ integrity banner and the calendar).
 
 **Forbids:** an icon font or icon package, an SVG/PNG icon asset, an emoji as an icon, a button whose
 only content is an icon, a per-screen colour for an icon, a `menu_button` without an icon.
+
+## 0049. A place name is not in a photograph: the question is open (proposed, no decision yet)
+
+**Status: an open question for the owner (M25.9, 2026-11-26).** No code takes a side here: the
+"Location" row shows the EXIF coordinates to five decimals and offers to copy them. No map link, no
+network call, no place name is invented.
+
+**The facts.** EXIF carries latitude and longitude only. A name — a city, a district, a country —
+is not a property of the file: it is what a reverse geocoder answers for those coordinates. The mock-
+up draws "Moscow, Russia" under the pin; the archive cannot produce it on its own.
+
+**Option A — no place name (today).** The row keeps the coordinates and the copy target; the hint
+says why a name is absent. Cost: nothing; the card is honest. What it loses: the owner scans a
+number instead of a word.
+
+**Option B — an offline data set.** A packaged reverse geocoder (for example a city/region table or
+a simplified boundary data set) is a new dependency: its size in the binary or in the cache (a
+global city table is ~10–50 MB, a country/region boundary set 5–20 MB, a full street-level set
+hundreds of MB), its licence (many are ODbL or CC-BY-SA, which needs a `NOTICE` entry and may reach
+the data it derives), and its coverage (country only, region/city only, or a nearest-city guess with
+its own error). It runs offline, so it does not touch §1.
+
+**Option C — a lookup by an explicit click.** One button sends the coordinates to a public reverse
+geocoder and shows the answer. This **sends user data** (the place of a family photo), which §1 of
+`AGENTS.md` forbids today: it needs a change of the rule and the owner's explicit decision, not a
+flag. It would also be the only network call in the app besides the consented model download.
+
+**What would be decided first.** The owner's answer to three questions: is a place name needed at
+all; if yes — country/region/city or a street address; and is a click that sends the coordinates
+acceptable. Until then the row stays as it is (Option A).
+
+**Forbids now:** a map link, a browser, a network call, a bundled geocoder, a guessed place name.

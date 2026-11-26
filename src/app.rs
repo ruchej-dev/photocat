@@ -679,6 +679,9 @@ const PATH_DATE_HINT: &str = "The field is literal: a case-insensitive part of t
 /// The hint of the state word in the status bar (M25.8): it names every pass the dot can report and
 /// says where their progress rows live.
 const PASS_HINT: &str = "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export or Integrity; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.";
+/// The hint of the location row (M25.9): what the file knows and why half of the mock-up's row is
+/// absent. A place name is not in a photograph.
+const LOCATION_HINT: &str = "EXIF carries the coordinates only — a place name is not in the file. A name needs a reverse geocoder: the network is forbidden by §1 of AGENTS.md, and an offline data set is a new dependency and an ADR (docs/DECISIONS.md). The button copies the coordinates.";
 /// The tooltips of the two archive buttons (M25.7): what a pass does and what it never touches. One
 /// source for the window and the test.
 const INDEX_HINT: &str = "Walk the folders and read only the new and changed files — the path, the size and the modification time decide. The pass computes the hash, the date, the dimensions, the sharpness and a 320 px preview, and gives a video its cover through ffmpeg. It writes to the cache only — the database and the previews, never the archive — and it can be stopped and resumed.";
@@ -7811,11 +7814,28 @@ impl App {
                 ui.add_space(2.0);
                 caps_label(ui, t(lang, "Location"));
                 // The mock-up puts the pin before the coordinates (M22.16); the place name of
-                // the mock-up needs a geocoder, which the offline rule forbids.
+                // the mock-up needs a geocoder, which the offline rule forbids (M25.9, ADR 0049).
+                let coords = format!("{a:.5}, {b:.5}");
+                let mut copied = false;
                 ui.horizontal(|ui| {
                     icon_mark(ui, Icon::Location, 14.0);
-                    ui.add(egui::Label::new(num(ui, format!("{a:.5}, {b:.5}"), 11.0)).wrap());
+                    ui.add(egui::Label::new(num(ui, coords.clone(), 11.0)).wrap())
+                        .on_hover_text(t(lang, LOCATION_HINT));
+                    if icon_button(
+                        ui,
+                        Icon::ContentCopy,
+                        20.0,
+                        t(lang, "copy the coordinates"),
+                    )
+                    .clicked()
+                    {
+                        copied = true;
+                    }
                 });
+                if copied {
+                    ui.ctx().copy_text(coords);
+                    self.status = t(lang, "coordinates copied").into();
+                }
             }
             ui.add_space(4.0);
             hairline(ui);
@@ -20149,6 +20169,56 @@ mod tests {
         assert!(app.query.is_empty());
         assert!(app.year_filter.is_none());
         assert_eq!(app.filtered().len(), 4, "all years are back");
+    }
+
+    /// M25.9: a photo with GPS shows the "Location" row, the coordinates to five decimals and a
+    /// copy target; a photo without GPS shows no row at all, and no place name is invented.
+    #[test]
+    fn the_location_row_shows_and_copies_the_coordinates() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-location.db"));
+        app.settings.lang = i18n::Lang::En;
+        app.settings.models_dir =
+            std::env::temp_dir().join("photocat-test-models-never-downloaded");
+        let mut f = file_row(1, "image", "geo.jpg");
+        f.lat = Some(55.755_8);
+        f.lon = Some(37.617_3);
+        app.items = vec![f];
+        app.selected = Some(1);
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 900.0);
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let rects = window_word_rects_at(&mut app, &ctx, size);
+        assert!(
+            rects.iter().any(|(text, _)| text == "LOCATION"),
+            "no location row: {:?}",
+            rects.iter().map(|(t, _)| t).collect::<Vec<_>>()
+        );
+        let coords = rects
+            .iter()
+            .find(|(text, _)| text == "55.75580, 37.61730")
+            .unwrap_or_else(|| panic!("no coordinates: {rects:?}"))
+            .1;
+        // The copy target stands right after the coordinates in the same row.
+        click_at(
+            &mut app,
+            &ctx,
+            egui::pos2(coords.right() + 18.0, coords.center().y),
+        );
+        assert!(
+            app.status.contains("coordinates copied"),
+            "the copy target did nothing: {}",
+            app.status
+        );
+        // A photo without GPS has no row: nothing is invented about the place.
+        app.items[0].lat = None;
+        app.items[0].lon = None;
+        let _ = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        let rects = window_word_rects_at(&mut app, &ctx, size);
+        assert!(
+            !rects.iter().any(|(text, _)| text == "LOCATION"),
+            "a location row without coordinates: {:?}",
+            rects.iter().map(|(t, _)| t).collect::<Vec<_>>()
+        );
     }
 
     /// M25.7: the two archive buttons explain themselves before a click — the pass reads only new
