@@ -672,8 +672,9 @@ affect the originals, and §1 AGENTS.md forbids that. Besides, one snapshot is a
   not opened; codes 0 — done, 1 — a data error, 2 — wrong arguments or a refusal without `--yes`.
 
 **Consequences.** An "Albums" view appears (tree, subalbums, a grid in album order) and the sort option
-"Album order", available only inside an album. An album stores no cover: the preview of the first
-non-trashed file by `position` serves as one. A file in the app trash stays an album row but is hidden
+"Album order", available only inside an album. An album stores no cover: the previews of the first
+non-trashed files by `position` serve as one — a mosaic of up to four on a card (M22.21). A file
+in the app trash stays an album row but is hidden
 in the grid (the counter "N in the trash"); a file that disappeared from the index loses the album
 row — there are no "dangling" references. Export to disk is a separate task M20
 (`plan/M19-albums.md` §6): file copies, the structure repeats the tree, `--out` is not overwritten.

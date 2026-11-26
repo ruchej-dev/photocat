@@ -131,8 +131,9 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   albums. `position` is dense 0..n−1 for files and for subalbums; `db` renumbers it after an
   insert, a move and a delete. This is data, not a view: the grid sort does not change the order.
   An album stores only `files.id`; one snapshot can be in several albums but only once in one
-  (`PRIMARY KEY(album_id, file_id)`). No cover is stored: the preview of the first non-trashed file
-  by `position` serves as one (`albums_tree().cover`). `updated_at` (unix seconds) is touched by
+  (`PRIMARY KEY(album_id, file_id)`). No cover is stored: the previews of the first non-trashed files
+  by `position` serve as the card cover — a mosaic of up to four, `db::ALBUM_COVERS`
+  (`albums_tree().covers`, M22.21). `updated_at` (unix seconds) is touched by
   every change of the row **and** of its contents (`add_to_album`, `remove_from_album`,
   `move_in_album`): it is the date an album card shows and the key of the "By update" order
   (M22.20). The card orders (`db::AlbumSort`, `db::album_order`) are a look — `position` stays the
@@ -581,6 +582,7 @@ not with a different labelled set.
 | 2026-11-24 | a clean install: `XDG_CACHE_HOME=$(mktemp -d)`, no DB, no models, no settings (M24.1/M24.2 smoke) | `gui` under `timeout 6`, then `stats`, `models list`, `doctor`, `ocr --dry-run`, `settings` on the same cache | the window opens and lives to the timeout (code 124, no output) and writes `<cache>/photocat/photocat.db` (176 KiB with the seeded 14-tag dictionary) plus `thumbs/`; `lang=ru` is detected from the locale and stored; `stats` says 0 files, `models list` says "not downloaded" for all four and "over the limit" for SigLIP 2, `ocr --dry-run` finds 0 of 0 candidates, `doctor` lists the programs, no pass starts by itself. The smoke found a defect: the GUI read the default English and stored no language, while the CLI detected the locale — fixed by `app::first_lang` |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M22.15) | the 160-frame scrolling measurement of 2026-11-24 again, six runs (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored grid_scroll_measurement`) | p50 6.55–6.64 ms (151–153 fps), p95 6.72–7.19 ms, p99 6.90–12.48 ms — the per-picture clip rect and the larger source area of the cover crop cost nothing measurable against the 6.4–6.7 ms of the fitted tile |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M22.16) | the whole window with a selected file in both languages; every painted rectangle and word (`cargo test the_file_card_keeps_the_mock_ups_band_and_air`, plus a temporary dump of the panel's geometry) | the right panel now owns its 280 px (the default side-panel frame used to leave 8 px on each side, so the 1 px line stood 9 px inside and the card had 263 px): the header band is 279×44 px at y 31–75, the "×" 22×22 px at x 1206–1228, the file card 255 px wide at x 973–1228 — 12 px of air on both sides — and every word and rectangle of the panel stays inside the window in English and in Russian; the two card actions no longer wrap in Russian (a 20 px row) |
+| 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M22.21) | the Albums screen with eight sub-album cards, every card carrying a mosaic of four real previews (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored albums_measurement --nocapture`) | p50 7.38 ms (135 fps), p95 9.87 ms, p99 9.87 ms over 16 frames; the one-preview card of the same run before M22.21 was p50 7.41 ms / p95 12.40 ms, so three extra previews per card cost nothing measurable; the first sub-album card sits at y 686 and the snapshot grid keeps its place under it |
 
 Rule: numbers without a corpus and a date do not enter the table.
 

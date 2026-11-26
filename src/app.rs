@@ -1757,8 +1757,8 @@ fn draw_album_tree(
                 .selectable_label(selected == Some(node.id), text)
                 .on_hover_text(if !node.note.trim().is_empty() {
                     node.note.clone()
-                } else if node.cover.is_some() {
-                    t(lang, "open the album; the cover is the first photo in its order").to_string()
+                } else if !node.covers.is_empty() {
+                    t(lang, "open the album; the cover shows its first photos in order").to_string()
                 } else {
                     t(lang, "open the album").to_string()
                 })
@@ -1844,18 +1844,70 @@ fn cover_badge(
     );
 }
 
+/// The cells of an album cover (M22.21): one photo fills the frame, two split it into columns,
+/// three give the first a half and the others the right stack, four a 2×2 mosaic. Never more than
+/// `db::ALBUM_COVERS` cells, however many previews the album has.
+fn cover_cells(rect: egui::Rect, n: usize) -> Vec<egui::Rect> {
+    const GAP: f32 = 2.0;
+    let n = n.min(db::ALBUM_COVERS);
+    let half_w = (rect.width() - GAP) / 2.0;
+    let half_h = (rect.height() - GAP) / 2.0;
+    let left = rect.left();
+    let right = left + half_w + GAP;
+    let top = rect.top();
+    let bottom = top + half_h + GAP;
+    match n {
+        0 => Vec::new(),
+        1 => vec![rect],
+        2 => vec![
+            egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(half_w, rect.height())),
+            egui::Rect::from_min_size(egui::pos2(right, top), egui::vec2(half_w, rect.height())),
+        ],
+        3 => vec![
+            egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(half_w, rect.height())),
+            egui::Rect::from_min_size(egui::pos2(right, top), egui::vec2(half_w, half_h)),
+            egui::Rect::from_min_size(egui::pos2(right, bottom), egui::vec2(half_w, half_h)),
+        ],
+        _ => vec![
+            egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(half_w, half_h)),
+            egui::Rect::from_min_size(egui::pos2(right, top), egui::vec2(half_w, half_h)),
+            egui::Rect::from_min_size(egui::pos2(left, bottom), egui::vec2(half_w, half_h)),
+            egui::Rect::from_min_size(egui::pos2(right, bottom), egui::vec2(half_w, half_h)),
+        ],
+    }
+}
+
+/// The mosaic of an album cover (M22.21): up to four previews fitted whole, the `canvas` showing
+/// through the 2 px seams. Returns how many previews were drawn.
+fn paint_cover_mosaic(
+    ui: &egui::Ui,
+    ctx: &egui::Context,
+    cs: &mut Cells,
+    covers: &[&FileRow],
+    rect: egui::Rect,
+) -> usize {
+    let cells = cover_cells(rect, covers.len());
+    let mut drawn = 0;
+    for (f, cell) in covers.iter().zip(cells) {
+        if paint_thumb(ui, ctx, cs, f, cell) {
+            drawn += 1;
+        }
+    }
+    drawn
+}
+
 /// An album card (M22.20, the mock-up's `photocat_3`): a `card`-tone card with a 16:10 canvas
-/// cover — the preview of the first snapshot fitted whole (a preview is never cropped), the count
-/// of files in the corner, the count of sub-albums in the other one, the name at 13 px and "size ·
-/// date" in mono 10. A click opens the album; the open album keeps the accent frame and the accent
-/// name.
+/// cover — a mosaic of up to four previews of its photos fitted whole (a preview is never
+/// cropped, M22.21), the count of files in the corner, the count of sub-albums in the other one,
+/// the name at 13 px and "size · date" in mono 10. A click opens the album; the open album keeps
+/// the accent frame and the accent name.
 #[allow(clippy::too_many_arguments)]
 fn draw_album_cell(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     cs: &mut Cells,
     node: &db::AlbumNode,
-    cover: Option<&FileRow>,
+    covers: &[&FileRow],
     tile: f32,
     open: bool,
     lang: i18n::Lang,
@@ -1884,7 +1936,7 @@ fn draw_album_cell(
             egui::vec2(size.x - 2.0 * PAD, size.y - 2.0 * PAD - 44.0),
         );
         painter.rect_filled(cover_rect, RADIUS_CTRL, th.canvas);
-        let drawn = cover.is_some_and(|f| paint_thumb(ui, ctx, cs, f, cover_rect));
+        let drawn = paint_cover_mosaic(ui, ctx, cs, covers, cover_rect) > 0;
         if !drawn {
             // An album without a snapshot keeps the empty canvas and a folder mark, not a placeholder.
             painter.text(
@@ -1961,15 +2013,16 @@ fn album_row_height(tile: f32) -> f32 {
     (26.0 + tile * 0.12).round().clamp(36.0, 58.0)
 }
 
-/// An album in the list look (M22.20): a cover, the name, the path and "N files · M sub-albums ·
-/// size · date" in mono 10, with the accent edge on the open album. A click opens it.
+/// An album in the list look (M22.20): a mosaic cover (M22.21), the name, the path and "N files ·
+/// M sub-albums · size · date" in mono 10, with the accent edge on the open album. A click opens
+/// it.
 #[allow(clippy::too_many_arguments)]
 fn draw_album_row(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     cs: &mut Cells,
     node: &db::AlbumNode,
-    cover: Option<&FileRow>,
+    covers: &[&FileRow],
     tile: f32,
     open: bool,
     lang: i18n::Lang,
@@ -1997,7 +2050,7 @@ fn draw_album_row(
             thumb,
         );
         ui.painter().rect_filled(tr, RADIUS_CTRL, th.canvas);
-        if !cover.is_some_and(|f| paint_thumb(ui, ctx, cs, f, tr)) {
+        if paint_cover_mosaic(ui, ctx, cs, covers, tr) == 0 {
             ui.painter().text(
                 tr.center(),
                 egui::Align2::CENTER_CENTER,
@@ -2065,12 +2118,18 @@ fn album_sort_label(sort: db::AlbumSort, lang: i18n::Lang) -> &'static str {
     )
 }
 
-/// The cover of an album: the preview of its first snapshot in the order — the very preview the
-/// grid would show first. The tree carries the `thumb` sha, the row is looked up by it.
-fn album_cover<'a>(node: &db::AlbumNode, items: &'a [FileRow]) -> Option<&'a FileRow> {
-    node.cover
-        .as_ref()
-        .and_then(|sha| items.iter().find(|f| f.thumb.as_deref() == Some(sha.as_str())))
+/// The previews of an album card (M22.21): up to four files in the album order, looked up among
+/// the loaded rows by their preview path. A file outside the loaded rows gets no cell — an album
+/// never invents a placeholder.
+fn album_covers<'a>(
+    node: &db::AlbumNode,
+    by_thumb: &HashMap<&str, &'a FileRow>,
+) -> Vec<&'a FileRow> {
+    node.covers
+        .iter()
+        .filter_map(|thumb| by_thumb.get(thumb.as_str()).copied())
+        .take(db::ALBUM_COVERS)
+        .collect()
 }
 
 /// The cards (or the rows) of one album level (M22.20): 10 px apart, wrapped to the panel. Returns
@@ -2088,15 +2147,21 @@ fn draw_album_cards(
     lang: i18n::Lang,
 ) -> Option<i64> {
     let mut open = None;
+    // The preview path of every loaded row once: a card looks its mosaic up by it, so a level of
+    // albums does not scan the whole grid for every cell.
+    let by_thumb: HashMap<&str, &FileRow> = items
+        .iter()
+        .filter_map(|f| f.thumb.as_deref().map(|thumb| (thumb, f)))
+        .collect();
     if list {
         for node in cards {
-            let cover = album_cover(node, items);
+            let covers = album_covers(node, &by_thumb);
             if draw_album_row(
                 ui,
                 ctx,
                 cs,
                 node,
-                cover,
+                &covers,
                 tile,
                 selected == Some(node.id),
                 lang,
@@ -2108,13 +2173,13 @@ fn draw_album_cards(
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
             for node in cards {
-                let cover = album_cover(node, items);
+                let covers = album_covers(node, &by_thumb);
                 if draw_album_cell(
                     ui,
                     ctx,
                     cs,
                     node,
-                    cover,
+                    &covers,
                     tile,
                     selected == Some(node.id),
                     lang,
@@ -3671,20 +3736,26 @@ impl App {
     /// The actions of the "Albums" panel. Errors go to the status bar, no data is lost.
     fn album_apply(&mut self, action: AlbumAction) {
         let lang = self.settings.lang;
+        // Opening an album and going back to the root need no open album: the root of the albums is
+        // the card grid, and a card there must open its album (M22.21).
+        match action {
+            AlbumAction::Select(id) => {
+                self.album_open(id);
+                return;
+            }
+            AlbumAction::Root => {
+                self.album_close();
+                return;
+            }
+            _ => {}
+        }
         let Some(id) = self.album_selected else {
             return;
         };
         let res: Result<String> = (|| {
             let conn = db::open(&self.db_path)?;
             match action {
-                AlbumAction::Select(other) => {
-                    self.album_open(other);
-                    Ok(String::new())
-                }
-                AlbumAction::Root => {
-                    self.album_close();
-                    Ok(String::new())
-                }
+                AlbumAction::Select(_) | AlbumAction::Root => unreachable!(),
                 AlbumAction::Up | AlbumAction::Down => {
                     let node = self.album_node(id).cloned().context(t(lang, "there is no album"))?;
                     let position = if action == AlbumAction::Up {
@@ -15818,9 +15889,9 @@ mod tests {
             trashed: 0,
             subalbums: covers.len() as i64,
             bytes: app.items.iter().map(|f| f.size).sum(),
-            cover: covers.first().cloned(),
+            covers: covers.iter().take(4).cloned().collect(),
         }];
-        for (i, cover) in covers.iter().enumerate() {
+        for i in 0..covers.len() {
             albums.push(db::AlbumNode {
                 id: i as i64 + 2,
                 parent_id: 1,
@@ -15833,7 +15904,8 @@ mod tests {
                 trashed: 0,
                 subalbums: 0,
                 bytes: 12 * 1024 * 1024,
-                cover: Some(cover.clone()),
+                // Every sub-album card carries the full mosaic of four previews (M22.21).
+                covers: covers.iter().take(4).cloned().collect(),
             });
         }
         app.albums = albums;
@@ -19126,7 +19198,7 @@ mod tests {
             trashed: 0,
             subalbums: 0,
             bytes: 30,
-            cover: None,
+            covers: Vec::new(),
         }];
         let chips = app.chips_snapshot();
         assert_eq!(chips.album.as_deref(), Some("Дача 2024"));
@@ -19692,7 +19764,7 @@ mod tests {
                 trashed: 0,
                 subalbums: 0,
                 bytes: 6144,
-                cover: Some("/tmp/a.jpg".into()),
+                covers: vec!["/tmp/a.jpg".into()],
             }];
             app.album_selected = Some(1);
             app.album_set = app.items.iter().map(|f| f.id).collect();
@@ -19867,7 +19939,7 @@ mod tests {
             trashed: 0,
             subalbums: subs,
             bytes: 2 * 1024 * 1024,
-            cover: None,
+            covers: Vec::new(),
         }
     }
 
@@ -19927,7 +19999,7 @@ mod tests {
                 &ctx,
                 &mut cells,
                 &node,
-                None,
+                &[],
                 tile,
                 false,
                 i18n::Lang::En,
@@ -20253,6 +20325,142 @@ mod tests {
             texts.iter().any(|t| t == "Summer 2024"),
             "the root is the card grid of the top level: {texts:?}"
         );
+    }
+
+    /// M22.21: the root of the albums is the card grid, so a card there must open its album. The
+    /// action used to be dropped at the root, where no album was open yet.
+    #[test]
+    fn a_click_on_an_album_card_opens_it_from_the_root() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-album-open-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let root;
+        {
+            let conn = db::open(&path).unwrap();
+            root = db::create_album(&conn, 0, "Summer 2024", "").unwrap();
+            db::create_album(&conn, root, "May", "").unwrap();
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Albums;
+        assert_eq!(app.album_selected, None, "the screen starts at the root");
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let _ = window_frame(&mut app, &ctx);
+        let at = window_word_rects_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(w, _)| w == "Summer 2024")
+            .expect("the album card is on screen")
+            .1;
+        click_at(&mut app, &ctx, at.center());
+        assert_eq!(app.album_selected, Some(root), "the card opens the album");
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "May"),
+            "the sub-albums of the opened album are shown: {texts:?}"
+        );
+    }
+
+    /// M22.21: an album cover is a mosaic of at most four photos: one fills the frame, two split
+    /// it into columns, three give the first a half and the others the right stack, four make a
+    /// 2×2 grid. The cells never overlap, so no photo hides another.
+    #[test]
+    fn the_album_cover_is_a_mosaic_of_at_most_four_photos() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 100.0));
+        assert!(super::cover_cells(rect, 0).is_empty());
+        assert_eq!(super::cover_cells(rect, 1), vec![rect]);
+        assert_eq!(super::cover_cells(rect, 2).len(), 2);
+        assert_eq!(super::cover_cells(rect, 3).len(), 3);
+        let four = super::cover_cells(rect, 4);
+        assert_eq!(four.len(), 4);
+        assert_eq!(
+            super::cover_cells(rect, 9).len(),
+            4,
+            "four photos are the maximum, however many the album has"
+        );
+        for cell in &four {
+            assert!(
+                cell.left() >= rect.left() - 0.01
+                    && cell.top() >= rect.top() - 0.01
+                    && cell.right() <= rect.right() + 0.01
+                    && cell.bottom() <= rect.bottom() + 0.01,
+                "the cell {cell:?} leaves the cover {rect:?}"
+            );
+        }
+        assert!((four[0].width() - (rect.width() - 2.0) / 2.0).abs() < 0.01);
+        assert!(!four[0].intersects(four[1]), "the columns overlap");
+        assert!(!four[0].intersects(four[2]), "the rows overlap");
+    }
+
+    /// M22.21: the mosaic really paints four previews — a larger album is cut to four, not to one.
+    #[test]
+    fn the_album_cover_paints_four_previews() {
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-album-mosaic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut rows = Vec::new();
+        for i in 0..6 {
+            let name = format!("p{i}.png");
+            image::RgbImage::from_pixel(160, 120, image::Rgb([40 * i as u8, 120, 60]))
+                .save(dir.join(&name))
+                .unwrap();
+            let mut f = file_row(i as i64 + 1, "image", &name);
+            f.thumb = Some(name);
+            rows.push(f);
+        }
+        let covers: Vec<&db::FileRow> = rows.iter().collect();
+        let mut textures = std::collections::HashMap::new();
+        let mut missing = std::collections::HashSet::new();
+        let picked = BTreeSet::new();
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let out = ctx.run_ui(raw, |ui| {
+            let mut cs = super::Cells {
+                bg: egui::Color32::BLACK,
+                cell_style: db::CellStyle::Tiles,
+                time_only: false,
+                textures: &mut textures,
+                missing: &mut missing,
+                thumbs_dir: &dir,
+                selected: None,
+                picked: &picked,
+                clicked: None,
+                open_clicked: None,
+                show_keep: false,
+                keep_clicked: None,
+                trash_mode: false,
+                restore_clicked: None,
+                tile: 150.0,
+                lang: i18n::Lang::En,
+                budget: 8,
+            };
+            let cover = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 100.0));
+            let drawn = super::paint_cover_mosaic(ui, &ctx, &mut cs, &covers, cover);
+            assert_eq!(drawn, 4, "four previews of the six are drawn");
+        });
+        let mut meshes = Vec::new();
+        for c in &out.shapes {
+            collect_meshes(&c.shape, &mut meshes);
+        }
+        out.drop_without_applying_deltas();
+        assert_eq!(meshes.len(), 4, "the cover is a mosaic of four pictures: {meshes:?}");
     }
 
     /// M22.20: the album list row grows with the "Tiles" slider, like the file list.

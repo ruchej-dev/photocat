@@ -96,8 +96,8 @@ CREATE INDEX IF NOT EXISTS album_files_file ON album_files(file_id);
   "2023/Dacha" and "2024/Dacha" are different albums.
 - `position` is dense 0..n−1 among siblings; `db` renumbers after an insert/a move/a delete,
   so that the order does not "spread" with holes.
-- No cover is stored: the first non-deleted file by `position`, otherwise by date. Otherwise — an
-  empty
+- No cover is stored: the non-deleted files by `position` provide the card mosaic of up to four
+  previews (M22.21, `db::ALBUM_COVERS`). Otherwise — an empty
   folder icon.
 - The depth is not limited artificially, but a cycle is forbidden: `move_album` refuses if the new
   parent is the album itself or its descendant (a check by walking up).
@@ -115,7 +115,7 @@ CREATE INDEX IF NOT EXISTS album_files_file ON album_files(file_id);
 | `add_to_album(conn, id, &[file_id]) -> (added, already there)` | to the end, idempotently |
 | `remove_from_album(conn, id, &[file_id])` | a renumbering |
 | `move_in_album(conn, id, file_id, delta)` | "up/down" in the album order |
-| `albums_tree(conn) -> Vec<AlbumNode>` | id, parent, position, the name, note, files, size, a cover, the depth |
+| `albums_tree(conn) -> Vec<AlbumNode>` | id, parent, position, the name, note, files, size, the cover mosaic, the depth |
 | `album_items(conn, id) -> Vec<FileRow>` | by `position` |
 | `albums_of_file(conn, file_id) -> Vec<String>` | for the inspector |
 
@@ -139,7 +139,8 @@ a file operation.
 
 - The left panel, the "LIBRARY" group: the item **"Albums (N)"** with the number of albums.
 - The "Albums" view: since M22.20 it opens on the **cards of the top level albums** — a 16:10 cover
-  with the first snapshot, "N sub-albums" and "N files" over it, the name and "size · date" under it
+  with a mosaic of up to four first snapshots (M22.21), "N sub-albums" and "N files" over it, the
+  name and "size · date" under it
   — with the control row of the screen (the filter of the names, the order, "Cards / List" and
   "+ New album"). The album order of the export is the default order of the cards; "By update",
   "By name", "By file count" and "By size" are looks (`AlbumSort`), and `AlbumNode::updated_at` is

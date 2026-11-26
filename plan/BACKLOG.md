@@ -1073,7 +1073,10 @@ date" under it, the control row filters the album names, orders the cards and sw
 list, the breadcrumb and the tree live inside an album, `AlbumNode::updated_at` gives the card its
 date, and the "add photos to an album" dialog has three entrances — the card's dashed "+ Add", the
 selection bar and "Add the picked ones", with a new album made in the same press; rows only) —
-2026-11-26.
+2026-11-26; M22.21 (the album card opens the album from the root — the action used to be dropped
+while no album was open — and its cover is a mosaic of up to four of its first photos,
+`AlbumNode::covers`; one photo whole, two in columns, three as a half and a right stack, four as a
+2×2 grid with 2 px seams) — 2026-11-26.
 
 **Acceptance criteria (whole block).**
 1. `app::Theme` is the only colour source: `DARK` and `LIGHT`, `settings.theme`

@@ -1891,9 +1891,14 @@ pub struct AlbumNode {
     /// Unix seconds of the last change of the album or of its contents: the card shows the date
     /// and "by update" sorts by it (M22.20).
     pub updated_at: String,
-    /// The preview of the first file in order that is not in the trash; `None` for an empty album.
-    pub cover: Option<String>,
+    /// Up to four previews of the first files in order that are not in the trash, in album order:
+    /// the album card is a mosaic of them (M22.21). Empty for an album without previews.
+    pub covers: Vec<String>,
 }
+
+/// How many previews of an album a card shows: one photo fills it, four split it into a 2×2
+/// mosaic (M22.21). A larger album keeps the first photos in its order.
+pub const ALBUM_COVERS: usize = 4;
 
 /// The order of two sibling albums for the cards (M22.20). A tie keeps the album order, so the
 /// screen does not shuffle on equal numbers.
@@ -2284,10 +2289,7 @@ pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
                   WHERE af.album_id=a.id AND f.trashed_at IS NOT NULL),
                 (SELECT COUNT(*) FROM albums c WHERE c.parent_id=a.id),
                 (SELECT COALESCE(SUM(f.size),0) FROM album_files af
-                  JOIN files f ON f.id=af.file_id WHERE af.album_id=a.id),
-                (SELECT f.thumb FROM album_files af JOIN files f ON f.id=af.file_id
-                  WHERE af.album_id=a.id AND f.trashed_at IS NULL
-                  ORDER BY af.position, f.id LIMIT 1)
+                  JOIN files f ON f.id=af.file_id WHERE af.album_id=a.id)
          FROM albums a ORDER BY a.parent_id, a.position, a.id",
     )?;
     let rows = st.query_map([], |r| {
@@ -2303,12 +2305,31 @@ pub fn albums_tree(conn: &Connection) -> Result<Vec<AlbumNode>> {
             trashed: r.get(7)?,
             subalbums: r.get(8)?,
             bytes: r.get(9)?,
-            cover: r.get(10)?,
+            covers: Vec::new(),
         })
     })?;
+    // The previews of every album in one pass, at most `ALBUM_COVERS` per album and in the album
+    // order. A file without a preview is skipped, not replaced by a placeholder.
+    let mut covers: HashMap<i64, Vec<String>> = HashMap::new();
+    let mut cover_st = conn.prepare(
+        "SELECT af.album_id, f.thumb FROM album_files af JOIN files f ON f.id=af.file_id
+         WHERE f.trashed_at IS NULL AND f.thumb IS NOT NULL
+         ORDER BY af.album_id, af.position, f.id",
+    )?;
+    let cover_rows = cover_st.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+    })?;
+    for row in cover_rows {
+        let (album, thumb) = row?;
+        let list = covers.entry(album).or_default();
+        if list.len() < ALBUM_COVERS {
+            list.push(thumb);
+        }
+    }
     let mut by_parent: HashMap<i64, Vec<AlbumNode>> = HashMap::new();
     for row in rows {
-        let node = row?;
+        let mut node = row?;
+        node.covers = covers.remove(&node.id).unwrap_or_default();
         by_parent.entry(node.parent_id).or_default().push(node);
     }
     fn walk(
@@ -3145,6 +3166,42 @@ mod tests {
         assert_eq!(
             tree.iter().find(|n| n.id == to_print).unwrap().position,
             1
+        );
+    }
+
+    #[test]
+    fn an_album_carries_up_to_four_previews_in_its_order() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        let mut ids = Vec::new();
+        for i in 0..6 {
+            let mut r = row(&format!("/{i}.jpg"), &format!("sha{i}"), 1.0);
+            r.thumb = Some(format!("thumbs/{i}.jpg"));
+            insert(&c, &r).unwrap();
+            ids.push(id_of(&c, &format!("/{i}.jpg")));
+        }
+        let album = create_album(&c, 0, "Day", "").unwrap();
+        // The album order decides which four previews the card gets, not the id order.
+        add_to_album(&c, album, &[ids[3], ids[5], ids[1], ids[4], ids[0], ids[2]]).unwrap();
+        let node = |c: &Connection| {
+            albums_tree(c)
+                .unwrap()
+                .into_iter()
+                .find(|n| n.id == album)
+                .unwrap()
+        };
+        assert_eq!(
+            node(&c).covers,
+            ["thumbs/3.jpg", "thumbs/5.jpg", "thumbs/1.jpg", "thumbs/4.jpg"]
+        );
+        // A trashed file and a file without a preview drop out; the next ones fill the mosaic.
+        c.execute("UPDATE files SET trashed_at=1 WHERE id=?1", [ids[3]])
+            .unwrap();
+        c.execute("UPDATE files SET thumb=NULL WHERE id=?1", [ids[5]])
+            .unwrap();
+        assert_eq!(
+            node(&c).covers,
+            ["thumbs/1.jpg", "thumbs/4.jpg", "thumbs/0.jpg", "thumbs/2.jpg"]
         );
     }
 

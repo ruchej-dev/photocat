@@ -1594,7 +1594,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("· {files} files · {}", "· файлов {files} · {}"),
     ("collapse the sub-albums", "свернуть подальбомы"),
     ("expand the sub-albums", "раскрыть подальбомы"),
-    ("open the album; the cover is the first photo in its order", "открыть альбом; обложка — первый снимок в его порядке"),
+    ("open the album; the cover shows its first photos in order", "открыть альбом; обложка показывает его первые снимки по порядку"),
     ("open the album", "открыть альбом"),
     ("{} · {} · {} — open the album", "{} · {} · {} — открыть альбом"),
     ("{} files", "файлов {}"),

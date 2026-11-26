@@ -143,7 +143,7 @@ red and the light red were moved a step for the same reason (M22.11; the numbers
 | Grid (main) | `photocat_1` | fully: strips, panels, header, tile card, caption band, years, tag chips, scrolling; the top strip, the one-row ribbon and the floating selection bar | M22.2 ✅, M22.2a ✅, M22.2b ✅, M22.3 ✅, M22.4 ✅, M22.19 ✅ |
 | Calendar, month | `photocat_2` | month/week grid, day list, mono counters, amber selection | M22.5 ✅ |
 | Calendar, year | `photocat_12` | 4×3 months with a count and a size, drill-down; the inspector of the screen is the right panel of M22.16 | M22.5 ✅, M22.16 ✅ |
-| Albums | `photocat_3` | the card grid at the root, the control row (filter, order, cards/list, the primary "+"), the counters over the cover, "size · date", the breadcrumb; the **tree stays inside an album** (§5 q. 7, revised in M22.20); the mock-up's floating album bar is not built — the selection bar carries "Add to an album…" | M22.6 ✅, M22.20 ✅ |
+| Albums | `photocat_3` | the card grid at the root, the control row (filter, order, cards/list, the primary "+"), the counters over the cover, "size · date", the breadcrumb; the **tree stays inside an album** (§5 q. 7, revised in M22.20); the cover is a mosaic of up to four photos (M22.21); the mock-up's floating album bar is not built — the selection bar carries "Add to an album…" | M22.6 ✅, M22.20 ✅, M22.21 ✅ |
 | Full-screen viewer | `photocat_5/6` | header facts, tools row, series strip, player row, inspector inside the viewer | M22.7 ✅ |
 | Duplicates | — | no mock-up: same strips, header, `card_block` per group, `draw_cell`, amber "keep", red-free everywhere | M22.9 ✅ |
 | Faces | — | same panels, face tile metrics unchanged, caption in mono 10, accent only on a picked face | M22.9 ✅ |
@@ -1019,6 +1019,36 @@ with albums, the dashed "+ Add" of the card, and the DB order of the cards with 
 `View::Albums` branch, the selection bar, the file card), `src/db.rs` (`AlbumSort`, `album_order`,
 `AlbumNode::updated_at`, the touched stamps, two settings keys), `src/i18n.rs` (28 labels),
 `docs/UI.md`, `plan/`.
+
+### M22.21 — the album card opens from the root and shows a mosaic ✅
+
+The owner: "доработать работу с альбомами. сейчас я не могу провалиться в альбом. Для превью
+альбома использовать его фотографии в виде плитки. максимум 4 фото для плитки".
+
+1. **A card at the root opens its album.** `album_apply` demanded an open album before it looked at
+   the action, so `AlbumAction::Select` from the root returned at once: the card grid of the top
+   level was a dead end, and only the tree and the breadcrumb inside an album worked. Opening and
+   "All albums" are handled before the open-album guard now.
+2. **The cover is a mosaic of up to four photos** in the album order: `AlbumNode::cover` became
+   `covers: Vec<String>` (at most `db::ALBUM_COVERS`), filled by `albums_tree` in one pass, skipping
+   a file in the trash or without a preview. `cover_cells` splits the 16:10 frame: one photo whole,
+   two columns, three as a left half and a right stack, four as a 2×2 grid, 2 px seams; the card and
+   the list row paint it with `paint_cover_mosaic` and keep `paint_thumb`'s fitted whole preview, so
+   no snapshot is cropped (M22.15's rule).
+3. **Refused:** storing a cover in the DB, a mosaic of more than four photos, cropping a cell.
+
+**Result.** `cargo test` 305, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics .` 0 errors. New tests: a click on a root
+card opens its album (`a_click_on_an_album_card_opens_it_from_the_root`), the geometry of the mosaic
+(`the_album_cover_is_a_mosaic_of_at_most_four_photos`: 0/1/2/3/4/9 photos, no overlapping cells), the
+four painted previews (`the_album_cover_paints_four_previews`: four meshes for six photos) and the DB
+order (`an_album_carries_up_to_four_previews_in_its_order`: the album order wins, a trashed file and
+a file without a preview drop out).
+
+**Files.** `src/db.rs` (`AlbumNode::covers`, `ALBUM_COVERS`, `albums_tree`), `src/app.rs`
+(`cover_cells`, `paint_cover_mosaic`, `album_covers`, `draw_album_cell`, `draw_album_row`,
+`draw_album_cards`, `album_apply`), `docs/UI.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`,
+`plan/`.
 
 ## 7. Not doing in M22
 
