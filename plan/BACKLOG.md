@@ -1812,7 +1812,7 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 (done 2026-11-27) the
 Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the face settings move to the People screen; M26.6 (done 2026-11-27) the layout survives a narrow window;
 M26.7 (done 2026-11-27) the catalog block after `photocat_1`: the pill, its dropdown and the scope; M26.8 (done 2026-11-27) the database gives the
-space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
+space back (VACUUM); M26.9 (done 2026-11-27) a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
 together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
 built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
@@ -2173,7 +2173,7 @@ facts.
 **Files.** `src/db.rs` (or `src/storage.rs`), `src/app.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
 
-**M26.9 — a catalog chooses which passes run over it: faces, tags, text.**
+**M26.9 — a catalog chooses which passes run over it: faces, tags, text.** ✅ (done 2026-11-27)
 **Goal.** A folder of paintings, screenshots or plain junk is indexed and browsable, but the expensive
 analysis does not chew on it: each catalog says whether the face pass, the CLIP tags and the OCR
 text run over its files. All three are on by default, so nothing changes for a normal archive.

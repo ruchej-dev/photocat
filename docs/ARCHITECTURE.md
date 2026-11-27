@@ -68,6 +68,38 @@ walkdir → Vec<PathBuf> → rayon(par_iter, jobs threads)
   If the file was indexed but without a preview or metadata (broken JPEG, no `ffmpeg`), it stays in
   the DB while the error counter still grows — otherwise the blind spot would be invisible.
 
+## The passes of a catalog (M26.9)
+
+Indexing is not one of them: the grid, the duplicates and the calendar need the path, size, date,
+sharpness and preview of every file. The three expensive analyses are: **Faces** (SCRFD + ArcFace,
+the crops and the groups), **Tags** (CLIP vectors, the tag dictionary and the semantic search) and
+**Text** (`tesseract` over documents and screenshots). Each catalog runs all three by default; the
+folder list gives every root three boxes.
+
+- **The decision is one helper.** `db::Settings::pass_allows(path, Pass)` is the only place that
+  answers. It first refuses everything under a root switched off for display (M26.1), then finds
+  the **most specific** root that holds the path and asks its exception list; a file outside every
+  root allows the pass. `Pass` is `Faces | Tags | Text`, and `Pass::key` is its data key.
+- **The choice is data, not a schema change.** `settings.root_passes` holds the exceptions only,
+  as JSON `{"<root>": ["faces", "text"]}` where the list is the *disabled* passes. A missing key
+  or an empty value means every pass on every root; `load_settings` drops the keys of roots that
+  are no longer in `roots`, and `save_settings` writes only current roots. The GUI and the CLI read
+  the same row.
+- **Every pass uses it**: `embed` and `embed --retag` (and `--refresh`, which therefore clears only
+  the vectors of allowed roots), `ocr` (including the heuristic and every explicit file) and
+  `faces` (the scan and `--recluster`, which leaves the faces of a forbidden root in their groups
+  instead of rebuilding them). A switched-off catalog is skipped by every pass through the same
+  helper, so switching it back on lets the passes catch up.
+- **The skip is reported.** Each pass counts the files it left alone and names the reason: “N
+  skipped — their folders have faces/tags/text off” in the GUI facts and in the CLI report. The
+  plan of `ocr --dry-run` and `faces --dry-run` carries the number too (`Plan::pass_skipped`).
+- **Off is never a deletion.** Vectors, tags, text, faces and clusters stay as they are and stay
+  visible; the pass simply stops updating them. A separate per-catalog action, “Forget the faces,
+  tags and text of this catalog”, removes the derived rows after a confirmation
+  (`db::forget_catalog_derived`: `tags`, `embeddings`, `ocr`, `faces`, `face_scans` and the empty
+  clusters). The file rows, the owner's `user_tags`, the previews and the archive are untouched,
+  and no automatic deletion happens anywhere.
+
 ## DB schema
 
 ```sql
@@ -82,6 +114,7 @@ user_tags(file_id, tag, created_at)    -- the owner's own tags, by hand
 embeddings(file_id, model, sha256, dim, vec, PRIMARY KEY(file_id, model))
 settings(key, value)                   -- model, path, limit, thresholds (dupes, tags, faces),
                                        -- threads, OCR languages, program paths, roots, roots_off,
+                                       -- root_passes (the disabled passes of a catalog, M26.9),
                                        -- tile_size, verify_*: the check reminder (M10)
 ocr(file_id, sha256, lang, text, chars, created_at)   -- text from a photo; PRIMARY KEY(file_id)
 ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='file_id'

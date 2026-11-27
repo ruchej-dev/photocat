@@ -21,6 +21,8 @@ pub struct Stats {
     pub candidates: usize,
     pub done: usize,
     pub skipped: usize,
+    /// The candidates the pass did not take because their catalog has text off (M26.9).
+    pub pass_skipped: usize,
     pub errors: usize,
     pub chars: i64,
     pub seconds: f64,
@@ -63,6 +65,14 @@ impl std::fmt::Display for Stats {
                 self.lang,
                 " ({} skipped, text already there)",
                 &[self.skipped.to_string()],
+            );
+            write!(f, "{note}")?;
+        }
+        if self.pass_skipped > 0 {
+            let note = i18n::fill(
+                self.lang,
+                " ({} skipped — their folders have text off)",
+                &[self.pass_skipped.to_string()],
             );
             write!(f, "{note}")?;
         }
@@ -115,12 +125,14 @@ pub struct Plan {
     pub candidates: usize,
     /// Of the candidates: those without text yet (or whose file changed).
     pub todo: usize,
+    /// The candidates the pass did not take because their catalog has text off (M26.9).
+    pub pass_skipped: usize,
 }
 
 /// The plan only, no OCR: the folder and the DB are read, no text is recognized.
 pub fn plan(db_path: &Path, all: bool) -> Result<Plan> {
     let conn = db::open(db_path)?;
-    let (images, selected) = select(&conn, all)?;
+    let (images, selected, pass_skipped) = select(&conn, all)?;
     let done = db::ocr_shas(&conn)?;
     let todo = selected
         .iter()
@@ -130,10 +142,13 @@ pub fn plan(db_path: &Path, all: bool) -> Result<Plan> {
         images,
         candidates: selected.len(),
         todo,
+        pass_skipped,
     })
 }
 
-fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>)> {
+/// The images of the pass and the candidates of the heuristic, split by `Settings::pass_allows`
+/// (M26.9): the third number is what a catalog with text off kept out of the pass.
+fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>, usize)> {
     let settings = db::load_settings(conn);
     // A switched-off folder takes no part in the pass (M26.1): its files are hidden, and the
     // owner switches it back on to let the pass catch up.
@@ -146,7 +161,7 @@ fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>
     // The labels of `document`/`screenshot` from every dictionary: the ids are stable, the words
     // are the owner's, so the heuristic never hard-codes a label (M23.6).
     let text = db::text_tag_labels(conn);
-    let selected = rows
+    let wanted: Vec<FileRow> = rows
         .into_iter()
         // `--all` widens the heuristic to every image but leaves videos alone: a cover frame is no document.
         .filter(|r| {
@@ -155,7 +170,15 @@ fn select(conn: &rusqlite::Connection, all: bool) -> Result<(usize, Vec<FileRow>
                     || wants_text(r, &tags, settings.tag_show, settings.tag_margin, &text))
         })
         .collect();
-    Ok((images, selected))
+    let pass_skipped = wanted
+        .iter()
+        .filter(|r| !settings.pass_allows(&r.path, db::Pass::Text))
+        .count();
+    let selected = wanted
+        .into_iter()
+        .filter(|r| settings.pass_allows(&r.path, db::Pass::Text))
+        .collect();
+    Ok((images, selected, pass_skipped))
 }
 
 /// A batch pass over the candidates: `all` means every image, not only documents and screenshots.
@@ -191,7 +214,7 @@ fn run_selected(
     let lang = settings.ocr_lang.clone();
     let tools = settings.tools.clone();
     // An explicitly chosen file is recognized regardless of the heuristic.
-    let (_, selected) = select(&conn, all || only.is_some())?;
+    let (_, selected, pass_skipped) = select(&conn, all || only.is_some())?;
     let selected: Vec<FileRow> = match only {
         Some(ids) => selected.into_iter().filter(|r| ids.contains(&r.id)).collect(),
         None => selected,
@@ -216,6 +239,7 @@ fn run_selected(
             candidates,
             done: 0,
             skipped,
+            pass_skipped,
             errors: 0,
             chars: 0,
             seconds: t0.elapsed().as_secs_f64(),
@@ -301,6 +325,7 @@ fn run_selected(
         candidates,
         done,
         skipped,
+        pass_skipped,
         errors: errors.load(Ordering::Relaxed),
         chars,
         seconds: t0.elapsed().as_secs_f64(),

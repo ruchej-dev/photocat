@@ -1520,6 +1520,83 @@ const PAIRS: &[(&str, &str)] = &[
     ("index reset; index a folder now", "индекс сброшен; проиндексируйте каталог"),
     ("cache cleared", "кэш очищен"),
     ("cleaning failed", "очистка не удалась"),
+    // --- the passes of a catalog (M26.9) -----------------------------------------
+    ("Faces", "Лица"),
+    (
+        "run the face pass over this catalog: find people, group them and keep the face vectors. Off: no new groups and no new faces here; the faces found before stay",
+        "прогонять проход по лицам на этом каталоге: находить людей, собирать их в группы и хранить векторы лиц. Выключено: новых групп и новых лиц здесь не будет, а найденные раньше лица останутся",
+    ),
+    (
+        "compute CLIP tags over this catalog: the tag cloud and the semantic search. Off: no new tags and no search hits from this folder; the tags computed before stay",
+        "считать CLIP-теги на этом каталоге: облако тегов и смысловой поиск. Выключено: новых тегов и находок поиска из этого каталога не будет, а посчитанные раньше теги останутся",
+    ),
+    (
+        "recognize text on the photos of this catalog: documents and screenshots. Off: no new text and no “By text” hits here; the text recognized before stays",
+        "распознавать текст на снимках этого каталога: документы и скриншоты. Выключено: нового текста и находок «По тексту» здесь не будет, а распознанный раньше текст останется",
+    ),
+    (
+        "The three boxes switch the expensive analysis for a catalog: faces, CLIP tags and text. Indexing, previews, duplicates and the calendar are not part of the switch. Off is not a deletion — what was computed before stays, and the pass comes back with the box.",
+        "Три флажка переключают дорогой анализ каталога: лица, CLIP-теги и текст. Индексация, превью, дубли и календарь в переключатель не входят. Выключение — не удаление: посчитанное раньше остаётся, а проход возвращается вместе с флажком.",
+    ),
+    (
+        "forget the faces, tags and text of this catalog…",
+        "забыть лица, теги и текст этого каталога…",
+    ),
+    (
+        "Forget the faces, tags and text of this catalog?",
+        "Забыть лица, теги и текст этого каталога?",
+    ),
+    ("Forget the faces, tags and text", "Забыть лица, теги и текст"),
+    ("Forget…", "Забыть…"),
+    (
+        "DB rows only: faces, CLIP tags, vectors and recognized text of these files. The photos, the previews, your own tags and every file on disk stay",
+        "только строки БД: лица, CLIP-теги, векторы и распознанный текст этих файлов. Снимки, превью, свои теги и все файлы на диске остаются",
+    ),
+    (
+        "{}: the pass is on again — the next run fills what is missing",
+        "{}: проход снова включён — следующий прогон дозаполнит недостающее",
+    ),
+    (
+        "{}: the pass is off — nothing computed before is deleted",
+        "{}: проход выключен — посчитанное раньше не удаляется",
+    ),
+    (
+        "{}: nothing to forget — this catalog has no faces, tags or text",
+        "{}: забывать нечего — в этом каталоге нет ни лиц, ни тегов, ни текста",
+    ),
+    (
+        "{}: analysis forgotten — {} faces, {} tags, {} vectors, {} texts; the files and your own tags stay",
+        "{}: анализ забыт — лиц {}, тегов {}, векторов {}, текстов {}; файлы и свои теги остаются",
+    ),
+    ("the analysis was not forgotten", "анализ не забыт"),
+    (
+        "this folder has the text pass off — switch the box on in the folder list",
+        "у этого каталога выключен проход текста — включите флажок в списке каталогов",
+    ),
+    (
+        "{} photos skipped — their folders have faces off",
+        "{} снимков пропущено — у их каталогов выключены лица",
+    ),
+    (
+        "{} candidates skipped — their folders have text off",
+        "{} кандидатов пропущено — у их каталогов выключен текст",
+    ),
+    (
+        " ({} skipped — their folders have tags off)",
+        " ({} пропущено — у их каталогов выключены теги)",
+    ),
+    (
+        " ({} skipped — their folders have faces off)",
+        " ({} пропущено — у их каталогов выключены лица)",
+    ),
+    (
+        " ({} skipped — their folders have text off)",
+        " ({} пропущено — у их каталогов выключен текст)",
+    ),
+    (
+        " ({} faces of catalogs with faces off kept as they are)",
+        " ({} лиц каталогов с выключенными лицами оставлены как есть)",
+    ),
     // --- CLI: reports and command messages (M21.6) -----------------------------
     ("stopped: ", "остановлено: "),
     ("indexed {}/{} files ({}), unchanged {}, errors {}, {} s", "проиндексировано {}/{} файлов ({}), без изменений {}, ошибок {}, за {} с"),

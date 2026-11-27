@@ -497,15 +497,26 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 pub struct Plan {
     pub images: usize,
     pub todo: usize,
+    /// Photos the pass did not take because their catalog has faces off (M26.9).
+    pub pass_skipped: usize,
 }
 
 pub fn plan(db_path: &Path) -> Result<Plan> {
     let conn = db::open(db_path)?;
     let settings = db::load_settings(&conn);
-    // A switched-off folder is not planned for (M26.1).
+    // A switched-off folder is not planned for (M26.1); a catalog with faces off is counted apart
+    // and left alone (M26.9).
     let rows: Vec<db::FileRow> = db::load_all(&conn)?
         .into_iter()
         .filter(|r| !settings.path_hidden(&r.path))
+        .collect();
+    let pass_skipped = rows
+        .iter()
+        .filter(|r| r.kind == "image" && !settings.pass_allows(&r.path, db::Pass::Faces))
+        .count();
+    let rows: Vec<db::FileRow> = rows
+        .into_iter()
+        .filter(|r| settings.pass_allows(&r.path, db::Pass::Faces))
         .collect();
     let scans = db::face_scan_shas(&conn)?;
     let images = rows.iter().filter(|r| r.kind == "image").count();
@@ -513,13 +524,19 @@ pub fn plan(db_path: &Path) -> Result<Plan> {
         .iter()
         .filter(|r| r.kind == "image" && scans.get(&r.id) != Some(&r.sha256))
         .count();
-    Ok(Plan { images, todo })
+    Ok(Plan {
+        images,
+        todo,
+        pass_skipped,
+    })
 }
 
 pub struct Stats {
     pub images: usize,
     pub done: usize,
     pub skipped: usize,
+    /// Photos the pass did not take because their catalog has faces off (M26.9).
+    pub pass_skipped: usize,
     pub faces: usize,
     pub clusters: usize,
     pub errors: usize,
@@ -560,6 +577,14 @@ impl std::fmt::Display for Stats {
             );
             write!(f, "{note}")?;
         }
+        if self.pass_skipped > 0 {
+            let note = i18n::fill(
+                self.lang,
+                " ({} skipped — their folders have faces off)",
+                &[self.pass_skipped.to_string()],
+            );
+            write!(f, "{note}")?;
+        }
         Ok(())
     }
 }
@@ -580,6 +605,15 @@ pub fn run(
         .into_iter()
         .filter(|r| !settings.path_hidden(&r.path))
         .collect();
+    // A catalog with faces off is counted apart and left alone (M26.9).
+    let pass_skipped = rows
+        .iter()
+        .filter(|r| r.kind == "image" && !settings.pass_allows(&r.path, db::Pass::Faces))
+        .count();
+    let rows: Vec<db::FileRow> = rows
+        .into_iter()
+        .filter(|r| settings.pass_allows(&r.path, db::Pass::Faces))
+        .collect();
     let scans = db::face_scan_shas(&conn)?;
     let images = rows.iter().filter(|r| r.kind == "image").count();
     let todo: Vec<db::FileRow> = rows
@@ -596,6 +630,7 @@ pub fn run(
             images,
             done: 0,
             skipped,
+            pass_skipped,
             faces: 0,
             clusters: 0,
             errors: 0,
@@ -610,6 +645,7 @@ pub fn run(
             images,
             done: 0,
             skipped,
+            pass_skipped,
             faces: faces as usize,
             clusters: clusters as usize,
             errors: 0,
@@ -703,6 +739,7 @@ pub fn run(
         images,
         done,
         skipped,
+        pass_skipped,
         faces: faces as usize,
         clusters,
         errors: errors.load(Ordering::Relaxed),
@@ -757,6 +794,8 @@ pub struct ClusterStats {
     pub faces: usize,
     pub clusters: usize,
     pub fixed: usize,
+    /// Faces the rebuild left alone because their catalog has faces off (M26.9).
+    pub pass_skipped: usize,
     pub seconds: f64,
     /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
@@ -774,7 +813,16 @@ impl std::fmt::Display for ClusterStats {
                 format!("{:.1}", self.seconds),
             ],
         );
-        f.write_str(&text)
+        write!(f, "{text}")?;
+        if self.pass_skipped > 0 {
+            let note = i18n::fill(
+                self.lang,
+                " ({} faces of catalogs with faces off kept as they are)",
+                &[self.pass_skipped.to_string()],
+            );
+            write!(f, "{note}")?;
+        }
+        Ok(())
     }
 }
 
@@ -782,13 +830,15 @@ impl std::fmt::Display for ClusterStats {
 pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
     let t0 = std::time::Instant::now();
     let mut conn = db::open(db_path)?;
-    let lang = db::load_settings(&conn).lang;
+    let settings = db::load_settings(&conn);
+    let lang = settings.lang;
     let faces = db::load_faces(&conn)?;
     if faces.is_empty() {
         return Ok(ClusterStats {
             faces: 0,
             clusters: 0,
             fixed: 0,
+            pass_skipped: 0,
             seconds: 0.0,
             lang,
         });
@@ -805,8 +855,17 @@ pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
             fixed.insert(cid);
         }
     }
+    // A catalog with faces off keeps the groups it has: its faces are not re-clustered (M26.9).
+    let paths = db::face_paths(&conn)?;
+    let allowed: HashSet<i64> = paths
+        .iter()
+        .filter(|(_, path)| settings.pass_allows(path, db::Pass::Faces))
+        .map(|(id, _)| *id)
+        .collect();
+    let pass_skipped = faces.iter().filter(|f| !allowed.contains(&f.id)).count();
     let free: Vec<&FaceRow> = faces
         .iter()
+        .filter(|f| allowed.contains(&f.id))
         .filter(|f| f.cluster_id.is_none_or(|c| !fixed.contains(&c)))
         .collect();
     if !free.is_empty() {
@@ -831,6 +890,7 @@ pub fn recluster(db_path: &Path, threshold: f32) -> Result<ClusterStats> {
         faces: faces.len(),
         clusters: total,
         fixed: fixed.len(),
+        pass_skipped,
         seconds: t0.elapsed().as_secs_f64(),
         lang,
     })

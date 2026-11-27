@@ -248,14 +248,23 @@ fn main() -> Result<()> {
                 } else {
                     i18n::t(lang, "not downloaded — “Settings” or faces download --yes")
                 };
-                println!(
-                    "{}",
-                    i18n::fill(
-                        lang,
-                        "photos: {}, still without faces: {}; face model: {}",
-                        &[plan.images.to_string(), plan.todo.to_string(), model.to_string()]
-                    )
+                let mut line = i18n::fill(
+                    lang,
+                    "photos: {}, still without faces: {}; face model: {}",
+                    &[
+                        plan.images.to_string(),
+                        plan.todo.to_string(),
+                        model.to_string(),
+                    ],
                 );
+                if plan.pass_skipped > 0 {
+                    line.push_str(&i18n::fill(
+                        lang,
+                        " ({} skipped — their folders have faces off)",
+                        &[plan.pass_skipped.to_string()],
+                    ));
+                }
+                println!("{line}");
                 return Ok(());
             }
             if has_flag(&args, "--list") {
@@ -329,23 +338,28 @@ fn main() -> Result<()> {
                     let conn = db::open(&db_path)?;
                     db::load_settings(&conn)
                 };
-                println!(
-                    "{}",
-                    i18n::fill(
-                        lang,
-                        "candidates: {} of {} photos; tesseract ({}): {}",
-                        &[
-                            plan.candidates.to_string(),
-                            plan.images.to_string(),
-                            settings.tools.source(tools::Tool::Tesseract, lang).to_string(),
-                            settings
-                                .tools
-                                .probe(tools::Tool::Tesseract)
-                                .map(|v| short_version(&v))
-                                .unwrap_or_else(|| i18n::t(lang, "not found").into()),
-                        ]
-                    )
+                let mut line = i18n::fill(
+                    lang,
+                    "candidates: {} of {} photos; tesseract ({}): {}",
+                    &[
+                        plan.candidates.to_string(),
+                        plan.images.to_string(),
+                        settings.tools.source(tools::Tool::Tesseract, lang).to_string(),
+                        settings
+                            .tools
+                            .probe(tools::Tool::Tesseract)
+                            .map(|v| short_version(&v))
+                            .unwrap_or_else(|| i18n::t(lang, "not found").into()),
+                    ],
                 );
+                if plan.pass_skipped > 0 {
+                    line.push_str(&i18n::fill(
+                        lang,
+                        " ({} skipped — their folders have text off)",
+                        &[plan.pass_skipped.to_string()],
+                    ));
+                }
+                println!("{line}");
                 return Ok(());
             }
             let progress = Arc::new(Progress::default());
@@ -1781,6 +1795,7 @@ mod cli_i18n_tests {
             candidates: 4,
             done: 3,
             skipped: 1,
+            pass_skipped: 0,
             errors: 0,
             chars: 120,
             seconds: 2.0,
@@ -1798,6 +1813,7 @@ mod cli_i18n_tests {
             images: 10,
             done: 8,
             skipped: 2,
+            pass_skipped: 0,
             faces: 20,
             clusters: 5,
             errors: 0,
@@ -1813,6 +1829,7 @@ mod cli_i18n_tests {
             faces: 20,
             clusters: 5,
             fixed: 2,
+            pass_skipped: 0,
             seconds: 1.0,
             lang: Lang::En,
         };
@@ -1826,6 +1843,7 @@ mod cli_i18n_tests {
             total: 10,
             computed: 9,
             skipped: 1,
+            pass_skipped: 0,
             errors: 0,
             seconds: 4.0,
             model_bytes: 2048,
@@ -1842,6 +1860,7 @@ mod cli_i18n_tests {
             model: "clip-vit-b32",
             total: 10,
             tagged: 10,
+            pass_skipped: 0,
             seconds: 1.0,
             lang: Lang::En,
         };

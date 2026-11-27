@@ -587,6 +587,38 @@ pub struct TagDef {
     pub min_percentile: i32,
 }
 
+/// A pass an owner can switch off for one catalog (M26.9): the expensive analysis that says
+/// something *about* a photo. Indexing itself is not a pass here — the grid, the duplicates and
+/// the calendar need it for every catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Pass {
+    Faces,
+    Tags,
+    Text,
+}
+
+impl Pass {
+    pub const ALL: [Pass; 3] = [Pass::Faces, Pass::Tags, Pass::Text];
+
+    /// The key in the `root_passes` JSON: data, not a label.
+    pub fn key(self) -> &'static str {
+        match self {
+            Pass::Faces => "faces",
+            Pass::Tags => "tags",
+            Pass::Text => "text",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Pass> {
+        match s {
+            "faces" => Some(Pass::Faces),
+            "tags" => Some(Pass::Tags),
+            "text" => Some(Pass::Text),
+            _ => None,
+        }
+    }
+}
+
 /// The application settings. Kept in the DB (next to the index), not in a file by the archive.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -629,6 +661,9 @@ pub struct Settings {
     /// Folders switched off (M26.1): their files are hidden from every view, the rows, the
     /// previews and the files on disk stay. The same newline-separated form as `roots`.
     pub roots_off: Vec<String>,
+    /// Passes switched off per catalog (M26.9): only the exceptions, keyed by the root path. A
+    /// root that is not listed runs every pass; a root that is gone keeps no key.
+    pub root_passes: std::collections::BTreeMap<String, Vec<Pass>>,
     /// The integrity reminder (M10): the folder and the manifest the term belongs to,
     /// the interval in days (0 — the reminder is off) and the result of the last pass.
     pub verify_root: String,
@@ -670,6 +705,7 @@ impl Default for Settings {
             album_list: false,
             roots: Vec::new(),
             roots_off: Vec::new(),
+            root_passes: std::collections::BTreeMap::new(),
             verify_root: String::new(),
             verify_manifest: String::new(),
             // 30 days is a calm term for a family archive; 0 switches the reminder off.
@@ -725,6 +761,58 @@ impl Settings {
             self.roots_off.retain(|r| trim_root(r) != root);
         }
     }
+
+    /// Whether the pass runs over this file (M26.9). One helper for the GUI and the CLI: the most
+    /// specific root that holds the path decides; a file outside every root and a root without an
+    /// exception allow the pass. A catalog switched off for display (M26.1) allows no pass at all —
+    /// switching it back on lets the passes catch up.
+    pub fn pass_allows(&self, path: &str, pass: Pass) -> bool {
+        if self.path_hidden(path) {
+            return false;
+        }
+        self.root_passes
+            .iter()
+            .filter(|(root, _)| under_root(path, root))
+            .max_by_key(|(root, _)| trim_root(root).len())
+            .is_none_or(|(_, off)| !off.contains(&pass))
+    }
+
+    /// Whether this catalog runs a pass — the three boxes of the folder list. A path that is not
+    /// a root itself is looked up by the same rule as `pass_allows`.
+    pub fn root_pass(&self, root: &str, pass: Pass) -> bool {
+        self.root_passes
+            .iter()
+            .filter(|(key, _)| trim_root(key) == trim_root(root))
+            .max_by_key(|(key, _)| trim_root(key).len())
+            .is_none_or(|(_, off)| !off.contains(&pass))
+    }
+
+    /// Switch one pass off or on for one catalog (M26.9): only the exception list changes, nothing
+    /// derived is deleted — the vectors, tags, text and faces stay until the owner forgets them.
+    pub fn set_root_pass(&mut self, root: &str, pass: Pass, on: bool) {
+        let key = trim_root(root).to_string();
+        let list = self.root_passes.entry(key.clone()).or_default();
+        if on {
+            list.retain(|p| *p != pass);
+        } else if !list.contains(&pass) {
+            list.push(pass);
+        }
+        if list.is_empty() {
+            self.root_passes.remove(&key);
+        }
+    }
+
+    /// Drop the exceptions of roots that are no longer in `roots` (M26.9): a catalog that is gone
+    /// keeps no key. Returns whether anything left.
+    pub fn prune_root_passes(&mut self) -> bool {
+        let before = self.root_passes.len();
+        self.root_passes.retain(|key, _| {
+            self.roots
+                .iter()
+                .any(|root| trim_root(root) == trim_root(key))
+        });
+        before != self.root_passes.len()
+    }
 }
 
 /// How many indexed files lie in each root, in the order of `roots`: the folder list says where
@@ -743,6 +831,89 @@ pub fn root_file_counts(db: &Path, roots: &[String]) -> Result<Vec<(String, usiz
             (root.clone(), n)
         })
         .collect())
+}
+
+/// The path of every face's source photo, by face id: a pass that respects a catalog's switches
+/// (M26.9) needs the path to ask `Settings::pass_allows`.
+pub fn face_paths(conn: &Connection) -> Result<HashMap<i64, String>> {
+    let mut st = conn.prepare(
+        "SELECT f.id, fi.path FROM faces f JOIN files fi ON fi.id = f.file_id",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out = HashMap::new();
+    for row in rows {
+        let (id, path) = row?;
+        out.insert(id, path);
+    }
+    Ok(out)
+}
+
+/// The path of every indexed file by id, the trashed ones included (M26.9): a pass must not fall
+/// back to "allowed" for a row it did not load into its visible set.
+pub fn file_paths(conn: &Connection) -> Result<HashMap<i64, String>> {
+    let mut st = conn.prepare("SELECT id, path FROM files")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out = HashMap::new();
+    for row in rows {
+        let (id, path) = row?;
+        out.insert(id, path);
+    }
+    Ok(out)
+}
+
+/// What a "forget this catalog's analysis" action removed (M26.9): derived rows only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Forgotten {
+    pub files: usize,
+    pub tags: usize,
+    pub vectors: usize,
+    pub ocr: usize,
+    pub faces: usize,
+}
+
+impl Forgotten {
+    pub fn is_empty(&self) -> bool {
+        self.tags == 0 && self.vectors == 0 && self.ocr == 0 && self.faces == 0
+    }
+}
+
+/// Remove the derived analysis of one catalog: CLIP tags, vectors, recognized text, faces and the
+/// scan mark. The file rows, the owner's own tags, the previews and the archive stay (M26.9).
+pub fn forget_catalog_derived(conn: &Connection, root: &str) -> Result<Forgotten> {
+    let ids: Vec<i64> = {
+        let mut st = conn.prepare("SELECT id, path FROM files")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            let (id, path) = row?;
+            if under_root(&path, root) {
+                ids.push(id);
+            }
+        }
+        ids
+    };
+    let mut out = Forgotten {
+        files: ids.len(),
+        ..Forgotten::default()
+    };
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut tags = tx.prepare("DELETE FROM tags WHERE file_id=?1")?;
+        let mut vectors = tx.prepare("DELETE FROM embeddings WHERE file_id=?1")?;
+        let mut ocr = tx.prepare("DELETE FROM ocr WHERE file_id=?1")?;
+        let mut scans = tx.prepare("DELETE FROM face_scans WHERE file_id=?1")?;
+        let mut faces = tx.prepare("DELETE FROM faces WHERE file_id=?1")?;
+        for id in &ids {
+            out.tags += tags.execute([id])?;
+            out.vectors += vectors.execute([id])?;
+            out.ocr += ocr.execute([id])?;
+            scans.execute([id])?;
+            out.faces += faces.execute([id])?;
+        }
+    }
+    tx.commit()?;
+    delete_empty_face_clusters(conn)?;
+    Ok(out)
 }
 
 pub fn load_settings(conn: &Connection) -> Settings {
@@ -788,6 +959,25 @@ pub fn load_settings(conn: &Connection) -> Settings {
                     .map(str::to_string)
                     .collect()
             }
+            // Passes switched off per catalog (M26.9): a JSON object root → disabled pass keys.
+            "root_passes" => {
+                let parsed = serde_json::from_str::<serde_json::Value>(&v)
+                    .ok()
+                    .and_then(|value| value.as_object().cloned());
+                for (root, list) in parsed.unwrap_or_default() {
+                    let off: Vec<Pass> = list
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_str().and_then(Pass::parse))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if !off.is_empty() {
+                        s.root_passes.insert(trim_root(&root).to_string(), off);
+                    }
+                }
+            }
             "roots" => {
                 s.roots = v
                     .lines()
@@ -816,6 +1006,8 @@ pub fn load_settings(conn: &Connection) -> Settings {
         s.tag_show = 0.22;
         s.tag_show_pct = 70;
     }
+    // A catalog that was removed from the index keeps no exception (M26.9).
+    s.prune_root_passes();
     s
 }
 
@@ -842,6 +1034,32 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ),
         ("roots", s.roots.join("\n")),
         ("roots_off", s.roots_off.join("\n")),
+        (
+            "root_passes",
+            {
+                // Only the exceptions, and only for roots that are still in the list.
+                let mut obj = serde_json::Map::new();
+                for (root, off) in &s.root_passes {
+                    if off.is_empty()
+                        || !s
+                            .roots
+                            .iter()
+                            .any(|r| trim_root(r) == trim_root(root))
+                    {
+                        continue;
+                    }
+                    obj.insert(
+                        root.clone(),
+                        serde_json::Value::Array(
+                            off.iter()
+                                .map(|p| serde_json::Value::String(p.key().into()))
+                                .collect(),
+                        ),
+                    );
+                }
+                serde_json::Value::Object(obj).to_string()
+            },
+        ),
         ("verify_root", s.verify_root.clone()),
         ("verify_manifest", s.verify_manifest.clone()),
         ("verify_interval_days", s.verify_interval_days.to_string()),
@@ -1295,8 +1513,15 @@ pub fn load_embeddings(conn: &Connection, model: &str) -> Result<Vec<(i64, Vec<f
 }
 
 /// Drop the vectors of a model: a recompute with a new model input. The archive and previews are untouched.
-pub fn clear_embeddings(conn: &Connection, model: &str) -> Result<usize> {
-    Ok(conn.execute("DELETE FROM embeddings WHERE model=?1", params![model])?)
+/// Drop the vectors of one model only for the given files (M26.9): a pass switched off for a
+/// catalog must not lose what a previous pass produced.
+pub fn clear_embeddings_for(conn: &Connection, model: &str, ids: &[i64]) -> Result<usize> {
+    let mut st = conn.prepare("DELETE FROM embeddings WHERE model=?1 AND file_id=?2")?;
+    let mut n = 0;
+    for id in ids {
+        n += st.execute(params![model, id])?;
+    }
+    Ok(n)
 }
 
 pub fn save_embedding(
@@ -3929,5 +4154,112 @@ mod tests {
         );
         assert_eq!(compaction.after.free_bytes, 0);
         assert!(files > 100, "{files} files — that is not the corpus");
+    }
+
+    /// M26.9: a catalog switches a pass off for itself only; the choice is data in the settings,
+    /// survives a restart and leaves no key for a root that is gone.
+    #[test]
+    fn a_catalog_switches_the_passes_off_for_itself_only() {
+        let mut s = Settings {
+            roots: vec!["/archive/a".into(), "/archive/b".into()],
+            ..Settings::default()
+        };
+        for pass in Pass::ALL {
+            assert!(
+                s.pass_allows("/archive/b/x.jpg", pass),
+                "a default catalog must allow every pass"
+            );
+        }
+        s.set_root_pass("/archive/b/", Pass::Tags, false);
+        assert!(!s.pass_allows("/archive/b/x.jpg", Pass::Tags));
+        assert!(s.pass_allows("/archive/b/x.jpg", Pass::Faces));
+        assert!(s.pass_allows("/archive/a/x.jpg", Pass::Tags));
+        assert!(!s.root_pass("/archive/b", Pass::Tags));
+        assert!(s.root_pass("/archive/b", Pass::Faces));
+        // A catalog switched off for display allows no pass at all (M26.1).
+        s.set_root_off("/archive/b", true);
+        for pass in Pass::ALL {
+            assert!(!s.pass_allows("/archive/b/x.jpg", pass));
+        }
+        s.set_root_off("/archive/b", false);
+
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        save_settings(&c, &s).unwrap();
+        let back = load_settings(&c);
+        assert_eq!(back.root_passes, s.root_passes);
+        assert!(!back.pass_allows("/archive/b/x.jpg", Pass::Tags));
+        let mut back = back;
+        back.set_root_pass("/archive/b", Pass::Tags, true);
+        assert!(back.root_passes.is_empty(), "switching on leaves an empty key");
+
+        // The root is gone: the next read drops its exception.
+        s.roots = vec!["/archive/a".into()];
+        save_settings(&c, &s).unwrap();
+        assert!(load_settings(&c).root_passes.is_empty());
+    }
+
+    /// M26.9: "forget this catalog's analysis" removes the derived rows of that root only — the
+    /// file rows, the owner's own tags and the other catalog's analysis stay.
+    #[test]
+    fn forgetting_a_catalog_removes_only_its_analysis() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-forget-{}-{:?}-{:?}.db",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let (a, b) = {
+            let c = open(&path).unwrap();
+            insert(&c, &row("/archive/a/one.jpg", "aa", 1.0)).unwrap();
+            insert(&c, &row("/archive/b/two.jpg", "bb", 1.0)).unwrap();
+            let ids = (id_of(&c, "/archive/a/one.jpg"), id_of(&c, "/archive/b/two.jpg"));
+            for (id, sha) in [(ids.0, "aa"), (ids.1, "bb")] {
+                replace_tags(&c, id, "clip:m", &[("beach".into(), 0.3)]).unwrap();
+                save_embedding(&c, id, "m", sha, &[1.0, 0.0]).unwrap();
+                save_ocr(&c, id, sha, "eng", "text").unwrap();
+                c.execute(
+                    "INSERT INTO user_tags(file_id,tag,created_at) VALUES(?1,'mine',0)",
+                    params![id],
+                )
+                .unwrap();
+                c.execute(
+                    "INSERT INTO faces(file_id,sha256,x,y,w,h,score,quality,thumb,embedding,created_at)
+                     VALUES(?1,?2,0,0,0,0,0.9,0.5,NULL,x'00000000',0)",
+                    params![id, sha],
+                )
+                .unwrap();
+            }
+            ids
+        };
+        let c = open(&path).unwrap();
+        let forgotten = forget_catalog_derived(&c, "/archive/b").unwrap();
+        assert_eq!(forgotten.files, 1);
+        assert_eq!(forgotten.tags, 1);
+        assert_eq!(forgotten.vectors, 1);
+        assert_eq!(forgotten.ocr, 1);
+        assert_eq!(forgotten.faces, 1);
+        let count = |sql: &str, id: i64| -> i64 {
+            c.query_row(sql, params![id], |r| r.get(0)).unwrap()
+        };
+        for table in ["tags", "embeddings", "ocr", "faces"] {
+            assert_eq!(
+                count(&format!("SELECT COUNT(*) FROM {table} WHERE file_id=?1"), b),
+                0,
+                "{table} rows of the forgotten catalog are still there"
+            );
+            assert_eq!(
+                count(&format!("SELECT COUNT(*) FROM {table} WHERE file_id=?1"), a),
+                1,
+                "{table} rows of the other catalog were removed"
+            );
+        }
+        // The owner's own tags and the file rows are not derived data.
+        assert_eq!(count("SELECT COUNT(*) FROM user_tags WHERE file_id=?1", b), 1);
+        assert_eq!(count("SELECT COUNT(*) FROM files WHERE id=?1", b), 1);
+        assert_eq!(forget_catalog_derived(&c, "/archive/b").unwrap(), Forgotten { files: 1, ..Forgotten::default() });
     }
 }

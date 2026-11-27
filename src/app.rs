@@ -2810,6 +2810,9 @@ struct App {
     /// The root the "Folders" dialog was opened for from the catalog menu (M26.7): it is marked
     /// in the list and "Index this catalog" acts on it.
     roots_focus: Option<String>,
+    /// The catalog whose "forget the analysis" confirmation is open (M26.9): the second press in
+    /// the folder list, never an automatic deletion.
+    forget_root: Option<String>,
     query: String,
     kind_filter: KindFilter,
     /// The year filter (M25.2): independent of the path/date field, so a typed word survives a
@@ -2884,6 +2887,8 @@ struct App {
     face_selected_cluster: Option<i64>,
     face_label_input: String,
     face_images: usize,
+    /// Photos whose catalog has the face pass off (M26.9).
+    face_skipped: usize,
     face_todo: usize,
     face_faces: i64,
     face_photos: i64,
@@ -2894,6 +2899,8 @@ struct App {
     face_download_rx: Option<mpsc::Receiver<Result<faces::DownloadReport>>>,
     /// How many photos a batch OCR pass would take by the heuristic (a plan, not a run).
     ocr_candidates: usize,
+    /// Candidates whose catalog has text off (M26.9).
+    ocr_skipped: usize,
     /// Of them — those without text yet; "Continue" shows exactly the remainder.
     ocr_remaining: usize,
     ocr_progress: Option<Arc<Progress>>,
@@ -3267,6 +3274,7 @@ impl App {
             catalog_facts: Vec::new(),
             catalog_visible: (0, 0),
             roots_focus: None,
+            forget_root: None,
             query: String::new(),
             kind_filter: KindFilter::All,
             year_filter: None,
@@ -3307,6 +3315,7 @@ impl App {
             face_selected_cluster: None,
             face_label_input: String::new(),
             face_images: 0,
+            face_skipped: 0,
             face_todo: 0,
             face_faces: 0,
             face_photos: 0,
@@ -3322,6 +3331,7 @@ impl App {
             ocr_files: 0,
             ocr_chars: 0,
             ocr_candidates: 0,
+            ocr_skipped: 0,
             ocr_remaining: 0,
             ocr_progress: None,
             ocr_rx: None,
@@ -3496,10 +3506,19 @@ impl App {
                 .collect::<std::collections::HashSet<i64>>()
                 .len() as i64;
             let scans = db::face_scan_shas(&c)?;
-            let face_images = rows.iter().filter(|r| r.kind == "image").count();
+            // A catalog with the face pass off is counted apart and not planned for (M26.9).
+            let face_allowed = |r: &db::FileRow| settings.pass_allows(&r.path, db::Pass::Faces);
+            let face_images = rows
+                .iter()
+                .filter(|r| r.kind == "image" && face_allowed(r))
+                .count();
+            let face_skipped = rows
+                .iter()
+                .filter(|r| r.kind == "image" && !face_allowed(r))
+                .count();
             let face_todo = rows
                 .iter()
-                .filter(|r| r.kind == "image" && scans.get(&r.id) != Some(&r.sha256))
+                .filter(|r| r.kind == "image" && face_allowed(r) && scans.get(&r.id) != Some(&r.sha256))
                 .count();
             Ok((
                 settings,
@@ -3515,6 +3534,7 @@ impl App {
                 face_faces,
                 face_photos,
                 face_images,
+                face_skipped,
                 face_todo,
             ))
         }) {
@@ -3532,6 +3552,7 @@ impl App {
                 face_faces,
                 face_photos,
                 face_images,
+                face_skipped,
                 face_todo,
             )) => {
                 // The language comes from the settings that have just been read: the `lang` of
@@ -3597,6 +3618,7 @@ impl App {
                 self.face_faces = face_faces;
                 self.face_photos = face_photos;
                 self.face_images = face_images;
+                self.face_skipped = face_skipped;
                 self.face_todo = face_todo;
                 if !self
                     .face_clusters
@@ -3608,6 +3630,7 @@ impl App {
                 }
                 if let Ok(plan) = ocr::plan(&self.db_path, false) {
                     self.ocr_candidates = plan.candidates;
+                    self.ocr_skipped = plan.pass_skipped;
                     self.ocr_remaining = plan.todo;
                 }
                 self.groups.clear();
@@ -4943,6 +4966,11 @@ impl App {
         // A ticked box means the folder is shown (M26.1): clearing it hides the folder from every
         // view — never removes a row and never touches a file on disk.
         let mut toggle: Option<(String, bool)> = None;
+        // The three passes of a catalog (M26.9): off stops the expensive analysis, never deletes
+        // what a previous pass produced.
+        let mut pass_toggle: Option<(String, db::Pass, bool)> = None;
+        let mut forget_now: Option<String> = None;
+        let mut forget_cancel = false;
         let roots = self.roots.clone();
         let off: Vec<bool> = roots
             .iter()
@@ -5048,8 +5076,100 @@ impl App {
                                 },
                             );
                         });
+                        ui.horizontal(|ui| {
+                            ui.add_space(22.0);
+                            for pass in db::Pass::ALL {
+                                let mut on = self.settings.root_pass(root, pass);
+                                let (label, hint) = match pass {
+                                    db::Pass::Faces => (
+                                        t(lang, "Faces"),
+                                        t(
+                                            lang,
+                                            "run the face pass over this catalog: find people, group them and keep the face vectors. Off: no new groups and no new faces here; the faces found before stay",
+                                        ),
+                                    ),
+                                    db::Pass::Tags => (
+                                        t(lang, "Tags"),
+                                        t(
+                                            lang,
+                                            "compute CLIP tags over this catalog: the tag cloud and the semantic search. Off: no new tags and no search hits from this folder; the tags computed before stay",
+                                        ),
+                                    ),
+                                    db::Pass::Text => (
+                                        t(lang, "Text on photos"),
+                                        t(
+                                            lang,
+                                            "recognize text on the photos of this catalog: documents and screenshots. Off: no new text and no “By text” hits here; the text recognized before stays",
+                                        ),
+                                    ),
+                                };
+                                if ui
+                                    .checkbox(&mut on, label)
+                                    .on_hover_text(hint)
+                                    .changed()
+                                {
+                                    pass_toggle = Some((root.clone(), pass, on));
+                                }
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add(WordButton::small(
+                                            Icon::Delete,
+                                            t(lang, "Forget…"),
+                                        ))
+                                        .on_hover_text(t(
+                                            lang,
+                                            "forget the faces, tags and text of this catalog…",
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.forget_root = Some(root.clone());
+                                    }
+                                },
+                            );
+                        });
+                        if self.forget_root.as_deref() == Some(root.as_str()) {
+                            ui.horizontal(|ui| {
+                                ui.add_space(22.0);
+                                ui.label(
+                                    egui::RichText::new(t(
+                                        lang,
+                                        "Forget the faces, tags and text of this catalog?",
+                                    ))
+                                    .size(11.0)
+                                    .color(theme(ui).danger),
+                                );
+                                if ui
+                                    .add(WordButton::danger(
+                                        Icon::Delete,
+                                        t(lang, "Forget the faces, tags and text"),
+                                    ))
+                                    .on_hover_text(t(
+                                        lang,
+                                        "DB rows only: faces, CLIP tags, vectors and recognized text of these files. The photos, the previews, your own tags and every file on disk stay",
+                                    ))
+                                    .clicked()
+                                {
+                                    forget_now = Some(root.clone());
+                                }
+                                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
+                                    forget_cancel = true;
+                                }
+                            });
+                        }
                     }
                 });
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "The three boxes switch the expensive analysis for a catalog: faces, CLIP tags and text. Indexing, previews, duplicates and the calendar are not part of the switch. Off is not a deletion — what was computed before stays, and the pass comes back with the box.",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
+            );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if word_button(ui, Icon::CreateNewFolder, t(lang, "Add a folder…")).clicked() {
@@ -5081,6 +5201,65 @@ impl App {
         if close {
             self.roots_open = false;
             self.roots_focus = None;
+            self.forget_root = None;
+        }
+        if forget_cancel {
+            self.forget_root = None;
+        }
+        if let Some((root, pass, on)) = pass_toggle {
+            self.settings.set_root_pass(&root, pass, on);
+            self.save_settings();
+            self.reload();
+            let lang = self.settings.lang;
+            self.status = if on {
+                i18n::fill(
+                    lang,
+                    "{}: the pass is on again — the next run fills what is missing",
+                    &[root],
+                )
+            } else {
+                i18n::fill(
+                    lang,
+                    "{}: the pass is off — nothing computed before is deleted",
+                    &[root],
+                )
+            };
+        }
+        if let Some(root) = forget_now {
+            self.forget_root = None;
+            let lang = self.settings.lang;
+            match db::open(&self.db_path)
+                .and_then(|conn| db::forget_catalog_derived(&conn, &root))
+            {
+                Ok(f) if f.is_empty() => {
+                    self.reload();
+                    self.status = i18n::fill(
+                        lang,
+                        "{}: nothing to forget — this catalog has no faces, tags or text",
+                        &[root],
+                    );
+                }
+                Ok(f) => {
+                    self.reload();
+                    self.status = i18n::fill(
+                        lang,
+                        "{}: analysis forgotten — {} faces, {} tags, {} vectors, {} texts; the files and your own tags stay",
+                        &[
+                            root,
+                            f.faces.to_string(),
+                            f.tags.to_string(),
+                            f.vectors.to_string(),
+                            f.ocr.to_string(),
+                        ],
+                    );
+                }
+                Err(e) => {
+                    self.status = format!(
+                        "{}: {e:#}",
+                        t(lang, "the analysis was not forgotten")
+                    )
+                }
+            }
         }
         if refresh {
             self.reload();
@@ -8426,6 +8605,14 @@ impl App {
                     i18n::fill(lang, "{} of {} photos have no faces yet", &[self.face_todo.to_string(), self.face_images.to_string()])
                 };
             ui.label(egui::RichText::new(todo).size(11.0).color(dim(ui)));
+            if self.face_skipped > 0 {
+                let skipped = i18n::fill(
+                    lang,
+                    "{} photos skipped — their folders have faces off",
+                    &[self.face_skipped.to_string()],
+                );
+                ui.label(egui::RichText::new(skipped).size(11.0).color(dim(ui)));
+            }
             ui.add_space(4.0);
             if self.face_rx.is_some() {
                 ui.label(t(lang, "reclustering…"));
@@ -8851,6 +9038,14 @@ impl App {
         ui.label(
             egui::RichText::new(candidates).size(11.0).color(dim(ui)),
         );
+        if self.ocr_skipped > 0 {
+            let skipped = i18n::fill(
+                lang,
+                "{} candidates skipped — their folders have text off",
+                &[self.ocr_skipped.to_string()],
+            );
+            ui.label(egui::RichText::new(skipped).size(11.0).color(dim(ui)));
+        }
         ui.add_space(4.0);
         if self.ocr_rx.is_some() {
             if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
@@ -9545,9 +9740,10 @@ impl App {
             } else {
                 t(lang, "Recognize text")
             };
+            let text_allowed = self.settings.pass_allows(&f.path, db::Pass::Text);
             if ui
                 .add_enabled(
-                    self.tesseract.is_some() && self.ocr_rx.is_none(),
+                    self.tesseract.is_some() && self.ocr_rx.is_none() && text_allowed,
                     WordButton::new(
                         if self.ocr_text.get(&id).is_some_and(|t| !t.trim().is_empty()) {
                             Icon::Refresh
@@ -9557,7 +9753,14 @@ impl App {
                         label,
                     ),
                 )
-                .on_hover_text(t(lang, "this photo only; the original is unchanged"))
+                .on_hover_text(if text_allowed {
+                    t(lang, "this photo only; the original is unchanged")
+                } else {
+                    t(
+                        lang,
+                        "this folder has the text pass off — switch the box on in the folder list",
+                    )
+                })
                 .clicked()
             {
                 self.start_ocr(Some(id));
@@ -20849,6 +21052,68 @@ mod tests {
             !space.worth_compacting(),
             "the compaction is still offered after the pass: {space:?}"
         );
+    }
+
+    /// M26.9: the folder list gives every catalog its three passes; the choice is saved, and
+    /// forgetting the analysis is a second press, never an automatic deletion.
+    #[test]
+    fn the_folder_list_switches_the_passes_of_each_catalog() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-root-passes-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let c = db::open(&path).unwrap();
+            db::insert(&c, &file_row(0, "image", "a.jpg")).unwrap();
+            let mut s = db::load_settings(&c);
+            s.roots = vec!["/archive/a".into(), "/archive/b".into()];
+            db::save_settings(&c, &s).unwrap();
+        }
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::En;
+        app.roots_open = true;
+        let ctx = egui::Context::default();
+        let texts = modal_frame(&mut app, &ctx, App::roots_modal);
+        for want in [
+            "Faces",
+            "Tags",
+            "Text on photos",
+            "Forget…",
+            "The three boxes switch the expensive analysis for a catalog: faces, CLIP tags and text. Indexing, previews, duplicates and the calendar are not part of the switch. Off is not a deletion — what was computed before stays, and the pass comes back with the box.",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "missing “{want}” in the folder list: {texts:?}"
+            );
+        }
+
+        // The switch is one catalog's business and survives a restart of the window.
+        app.settings
+            .set_root_pass("/archive/b", db::Pass::Tags, false);
+        app.save_settings();
+        let conn = db::open(&app.db_path).unwrap();
+        let back = db::load_settings(&conn);
+        assert!(!back.pass_allows("/archive/b/x.jpg", db::Pass::Tags));
+        assert!(back.pass_allows("/archive/a/x.jpg", db::Pass::Tags));
+        assert!(back.pass_allows("/archive/b/x.jpg", db::Pass::Faces));
+
+        // "Forget" asks once: the row shows the question and the red action.
+        app.forget_root = Some("/archive/b".into());
+        let texts = modal_frame(&mut app, &ctx, App::roots_modal);
+        for want in [
+            "Forget the faces, tags and text of this catalog?",
+            "Forget the faces, tags and text",
+            "Cancel",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "missing “{want}” in the forget confirmation: {texts:?}"
+            );
+        }
     }
 
     #[test]

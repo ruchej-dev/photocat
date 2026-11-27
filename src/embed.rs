@@ -1155,6 +1155,8 @@ pub struct EmbedStats {
     pub total: usize,
     pub computed: usize,
     pub skipped: usize,
+    /// Files the pass did not take because their catalog has tags off (M26.9).
+    pub pass_skipped: usize,
     pub errors: usize,
     pub seconds: f64,
     pub model_bytes: i64,
@@ -1188,7 +1190,16 @@ impl std::fmt::Display for EmbedStats {
                 db::human_in(self.lang, self.model_bytes),
             ],
         );
-        f.write_str(&text)
+        f.write_str(&text)?;
+        if self.pass_skipped > 0 {
+            let note = i18n::fill(
+                self.lang,
+                " ({} skipped — their folders have tags off)",
+                &[self.pass_skipped.to_string()],
+            );
+            f.write_str(&note)?;
+        }
+        Ok(())
     }
 }
 
@@ -1206,8 +1217,28 @@ pub fn embed_missing(
     let conn = db::open(db_path)?;
     let settings = db::load_settings(&conn);
     let entry = active_entry(&settings);
+    let rows = db::load_all(&conn)?;
+    // A switched-off folder takes no part in the pass (M26.1), and so does a catalog whose tags
+    // are off (M26.9): the owner switches it back on to let the pass catch up. Nothing derived is
+    // deleted by the switch — the existing vectors and tags stay.
+    let all_rows: Vec<&FileRow> = rows
+        .iter()
+        .filter(|r| !settings.path_hidden(&r.path))
+        .collect();
+    let pass_skipped = all_rows
+        .iter()
+        .filter(|r| r.thumb.is_some() && !settings.pass_allows(&r.path, db::Pass::Tags))
+        .count();
+    let rows: Vec<&FileRow> = all_rows
+        .iter()
+        .copied()
+        .filter(|r| settings.pass_allows(&r.path, db::Pass::Tags))
+        .collect();
     if refresh {
-        let n = db::clear_embeddings(&conn, entry.id)?;
+        // Only the allowed roots lose their vectors: a pass switched off never deletes what a
+        // previous pass produced (M26.9).
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        let n = db::clear_embeddings_for(&conn, entry.id, &ids)?;
         if let Some(p) = &progress {
             p.set_msg(i18n::fill(
                 settings.lang,
@@ -1216,14 +1247,7 @@ pub fn embed_missing(
             ));
         }
     }
-    let rows = db::load_all(&conn)?;
     let done = db::embedding_shas(&conn, entry.id)?;
-    // A switched-off folder takes no part in the pass (M26.1): the owner switches it back on
-    // to let the pass catch up.
-    let rows: Vec<&FileRow> = rows
-        .iter()
-        .filter(|r| !settings.path_hidden(&r.path))
-        .collect();
     let todo: Vec<&FileRow> = rows
         .iter()
         .copied()
@@ -1246,6 +1270,7 @@ pub fn embed_missing(
             total,
             computed: 0,
             skipped,
+            pass_skipped,
             errors: 0,
             seconds: t0.elapsed().as_secs_f64(),
             model_bytes: model_bytes_in(&settings.models_dir, entry),
@@ -1343,6 +1368,7 @@ pub fn embed_missing(
         total,
         computed,
         skipped,
+        pass_skipped,
         errors,
         seconds: t0.elapsed().as_secs_f64(),
         model_bytes: model_bytes_in(&settings.models_dir, entry),
@@ -1356,6 +1382,8 @@ pub struct RetagStats {
     pub model: &'static str,
     pub total: usize,
     pub tagged: usize,
+    /// Vectors the pass left alone because their catalog has tags off (M26.9).
+    pub pass_skipped: usize,
     pub seconds: f64,
     /// The language of the report (M21.6): the caller sets it before printing; English by default.
     pub lang: Lang,
@@ -1373,7 +1401,16 @@ impl std::fmt::Display for RetagStats {
                 format!("{:.1}", self.seconds),
             ],
         );
-        f.write_str(&text)
+        f.write_str(&text)?;
+        if self.pass_skipped > 0 {
+            let note = i18n::fill(
+                self.lang,
+                " ({} skipped — their folders have tags off)",
+                &[self.pass_skipped.to_string()],
+            );
+            f.write_str(&note)?;
+        }
+        Ok(())
     }
 }
 
@@ -1395,7 +1432,19 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
     let conn = db::open(db_path)?;
     let settings = db::load_settings(&conn);
     let entry = active_entry(&settings);
-    let rows = db::load_embeddings(&conn, entry.id)?;
+    // A catalog with tags off keeps the tags it has; the pass simply does not touch them (M26.9).
+    let paths = db::file_paths(&conn)?;
+    let forbidden: HashSet<i64> = paths
+        .iter()
+        .filter(|(_, path)| !settings.pass_allows(path, db::Pass::Tags))
+        .map(|(id, _)| *id)
+        .collect();
+    let all_rows = db::load_embeddings(&conn, entry.id)?;
+    let pass_skipped = all_rows.iter().filter(|(id, _)| forbidden.contains(id)).count();
+    let rows: Vec<(i64, Vec<f32>)> = all_rows
+        .into_iter()
+        .filter(|(id, _)| !forbidden.contains(id))
+        .collect();
     if let Some(p) = &progress {
         p.set_total(rows.len());
         p.set_msg(i18n::t(settings.lang, "CLIP: recomputing the tags without the photos…"));
@@ -1421,6 +1470,7 @@ pub fn retag(db_path: &Path, threads: usize, progress: Option<Arc<Progress>>) ->
         model: entry.id,
         total: rows.len(),
         tagged,
+        pass_skipped,
         seconds: t0.elapsed().as_secs_f64(),
         lang: settings.lang,
     })
