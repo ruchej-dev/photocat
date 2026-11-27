@@ -1,45 +1,75 @@
 # assets
 
-The face of the program: the mark (a cat head built from a stack of photo frames, an aperture for the
-eye) and its lockup. ADR 0052 explains why the mark is an asset while every icon inside the window
-stays drawn geometry, and why it is distributed under the same Apache-2.0 as the code.
+The face of the program: the mark (a cat head built from a stack of photo frames, an aperture for an
+eye) and its lockup — the mark with the word `photocat` beside it. ADR 0052 explains why the mark is
+an asset while every icon inside the window stays drawn geometry, and why it is distributed under the
+same Apache-2.0 as the code.
 
-| File | What it is | Who uses it |
-|---|---|---|
-| `photocat-1024.png` | the mark as the owner drew it: 1024×1024, the dark rounded plate with its glow | the source of the other files, the store and the press kit |
-| `photocat-lockup.png` | the mark with the word `photocat`, 1184×296, dark background | the top of both READMEs |
-| `photocat-icon-256.png` | the mark alone: flat amber `#F59E0B` on transparency, no plate, no glow | the window icon, embedded in the binary |
-| `photocat-icon-128.png` | the same, 128 px | packaging: a `.desktop` entry, a macOS `.iconset` |
-| `photocat-icon-64.png` | the same, 64 px | packaging |
-| `photocat-icon-32.png` | the same geometry at 32 px, its alpha a little brighter (`α^0.78`), because a 20 px stroke of the 1024 px file is 0.6 px here | packaging: the smallest size the mark still reads in |
-| `photocat-mark-24.png` | the same geometry at 24 px, `α^0.70` — the size of the mark in the top bar of the window | the top bar, embedded in the binary and **tinted** with the accent of the theme (`#f59e0b` dark, `#b45309` light), so one file is right in both themes |
+## Sources
 
-## How the flat set was derived
+| File | What it is |
+|---|---|
+| `photocat-mark.svg` | the mark, 32×32 units, **the source of every raster below** |
+| `photocat-lockup.svg` | the mark and the word side by side, cropped to the ink |
 
-The originals came as bitmaps (the mark was a JPEG under a `webp` name), so the flat set was cut out
-of them once, by hand, and the files are committed as they came out — nothing regenerates them:
+Both are the owner's drawings, kept verbatim: the paths were not redrawn, only re-wrapped. The colours
+are CSS variables, so one file serves both themes:
 
-1. the bright amber strokes are separated from the plate by a rolling-ball subtraction (a 31 px
-   opening plus an 18 px blur of the mask estimates the baked glow, and the glow is subtracted from
-   the mask), leaving `alpha = f(max channel)`;
-2. the plate and its glowing rim are cut off 60 px from every edge, and islands under 400 px are
-   dropped as specks;
-3. the mark is cropped to its dense part with a 5 % margin, and painted in one flat colour with that
-   alpha;
-4. `256 / 128 / 64` are Lanczos reductions of the 680 px mask; `32` is the same mask with a gamma on
-   the alpha, the one parameter that was tuned by eye on a `#0C0E12` and a `#F8FAFC` background.
+| Variable | What it paints | Dark | Light |
+|---|---|---|---|
+| `photocat-mark` | the ink of the mark | `#f59e0b` | `#b45309` |
+| `photocat-paper` | the plate, and the frame's inner field and the lens through the plate | `#111111` | `#f1f5f9` |
+| `photocat-word` | the word of the lockup | `#e7e8ee` | `#0f172a` |
+| `photocat-band` | the ground strip of the lockup | `#222327` | `#f1f5f9` |
 
-## What the 32 px file does not do
+`transparent` in place of a colour is meaningful for `photocat-paper` and `photocat-band`: the plate or
+the strip disappears and the mark is left as a cut-out. The frame's inner field and the lens are a
+`<mask>`, not dark shapes over the ink, so that a cut-out really has holes in it.
 
-At 16 px the strokes drown, whatever the gamma: a favicon-grade square needs a filled silhouette
-(the head filled, the aperture cut out), which is a drawing and not a reduction. It is not made yet —
-nothing in the program asks for 16 px, and the task that needs it (a web page or a Windows `.ico`)
-says so in `plan/BACKLOG.md`.
+The dark values are the window's `DARK` palette, the light ones its `LIGHT` palette (`src/app.rs`), so
+the logo, the icons of a package and the interface are the same colour. A browser follows the system
+theme by itself (`@media (prefers-color-scheme: light)`); the renderers used below do not read `var()`,
+which is why the script substitutes the values first.
+
+## Rasters — generated, never hand-edited
+
+```bash
+assets/render.sh                # rewrites the PNGs in assets/
+assets/render.sh /tmp/look      # a look somewhere else
+```
+
+Needs `rsvg-convert` (librsvg) or `resvg`. The PNGs are committed, because nothing renders SVG at
+build time: the binary embeds exactly two files, and a compositor or a package reads the rest.
+
+| File | Size | Ink and ground | Who reads it |
+|---|---|---|---|
+| `photocat-mark-48.png` | 48×48 | white on transparency, a hair of stroke (`0.25`) because a 1.2-unit line is 0.9 px at the size it is drawn | the top bar: embedded, drawn at 24 logical px (`BRAND_MARK`) and **tinted** with the accent of the theme, so one file is right in both themes |
+| `photocat-icon-32.png` … `-256.png` | 32, 64, 128, 256 | amber on the plate | the window icon (the 256 px one is embedded) and `hicolor/<size>/apps` of a package — the plate keeps the mark visible on a light desktop |
+| `photocat-1024.png` | 1024×1024 | amber on the plate | a store page, a press kit, a print |
+| `photocat-lockup.png` | 800×230 | dark band, light word | the README in a dark theme |
+| `photocat-lockup-light.png` | 800×230 | light band, dark word | the README in a light theme |
+
+The two lockups are chosen by the reader's theme with `<picture>` + `prefers-color-scheme`, so a
+single README is legible on GitHub's dark and light pages.
+
+## Changing something
+
+- **A size**: a line in `render.sh` (`render "$mark_svg" 64 64 …`). A new size is a file, not a script
+  at build time — the binary embeds one PNG and a missing asset costs the icon, not the window.
+- **A colour**: the palette at the top of `render.sh` and the `<style>` block of the SVG — both, or a
+  browser and the program disagree.
+- **The drawing**: the owner's file. Re-export it and run `render.sh`: the wrapper only adds the
+  `<style>`, the `<mask>` and the crop of the lockup.
+
+## What the rasters do not do
+
+At 16 px the drawing drowns, whatever the stroke: that size needs a filled silhouette (the head
+filled, the aperture cut out), which is a new drawing and not a reduction. Nothing asks for 16 px yet;
+the task that needs it (a Windows `.ico`, a favicon) says so in `plan/BACKLOG.md`.
 
 ## Rules
 
-- A new size is a file, not a script at build time: the binary embeds exactly one PNG, and a missing
-  asset costs the icon, not the window.
 - The mark never appears *inside* the window as a widget or a background (ADR 0048 stays true: the
-  interface is drawn geometry, and its screenshots do not depend on a bitmap).
-- `photocat-1024.png` and `photocat-lockup.png` are the owner's originals: keep them as they came.
+  interface is drawn geometry, and its screenshots do not depend on a bitmap). The one exception is
+  the mark at the left of the top strip, which is chrome, not a screen.
+- A raster is never edited by hand and never generated at build time.

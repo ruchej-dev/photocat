@@ -4312,3 +4312,42 @@ tint back off the shape in both palettes) + `source_language` 3, `clippy --all-t
 **Documents.** `docs/UI.md` + `.ru.md` (the top strip: the logo, the two accents, `BRAND_MARK`),
 `assets/README.md` (the 24 px row and why it is tinted), `plan/BACKLOG.md` § M26.20,
 `CHANGELOG.md` + `CHANGELOG.ru.md`, `docs/DECISIONS.md` ADR 0052 (the flat set and the tint).
+
+## M26.21 — the mark is SVG with theme variables; the rasters are rendered from it (2026-11-27)
+
+The owner redrew the logo as SVG: `~/Pictures/photocat.svg` (the mark, 32×32 units) and
+`~/Pictures/photocat_lockup.svg` (the lockup, a 512 square with a band). Both were wrapped into the
+repository — the paths verbatim, nothing redrawn — as `assets/photocat-mark.svg` and
+`assets/photocat-lockup.svg`, with three changes of substance.
+
+**The colours are variables.** `photocat-mark`, `photocat-paper`, `photocat-word`, `photocat-band`,
+defaulted to the window's `DARK` palette and redefined under `@media (prefers-color-scheme: light)`
+with `LIGHT`'s values (`#b45309` ink on `#f1f5f9` ground). A browser follows the system theme by
+itself; the renderers here do not read `var()`, so `assets/render.sh` substitutes the palette after
+dropping `<style>` and then rasterises.
+
+**The cut-outs are holes.** In the owner's file the frame's inner field and the lens are dark shapes
+painted over the ink, which only works on the dark plate. Both moved into a `<mask>`, so
+`photocat-paper: transparent` gives a real cut-out. Without the mask the first 24 px render was a
+solid blob — the check that caught it was looking at the PNG, not at the numbers.
+
+**One source, eight rasters.** `assets/render.sh` (needs `rsvg-convert` or `resvg`) writes
+`photocat-mark-48.png` (white ink, `0.25`-unit stroke — a 1.2-unit line is 0.9 px at the 24 logical px
+the strip draws it in), `photocat-icon-{32,64,128,256}.png` (amber on the plate, for the window icon
+and `hicolor`), `photocat-1024.png` (a store page, a press kit) and the two lockups at 800×230. The old
+rasters are gone: the plate-and-glow 1024 file and the cut-outs cut out of it by hand in M26.19 are
+replaced by renders of the same drawing.
+
+The lockup's `viewBox` is cropped to the ink (the 512 square was mostly air): `64 192 376 108`, which
+is what the 800×230 renders measure. The README picks a lockup per theme with
+`<picture>` + `prefers-color-scheme`, so one file reads well on GitHub's dark and light pages.
+
+Measured: `assets/render.sh` 1.4 s for all eight files, sizes 0.5–76 KiB (the 1024 px copy is the
+largest); `cargo test` 366 passed + `source_language` 3, `clippy --all-targets` clean, `check.sh` 55,
+`rust-analyzer diagnostics` no errors; the screenshot of the running window shows the new mark in the
+top strip.
+
+**Documents.** `assets/README.md` (rewritten: variables, palette, sizes, the render command, the naming
+of the lockup), `docs/DECISIONS.md` + `.ru.md` ADR 0052 (SVG as the source, PNGs committed, no SVG
+parser in the binary), `docs/UI.md` + `.ru.md` (the strip's file), `README.md` + `.ru.md` (`<picture>`),
+`plan/BACKLOG.md` § M26.21, `CHANGELOG.md` + `CHANGELOG.ru.md`.

@@ -1411,14 +1411,16 @@ a name (a group that loses its label takes its proposals with it).
 ## 0052. The mark lives in `assets/` and the window carries it; the UI icons stay drawn geometry
 
 **Decision (2026-11-27).** The logo is a cat head whose outline is a stack of photo frames with an
-aperture for an eye — the name read twice; the lockup adds the word `photocat`. Both are kept as PNG
-in `assets/` (`photocat-1024.png`, `photocat-lockup.png`), and so is the **flat cut-out** of the mark
-— its strokes alone on transparency, without the dark plate and the glow of the 1024 px file, because
-a light desktop must see the mark and not a dark tile around it. The 256 px cut-out
-(`photocat-icon-256.png`) is embedded in the binary with `include_bytes!` and handed to
-`egui::ViewportBuilder::with_icon`; 32/64/128 px live next to it for packaging, and 32 px is the
-smallest size the mark still reads in. No new dependency: `image` already decodes PNG for the
-previews, and the icon is decoded once at start.
+aperture for an eye — the name read twice; the lockup adds the word `photocat`. The **source is SVG**
+(`photocat-mark.svg`, `photocat-lockup.svg`, M26.21), with the colours as CSS variables —
+`photocat-mark`, `photocat-paper`, `photocat-word`, `photocat-band` — set to the palette's amber and
+plate, so one drawing serves both themes and a browser follows the system by itself. The frame's inner
+field and the lens are a `<mask>`, so the cut-out really has holes and the mark sits on any
+background. The PNGs are **rendered from those sources by `assets/render.sh`** and committed: the
+binary embeds two of them — the 256 px mark on its plate as the window icon
+(`egui::ViewportBuilder::with_icon`) and the 48 px white mark of the top strip, drawn at 24 logical px
+and tinted with the theme's accent. No new dependency: `image` already decodes PNG for the previews,
+and each icon is decoded once at start.
 
 **Why.** The window had no icon and the repository had no mark; a family-archive program that the
 owner launches from a dock has to be findable there in a second, the same rule the interface follows.

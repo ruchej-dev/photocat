@@ -1,4 +1,7 @@
-![photocat](assets/photocat-lockup.png)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/photocat-lockup-light.png">
+  <img alt="photocat" src="assets/photocat-lockup.png" width="800">
+</picture>
 
 # photocat
 

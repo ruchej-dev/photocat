@@ -2752,6 +2752,38 @@ lines) → 53×15 in a 73×20 box; English unchanged at 28×15 in 70×20. `cargo
 **Not doing.** A second light-theme asset; the logo inside the window anywhere but the top bar (ADR
 0048 stays); a filled 16 px silhouette; a wrap of the words of the "keep" target instead of a wider box.
 
+**M26.21 — the mark as SVG with theme variables, and the rasters rendered from it.** ✅ (done 2026-11-27)
+**Goal.** The drawing has one source, its colours are named, and every PNG — the window icon, the
+packaging sizes, the store copy, the two lockups of the README — comes out of that source by a command
+that can be repeated.
+**Source.** The owner's message of 2026-11-27 with two SVG files: "К svg сделай цвета через
+переменные, чтобы под темы адаптировать. Подгони под нужный размер. Замени старые растры."
+**Acceptance criteria.**
+1. `assets/photocat-mark.svg` and `assets/photocat-lockup.svg` carry the owner's paths verbatim, the
+   colours as CSS variables (`photocat-mark`, `photocat-paper`, `photocat-word`, `photocat-band`),
+   defaults for the dark palette and a `prefers-color-scheme: light` block for the light one.
+2. `transparent` in place of `photocat-paper`/`photocat-band` yields a real cut-out: the frame's inner
+   field and the lens are a `<mask>`, not dark shapes over the ink.
+3. `assets/render.sh` renders every committed PNG from those sources at the sizes the program and the
+   packages ask for; the palettes are the window's `DARK`/`LIGHT` values.
+4. The old rasters are replaced: the window icon is the 256 px render on the plate, the top bar uses
+   a 48 px white render drawn at 24 px and tinted, and the README shows the lockup of the reader's
+   theme (`<picture>` + `prefers-color-scheme`).
+5. `assets/README.md` states the variables, the palette, the sizes, who reads each file and how to
+   change one; ADR 0052 is amended; no SVG is parsed at run time (ADR 0048 stays true).
+**Files.** `assets/*.svg`, `assets/render.sh`, `assets/*.png`, `src/app.rs`, `README.md` + `.ru.md`,
+`docs/UI.md` + `.ru.md`, `docs/DECISIONS.md` + `.ru.md`, `plan/STATUS.md`, `CHANGELOG.md`,
+`CHANGELOG.ru.md`.
+**Done (2026-11-27).** Eight PNGs out of two SVGs and one script (needs `rsvg-convert` or `resvg`; the
+renderers do not read `var()`, so the script substitutes the palette after dropping `<style>`). The
+mark keeps its holes through a `<mask>` — without it a cut-out would be a solid blob at 24 px, which
+is how the first attempt looked. The 24 px drawing is under a pixel per line, so its render gets a
+`0.25`-unit stroke. `cargo test` 366 passed + `source_language` 3, `clippy`, `check.sh` 55,
+`rust-analyzer` clean; the screenshot of the running window shows the new mark in the strip.
+**Not doing.** A 16 px render (a filled silhouette is a new drawing); an SVG renderer inside the
+binary (a dependency for a file that never changes); editing a PNG by hand; a second colour scheme
+per file.
+
 **Not doing.** A 16 px file (the strokes drown whatever the gamma: that size needs a filled
 silhouette, a drawing and not a reduction — `assets/README.md` says so); an SVG or a font-based mark
 (a renderer we do not have); the logo inside the window as a widget or a background (ADR 0048 stays);
