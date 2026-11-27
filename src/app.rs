@@ -7811,20 +7811,24 @@ impl App {
     /// mode switch, the query, "Search", "×") and the tools on the right — the tile size, the
     /// details toggle and "Settings" (the state moved into the status bar, M25.8). The folder and "Index" live in
     /// the left panel: they are work with the archive, not a search (M22.19).
-    /// The mark of the top bar: the alpha of the logo, made white so that `tint` decides the colour
-    /// — the dark theme paints it `#f59e0b`, the light one `#b45309`, and a third theme would need no
-    /// new file. The texture is made once and kept in `App`.
+    /// The mark of the top bar: the logo drawn white (`assets/render.sh` renders the SVG with the
+    /// "photocat-mark" variable set to `#ffffff`), so that `tint` decides the colour — the dark theme
+    /// paints it `#f59e0b`, the light one `#b45309`, and a third theme would need no new file. The
+    /// file is 48 px for a `BRAND_MARK` of 24: a HiDPI screen then gets real pixels. The texture is
+    /// made once and kept in `App`.
     fn mark_texture(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         if let Some(tex) = &self.mark_tex {
             return Some(tex.clone());
         }
-        const PNG: &[u8] = include_bytes!("../assets/photocat-mark-24.png");
+        const PNG: &[u8] = include_bytes!("../assets/photocat-mark-48.png");
         let img = image::load_from_memory_with_format(PNG, image::ImageFormat::Png)
             .ok()?
             .to_rgba8();
         let (w, h) = img.dimensions();
         let mut rgba = img.into_raw();
-        // A tint multiplies the texture, so the texture is white and the theme owns the colour.
+        // A tint multiplies the texture, so the texture is white and the theme owns the colour. The
+        // file is white already; the pixels are set here as well, so a coloured export cannot make
+        // the mark of one theme wrong without a test noticing.
         for px in rgba.chunks_mut(4) {
             px[0] = 255;
             px[1] = 255;

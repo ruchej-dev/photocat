@@ -23,8 +23,10 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
 - Automatic face matches wait in a quarantine until the owner confirms them: “Quarantine · N” in the
   group list, “Confirm all”, and `faces --quarantine` / `confirm` / `reject` [M26.17].
 - The mark: the cat-aperture logo and its lockup in `assets/`, and the window carries the icon — the
-  flat 256 px cut-out of the mark, embedded in the binary, with 32/64/128 px files for packaging
-  [M26.19].
+  256 px mark on its plate, embedded in the binary, with 32/64/128 px files for packaging [M26.19].
+- The mark and the lockup as SVG with the colours in CSS variables (`photocat-mark`,
+  `photocat-paper`, `photocat-word`, `photocat-band`), rendered into every PNG by `assets/render.sh`,
+  and the README picks the lockup that matches the reader's theme [M26.21].
 
 ### Changed
 

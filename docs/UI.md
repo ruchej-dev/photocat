@@ -142,7 +142,7 @@ the interface rules at the end of the file.
   `text_dim` on the right) → a 2 px accent selection outline and a square check flag. The list view
   keeps the same words and accent: a row with a 58×40 thumbnail, the name and the date · size.
 - **The top strip is 32 px and one row** (M22.19, after `photocat_1`): the mark — since M26.20 the
-  **logo itself**, `assets/photocat-mark-24.png` at 24 px, painted in the accent of the theme
+  **logo itself**, `assets/photocat-mark-48.png` drawn at 24 px, painted in the accent of the theme
   (`#f59e0b` dark, `#b45309` light: one texture tinted, not a second file and not a drawn glyph) — and
   "photocat" at 14 px 6 px after it; one search field in the middle (the
   search glyph, the "Semantic / By text" mode switch with its arrow, the query, "Search" in the
