@@ -49,15 +49,17 @@ render() { # render <svg> <width> <height> <mark> <paper|band> <word> <file> [st
                -e "s|<g id=\"blades\"|<g id=\"blades\" stroke=\"$mark\" stroke-width=\"$stroke\"|" \
                "$tmp/render.svg"
     fi
+    local size=(-w "$w")
+    [ -n "$h" ] && size=(-w "$w" -h "$h")
     if command -v rsvg-convert >/dev/null; then
-        rsvg-convert -w "$w" -h "$h" -o "$file" "$tmp/render.svg"
+        rsvg-convert "${size[@]}" -o "$file" "$tmp/render.svg"
     elif command -v resvg >/dev/null; then
-        resvg -w "$w" -h "$h" "$tmp/render.svg" "$file"
+        resvg "${size[@]}" "$tmp/render.svg" "$file"
     else
         echo "no SVG renderer: install librsvg (rsvg-convert) or resvg" >&2
         exit 1
     fi
-    echo "  $(basename "$file")  ${w}x${h}"
+    echo "  $(basename "$file")  ${w}x${h:-auto}"
 }
 
 echo "the mark, for the program:"
@@ -74,11 +76,14 @@ done
 render "$mark_svg" 1024 1024 "$dark_mark" "$dark_paper" '' "$out/photocat-1024.png"
 
 echo "the lockup, for the READMEs:"
-# 800 px wide, the proportions of the cropped viewBox (376:108).
+# 800 px is the width the README shows it at, and the viewBox is 800 by 220 already: the file is
+# rendered at its own size, so nothing is downscaled and the ink stays where it was framed — equal
+# air on all four sides. The height follows the viewBox; it is never passed here, because a width and
+# a height that disagree with the aspect ratio stretch the drawing.
 for theme in dark light; do
     mark=$dark_mark; ground=$dark_band; word=$dark_word
     if [ "$theme" = light ]; then mark=$light_mark; ground=$light_band; word=$light_word; fi
     suffix=''
     [ "$theme" = light ] && suffix='-light'
-    render "$lockup_svg" 800 230 "$mark" "$ground" "$word" "$out/photocat-lockup$suffix.png"
+    render "$lockup_svg" 800 '' "$mark" "$ground" "$word" "$out/photocat-lockup$suffix.png"
 done
