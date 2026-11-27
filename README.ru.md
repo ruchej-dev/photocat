@@ -5,6 +5,8 @@
 
 *English version: [README.md](README.md).*
 
+Что менялось и когда: [CHANGELOG.ru.md](CHANGELOG.ru.md).
+
 ## Сборка
 
 ```bash

@@ -174,6 +174,15 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
 ## 6. Change rules
 
 - One commit — one topic; the message is in English, imperative, about the essence, not "fix".
+- **The changelog is part of the change.** A commit that changes what the owner sees, what a command
+  does or what appears on disk adds one line under `## [Unreleased]` in `CHANGELOG.md` — in the same
+  commit, in the imperative or as a short noun phrase, with the milestone in brackets when it has one
+  (`[M26.14]`) — and the same line in `CHANGELOG.ru.md`. Keep a Changelog format
+  (`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`), SemVer versions; the line
+  says *what* changed, `plan/STATUS.md` keeps *how* and the numbers. A release takes the
+  `[Unreleased]` section, gives it a version and a date, bumps `version` in `Cargo.toml` and starts a
+  new empty section. A changelog that lies is a defect: an entry without the milestone that has it, or
+  a merged change with no entry, is fixed in the next commit.
 - Documents that describe behaviour (`docs/`, `plan/`) are updated first, then the code — in the same
   commit.
 - **Documentation and commit messages are English.** The Russian documentation is kept as the second

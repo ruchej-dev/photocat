@@ -6,6 +6,8 @@ modified.
 
 *Русская версия: [README.ru.md](README.ru.md).*
 
+What changed and when: [CHANGELOG.md](CHANGELOG.md).
+
 ## Build
 
 ```bash
