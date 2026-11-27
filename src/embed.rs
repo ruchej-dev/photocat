@@ -1805,6 +1805,10 @@ fn http_get(
             Ok(()) => return Ok(()),
             Err(e) => {
                 last = format!("attempt {attempt}: {e}");
+                // A stopped transfer is not retried: "Stop" is the owner's answer, not a flaky network.
+                if progress.is_some_and(|p| p.cancelled()) {
+                    break;
+                }
                 // A short pause and a fresh attempt: the retry is for a flaky network, not for a 404.
                 std::thread::sleep(std::time::Duration::from_secs(attempt));
             }
@@ -1834,6 +1838,11 @@ fn copy_body(
     let mut done: u64 = 0;
     let mut shown: u64 = 0;
     loop {
+        // "Stop" (M26.5): the model download is the one network transfer the owner can interrupt.
+        // The partial file fails the sha256 check next time, so nothing half-written is trusted.
+        if progress.is_some_and(|p| p.cancelled()) {
+            bail!("the download was stopped");
+        }
         let n = std::io::Read::read(&mut body, &mut buf)
             .with_context(|| format!("reading {url}"))?;
         if n == 0 {

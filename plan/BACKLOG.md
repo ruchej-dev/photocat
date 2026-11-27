@@ -1810,7 +1810,7 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 
 **Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 (done 2026-11-27) a warning
 mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 (done 2026-11-27) the
-Windows top strip is as tall as the design says; M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
+Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
@@ -2045,7 +2045,7 @@ the old code with "at 1 the strip is 42 px instead of 32"); `cargo test` 341 pas
 `cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
 `rust-analyzer diagnostics` 0 errors. The owner's review on the Windows window is the last word.
 
-**M26.5 — the face settings live on the People screen.**
+**M26.5 — the face settings live on the People screen.** ✅ (done 2026-11-27)
 **Goal.** The People screen owns its model, threshold and passes, as the calendar owns its layers —
 the settings dialog stops carrying a second screen for one view.
 
@@ -2066,6 +2066,32 @@ consent, the threshold and "Rebuild groups"; the pass starts, stops and reports;
 the screen in both languages.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**Done.** The "People" pane is now the block of the People screen's left panel and
+`SettingsTab::Faces` with `settings_faces` is gone: the dialog keeps seven sections and the section
+list, its mono values (`EN`, `512 dims`, the file count, the tag count, `3/3`) and the shape of the
+frame lose one row. The block carries the state line `buffalo_l · 182.4 MiB · in place / not
+downloaded` in the accent or dim tone, the licence line `SCRFD and ArcFace (InsightFace buffalo_l):
+non-commercial research use` at 10 px, the consent tick and the accent "Download the face model"
+with "the button is disabled: network consent is required" under it, the progress bar at the panel
+width (`face files: N/M`, its message under it) and one "Stop" that cancels the transfer; with the
+weights in place the download row makes room for "Check the face model", so the usual state is
+short. The threshold slider and "Rebuild groups" stay where they were, and the long threshold hint
+moved into the slider's tooltip. Stopping a download needed a check the downloader never had:
+`embed::copy_body` bails when the progress is cancelled and `fetch_with_fallback` does not retry a
+stopped transfer, so the 16 KiB loop ends within a chunk instead of downloading 176 MiB to the end;
+the App then says "the face model download is stopped: the pass can be started again" instead of
+reporting a failure. The face pass, its "People" row in the top strip and the group list in the
+right panel are untouched; no DB schema, no table and no archive file changed. Measured: the new
+`the_people_screen_owns_its_face_model_settings` renders the screen at 1240×1400 and finds the
+state line, the licence, the consent, the download and its hint, `face files: 0/2` with a "Stop",
+`Merge threshold: 0.45` and "Rebuild groups", then renders the dialog at 1240×840 in both
+languages and finds no "People"/"Лица" row in the section list (the old code fails it). On a copy of
+the real DB (2232 files, 2498 faces in 617 groups) the People screen keeps its price — p50 10.16 ms
+dark / 10.11 ms light, against 10.27 / 9.61 of M22.26 — and the dialog, one section shorter, is
+p50 5.68–7.79 ms with the tag dictionary still the heaviest. `cargo test` 342 passed,
+`cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics` 0 errors. The owner's review on the real window is the last word.
 
 **M26.6 — the layout survives a narrow window.**
 **Goal.** At any width from 700 to 2539 px no control overlaps another, nothing is cut off and the
@@ -2327,16 +2353,16 @@ Every section is walked once and its components are checked against the pane the
 чтобы не прыгало при смене раздела; проверить вёрстку компонентов окна настроек на всех разделах".
 
 **What happens today (measured 2026-11-26, the test corpus, 1240×840).** The dialog asks for
-760×620 of content (`ui.set_min_size`) and its frame comes out 794×654 — the same in seven of the
-eight sections. In "Tags" the frame is 966×654: the action row of the tag dictionary ("Add to the
-dictionary", "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults") is one
-`ui.horizontal` of 716.1 px inside the 520 px column, a horizontal row does not wrap, and its width
-propagates through the pane up to the frame — the dialog widens by 172 px and shifts 86 px to the
-left. The pane itself is 1850 px tall there, so the vertical overflow already scrolls as it should;
-the width is what is unpinned.
+760×620 of content (`ui.set_min_size`) and its frame comes out 794×654 — the same in six of the
+seven sections (the "People" section left the dialog in M26.5). In "Tags" the frame is 966×654: the
+action row of the tag dictionary ("Add to the dictionary", "Recompute tags", "Export JSON",
+"Import JSON", "Restore the defaults") is one `ui.horizontal` of 716.1 px inside the 520 px column,
+a horizontal row does not wrap, and its width propagates through the pane up to the frame — the
+dialog widens by 172 px and shifts 86 px to the left. The pane itself is 1850 px tall there, so the
+vertical overflow already scrolls as it should; the width is what is unpinned.
 
 **Acceptance criteria.**
-1. First the measurement, then the fix: all eight sections in both languages at 1240×840 and at the
+1. First the measurement, then the fix: all seven sections in both languages at 1240×840 and at the
    narrow sizes of M26.6 (900×700, 700×600) are rendered and every section whose content asks for
    more than its pane is named with the row that does it; the table goes to `plan/STATUS.md`.
 2. The dialog's outer rectangle is identical (±0.5 px) in every section and in every state of a
@@ -2354,7 +2380,7 @@ the width is what is unpinned.
    a field is not narrower than its content needs (a path ≥120 px, the model name truncated with its
    hint), a wrapping row does not break the 26 px line height, a checkbox keeps its word on one line,
    a long hint wraps instead of being cut. Both languages are checked — the Russian words are longer.
-6. Tests: a headless test renders all eight sections twice (the modal fades in) and asserts the same
+6. Tests: a headless test renders all seven sections twice (the modal fades in) and asserts the same
    frame rect and the same "Close" position across the sections at 1240×840, 900×700 and 700×600; a
    test asserts that no widget rect crosses the pane's right edge (the bounds helpers of M26.6 are
    reused); a section with a 40-character tag label and a 500-character prompt keeps the frame's
@@ -2363,14 +2389,14 @@ the width is what is unpinned.
    vertical scroll and the "no row widens the pane" rule; `plan/STATUS.md` carries the measurement
    per section before and after; `plan/I18N.md` is checked for the changed labels.
 
-**Acceptance.** Switching sections never moves or resizes the frame; the table "eight sections ×
+**Acceptance.** Switching sections never moves or resizes the frame; the table "seven sections ×
 two languages × three window sizes" has one size per window size; the Tags action row fits its
 column; a headless frame of "Tags" at 1240×840 in both languages.
 
 **Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`, `plan/I18N.md`.
 
 **Not doing.** A resizable or draggable dialog; animating the size change; restructuring a section
-beyond the rows that overflow (the dialog stays as wide as it is today in seven sections).
+beyond the rows that overflow (the dialog stays as wide as it is today in six sections).
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog

@@ -374,33 +374,31 @@ enum SettingsTab {
     Model,
     Index,
     Tags,
-    Faces,
     Storage,
     Text,
     Tools,
 }
 
 impl SettingsTab {
-    const ALL: [SettingsTab; 8] = [
+    const ALL: [SettingsTab; 7] = [
         SettingsTab::Interface,
         SettingsTab::Model,
         SettingsTab::Index,
         SettingsTab::Tags,
-        SettingsTab::Faces,
         SettingsTab::Storage,
         SettingsTab::Text,
         SettingsTab::Tools,
     ];
 
     /// The icon of the section: the mock-up's Material Symbols by name (`settings`,
-    /// `psychology`, `folder_supervised`, `label`, `face`, `inventory_2`, `terminal`).
+    /// `psychology`, `folder_supervised`, `label`, `inventory_2`, `terminal`). The face model has
+    /// no section of its own: it lives on the People screen (M26.5).
     fn icon(self) -> Icon {
         match self {
             SettingsTab::Interface => Icon::Settings,
             SettingsTab::Model => Icon::Psychology,
             SettingsTab::Index => Icon::FolderSpecial,
             SettingsTab::Tags => Icon::Label,
-            SettingsTab::Faces => Icon::Face,
             SettingsTab::Storage => Icon::Inventory,
             SettingsTab::Text => Icon::TextFields,
             SettingsTab::Tools => Icon::Terminal,
@@ -415,7 +413,6 @@ impl SettingsTab {
                 SettingsTab::Model => "AI model",
                 SettingsTab::Index => "Indexing & duplicates",
                 SettingsTab::Tags => "Tags",
-                SettingsTab::Faces => "People",
                 SettingsTab::Storage => "Storage",
                 SettingsTab::Text => "Text on photos",
                 SettingsTab::Tools => "External tools",
@@ -4353,10 +4350,6 @@ impl App {
             self.tag_defs.iter().filter(|d| d.enabled).count().to_string(),
         );
         section_notes.insert(
-            SettingsTab::Faces,
-            format!("{:.2}", self.settings.face_threshold),
-        );
-        section_notes.insert(
             SettingsTab::Tools,
             format!(
                 "{}/{}",
@@ -5421,7 +5414,6 @@ impl App {
             SettingsTab::Model => self.settings_model(ui),
             SettingsTab::Index => self.settings_index(ui),
             SettingsTab::Tags => self.settings_tags(ui),
-            SettingsTab::Faces => self.settings_faces(ui),
             SettingsTab::Storage => self.settings_storage(ui),
             SettingsTab::Text => self.settings_text(ui),
             SettingsTab::Tools => self.settings_tools(ui),
@@ -6236,99 +6228,6 @@ impl App {
             let r = embed::retag(&db_path, 8, Some(progress));
             let _ = tx.send(r);
         });
-    }
-
-    fn settings_faces(&mut self, ui: &mut egui::Ui) {
-        let lang = self.settings.lang;
-        let present = faces::model_present(&self.settings);
-        ui.label(
-            egui::RichText::new(format!(
-                "{} · {} · {}",
-                faces::MODEL_ID,
-                db::human_in(lang, faces::model_bytes(&self.settings)),
-                if present {
-                    t(lang, "in place")
-                } else {
-                    t(lang, "not downloaded")
-                }
-            ))
-            .size(12.0)
-            .color(if present { accent(ui) } else { dim(ui) }),
-        );
-        ui.add_space(12.0);
-        ui.label(
-            egui::RichText::new(t(lang, "Face merge threshold (cosine)"))
-                .size(12.0)
-                .color(dim(ui)),
-        );
-        ui.add_space(2.0);
-        let r =
-            ui.add(egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70).step_by(0.01));
-        if r.drag_stopped() || r.lost_focus() {
-            self.save_settings();
-        }
-        ui.label(
-            egui::RichText::new(t(
-                lang,
-                "A higher threshold — fewer false merges, but one person may split into groups. The SCRFD and ArcFace models are ONNX, local.",
-            ))
-            .size(11.0)
-            .color(dim(ui)),
-        );
-        ui.add_space(12.0);
-        ui.checkbox(
-            &mut self.face_download_consent,
-            t(lang, "I allow the face weights to be downloaded (photos are not sent)"),
-        );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            let b = WordButton::primary(Icon::Download, t(lang, "Download the face model"));
-            if ui
-                .add_enabled(
-                    self.face_download_consent && self.face_download_rx.is_none(),
-                    b,
-                )
-                .clicked()
-            {
-                self.start_face_download();
-            }
-            if word_button(ui, Icon::CheckCircle, t(lang, "Check the face model")).clicked() {
-                match faces::check_model(&self.settings) {
-                    Ok(()) => {
-                        self.status =
-                            t(lang, "the face model is checked: sha256 matched").into()
-                    }
-                    Err(e) => {
-                        self.status = format!("{}: {e:#}", t(lang, "the face model is not ready"))
-                    }
-                }
-            }
-        });
-        if !self.face_download_consent {
-            ui.label(
-                egui::RichText::new(t(lang, "the button is disabled: network consent is required"))
-                    .size(11.0)
-                    .color(dim(ui)),
-            );
-        }
-        if let Some(p) = &self.face_download_progress {
-            let (done, total) = (p.done(), p.total());
-            let frac = if total > 0 {
-                done as f32 / total as f32
-            } else {
-                0.0
-            };
-            ui.add(
-                egui::ProgressBar::new(frac)
-                    .desired_width(380.0)
-                    .text(if total > 0 {
-                        format!("{}: {done}/{total}", t(lang, "face files:"))
-                    } else {
-                        p.msg()
-                    }),
-            );
-            ui.label(egui::RichText::new(p.msg()).size(11.0).color(dim(ui)));
-        }
     }
 
     fn settings_storage(&mut self, ui: &mut egui::Ui) {
@@ -7479,11 +7378,14 @@ impl App {
         });
     }
 
-    /// The context of the "Faces" view: the threshold, the pass over the photos, the regrouping and
-    /// the "all together" search. The list of groups is the right panel of the screen (M22.26);
-    /// only a narrow window keeps it here.
+    /// The controls of the "Faces" view — the whole of what the settings dialog used to keep in a
+    /// section of its own (M26.5): the model with its licence, the consent and the download, the
+    /// merge threshold, the pass over the photos, the regrouping and the "all together" search. The
+    /// list of groups is the right panel of the screen (M22.26); only a narrow window keeps it here.
     fn faces_controls(&mut self, ui: &mut egui::Ui, show_lists: bool) {
         let lang = self.settings.lang;
+        let model = faces::model_present(&self.settings);
+        let downloading = self.face_download_rx.is_some();
         block(ui, |ui| {
             ui.label(
                 egui::RichText::new(t(lang, "People"))
@@ -7491,6 +7393,91 @@ impl App {
                     .color(dim(ui)),
             );
             ui.add_space(4.0);
+            // The model, its size and its licence: the weights come by the owner's press only and
+            // never leave the machine afterwards.
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · {} · {}",
+                    faces::MODEL_ID,
+                    db::human_in(lang, faces::model_bytes(&self.settings)),
+                    if model {
+                        t(lang, "in place")
+                    } else {
+                        t(lang, "not downloaded")
+                    }
+                ))
+                .size(11.0)
+                .color(if model { accent(ui) } else { dim(ui) }),
+            );
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
+                ))
+                .size(10.0)
+                .color(dim(ui)),
+            );
+            // The consent and the download stand here only while the weights are missing or coming:
+            // with the model in place the block keeps its room for the pass (M26.5).
+            if !model || downloading {
+                ui.add_space(4.0);
+                ui.checkbox(
+                    &mut self.face_download_consent,
+                    t(lang, "I allow the face weights to be downloaded (photos are not sent)"),
+                );
+                if ui
+                    .add_enabled(
+                        self.face_download_consent && !downloading,
+                        WordButton::primary(Icon::Download, t(lang, "Download the face model")),
+                    )
+                    .clicked()
+                {
+                    self.start_face_download();
+                }
+                if !self.face_download_consent {
+                    ui.label(
+                        egui::RichText::new(t(
+                            lang,
+                            "the button is disabled: network consent is required",
+                        ))
+                        .size(10.0)
+                        .color(dim(ui)),
+                    );
+                }
+                if let Some(p) = &self.face_download_progress {
+                    let (done, total) = (p.done(), p.total());
+                    let frac = if total > 0 {
+                        done as f32 / total as f32
+                    } else {
+                        0.0
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .desired_width(ui.available_width())
+                            .text(if total > 0 {
+                                format!("{} {done}/{total}", t(lang, "face files:"))
+                            } else {
+                                p.msg()
+                            }),
+                    );
+                    ui.label(egui::RichText::new(p.msg()).size(10.0).color(dim(ui)));
+                    if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked() {
+                        p.cancel();
+                        self.status = t(lang, "the face model download: stopping…").into();
+                    }
+                }
+            } else if word_button(ui, Icon::CheckCircle, t(lang, "Check the face model")).clicked()
+            {
+                match faces::check_model(&self.settings) {
+                    Ok(()) => {
+                        self.status = t(lang, "the face model is checked: sha256 matched").into()
+                    }
+                    Err(e) => {
+                        self.status = format!("{}: {e:#}", t(lang, "the face model is not ready"))
+                    }
+                }
+            }
+            ui.add_space(6.0);
             ui.label(egui::RichText::new(format!(
                 "{} {:.2}",
                 t(lang, "Merge threshold:"),
@@ -7502,18 +7489,10 @@ impl App {
             if r.drag_stopped() || r.lost_focus() {
                 self.save_settings();
             }
-            let model = faces::model_present(&self.settings);
-            if !model {
-                ui.label(
-                    egui::RichText::new(t(lang, "face model not downloaded"))
-                        .size(11.0)
-                        .color(dim(ui)),
-                );
-                if word_button(ui, Icon::Settings, t(lang, "Face settings")).clicked() {
-                    self.settings_open = true;
-                    self.settings_tab = SettingsTab::Faces;
-                }
-            }
+            r.on_hover_text(t(
+                lang,
+                "A higher threshold — fewer false merges, but one person may split into groups. The SCRFD and ArcFace models are ONNX, local.",
+            ));
             let found = i18n::fill(lang, "{} faces in {} photos, {} groups", &[self.face_faces.to_string(), self.face_photos.to_string(), self.face_clusters.len().to_string()]);
             ui.label(egui::RichText::new(found).size(11.0).color(dim(ui)));
             let todo = {
@@ -14011,6 +13990,12 @@ impl eframe::App for App {
         if let Some(rx) = &self.face_download_rx {
             match rx.try_recv() {
                 Ok(res) => {
+                    // A stop is not a failure: the transfer ends with an error, and the owner is
+                    // told what he asked for (M26.5).
+                    let stopped = self
+                        .face_download_progress
+                        .as_ref()
+                        .is_some_and(|p| p.cancelled());
                     self.face_download_rx = None;
                     self.face_download_progress = None;
                     match res {
@@ -14021,8 +14006,11 @@ impl eframe::App for App {
                         }
                         Err(e) => {
                             let lang = self.settings.lang;
-                            self.status =
+                            self.status = if stopped {
+                                t(lang, "the face model download is stopped: the pass can be started again").into()
+                            } else {
                                 format!("{}: {e:#}", t(lang, "face model not downloaded"))
+                            };
                         }
                     }
                 }
@@ -18429,6 +18417,89 @@ mod tests {
         }
     }
 
+    /// M26.5: the "People" pane of the settings dialog lives on the People screen now — the model
+    /// with its licence, the consent and "Download the face model" with its progress and "Stop",
+    /// the merge threshold and "Rebuild groups" — and the dialog keeps no section for it.
+    #[test]
+    fn the_people_screen_owns_its_face_model_settings() {
+        let mut app = App::new(std::path::PathBuf::from(
+            "/tmp/photocat-test-people-settings.db",
+        ));
+        app.settings.models_dir = std::env::temp_dir().join("photocat-test-faces-never-downloaded");
+        app.settings.face_threshold = 0.45;
+        app.settings.lang = i18n::Lang::En;
+        app.face_faces = 2;
+        app.face_photos = 1;
+        app.face_images = 3;
+        app.face_todo = 2;
+        app.face_clusters = vec![db::FaceCluster {
+            id: 7,
+            label: "Lisa".into(),
+            faces: 2,
+            photos: 1,
+        }];
+        app.view = View::Faces;
+        let ctx = egui::Context::default();
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1400.0));
+        for needle in [
+            "Download the face model",
+            "the button is disabled: network consent is required",
+            "Merge threshold: 0.45",
+            "Rebuild groups",
+            "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
+        ] {
+            assert!(
+                texts.iter().any(|t| t == needle),
+                "missing “{needle}” on the People screen: {texts:?}"
+            );
+        }
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains(super::faces::MODEL_ID) && t.contains("not downloaded")),
+            "the model state is not on the screen: {texts:?}"
+        );
+        // A running download shows its progress and one "Stop": the transfer can be interrupted.
+        let p = std::sync::Arc::new(db::Progress::default());
+        p.set_total(2);
+        app.face_download_progress = Some(p);
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1400.0));
+        assert!(
+            texts.iter().any(|t| t == "face files: 0/2"),
+            "the progress of the download is not on the screen: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Stop"),
+            "the download cannot be stopped: {texts:?}"
+        );
+        app.face_download_progress = None;
+        // The dialog keeps no section for a screen that holds its own settings.
+        assert!(
+            !SettingsTab::ALL
+                .iter()
+                .any(|s| s.label(i18n::Lang::En) == "People"),
+            "the settings dialog still has a People section"
+        );
+        app.settings_open = true;
+        // The rows of the section list stand in the left column of the dialog, under its heading;
+        // the words of the screen behind the modal (the view title, the navigation) do not count.
+        // A modal knows its size on the second frame, so every language is drawn twice.
+        for lang in i18n::Lang::ALL {
+            app.settings.lang = lang;
+            let _ = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+            let drawn = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+            let word = t(lang, "People");
+            assert!(
+                !drawn.iter().any(|(text, pos)| text == word
+                    && pos.x > 270.0
+                    && pos.x < 440.0
+                    && pos.y > 150.0
+                    && pos.y < 500.0),
+                "the section list still holds “{word}” under {lang:?}: {drawn:?}"
+            );
+        }
+    }
+
     /// M22.26: the group list is the right panel of the "People" screen, and the ribbon carries
     /// no dead cell-view switch there: the face tiles have one look of their own.
     #[test]
@@ -19064,7 +19135,8 @@ mod tests {
     }
 
     /// M21.4f: the sections of the "Settings" dialog are translated completely: the model, the
-    /// indexing, the tags with the dictionary, the faces, the storage and the external programs.
+    /// indexing, the tags with the dictionary, the storage and the external programs. The face
+    /// model left the dialog in M26.5 — it is checked on the People screen itself.
     #[test]
     fn english_translates_the_settings_panes() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-settings-i18n.db"));
@@ -19122,21 +19194,6 @@ mod tests {
                 "missing “{want}” in the tags section: {tags:?}"
             );
         }
-        let faces = settings_frame(&mut app, &ctx, SettingsTab::Faces);
-        for want in [
-            "Face merge threshold (cosine)",
-            "Download the face model",
-            "Check the face model",
-        ] {
-            assert!(
-                faces.iter().any(|t| t == want),
-                "missing “{want}” in the faces section: {faces:?}"
-            );
-        }
-        assert!(
-            faces.iter().any(|t| t.contains("not downloaded")),
-            "the face model state is not translated: {faces:?}"
-        );
         let storage = settings_frame(&mut app, &ctx, SettingsTab::Storage);
         for want in [
             "Index",
@@ -19201,7 +19258,6 @@ mod tests {
             ("model", &model),
             ("index", &index),
             ("tags", &tags),
-            ("faces", &faces),
             ("storage", &storage),
             ("tools", &tools),
         ] {

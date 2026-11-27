@@ -741,7 +741,19 @@ const PAIRS: &[(&str, &str)] = &[
     // --- people ----------------------------------------------------------------
     ("Merge threshold:", "Порог склейки:"),
     ("face model not downloaded", "модель лиц не скачана"),
-    ("Face settings", "Настройки лиц"),
+    (
+        "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
+        "SCRFD и ArcFace (InsightFace buffalo_l): только некоммерческое исследовательское \
+         использование",
+    ),
+    (
+        "the face model download: stopping…",
+        "скачивание модели лиц: останавливаю…",
+    ),
+    (
+        "the face model download is stopped: the pass can be started again",
+        "скачивание модели лиц остановлено: проход можно запустить снова",
+    ),
     ("reclustering…", "пересобираю группы…"),
     ("Stop", "Стоп"),
     ("people: stopping after the current photos…", "лица: останавливаю после текущих снимков…"),
@@ -1161,8 +1173,7 @@ const PAIRS: &[(&str, &str)] = &[
         "CLIP: пересчёт тегов по сохранённым векторам…",
     ),
 
-    // --- settings: faces (M21.4f) ----------------------------------------------
-    ("Face merge threshold (cosine)", "Порог склейки лиц (косинус)"),
+    // --- settings: faces (M21.4f, moved to the People screen in M26.5) ----------
     (
         "A higher threshold — fewer false merges, but one person may split into groups. \
          The SCRFD and ArcFace models are ONNX, local.",
