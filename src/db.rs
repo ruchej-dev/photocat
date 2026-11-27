@@ -103,7 +103,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// The schema version. It changes together with the DDL below: old DBs catch up once.
 /// While the version matches, `open` writes nothing — the DB can be read in parallel
 /// with a long pass (indexing, OCR) without hitting a lock.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -242,6 +242,7 @@ fn init(c: &Connection) -> Result<()> {
             embedding  BLOB NOT NULL,
             cluster_id INTEGER,
             manual     INTEGER NOT NULL DEFAULT 0,
+            match_score REAL,
             created_at INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_faces_file    ON faces(file_id);
@@ -290,6 +291,10 @@ fn init(c: &Connection) -> Result<()> {
     ensure_column(c, "files", "decision", "TEXT")?;
     ensure_column(c, "files", "duration_s", "REAL")?;
     ensure_column(c, "files", "trashed_at", "INTEGER")?;
+    // Schema 9: the similarity that brought an automatically matched face into a named group
+    // (M26.11). `NULL` means the face was not matched by the step — it is clustered or the owner
+    // put it there by hand.
+    ensure_column(c, "faces", "match_score", "REAL")?;
     // Schema 7: tags of different models do not mix — the key is (file_id, tag, source).
     // The old table is rebuilt in place and the data is kept; the trigger that resets
     // tags on a sha256 change is recreated, otherwise it would point at the old table
@@ -645,6 +650,11 @@ pub struct Settings {
     pub tools: crate::tools::Tools,
     /// The cosine threshold for merging faces into one person (ADR 0021).
     pub face_threshold: f32,
+    /// The cosine an automatically matched face needs to reach a named person (M26.11).
+    pub face_match: f32,
+    /// How far the best named person must lead the second one (M26.11): a relative's face is
+    /// left alone rather than guessed.
+    pub face_match_margin: f32,
     /// The grid tile size, px (docs/UI.md).
     pub tile_size: f32,
     /// The grid layout: months or a flat ribbon (M17).
@@ -697,6 +707,8 @@ impl Default for Settings {
             ocr_lang: "rus+eng".into(),
             tools: crate::tools::Tools::default(),
             face_threshold: 0.45,
+            face_match: 0.50,
+            face_match_margin: 0.03,
             tile_size: 150.0,
             grid_layout: GridLayout::Months,
             grid_sort: GridSort::DateDesc,
@@ -945,6 +957,10 @@ pub fn load_settings(conn: &Connection) -> Settings {
             "tool_ffprobe" => s.tools.ffprobe = v,
             "tool_tesseract" => s.tools.tesseract = v,
             "face_threshold" => s.face_threshold = v.parse().unwrap_or(s.face_threshold),
+            "face_match" => s.face_match = v.parse().unwrap_or(s.face_match),
+            "face_match_margin" => {
+                s.face_match_margin = v.parse().unwrap_or(s.face_match_margin)
+            }
             "tile_size" => s.tile_size = v.parse().unwrap_or(s.tile_size),
             "grid_layout" => s.grid_layout = GridLayout::parse(&v),
             "grid_sort" => s.grid_sort = GridSort::parse(&v),
@@ -1023,6 +1039,8 @@ pub fn save_settings(conn: &Connection, s: &Settings) -> Result<()> {
         ("tag_show_pct", s.tag_show_pct.to_string()),
         ("ocr_lang", s.ocr_lang.clone()),
         ("face_threshold", s.face_threshold.to_string()),
+        ("face_match", s.face_match.to_string()),
+        ("face_match_margin", s.face_match_margin.to_string()),
         ("tile_size", s.tile_size.to_string()),
         ("grid_layout", s.grid_layout.as_str().to_string()),
         ("grid_sort", s.grid_sort.as_str().to_string()),
@@ -1570,6 +1588,11 @@ pub struct FaceView {
     pub thumb: Option<String>,
     pub score: f32,
     pub cluster_id: Option<i64>,
+    /// The owner set this face's group by hand (named it, gathered it, split it off) — M26.11.
+    pub manual: bool,
+    /// The similarity that put the face into its named group automatically; `None` when the face
+    /// was clustered or placed by hand.
+    pub match_score: Option<f32>,
 }
 
 /// A face box over the frame of its file (M22.7): the photo in the full screen marks who is
@@ -1694,7 +1717,8 @@ pub fn load_faces(conn: &Connection) -> Result<Vec<FaceRow>> {
 /// Faces for the grid: `cluster_id=None` means all. The large and confident ones come first.
 pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec<FaceView>> {
     let mut st = conn.prepare(
-        "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id
+        "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id,f.manual,
+                f.match_score
          FROM faces f JOIN files fi ON fi.id=f.file_id
          WHERE ?1 IS NULL OR f.cluster_id=?1
          ORDER BY f.quality DESC, f.id",
@@ -1708,6 +1732,8 @@ pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec
             thumb: r.get(4)?,
             score: r.get(5)?,
             cluster_id: r.get(6)?,
+            manual: r.get::<_, i64>(7)? != 0,
+            match_score: r.get(8)?,
         })
     })?;
     let mut out = Vec::new();
@@ -1774,6 +1800,8 @@ pub fn create_face_cluster(conn: &Connection) -> Result<i64> {
 }
 
 /// Store the assignment of faces to clusters. `manual` means the owner set it by hand.
+/// An assignment is not a match: a stale similarity from the matching step (M26.11) goes away,
+/// otherwise the tile would keep saying "auto" about a face the owner or the clustering moved.
 pub fn save_face_assignments(
     conn: &mut Connection,
     assignments: &[(i64, Option<i64>)],
@@ -1781,13 +1809,66 @@ pub fn save_face_assignments(
 ) -> Result<()> {
     let tx = conn.transaction()?;
     {
-        let mut st = tx.prepare("UPDATE faces SET cluster_id=?1, manual=?2 WHERE id=?3")?;
+        let mut st =
+            tx.prepare("UPDATE faces SET cluster_id=?1, manual=?2, match_score=NULL WHERE id=?3")?;
         for &(face_id, cluster_id) in assignments {
             st.execute(params![cluster_id, manual as i64, face_id])?;
         }
     }
     tx.commit()?;
     Ok(())
+}
+
+/// Move automatically matched faces into their named groups in one transaction (M26.11):
+/// `(face, group, similarity)`. `manual` stays 0 — the owner did not place these faces — and
+/// the similarity is kept so the tile can mark the face as "auto" and undo it.
+/// A face the owner has placed by hand (`manual = 1`) is never moved: the guard is in the SQL.
+pub fn apply_named_matches(conn: &mut Connection, matches: &[(i64, i64, f32)]) -> Result<usize> {
+    if matches.is_empty() {
+        return Ok(0);
+    }
+    let tx = conn.transaction()?;
+    let mut moved = 0usize;
+    {
+        let mut st = tx.prepare(
+            "UPDATE faces SET cluster_id=?1, manual=0, match_score=?2
+             WHERE id=?3 AND manual=0",
+        )?;
+        for &(face_id, cluster_id, score) in matches {
+            moved += st.execute(params![cluster_id, score, face_id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(moved)
+}
+
+/// Take the faces the matching step put into a named group back out of it (M26.11): they move
+/// into one new unnamed group and are pinned by hand (`manual = 1`), so the next matching step
+/// does not put them back. Rows only — nothing on disk is touched. Returns how many left.
+pub fn detach_auto_faces(conn: &mut Connection, cluster_id: i64) -> Result<usize> {
+    let auto: Vec<i64> = {
+        let mut st = conn.prepare(
+            "SELECT id FROM faces WHERE cluster_id=?1 AND manual=0 ORDER BY id",
+        )?;
+        let rows = st.query_map([cluster_id], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<i64>>>()?
+    };
+    if auto.is_empty() {
+        return Ok(0);
+    }
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO face_clusters(label,created_at) VALUES('',?1)",
+        params![now()],
+    )?;
+    let new_id = tx.last_insert_rowid();
+    let mut st = tx.prepare("UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2")?;
+    for face_id in &auto {
+        st.execute(params![new_id, face_id])?;
+    }
+    drop(st);
+    tx.commit()?;
+    Ok(auto.len())
 }
 
 pub fn label_face_cluster(conn: &Connection, cluster_id: i64, label: &str) -> Result<()> {
@@ -1825,7 +1906,9 @@ pub fn group_faces(conn: &Connection, face_ids: &[i64], label: &str) -> Result<i
     };
     let tx = conn.unchecked_transaction()?;
     {
-        let mut st = tx.prepare("UPDATE faces SET cluster_id=?1, manual=1 WHERE id=?2")?;
+        let mut st = tx.prepare(
+            "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
+        )?;
         for &id in face_ids {
             st.execute(params![cluster_id, id])?;
         }
@@ -1844,7 +1927,7 @@ pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
     )?;
     let cluster_id = tx.last_insert_rowid();
     let n = tx.execute(
-        "UPDATE faces SET cluster_id=?1, manual=1 WHERE id=?2",
+        "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
         params![cluster_id, face_id],
     )?;
     if n == 0 {
@@ -1875,7 +1958,7 @@ pub fn split_faces(conn: &mut Connection, face_ids: &[i64]) -> Result<SplitOutco
         )?;
         let cluster_id = tx.last_insert_rowid();
         let n = tx.execute(
-            "UPDATE faces SET cluster_id=?1, manual=1 WHERE id=?2",
+            "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
             params![cluster_id, face_id],
         )?;
         if n == 0 {
@@ -3612,6 +3695,80 @@ mod tests {
         save_settings(&c, &s).unwrap();
         let back = load_settings(&c);
         assert!((back.face_threshold - 0.51).abs() < 1e-6);
+    }
+
+    /// M26.11: the two numbers of the matching step are settings, not a schema change: an absent or
+    /// broken value reads as the default, and a saved one comes back.
+    #[test]
+    fn the_matching_thresholds_survive_a_roundtrip() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        assert!((Settings::default().face_match - 0.50).abs() < 1e-6);
+        assert!((Settings::default().face_match_margin - 0.03).abs() < 1e-6);
+        let s = Settings {
+            face_match: 0.62,
+            face_match_margin: 0.05,
+            ..Default::default()
+        };
+        save_settings(&c, &s).unwrap();
+        let back = load_settings(&c);
+        assert!((back.face_match - 0.62).abs() < 1e-6);
+        assert!((back.face_match_margin - 0.05).abs() < 1e-6);
+        // A broken value does not lose the setting: the default stands.
+        c.execute("UPDATE settings SET value='not a number' WHERE key='face_match'", [])
+            .unwrap();
+        assert!((load_settings(&c).face_match - 0.50).abs() < 1e-6);
+    }
+
+    /// M26.11: an automatic match moves a free face and never a face the owner placed; the
+    /// similarity is kept for the tile, and detaching puts the whole matched set back.
+    #[test]
+    fn an_automatic_match_respects_the_owner_and_can_be_detached() {
+        let mut c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
+        let file_id = id_of(&c, "/a.jpg");
+        let face = |i: u8| FaceRow {
+            id: 0,
+            x: i as i32,
+            y: 0,
+            w: 10,
+            h: 10,
+            score: 0.9,
+            quality: 0.8,
+            thumb: None,
+            embedding: vec![1.0, i as f32],
+            cluster_id: None,
+            manual: false,
+        };
+        save_faces_for_file(&c, file_id, "aa", &[face(0), face(1)]).unwrap();
+        let ids: Vec<i64> = load_faces(&c).unwrap().iter().map(|f| f.id).collect();
+        let named = create_face_cluster(&c).unwrap();
+        label_face_cluster(&c, named, "Lisa").unwrap();
+        // The owner placed the second face in the group by hand; the first one is still free.
+        save_face_assignments(&mut c, &[(ids[1], Some(named))], true).unwrap();
+        // The owner's face is already in the group; the automatic one is not.
+        let moved = apply_named_matches(&mut c, &[(ids[1], named, 0.9), (ids[0], named, 0.97)])
+            .unwrap();
+        assert_eq!(moved, 1, "a hand-placed face was moved by the matching step");
+        let views = load_face_views(&c, Some(named)).unwrap();
+        assert_eq!(views.len(), 2);
+        let auto = views.iter().find(|v| v.id == ids[0]).unwrap();
+        assert!(!auto.manual);
+        assert_eq!(auto.match_score, Some(0.97));
+        let own = views.iter().find(|v| v.id == ids[1]).unwrap();
+        assert!(own.manual);
+        assert_eq!(own.match_score, None, "a hand-placed face wears an “auto” mark");
+        // Detaching the automatic faces leaves the owner's decision and pins the moved face.
+        assert_eq!(detach_auto_faces(&mut c, named).unwrap(), 1);
+        let views = load_face_views(&c, None).unwrap();
+        let detached = views.iter().find(|v| v.id == ids[0]).unwrap();
+        assert!(detached.manual);
+        assert_eq!(detached.match_score, None);
+        assert_ne!(detached.cluster_id, Some(named));
+        assert_eq!(detach_auto_faces(&mut c, named).unwrap(), 0);
+        // Nothing on disk is involved: the file row is still there.
+        assert_eq!(load_faces(&c).unwrap().len(), 2);
     }
 
     #[test]

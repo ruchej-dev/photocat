@@ -2886,6 +2886,9 @@ struct App {
     face_missing: HashSet<i64>,
     face_selected_cluster: Option<i64>,
     face_label_input: String,
+    /// The confirmation of "Detach the auto-matched" (M26.11): rows only, but the press undoes
+    /// every automatic match of one group at once, so it asks first.
+    face_detach_confirm: Option<i64>,
     face_images: usize,
     /// Photos whose catalog has the face pass off (M26.9).
     face_skipped: usize,
@@ -3314,6 +3317,7 @@ impl App {
             face_missing: HashSet::new(),
             face_selected_cluster: None,
             face_label_input: String::new(),
+            face_detach_confirm: None,
             face_images: 0,
             face_skipped: 0,
             face_todo: 0,
@@ -5968,6 +5972,67 @@ impl App {
         }
     }
 
+    /// The confirmation of "Detach the auto-matched" (M26.11): one press undoes every automatic
+    /// match of the open group, so it asks first. Rows only — the photos, the crops and the
+    /// archive are untouched.
+    fn face_detach_modal(&mut self, ctx: &egui::Context) {
+        let Some(cluster_id) = self.face_detach_confirm else {
+            return;
+        };
+        let lang = self.settings.lang;
+        let n = self
+            .face_views
+            .iter()
+            .filter(|f| f.cluster_id == Some(cluster_id) && !f.manual)
+            .count();
+        let label = self
+            .face_clusters
+            .iter()
+            .find(|c| c.id == cluster_id)
+            .map(|c| c.label.clone())
+            .unwrap_or_default();
+        let mut confirmed = false;
+        let mut cancel = false;
+        let modal =
+            egui::Modal::new(egui::Id::unique("photocat-face-detach")).frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
+            ui.set_min_width(dialog_width(ctx, 460.0));
+            ui.label(egui::RichText::new(t(lang, "Detach the automatically matched?")).size(14.0));
+            ui.add_space(4.0);
+            if !label.is_empty() {
+                ui.label(egui::RichText::new(&label).size(13.0).strong());
+            }
+            let facts = i18n::fill(lang, "Automatic matches: {}", &[n.to_string()]);
+            ui.label(num(ui, &facts, 11.0).color(dim(ui)));
+            ui.label(t(
+                lang,
+                "They move into one unnamed group and stay there: the next matching step leaves them alone. The faces you named or placed by hand stay in the group. Rows only — the photos and the crops are untouched.",
+            ));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(WordButton::primary(Icon::Remove, t(lang, "Detach them")))
+                    .clicked()
+                {
+                    confirmed = true;
+                }
+                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() {
+            cancel = true;
+        }
+        if cancel {
+            self.face_detach_confirm = None;
+        }
+        if confirmed {
+            self.face_detach_confirm = None;
+            self.detach_auto_faces(cluster_id);
+        }
+    }
+
     /// M26.2: the dialog behind the warning mark of the status bar. One row per program that does
     /// not start — what is lost without it — and the commands that install it on the running
     /// system. The app installs and downloads nothing and opens no browser (AGENTS.md §1): the
@@ -8598,6 +8663,36 @@ impl App {
             r.on_hover_text(t(
                 lang,
                 "A higher threshold — fewer false merges, but one person may split into groups. The SCRFD and ArcFace models are ONNX, local.",
+            ));
+            // The matching step (M26.11): a face joins a named person only when it is close enough
+            // and leads the next person by a margin — a relative's face is left alone, not guessed.
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(format!(
+                "{} {:.2}",
+                t(lang, "A face joins a named person at:"),
+                self.settings.face_match
+            )));
+            let m = ui.add(
+                egui::Slider::new(&mut self.settings.face_match, 0.30..=0.80).step_by(0.01),
+            );
+            if m.drag_stopped() || m.lost_focus() {
+                self.save_settings();
+            }
+            ui.label(egui::RichText::new(format!(
+                "{} {:.2}",
+                t(lang, "and leads the next person by:"),
+                self.settings.face_match_margin
+            )));
+            let g = ui.add(
+                egui::Slider::new(&mut self.settings.face_match_margin, 0.00..=0.10)
+                    .step_by(0.01),
+            );
+            if g.drag_stopped() || g.lost_focus() {
+                self.save_settings();
+            }
+            g.on_hover_text(t(
+                lang,
+                "a face joins a named person only when it is at least that close and leads the next person by this much; the close face joins the group with the “auto” mark and a wrong match is split off the tile",
             ));
             let found = i18n::fill(lang, "{} faces in {} photos, {} groups", &[self.face_faces.to_string(), self.face_photos.to_string(), self.face_clusters.len().to_string()]);
             ui.label(egui::RichText::new(found).size(11.0).color(dim(ui)));
@@ -12246,6 +12341,28 @@ impl App {
         }
     }
 
+    /// Every face the matching step put into this group leaves it in one action (M26.11): the
+    /// group keeps the faces the owner placed, the others move into one unnamed group and stay
+    /// pinned, so the next matching step does not put them back. Rows only.
+    fn detach_auto_faces(&mut self, cluster_id: i64) {
+        let lang = self.settings.lang;
+        match faces::detach_auto(&self.db_path, cluster_id) {
+            Ok(n) => {
+                self.reload();
+                self.status = if n == 0 {
+                    t(lang, "no automatic match left in this group").into()
+                } else {
+                    i18n::fill(
+                        lang,
+                        "{} faces left the group into one unnamed group; the screen stays here",
+                        &[n.to_string()],
+                    )
+                };
+            }
+            Err(e) => self.status = format!("{}: {e:#}", t(lang, "faces not detached")),
+        }
+    }
+
     /// Every ticked face leaves the open group into its own new one, in one DB action (M26.10):
     /// the ticks clear, the group stays open and the status says how many left.
     fn split_picked_keeping_view(&mut self, open: Option<i64>) {
@@ -12561,6 +12678,35 @@ fn draw_face_cell(
                 egui::StrokeKind::Inside,
             );
         }
+        // A face the matching step brought into a named person says so (M26.11): "auto" in mono 10
+        // on a scrim at the foot of the frame. The owner's own placements carry no mark — the
+        // crossed-head button next to it undoes this one, and the group has "Detach the auto-matched".
+        if let Some(sim) = f.match_score.filter(|_| !f.manual) {
+            let text = t(lang, "auto");
+            let galley = ui.painter().layout_no_wrap(
+                format!("{text} {sim:.2}"),
+                egui::FontId::monospace(10.0),
+                egui::Color32::WHITE,
+            );
+            let pad = egui::vec2(4.0, 2.0);
+            let badge = egui::Rect::from_min_size(
+                egui::pos2(
+                    img_rect.left() + 6.0,
+                    img_rect.bottom() - 6.0 - galley.size().y - pad.y * 2.0,
+                ),
+                galley.size() + pad * 2.0,
+            );
+            ui.painter().rect_filled(
+                badge,
+                egui::CornerRadius::same(4),
+                egui::Color32::from_black_alpha(160),
+            );
+            ui.painter().galley(
+                badge.min + pad,
+                galley,
+                egui::Color32::WHITE,
+            );
+        }
     }
     if cs.selected_file == Some(f.file_id) {
         ui.painter().rect_stroke(
@@ -12579,10 +12725,18 @@ fn draw_face_cell(
     if resp.hovered()
         && let Some(t) = cs.textures.get(&f.id).cloned()
     {
+        let matched = f.match_score.filter(|_| !f.manual);
         resp.on_hover_ui_at_pointer(|ui| {
             let big = egui::load::SizedTexture::new(t.id(), t.size_vec2());
             ui.add(egui::Image::new(big).max_size(egui::vec2(300.0, 300.0)));
             ui.label(&f.path);
+            if let Some(sim) = matched {
+                ui.label(i18n::fill(
+                    lang,
+                    "matched automatically: {} close to this person — split it off if it is not them",
+                    &[format!("{sim:.2}")],
+                ));
+            }
         });
     }
 }
@@ -15390,6 +15544,7 @@ impl eframe::App for App {
         self.album_pick_modal(ctx);
         self.export_modal(ctx);
         self.trash_modal(ctx);
+        self.face_detach_modal(ctx);
         self.limited_modal(ctx);
         self.poll_photo(ctx);
         self.poll_video(ctx);
@@ -15486,6 +15641,8 @@ impl eframe::App for App {
         let mut face_assign: Option<String> = None;
         // The ticked strangers leave the open group in one press (M26.10).
         let mut face_split_picked = false;
+        // The faces the matching step put into the open group leave it in one press (M26.11).
+        let mut face_detach_auto = false;
         let mut reset = false;
         let mut empty_click = false;
         let mut album_pick_request = false;
@@ -17086,6 +17243,29 @@ impl eframe::App for App {
                     {
                         face_split_picked = true;
                     }
+                    // Only a named group has automatic matches to undo: the tiles it received by
+                    // themselves carry no "manual" of the owner (M26.11).
+                    let auto_n = shown.iter().filter(|f| !f.manual).count();
+                    let named_group = current
+                        .as_ref()
+                        .is_some_and(|c| !c.label.trim().is_empty());
+                    if named_group
+                        && ui
+                            .add_enabled(
+                                auto_n > 0,
+                                WordButton::new(
+                                    Icon::Remove,
+                                    format!("{} ({auto_n})", t(lang, "Detach the auto-matched")),
+                                ),
+                            )
+                            .on_hover_text(t(
+                                lang,
+                                "every face that joined this person by itself moves into one unnamed group; the faces you placed stay, and the next matching step leaves them alone",
+                            ))
+                            .clicked()
+                    {
+                        face_detach_auto = true;
+                    }
                     if ui
                         .add_enabled(
                             !face_picked.is_empty(),
@@ -17448,17 +17628,26 @@ impl eframe::App for App {
             && let Some(id) = face_selected
         {
             let lang = self.settings.lang;
+            // The name is the last decision (M26.11): the step matches the free faces at once and
+            // the status says how many joined the person.
             match faces::label(&self.db_path, id, &label) {
-                Ok(()) => {
-                    self.status = if label.is_empty() {
-                        t(lang, "group name removed").into()
+                Ok(matched) => {
+                    let mut line = if label.is_empty() {
+                        t(lang, "group name removed").to_string()
                     } else {
                         i18n::fill(lang, "the group is named: “{}”", std::slice::from_ref(&label))
                     };
+                    if matched.worth_telling() {
+                        line.push_str(&format!("; {matched}"));
+                    }
+                    self.status = line;
                     self.reload();
                 }
                 Err(e) => self.status = format!("{}: {e:#}", t(lang, "name not saved")),
             }
+        }
+        if face_detach_auto {
+            self.face_detach_confirm = face_selected;
         }
         if let Some(face_id) = face_split {
             let open = self.face_selected_cluster;
@@ -19593,6 +19782,8 @@ mod tests {
             thumb: None,
             score: 0.62,
             cluster_id: Some(7),
+            manual: true,
+            match_score: None,
         }];
         app.face_selected_cluster = Some(7);
         app.settings.lang = i18n::Lang::En;
@@ -19745,6 +19936,8 @@ mod tests {
             thumb: None,
             score: 0.62,
             cluster_id: Some(7),
+            manual: true,
+            match_score: None,
         }];
         app.settings.lang = i18n::Lang::En;
         app.view = View::Faces;
@@ -20100,6 +20293,8 @@ mod tests {
             thumb: None,
             score: 0.62,
             cluster_id: Some(7),
+            manual: true,
+            match_score: None,
         }];
         app.face_selected_cluster = Some(7);
         app.face_picked.insert(1);
@@ -20237,6 +20432,135 @@ mod tests {
         assert_eq!(group.faces, 1);
         let moved = app.face_views.iter().find(|v| v.id == ids[2]).unwrap();
         assert_ne!(moved.cluster_id, Some(named), "the split face is still in the group");
+    }
+
+    /// M26.11: naming a person finds the free faces at once. The named group shows the faces that
+    /// joined by themselves with an "auto" mark, the group action takes them all back out in one
+    /// press, and the screen stays where it was.
+    #[test]
+    fn naming_a_person_matches_faces_and_the_auto_mark_can_be_detached() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-auto-match-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let (named, free) = {
+            let c = db::open(&path).unwrap();
+            db::insert(&c, &file_row(0, "image", "own.jpg")).unwrap();
+            db::insert(&c, &file_row(0, "image", "other.jpg")).unwrap();
+            let id_of = |name: &str| -> i64 {
+                c.query_row(
+                    "SELECT id FROM files WHERE path=?1",
+                    [format!("/tmp/{name}")],
+                    |r| r.get(0),
+                )
+                .unwrap()
+            };
+            let add = |name: &str, v: Vec<f32>| -> i64 {
+                db::save_faces_for_file(
+                    &c,
+                    id_of(name),
+                    "sha",
+                    &[db::FaceRow {
+                        id: 0,
+                        x: 0,
+                        y: 0,
+                        w: 40,
+                        h: 40,
+                        score: 0.9,
+                        quality: 30.0,
+                        thumb: None,
+                        embedding: v,
+                        cluster_id: None,
+                        manual: false,
+                    }],
+                )
+                .unwrap();
+                c.query_row("SELECT MAX(id) FROM faces", [], |r| r.get(0))
+                    .unwrap()
+            };
+            let unit = |deg: f32| -> Vec<f32> {
+                let a: f32 = deg.to_radians();
+                vec![a.cos(), a.sin(), 0.0, 0.0]
+            };
+            let own = add("own.jpg", unit(2.0));
+            let free = add("other.jpg", unit(20.0));
+            let named = db::create_face_cluster(&c).unwrap();
+            db::label_face_cluster(&c, named, "Lisa").unwrap();
+            db::save_face_assignments(&mut db::open(&path).unwrap(), &[(own, Some(named))], true)
+                .unwrap();
+            (named, free)
+        };
+        // The name is the last decision: the matching step runs with it.
+        let report = crate::faces::label(&path, named, "Lisa").unwrap();
+        assert_eq!((report.matched, report.people), (1, 1), "{report}");
+
+        let mut app = App::new(path.clone());
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Faces;
+        app.face_selected_cluster = Some(named);
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        assert!(
+            texts.iter().any(|t| t.starts_with("auto 0.")),
+            "the matched face wears no “auto” mark: {texts:?}"
+        );
+        let at = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t == "Detach the auto-matched (1)")
+            .map(|(_, r)| r.center())
+            .expect("the named group has no way to detach the automatic match");
+        click_at(&mut app, &ctx, at);
+        assert_eq!(
+            app.face_detach_confirm,
+            Some(named),
+            "the press did not ask for a confirmation"
+        );
+        let dialog = modal_frame(&mut app, &ctx, App::face_detach_modal);
+        for want in [
+            "Detach the automatically matched?",
+            "Automatic matches: 1",
+            "Detach them",
+            "Cancel",
+        ] {
+            assert!(
+                dialog.iter().any(|t| t == want),
+                "missing “{want}” in the dialog: {dialog:?}"
+            );
+        }
+        let go = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t == "Detach them")
+            .map(|(_, r)| r.center())
+            .expect("the confirmation has no “Detach them”");
+        click_at(&mut app, &ctx, go);
+        assert!(app.face_detach_confirm.is_none(), "the dialog stayed open");
+        assert_eq!(app.face_selected_cluster, Some(named), "the screen jumped");
+        assert!(
+            app.status.contains("left the group into one unnamed group"),
+            "the status does not say what happened: {:?}",
+            app.status
+        );
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        assert!(
+            !texts.iter().any(|t| t.starts_with("auto 0.")),
+            "the detached face still wears the “auto” mark: {texts:?}"
+        );
+        // The face is out of the group and pinned, so a second matching step leaves it.
+        let faces = db::load_faces(&db::open(&path).unwrap()).unwrap();
+        let moved = faces.iter().find(|f| f.id == free).unwrap();
+        assert!(moved.manual, "the detached face is not pinned");
+        assert_ne!(moved.cluster_id, Some(named));
+        let again = crate::faces::match_named(
+            &path,
+            &crate::db::load_settings(&db::open(&path).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(again.matched, 0, "the detached face came back: {again}");
     }
 
     /// M22.9: the trash counts in mono and has exactly one red word — its one action that changes
@@ -21662,6 +21986,8 @@ mod tests {
                 thumb: None,
                 score: 0.9,
                 cluster_id: Some(7),
+                manual: true,
+                match_score: None,
             },
             db::FaceView {
                 id: 11,
@@ -21671,6 +21997,8 @@ mod tests {
                 thumb: None,
                 score: 0.8,
                 cluster_id: Some(7),
+                manual: true,
+                match_score: None,
             },
         ];
         app.settings.lang = i18n::Lang::En;

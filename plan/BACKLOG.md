@@ -1814,7 +1814,8 @@ Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the fac
 M26.7 (done 2026-11-27) the catalog block after `photocat_1`: the pill, its dropdown and the scope; M26.8 (done 2026-11-27) the database gives the
 space back (VACUUM); M26.9 (done 2026-11-27) a catalog chooses which passes run over it (faces, tags, text);
 M26.10 (done 2026-11-27) splitting a face does not throw the owner out of the group, and the ticked
-faces can be split together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
+faces can be split together; M26.11 (done 2026-11-27) a named person is recognized in every
+catalog; M26.12 (done 2026-11-26) the
 built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
 separate window; M26.13 the settings dialog keeps one size and its layout in every section.
 
@@ -2255,7 +2256,7 @@ drops the group's face count by two. A headless frame shows both actions in both
 
 **Files.** `src/app.rs`, `src/db.rs`, `src/faces.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
 
-**M26.11 — a named person is recognized in every catalog.**
+**M26.11 — a named person is recognized in every catalog.** ✅ (done 2026-11-27)
 **Goal.** A face named once is found everywhere: a face computed in another folder that resembles a
 named person joins that person's group by itself — the owner does not walk over 20 catalogs and name
 the same grandmother again. Detection already runs over every catalog where the pass is allowed; what
@@ -2299,6 +2300,16 @@ frame with the numbers in both languages.
 
 **Files.** `src/faces.rs`, `src/db.rs`, `src/app.rs`, `src/i18n.rs`, `src/main.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
+
+**Done (2026-11-27).** `faces::match_named` with the two thresholds and the reasons; `faces.match_score`
+(schema 9) as the "auto" mark; the step runs at the end of `recluster`, after `faces::label` and in
+`faces --recluster`, and `faces --dry-run` plans it. The tile wears `auto <cosine>`, a named group
+carries "Detach the auto-matched (N)" behind a confirmation (`db::detach_auto_faces` pins the
+detached faces), and the People block has the two sliders. On a copy of the real DB 1587 free faces
+against 908 named members cost 73–80 ms in parallel, and **the closest free face is 0.448 from a
+named person**: the default 0.50 matches nothing on this archive, at 0.30 the first pass matches 167
+faces to 4 people. The owner may want a lower default — the slider is his to move; the numbers are
+in `docs/ARCHITECTURE.md` § Measurements.
 
 **M26.12 — the video plays in the window, not in somebody else's: the fallback is explicit and the Windows reason is found.**
 **Goal.** The owner presses ▶ and the video plays in the frame he is looking at. The built-in player

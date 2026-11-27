@@ -119,7 +119,7 @@ settings(key, value)                   -- model, path, limit, thresholds (dupes,
 ocr(file_id, sha256, lang, text, chars, created_at)   -- text from a photo; PRIMARY KEY(file_id)
 ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='file_id'
 faces(id, file_id, sha256, x, y, w, h, score, quality, thumb,
-      embedding, cluster_id, manual, created_at)
+      embedding, cluster_id, manual, match_score, created_at)
 face_clusters(id, label, created_at)
 face_scans(file_id, sha256, faces, created_at)       -- the photo has already been scanned
 albums(id, parent_id, position, name, name_key, note, created_at, updated_at)
@@ -168,6 +168,11 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   wipes the faces and the pass mark.
 - `faces.cluster_id`: the group; `face_clusters.label` is the name given by hand. A non-empty label
   also pins the group during a rebuild.
+- `faces.match_score`: the cosine that brought the face into a **named** group automatically
+  (M26.11, schema 9); `NULL` means the face was clustered or placed by the owner. Together with
+  `manual=0` it is the "auto" mark on the tile — an automatic match and a cluster are told apart,
+  because a rebuild clears the column (`db::save_face_assignments`), as does a split or a batch
+  naming: an assignment is not a similarity.
 - `ocr.text`: text from a photo produced by `tesseract`. One row per file, `sha256` is the content
   at the moment of recognition; the trigger `invalidate_ocr_after_sha_change` wipes the text if the
   file was replaced. `ocr_fts` is FTS5 (`tokenize='unicode61'`), kept in sync by triggers on `ocr`.
@@ -321,6 +326,44 @@ file itself; on the last file the cover frame stays so that viewing does not sta
 filter. In "Faces" groups can be ticked and "Photos where everyone is together" can be requested: a
 photo enters the selection only if it has at least one face from each ticked group. The ticked faces
 can be assigned to one group in a batch (`db::group_faces`, `manual=1`).
+
+## The face flow (M6, matching — M26.11)
+
+1. **The pass** (`faces::run`) walks the photos whose catalog allows the faces pass, detects, aligns
+   and embeds the faces, writes them (`db::save_faces_for_file`, a photo is replaced as a whole) and
+   then rebuilds the groups: `db::load_faces`, the "cosine ≥ `face_threshold`" components
+   (`faces::components`), one new group per component. Groups with a name and faces with
+   `manual=1` are pinned: they are not re-clustered and not merged.
+2. **The matching step** (`faces::match_named(db_path, &settings)`, M26.11) is what makes a name
+   work across catalogs: detection already runs everywhere the pass is allowed, but a *new* face of
+   a person named in another folder stayed in an unnamed group, because a pinned group takes no part
+   in the components graph. The step reads the named groups' members once and the free faces once
+   (a free face is `manual=0` and not in a named group; a catalog with faces off and a switched-off
+   folder are skipped through `Settings::pass_allows`), and for every free face finds the closest
+   similarity to **each** named group. The face joins the best group only when that similarity is at
+   least `settings.face_match` (0.50) **and** leads the second named group by
+   `settings.face_match_margin` (0.03) — a relative is left alone rather than guessed; the rest are
+   counted as "the lead was too small" or "no named person is close enough". The decision is one
+   transaction (`db::apply_named_matches`, `manual` stays 0, `match_score` keeps the cosine), and
+   `delete_empty_face_clusters` sweeps a group the move emptied. Neither a named group nor a
+   `manual=1` face is ever a candidate, and nothing on disk is read or written.
+3. **When it runs.** At the end of `faces::recluster` — which is the tail of the pass, of
+   "Rebuild groups" and of `faces --recluster` — and right after a name is saved (`faces::label`, so
+   both the People screen's "Save the name" and `faces label` report it). One pass is
+   `free faces × named members` cosine products: 73–80 ms on the corpus with `rayon` over the free
+   faces, and never per frame; `faces --dry-run` runs the same code with writes turned off and says
+   "would match N faces to M named people".
+4. **Undo.** The tile of an automatic match shows `auto <cosine>` and its hint names the
+   similarity; the crossed-head target splits it off (`manual=1`), and "Detach the auto-matched (N)"
+   moves every `manual=0` face of a named group into one new unnamed group and pins them
+   (`db::detach_auto_faces`), so the next step does not put them back. A rebuild clears
+   `match_score` — an assignment made by the clustering or by the owner is not a match, and the
+   tile must not keep claiming one.
+5. **Cost and numbers.** The step is bounded by one read of the named members and one of the free
+   faces; on the corpus 1587 free faces against 908 named members cost 73–80 ms. The measured
+   distribution of the best similarity is in the Measurements table — in short, on the owner's
+   archive the closest free face is 0.448 from a named person, so the default 0.50 matches nothing
+   until the slider moves.
 
 ## Album export (M20)
 
@@ -654,6 +697,7 @@ not with a different labelled set.
 | 2026-11-27 | the real DB, 2232 files, 1240×840 headless frames (M26.6) | the grid's scroll frames, 160 of them (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored grid_scroll_measurement`) | p50 5.51 ms (182 fps), p95 5.64, p99 5.70 — against the 5.72 ms of M25.10, so the ribbon's rows are not paid for: the row is measured before it is drawn, and each measuring pass (`ribbon_title_width`, `ribbon_controls_width` twice) lays a dozen widgets out on an invisible ui that paints nothing |
 | 2026-11-27 | the real DB, 2232 files, 1240×840 headless frames (M26.7) | the grid's scroll frames, 160 of them, with the catalog pill in place of the path field and its two buttons (`… --ignored grid_scroll_measurement`), and the left panel's budget (`… --ignored panel_years_measurement --nocapture`) | p50 5.73 ms (175 fps), p95 6.16, p99 7.27 — inside the 5.51–5.72 ms of M26.6/M25.10, so the pill costs the grid nothing: it lays out two text lines and reads facts collected on `reload`, not on every frame. The pinned part now ends at 627 px (the threshold at y 588, the "Tags" heading at 652.5) — 33 px less than M25.6's 621 / 685.5, because one 40 px pill took the room of a field and two buttons; at the owner's 1021 px window the years land at 908 px instead of 941 |
 | 2026-11-27 | a copy of the real DB in `/tmp`, 2234 files, 31 206 tags, 2498 faces, 435 OCR rows (M26.8) | `db::db_space` then `db::vacuum`, release (`PHOTOCAT_BENCH_DB=<copy> cargo test --release -- --ignored a_real_database_gives_its_free_pages_back --nocapture`) | 29.4 MiB → 25.9 MiB (30 793 728 → 27 140 096 B): 3.0 MiB of free pages (774 of 7518) given back in 0.086 s; `freelist_count` 0 afterwards, the rows intact — 2234 files, 31 206 tags, 2498 faces, 435 OCR rows, 2 albums, `PRAGMA integrity_check` ok; a second call reports the same numbers twice and touches nothing |
+| 2026-11-27 | a copy of the real DB, 2234 files, 2498 faces in 621 groups, 5 of them named (Лиза 72, Настя 252, Ника 218, Федя 4, Ярослав 362) (M26.11) | `faces::match_named` on the copy, release, three passes in a row (`PHOTOCAT_BENCH_DB=<copy> cargo test --release -- --ignored a_real_archive_matches_a_named_person_quickly --nocapture`) | 1587 free faces against 908 named members: the closest free face sits 0.448 from a named person (p99 0.423, p95 0.345; 24 above 0.40, 74 above 0.35, 175 above 0.30), so the default `face_match` 0.50 matches **nothing** on this archive — the step is inert until the owner lowers the slider (at 0.30 the first pass matches 167 faces to 4 people, 8 left for a small lead, in 73 ms; the second pass matches 342 more, because the matched faces join the reference set of their group). Cost of one pass: 555 ms single-threaded → **73–80 ms** with `rayon` over the free faces (7×); the step runs only at the end of a rebuild, after a name and in `faces --recluster`, never per frame |
 Rule: numbers without a corpus and a date do not enter the table.
 
 ## Long passes: cancel and resume

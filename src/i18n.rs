@@ -2200,6 +2200,73 @@ const PAIRS: &[(&str, &str)] = &[
         "после установки нажмите «Найти программы» ещё раз",
     ),
 
+    // --- M26.11: a named person is recognized in every catalog ------------------
+    (
+        "no named people yet: there is nothing to match to",
+        "названных людей пока нет: сопоставлять некому",
+    ),
+    (
+        "matched {} faces to {} named people",
+        "сопоставлено {} лиц {} названным людям",
+    ),
+    (
+        "would match {} faces to {} named people",
+        "будет сопоставлено {} лиц {} названным людям",
+    ),
+    (
+        "no automatic match yet: {} named",
+        "автоматических сопоставлений пока нет: названных — {}",
+    ),
+    (
+        "{} left — the lead was too small",
+        "{} осталось — перевес слишком мал",
+    ),
+    (
+        "{} left — no named person is close enough",
+        "{} осталось — ни один названный человек не достаточно близок",
+    ),
+    (
+        "A face joins a named person at:",
+        "Лицо присоединяется к названному человеку при близости:",
+    ),
+    (
+        "and leads the next person by:",
+        "и опережает следующего человека на:",
+    ),
+    (
+        "a face joins a named person only when it is at least that close and leads the next person by this much; the close face joins the group with the “auto” mark and a wrong match is split off the tile",
+        "лицо присоединяется к названному человеку только когда оно настолько близко и опережает следующего человека на эту величину; хорошо похожее лицо входит в группу с пометкой «авто», а ошибочное сопоставление отделяется кнопкой на плитке",
+    ),
+    (
+        "matched automatically: {} close to this person — split it off if it is not them",
+        "сопоставлено автоматически: близость {} — отделите, если это не он",
+    ),
+    ("auto", "авто"),
+    ("Detach the auto-matched", "Отделить сопоставленные автоматически"),
+    (
+        "every face that joined this person by itself moves into one unnamed group; the faces you placed stay, and the next matching step leaves them alone",
+        "каждое лицо, присоединившееся к этому человеку само, перейдёт в одну безымянную группу; расставленные вами лица остаются, и следующий шаг сопоставления их не тронет",
+    ),
+    (
+        "Detach the automatically matched?",
+        "Отделить сопоставленные автоматически?",
+    ),
+    (
+        "Automatic matches: {}",
+        "Автоматических сопоставлений: {}",
+    ),
+    (
+        "They move into one unnamed group and stay there: the next matching step leaves them alone. The faces you named or placed by hand stay in the group. Rows only — the photos and the crops are untouched.",
+        "Они перейдут в одну безымянную группу и останутся там: следующий шаг сопоставления их не тронет. Лица, названные или расставленные вами, остаются в группе. Только строки — фото и кропы не трогаются.",
+    ),
+    ("Detach them", "Отделить их"),
+    ("no automatic match left in this group", "в этой группе автоматических сопоставлений не осталось"),
+    (
+        "{} faces left the group into one unnamed group; the screen stays here",
+        "{} лиц ушли из группы в одну безымянную; экран остаётся на месте",
+    ),
+    ("faces not detached", "лица не отделены"),
+
 ];
 
 #[cfg(test)]

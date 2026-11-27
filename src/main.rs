@@ -207,11 +207,15 @@ fn main() -> Result<()> {
                         );
                         std::process::exit(2);
                     }
-                    faces::label(&db_path, id, &label)?;
+                    let matched = faces::label(&db_path, id, &label)?;
                     println!(
                         "{}",
                         i18n::fill(lang, "group {}: “{}”", &[id.to_string(), label.trim().to_string()])
                     );
+                    // Naming a person matches the free faces at once (M26.11).
+                    if matched.worth_telling() {
+                        println!("{matched}");
+                    }
                     return Ok(());
                 }
                 "split" => {
@@ -265,6 +269,9 @@ fn main() -> Result<()> {
                     ));
                 }
                 println!("{line}");
+                // How many faces the matching step would move to a named person, nothing written
+                // (M26.11).
+                println!("{}", faces::plan_named(&db_path, &settings)?);
                 return Ok(());
             }
             if has_flag(&args, "--list") {
@@ -1816,6 +1823,7 @@ mod cli_i18n_tests {
             pass_skipped: 0,
             faces: 20,
             clusters: 5,
+            matched: Default::default(),
             errors: 0,
             seconds: 3.0,
             cancelled: false,
@@ -1825,17 +1833,65 @@ mod cli_i18n_tests {
         faces.lang = Lang::Ru;
         assert!(faces.to_string().contains("просканировано 8 из 10 снимков"));
 
+        // The matching step of M26.11: one report, the same numbers in both languages, and its
+        // reasons named — a dry run says "would match".
+        let mut matched = faces::MatchReport {
+            matched: 12,
+            people: 3,
+            named: 5,
+            left_small: 4,
+            left_far: 2,
+            seconds: 0.07,
+            dry_run: false,
+            lang: Lang::En,
+        };
+        assert_eq!(
+            matched.to_string(),
+            "matched 12 faces to 3 named people; 4 left — the lead was too small; \
+             2 left — no named person is close enough"
+        );
+        matched.lang = Lang::Ru;
+        let ru = matched.to_string();
+        assert!(
+            ru.contains("сопоставлено 12 лиц 3 названным людям")
+                && ru.contains("4 осталось — перевес слишком мал"),
+            "{ru}"
+        );
+        matched.dry_run = true;
+        matched.lang = Lang::En;
+        assert!(matched.to_string().starts_with("would match 12 faces"));
+        matched.matched = 0;
+        matched.people = 0;
+        assert!(matched.to_string().starts_with("no automatic match yet: 5 named"));
+        matched.named = 0;
+        assert!(matched
+            .to_string()
+            .contains("no named people yet: there is nothing to match to"));
+
         let mut clusters = faces::ClusterStats {
             faces: 20,
             clusters: 5,
             fixed: 2,
             pass_skipped: 0,
+            matched: faces::MatchReport {
+                matched: 12,
+                people: 3,
+                named: 5,
+                lang: Lang::En,
+                ..Default::default()
+            },
             seconds: 1.0,
             lang: Lang::En,
         };
         assert!(clusters.to_string().contains("20 faces, 5 groups"));
+        assert!(
+            clusters.to_string().ends_with("; matched 12 faces to 3 named people"),
+            "{clusters}"
+        );
         clusters.lang = Lang::Ru;
         assert!(clusters.to_string().contains("лиц 20, групп 5"));
+        clusters.matched.lang = Lang::Ru;
+        assert!(clusters.to_string().contains("сопоставлено 12 лиц 3 названным людям"));
 
         // embed
         let mut embed = embed::EmbedStats {
