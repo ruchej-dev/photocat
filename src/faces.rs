@@ -939,6 +939,16 @@ pub fn split(db_path: &Path, face_id: i64) -> Result<i64> {
     Ok(cid)
 }
 
+/// Take several picked faces out of their group in one action (M26.10): each gets an unnamed
+/// group of its own, the rest stay, and the empty groups are cleared once. The caller keeps the
+/// open group: this function never jumps the screen anywhere.
+pub fn split_many(db_path: &Path, face_ids: &[i64]) -> Result<db::SplitOutcome> {
+    let mut conn = db::open(db_path)?;
+    let out = db::split_faces(&mut conn, face_ids)?;
+    db::delete_empty_face_clusters(&conn)?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

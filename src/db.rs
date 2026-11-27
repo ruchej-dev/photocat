@@ -1854,6 +1854,41 @@ pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
     Ok(cluster_id)
 }
 
+/// What one split action did (M26.10): how many faces went into their own new groups and how
+/// many ids were not in the database.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SplitOutcome {
+    pub moved: usize,
+    pub missing: usize,
+}
+
+/// Move every picked face into a group of its own, in one transaction (M26.10). A face that is
+/// not in the database is counted and does not abort the others; the empty group is not left
+/// behind. `manual=1` pins each decision through a rebuild, exactly as the single split does.
+pub fn split_faces(conn: &mut Connection, face_ids: &[i64]) -> Result<SplitOutcome> {
+    let tx = conn.transaction()?;
+    let mut out = SplitOutcome::default();
+    for &face_id in face_ids {
+        tx.execute(
+            "INSERT INTO face_clusters(label,created_at) VALUES('',?1)",
+            params![now()],
+        )?;
+        let cluster_id = tx.last_insert_rowid();
+        let n = tx.execute(
+            "UPDATE faces SET cluster_id=?1, manual=1 WHERE id=?2",
+            params![cluster_id, face_id],
+        )?;
+        if n == 0 {
+            out.missing += 1;
+            tx.execute("DELETE FROM face_clusters WHERE id=?1", params![cluster_id])?;
+        } else {
+            out.moved += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(out)
+}
+
 /// Remove clusters without faces. A named cluster stays even while it is empty.
 pub fn delete_empty_face_clusters(conn: &Connection) -> Result<usize> {
     Ok(conn.execute(
@@ -3087,6 +3122,95 @@ mod tests {
         insert(&c, &row("/a.jpg", "bb", 1.0)).unwrap();
         assert!(load_faces(&c).unwrap().is_empty());
         assert!(face_scan_shas(&c).unwrap().is_empty());
+    }
+
+    /// M26.10: the picked faces leave the open group into their own new ones in one action; the
+    /// named groups that stay keep their names, and a group emptied by the split is cleared while
+    /// a named empty group is kept.
+    #[test]
+    fn splitting_picked_faces_moves_each_and_keeps_the_names() {
+        let mut c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
+        let file_id = id_of(&c, "/a.jpg");
+        let face = |i: u8| FaceRow {
+            id: 0,
+            x: i as i32,
+            y: 0,
+            w: 10,
+            h: 10,
+            score: 0.9,
+            quality: 0.8,
+            thumb: None,
+            embedding: vec![1.0, i as f32],
+            cluster_id: None,
+            manual: false,
+        };
+        save_faces_for_file(&c, file_id, "aa", &(0..5).map(face).collect::<Vec<_>>()).unwrap();
+        let ids: Vec<i64> = load_faces(&c).unwrap().iter().map(|f| f.id).collect();
+        let named = create_face_cluster(&c).unwrap();
+        label_face_cluster(&c, named, "Lisa").unwrap();
+        let other = create_face_cluster(&c).unwrap();
+        label_face_cluster(&c, other, "Max").unwrap();
+        let unnamed = create_face_cluster(&c).unwrap();
+        save_face_assignments(
+            &mut c,
+            &[
+                (ids[0], Some(named)),
+                (ids[1], Some(named)),
+                (ids[2], Some(named)),
+                (ids[3], Some(other)),
+                (ids[4], Some(unnamed)),
+            ],
+            false,
+        )
+        .unwrap();
+
+        let out = split_faces(&mut c, &[ids[0], ids[1], 9_999]).unwrap();
+        assert_eq!(out, SplitOutcome { moved: 2, missing: 1 });
+        let rows = load_faces(&c).unwrap();
+        let of = |id: i64| rows.iter().find(|f| f.id == id).unwrap().clone();
+        let left_in_named = rows.iter().filter(|f| f.cluster_id == Some(named)).count();
+        assert_eq!(left_in_named, 1, "the named group lost more than the two picked faces");
+        assert_eq!(of(ids[2]).cluster_id, Some(named));
+        assert_ne!(of(ids[0]).cluster_id, Some(named));
+        assert_ne!(of(ids[0]).cluster_id, of(ids[1]).cluster_id);
+        assert!(of(ids[0]).manual && of(ids[1]).manual);
+        assert_eq!(of(ids[3]).cluster_id, Some(other));
+        assert_eq!(of(ids[4]).cluster_id, Some(unnamed));
+        let clusters = load_face_clusters(&c).unwrap();
+        let label_of = |id: i64| {
+            clusters
+                .iter()
+                .find(|cl| cl.id == id)
+                .map(|cl| cl.label.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(label_of(named), "Lisa");
+        assert_eq!(label_of(other), "Max");
+
+        // The last face of an unnamed group leaves: the empty group is cleared.
+        split_faces(&mut c, &[ids[4]]).unwrap();
+        delete_empty_face_clusters(&c).unwrap();
+        let left: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM face_clusters WHERE id=?1",
+                params![unnamed],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0, "the empty unnamed group was kept");
+        // A named group left empty stays: the name is the owner's.
+        split_faces(&mut c, &[ids[3]]).unwrap();
+        delete_empty_face_clusters(&c).unwrap();
+        let kept: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM face_clusters WHERE id=?1",
+                params![other],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1, "the named empty group was deleted");
     }
 
     #[test]

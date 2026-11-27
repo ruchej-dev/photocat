@@ -1813,8 +1813,8 @@ mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find th
 Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the face settings move to the People screen; M26.6 (done 2026-11-27) the layout survives a narrow window;
 M26.7 (done 2026-11-27) the catalog block after `photocat_1`: the pill, its dropdown and the scope; M26.8 (done 2026-11-27) the database gives the
 space back (VACUUM); M26.9 (done 2026-11-27) a catalog chooses which passes run over it (faces, tags, text);
-M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
-together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
+M26.10 (done 2026-11-27) splitting a face does not throw the owner out of the group, and the ticked
+faces can be split together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
 built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
 separate window; M26.13 the settings dialog keeps one size and its layout in every section.
 
@@ -2216,7 +2216,7 @@ A test on a temporary DB with two roots and a fake pass, plus a headless frame o
 **Files.** `src/db.rs`, `src/embed.rs`, `src/ocr.rs`, `src/faces.rs`, `src/app.rs`, `src/main.rs`,
 `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`.
 
-**M26.10 — the People screen: a split does not throw the owner out of the group, and the ticked faces split together.**
+**M26.10 — the People screen: a split does not throw the owner out of the group, and the ticked faces split together.** ✅ (done 2026-11-27)
 **Goal.** A wrong merge is undone on the spot: the crossed-head target takes the stranger out of the
 open group and the screen stays exactly where it was, on the same group and the same scroll. In the
 tick mode the owner marks several strangers and takes them all out in one press.

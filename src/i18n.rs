@@ -782,9 +782,11 @@ const PAIRS: &[(&str, &str)] = &[
     ("Save the name", "Сохранить имя"),
     (
         "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is \
-         split by the crossed-head button on the tile.",
+         split by the crossed-head button on the tile and the view stays where it was; tick \
+         several strangers and “Split the picked” takes them all out at once.",
         "Подпись закрепляет группу: пересборка по порогу её не перемешает. Ложную склейку \
-         разъединяет кнопка с перечёркнутой головой на плитке.",
+         разъединяет кнопка с перечёркнутой головой на плитке, и вид остаётся на месте; отметьте \
+         нескольких чужих и «Отделить выбранные» уберёт их всех разом.",
     ),
     (
         "Pick a group in the list to name it, or split the tiles.",
@@ -804,14 +806,39 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("No faces in this group.", "В этой группе нет лиц."),
     ("no frame", "нет кадра"),
-    ("split this face into a new group", "отделить это лицо в новую группу"),
+    ("split this face into a new group; this screen stays here", "отделить это лицо в новую группу; этот экран остаётся здесь"),
     ("mark this face for a shared name", "отметить это лицо для общего имени"),
     ("no faces found", "лица не найдены"),
     ("groups not built", "группы не собраны"),
     ("group name removed", "подпись группы убрана"),
     ("name not saved", "подпись не сохранена"),
-    ("face moved into a new group; give it a name", "лицо отделено в новую группу; дайте ей имя"),
+    (
+        "the face is in a new group; the screen stays here",
+        "лицо в новой группе; экран остаётся здесь",
+    ),
+    (
+        "the face is in a new group; the group was left empty",
+        "лицо в новой группе; группа осталась пустой",
+    ),
+    ("Split the picked", "Отделить выбранные"),
+    (
+        "each picked face leaves this group into its own new one; the rest stay",
+        "каждое отмеченное лицо уходит из этой группы в свою новую; остальные остаются",
+    ),
+    (
+        "{} faces are in new groups; {} not found",
+        "{} лиц в новых группах; {} не найдено",
+    ),
+    (
+        "{} faces left the group; the screen stays here",
+        "{} лиц вышло из группы; экран остаётся здесь",
+    ),
+    (
+        "{} faces left the group and it was left empty",
+        "{} лиц вышло из группы, и она осталась пустой",
+    ),
     ("face not split off", "лицо не отделено"),
+    ("faces not split off", "лица не отделены"),
     ("faces not assigned", "лица не назначены"),
     ("people: rebuilding groups…", "лица: пересобираю группы…"),
     (

@@ -12228,6 +12228,58 @@ impl App {
         });
     }
 
+    /// One face leaves the open group into a new one (M26.10). The screen stays where it was:
+    /// the open group is never switched to the new one, and a group the split left empty simply
+    /// disappears from the list. `open` is the selection at the moment of the click.
+    fn split_face_keeping_view(&mut self, face_id: i64, open: Option<i64>) {
+        let lang = self.settings.lang;
+        match faces::split(&self.db_path, face_id) {
+            Ok(_cid) => {
+                self.reload();
+                self.status = if open.is_some() && self.face_selected_cluster.is_none() {
+                    t(lang, "the face is in a new group; the group was left empty").into()
+                } else {
+                    t(lang, "the face is in a new group; the screen stays here").into()
+                };
+            }
+            Err(e) => self.status = format!("{}: {e:#}", t(lang, "face not split off")),
+        }
+    }
+
+    /// Every ticked face leaves the open group into its own new one, in one DB action (M26.10):
+    /// the ticks clear, the group stays open and the status says how many left.
+    fn split_picked_keeping_view(&mut self, open: Option<i64>) {
+        let ids: Vec<i64> = self.face_picked.iter().copied().collect();
+        let lang = self.settings.lang;
+        match faces::split_many(&self.db_path, &ids) {
+            Ok(out) => {
+                self.face_picked.clear();
+                self.reload();
+                let stayed = open.is_none() || self.face_selected_cluster == open;
+                self.status = if out.missing > 0 {
+                    i18n::fill(
+                        lang,
+                        "{} faces are in new groups; {} not found",
+                        &[out.moved.to_string(), out.missing.to_string()],
+                    )
+                } else if stayed {
+                    i18n::fill(
+                        lang,
+                        "{} faces left the group; the screen stays here",
+                        &[out.moved.to_string()],
+                    )
+                } else {
+                    i18n::fill(
+                        lang,
+                        "{} faces left the group and it was left empty",
+                        &[out.moved.to_string()],
+                    )
+                };
+            }
+            Err(e) => self.status = format!("{}: {e:#}", t(lang, "faces not split off")),
+        }
+    }
+
     fn start_face_download(&mut self) {
         if self.face_download_rx.is_some() || !self.face_download_consent {
             return;
@@ -12465,7 +12517,7 @@ fn draw_face_cell(
                 btn,
                 Icon::NotHim,
                 false,
-                t(lang, "split this face into a new group"),
+                t(lang, "split this face into a new group; this screen stays here"),
             );
             pointer_on_button |= r.hovered();
             if r.clicked() {
@@ -15432,6 +15484,8 @@ impl eframe::App for App {
         let face_photos = self.face_photos;
         let mut face_save_label: Option<String> = None;
         let mut face_assign: Option<String> = None;
+        // The ticked strangers leave the open group in one press (M26.10).
+        let mut face_split_picked = false;
         let mut reset = false;
         let mut empty_click = false;
         let mut album_pick_request = false;
@@ -16968,7 +17022,7 @@ impl eframe::App for App {
                     });
                     ui.label(t(
                         lang,
-                        "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is split by the crossed-head button on the tile.",
+                        "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is split by the crossed-head button on the tile and the view stays where it was; tick several strangers and “Split the picked” takes them all out at once.",
                     ));
                 } else {
                     ui.label(
@@ -17009,6 +17063,28 @@ impl eframe::App for App {
                         .clicked()
                     {
                         face_assign = Some(face_group_input.trim().to_string());
+                    }
+                    // The inverse of naming (M26.10): the ticked strangers are different people,
+                    // so each leaves the open group into its own new one.
+                    if ui
+                        .add_enabled(
+                            face_selected.is_some() && !face_picked.is_empty(),
+                            WordButton::new(
+                                Icon::NotHim,
+                                format!(
+                                    "{} ({})",
+                                    t(lang, "Split the picked"),
+                                    face_picked.len()
+                                ),
+                            ),
+                        )
+                        .on_hover_text(t(
+                            lang,
+                            "each picked face leaves this group into its own new one; the rest stay",
+                        ))
+                        .clicked()
+                    {
+                        face_split_picked = true;
                     }
                     if ui
                         .add_enabled(
@@ -17385,16 +17461,12 @@ impl eframe::App for App {
             }
         }
         if let Some(face_id) = face_split {
-            let lang = self.settings.lang;
-            match faces::split(&self.db_path, face_id) {
-                Ok(cid) => {
-                    self.face_selected_cluster = Some(cid);
-                    self.reload();
-                    self.status =
-                        t(lang, "face moved into a new group; give it a name").into();
-                }
-                Err(e) => self.status = format!("{}: {e:#}", t(lang, "face not split off")),
-            }
+            let open = self.face_selected_cluster;
+            self.split_face_keeping_view(face_id, open);
+        }
+        if face_split_picked {
+            let open = self.face_selected_cluster;
+            self.split_picked_keeping_view(open);
         }
         if face_split.is_none()
             && face_viewer.is_none()
@@ -20071,6 +20143,100 @@ mod tests {
         );
         assert_palette(&mut app, &ctx, "faces", super::DARK);
         assert_palette(&mut app, &ctx, "faces", super::LIGHT);
+    }
+
+    /// M26.10: a wrong merge is undone without leaving the group. The ticked strangers leave in
+    /// one press, the ticks clear, the open group stays selected, and a single split moves the
+    /// face out while the screen stays where it was.
+    #[test]
+    fn splitting_faces_keeps_the_people_screen_where_it_was() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-split-view-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let (named, ids) = {
+            let c = db::open(&path).unwrap();
+            db::insert(&c, &file_row(0, "image", "people.jpg")).unwrap();
+            let file_id: i64 = c
+                .query_row(
+                    "SELECT id FROM files WHERE path=?1",
+                    ["/tmp/people.jpg"],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let faces: Vec<db::FaceRow> = (0..4u8)
+                .map(|i| db::FaceRow {
+                    id: 0,
+                    x: i as i32,
+                    y: 0,
+                    w: 10,
+                    h: 10,
+                    score: 0.9,
+                    quality: 0.8,
+                    thumb: None,
+                    embedding: vec![1.0, i as f32],
+                    cluster_id: None,
+                    manual: false,
+                })
+                .collect();
+            db::save_faces_for_file(&c, file_id, "aa", &faces).unwrap();
+            let ids: Vec<i64> = db::load_faces(&c).unwrap().iter().map(|f| f.id).collect();
+            let named = db::create_face_cluster(&c).unwrap();
+            db::label_face_cluster(&c, named, "Lisa").unwrap();
+            db::save_face_assignments(
+                &mut db::open(&path).unwrap(),
+                &ids.iter().map(|&id| (id, Some(named))).collect::<Vec<_>>(),
+                false,
+            )
+            .unwrap();
+            (named, ids)
+        };
+        let mut app = App::new(path);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Faces;
+        app.face_selected_cluster = Some(named);
+        app.face_picked = ids[0..2].iter().copied().collect();
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let at = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t == "Split the picked (2)")
+            .map(|(_, r)| r.center())
+            .expect("the ticked strangers have no split action");
+        click_at(&mut app, &ctx, at);
+        assert_eq!(
+            app.face_selected_cluster,
+            Some(named),
+            "the open group was left"
+        );
+        assert!(app.face_picked.is_empty(), "the ticks did not clear");
+        let group = app
+            .face_clusters
+            .iter()
+            .find(|c| c.id == named)
+            .expect("the named group disappeared");
+        assert_eq!(group.faces, 2, "the group did not lose exactly the picked faces");
+        assert!(
+            app.status.contains("left the group"),
+            "the status does not say what happened: {:?}",
+            app.status
+        );
+
+        // One more face leaves by the single split: the view still stays, the group keeps one.
+        app.split_face_keeping_view(ids[2], Some(named));
+        assert_eq!(app.face_selected_cluster, Some(named));
+        let group = app
+            .face_clusters
+            .iter()
+            .find(|c| c.id == named)
+            .expect("the named group disappeared");
+        assert_eq!(group.faces, 1);
+        let moved = app.face_views.iter().find(|v| v.id == ids[2]).unwrap();
+        assert_ne!(moved.cluster_id, Some(named), "the split face is still in the group");
     }
 
     /// M22.9: the trash counts in mono and has exactly one red word — its one action that changes
