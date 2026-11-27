@@ -4924,8 +4924,11 @@ impl App {
                                 }
                             }
                         });
+                    // The scroll offset belongs to the section (M26.13): one shared id salt let a
+                    // long pane scroll the next one, so a switch dropped the owner into the middle
+                    // of a section he had not touched.
                     egui::ScrollArea::vertical()
-                        .id_salt("settings-scroll")
+                        .id_salt(("settings-scroll", tab as u8))
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.add_space(12.0);
@@ -6395,11 +6398,14 @@ impl App {
                 .color(dim(ui)),
         );
         ui.add_space(2.0);
-        ui.horizontal(|ui| {
+        // A wrapped row (M26.13): the field and its button never ask for more than the 520 px
+        // column, so the dialog cannot be widened by a path.
+        ui.horizontal_wrapped(|ui| {
+            let field = (ui.available_width() - 150.0).clamp(120.0, 380.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.models_dir_input)
                     .hint_text(t(lang, "where to download the weights"))
-                    .desired_width(380.0),
+                    .desired_width(field),
             );
             if word_button(ui, Icon::Check, t(lang, "Apply the path")).clicked() {
                 let p = self.models_dir_input.trim();
@@ -6700,7 +6706,9 @@ impl App {
         let mut removed: Option<String> = None;
         for d in self.tag_defs.iter_mut() {
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            // A wrapped row (M26.13): a tick, the label, the percentile and the removal are 420 px
+            // wide together and a 402 px pane must not be widened by them.
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .checkbox(&mut d.enabled, "")
                     .on_hover_text(t(
@@ -6769,15 +6777,18 @@ impl App {
             self.delete_tag_def_row(&id);
         }
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        // The two fields wrap and the second one takes what is left (M26.13): 150 + 260 = 410 px
+        // as one unwrapped row would widen the pane at a narrow window.
+        ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.tag_new_label)
                     .desired_width(150.0)
                     .hint_text(t(lang, "a new label, e.g. “Wardrobe”")),
             );
+            let prompt = (ui.available_width() - 8.0).clamp(120.0, 260.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.tag_new_prompts)
-                    .desired_width(260.0)
+                    .desired_width(prompt)
                     .hint_text(t(lang, "prompt: “a photo of a wardrobe”")),
             );
         });
@@ -6786,7 +6797,9 @@ impl App {
         let mut export = false;
         let mut import = false;
         let mut reset = false;
-        ui.horizontal(|ui| {
+        // The five actions wrap (M26.13): as one horizontal row they asked for 716 px inside the
+        // 520 px column and widened the whole dialog by 172 px.
+        ui.horizontal_wrapped(|ui| {
             add = ui
                 .add_enabled(
                     !self.tag_new_label.trim().is_empty(),
@@ -26571,6 +26584,181 @@ mod tests {
             .map(|(_, pos)| *pos);
         println!("section list heading at {heading:?}");
     }
+    /// One dictionary row of the M26.13 tests: a 47-character label and a 200-character prompt,
+    /// the state that used to be able to resize the dialog.
+    fn many_tag_defs(settings: &db::Settings, i: i64) -> db::TagDef {
+        db::TagDef {
+            model: embed::active_entry(settings).id.to_string(),
+            id: format!("tag{i}"),
+            label: "a very long label that no column can hold".into(),
+            prompts: vec![
+                "a photo of something that is described with a long sentence, written on one line                  and never wrapped by the editor, which is exactly the case that used to break the                  column of the dialog and push the whole window to the left"
+                    .into(),
+            ],
+            enabled: true,
+            position: i,
+            min_percentile: 0,
+        }
+    }
+
+    /// The frame of the settings dialog and the words it paints: two frames, because a modal knows
+    /// its size only on the second one. The raw word rects are kept — a clipped word is a word the
+    /// pane could not hold (M26.13).
+    fn settings_card(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> (egui::Rect, Vec<(String, egui::Rect)>) {
+        super::style(ctx);
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let first = ctx.run_ui(raw(), |ui| {
+            let c = ui.ctx().clone();
+            app.settings_modal(&c);
+        });
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| {
+            let c = ui.ctx().clone();
+            app.settings_modal(&c);
+        });
+        let mut words = Vec::new();
+        let mut rects = Vec::new();
+        for c in &out.shapes {
+            collect_text_rects(&c.shape, &mut words);
+            collect_rect_styles(&c.shape, &mut rects);
+        }
+        out.drop_without_applying_deltas();
+        let card = rects
+            .iter()
+            .filter(|(_, _, stroke, radius)| {
+                stroke.width > 0.0 && radius.nw == super::RADIUS_CARD as u8
+            })
+            .map(|(r, _, _, _)| *r)
+            .max_by(|a, b| a.width().total_cmp(&b.width()))
+            .expect("the settings dialog is not a card");
+        (card, words)
+    }
+
+    /// M26.13: the settings dialog keeps one size in every section. Seven sections × two languages
+    /// × three window sizes give one rectangle per window size, and no word of a section reaches
+    /// past its 520 px column — the row that did (the tag dictionary's five actions, 716 px) used
+    /// to widen the whole dialog by 172 px and shift it 86 px to the left.
+    #[test]
+    fn the_settings_dialog_keeps_one_size_in_every_section() {
+        for size in [
+            egui::vec2(1240.0, 840.0),
+            egui::vec2(900.0, 700.0),
+            egui::vec2(700.0, 600.0),
+        ] {
+            for lang in i18n::Lang::ALL {
+                let mut frames = Vec::new();
+                for section in SettingsTab::ALL {
+                    let mut app = calendar_app();
+                    app.settings.lang = lang;
+                    app.settings_open = true;
+                    app.settings_tab = section;
+                    let ctx = egui::Context::default();
+                    let (card, words) = settings_card(&mut app, &ctx, size);
+                    // The section list takes 200 px, the pane 520 at most: everything a section
+                    // paints lies between the list and that right edge.
+                    let pane_right = card.left() + 17.0 + 200.0 + 16.0 + 520.0;
+                    for (text, r) in &words {
+                        assert!(
+                            r.right() <= pane_right + 0.5,
+                            "$section «{}» at {size:?} with {lang:?} paints “{text}” past the pane \
+                             (right {:.1} > {pane_right:.1})",
+                            section.label(lang),
+                            r.right()
+                        );
+                    }
+                    frames.push((section, card));
+                }
+                let (_, first) = frames[0];
+                for (section, card) in &frames[1..] {
+                    assert!(
+                        (card.width() - first.width()).abs() <= 0.5
+                            && (card.height() - first.height()).abs() <= 0.5
+                            && (card.left() - first.left()).abs() <= 0.5,
+                        "«{}» at {size:?} with {lang:?} moves the dialog: {card:?} against {first:?}",
+                        section.label(lang)
+                    );
+                }
+            }
+        }
+    }
+
+    /// M26.13: the state of a section is not the size of the dialog — a 40-character tag label and
+    /// a 500-character prompt leave the frame where it was.
+    #[test]
+    fn a_long_tag_label_does_not_resize_the_settings_dialog() {
+        let size = egui::vec2(1240.0, 840.0);
+        let mut app = calendar_app();
+        app.settings.lang = i18n::Lang::En;
+        app.settings_open = true;
+        app.settings_tab = SettingsTab::Interface;
+        let ctx = egui::Context::default();
+        let (want, _) = settings_card(&mut app, &ctx, size);
+        app.tag_defs = (0..20).map(|i| many_tag_defs(&app.settings, i)).collect();
+        app.settings_tab = SettingsTab::Tags;
+        let (card, _) = settings_card(&mut app, &ctx, size);
+        assert!(
+            (card.width() - want.width()).abs() <= 0.5
+                && (card.height() - want.height()).abs() <= 0.5
+                && (card.left() - want.left()).abs() <= 0.5,
+            "long tag data moved the dialog: {card:?} against {want:?}"
+        );
+    }
+
+    /// M26.13: the scroll offset belongs to the section — a switch starts the new one at its top,
+    /// instead of dropping the owner into the middle of the pane he never scrolled.
+    #[test]
+    fn a_section_switch_starts_the_pane_at_its_top() {
+        let size = egui::vec2(1240.0, 840.0);
+        let mut app = calendar_app();
+        app.settings.lang = i18n::Lang::En;
+        app.settings_open = true;
+        // Twenty dictionary rows make the Tags pane taller than its 520 px, so it really scrolls.
+        app.tag_defs = (0..20).map(|i| many_tag_defs(&app.settings, i)).collect();
+        app.settings_tab = SettingsTab::Tags;
+        let ctx = egui::Context::default();
+        // Two frames to learn the size, then a deep scroll of the Tags pane.
+        let _ = settings_card(&mut app, &ctx, size);
+        let _ = settings_card(&mut app, &ctx, size);
+        let over = egui::pos2(700.0, 400.0);
+        for _ in 0..30 {
+            window_frame_with(
+                &mut app,
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(over),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -120.0),
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Unknown,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        // The pane really scrolled: the first row of the section left the view.
+        let (_, tags) = settings_card(&mut app, &ctx, size);
+        assert!(
+            !tags.iter().any(|(text, _)| text == "Tag filter threshold"),
+            "the wheel did not scroll the Tags pane, so the test proves nothing"
+        );
+        // The next section starts at its own top: the offset leaked before M26.13.
+        app.settings_tab = SettingsTab::Model;
+        let (_, words) = settings_card(&mut app, &ctx, size);
+        assert!(
+            words.iter().any(|(text, _)| text == "Model"),
+            "the next section does not start at its top — the offset leaked: {:?}",
+            words.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// M22.8: the section list of the settings dialog is translated in both languages, and the mono
     /// value of a section never touches its word: the widest label of the list makes the value be
     /// dropped when it does not fit.

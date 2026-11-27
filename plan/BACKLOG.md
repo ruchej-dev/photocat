@@ -1817,7 +1817,8 @@ M26.10 (done 2026-11-27) splitting a face does not throw the owner out of the gr
 faces can be split together; M26.11 (done 2026-11-27) a named person is recognized in every
 catalog; M26.12 (done 2026-11-26) the
 built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
-separate window; M26.13 the settings dialog keeps one size and its layout in every section.
+separate window; M26.13 (done 2026-11-27) the settings dialog keeps one size and its layout in
+every section.
 
 **M26.1 — an archive folder can be switched off without losing its rows.** ✅ (done 2026-11-26)
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -2376,7 +2377,7 @@ shows the reason and waits for a press; nothing opens by itself; the measured nu
 **Files.** `src/app.rs`, `src/player.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
 
-**M26.13 — the settings dialog keeps one size in every section, and every section keeps its layout.**
+**M26.13 — the settings dialog keeps one size in every section, and every section keeps its layout.** ✅ (done 2026-11-27)
 **Goal.** The owner switches a section and the dialog stays the rectangle he was looking at: the
 frame, the section list, the footer and "Close" do not move, and nothing jumps under the pointer.
 Every section is walked once and its components are checked against the pane they live in.
@@ -2429,6 +2430,16 @@ column; a headless frame of "Tags" at 1240×840 in both languages.
 
 **Not doing.** A resizable or draggable dialog; animating the size change; restructuring a section
 beyond the rows that overflow (the dialog stays as wide as it is today in six sections).
+
+**Done (2026-11-27).** The measurement named two offenders: the tag dictionary (its five-action row
+716.1 px in English, 751.7 in Russian, its per-tag row and its two-field row 420.1) and the model's
+path row (513.1 / 525.3). All of them are `ui.horizontal_wrapped` now and the two fields take the
+room left (120…380 px), so the frame is 794×654 at 1240×840, 794×652 at 900×700 and 652×552 at
+700×600 in all seven sections and both languages; a 20-row dictionary with long labels and prompts
+keeps the rectangle. The scroll salt carries the section, so a switch starts the next pane at its
+own top. Three tests hold it: the 14-frame × three-size frame check with "no word past the 520 px
+pane", the long-data check, and the switch-after-scroll check. The table before/after is in
+`plan/STATUS.md`.
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
