@@ -72,6 +72,100 @@ impl Tool {
     }
 }
 
+/// The package manager that installs the programs on the running system (M26.2).
+///
+/// The dialog of the warning mark shows its commands and copies them to the clipboard: the app
+/// itself installs nothing, downloads nothing and opens no browser (AGENTS.md §1). On Linux the
+/// choice follows the package manager that is really on the machine, not a guessed name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Installer {
+    Pacman,
+    Apt,
+    Windows,
+    Brew,
+    /// No package manager was recognised: the official download pages are named instead.
+    Unknown,
+}
+
+impl Installer {
+    /// The system in words — a proper name, the same in both languages.
+    pub fn system(self) -> &'static str {
+        match self {
+            Installer::Pacman => "Arch Linux",
+            Installer::Apt => "Debian / Ubuntu",
+            Installer::Windows => "Windows",
+            Installer::Brew => "macOS",
+            Installer::Unknown => "Linux",
+        }
+    }
+
+    /// The commands that install the three programs, one per line. `ffprobe` ships with `ffmpeg`
+    /// in every package named here, so a missing `ffprobe` needs no line of its own.
+    pub fn commands(self) -> &'static [&'static str] {
+        match self {
+            Installer::Pacman => &[
+                "sudo pacman -S ffmpeg tesseract tesseract-data-rus tesseract-data-eng",
+            ],
+            Installer::Apt => &[
+                "sudo apt install ffmpeg tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng",
+            ],
+            Installer::Windows => &[
+                "winget install Gyan.FFmpeg",
+                "winget install UB-Mannheim.TesseractOCR",
+            ],
+            Installer::Brew => &["brew install ffmpeg tesseract tesseract-lang"],
+            // Nothing is guessed for an unknown system: the pages below are the honest way out.
+            Installer::Unknown => &[],
+        }
+    }
+
+    /// The pages the programs are downloaded from. They are printed as text and never opened.
+    pub fn pages(self) -> &'static [&'static str] {
+        match self {
+            Installer::Windows | Installer::Unknown => &[
+                "ffmpeg.org/download.html",
+                "github.com/UB-Mannheim/tesseract/wiki",
+            ],
+            Installer::Pacman | Installer::Apt | Installer::Brew => &[],
+        }
+    }
+
+    /// The one line a system needs on top of its command (`tesseract` packs elsewhere).
+    pub fn note(self, lang: Lang) -> &'static str {
+        match self {
+            Installer::Windows => i18n::t(
+                lang,
+                "the tesseract installer offers the Russian and English language packs",
+            ),
+            Installer::Pacman | Installer::Apt | Installer::Brew => i18n::t(
+                lang,
+                "the command brings the Russian and English language packs of tesseract",
+            ),
+            Installer::Unknown => "",
+        }
+    }
+}
+
+/// The package manager of the running system (M26.2): chosen by the target and, on Linux, by what
+/// is really installed — `/etc/arch-release` or `pacman` means Arch, `apt` means Debian/Ubuntu.
+/// An unknown system is not a failure: the official pages are named instead of a command.
+pub fn installer() -> Installer {
+    if cfg!(target_os = "windows") {
+        return Installer::Windows;
+    }
+    if cfg!(target_os = "macos") {
+        return Installer::Brew;
+    }
+    let there = |path: &str| Path::new(path).is_file();
+    if there("/etc/arch-release") || there("/usr/bin/pacman") {
+        return Installer::Pacman;
+    }
+    if there("/usr/bin/apt") || there("/usr/bin/apt-get") {
+        return Installer::Apt;
+    }
+    Installer::Unknown
+}
+
 /// Where `ffplay` is: next to the configured `ffmpeg`, or the first one in `PATH`. Nothing is
 /// started — the viewer offers it explicitly when the built-in player cannot open a file (M26.12).
 pub fn find_ffplay(tools: &Tools) -> Option<PathBuf> {
@@ -296,6 +390,55 @@ mod tests {
             Some(ffplay.as_path()),
             "ffplay is not found next to ffmpeg"
         );
+    }
+
+    /// M26.2: the lines the info dialog shows are the right ones for the running system, and
+    /// every command names both programs — `ffprobe` comes with `ffmpeg` and needs no line.
+    #[test]
+    fn the_install_lines_follow_the_running_system() {
+        let found = installer();
+        if cfg!(target_os = "windows") {
+            assert_eq!(found, Installer::Windows);
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(found, Installer::Brew);
+        } else {
+            assert!(
+                matches!(found, Installer::Pacman | Installer::Apt | Installer::Unknown),
+                "not a Linux package manager: {found:?}"
+            );
+        }
+        for i in [
+            Installer::Pacman,
+            Installer::Apt,
+            Installer::Windows,
+            Installer::Brew,
+        ] {
+            assert!(!i.commands().is_empty(), "{i:?} shows no command");
+            // Windows names its packages in CamelCase (`Gyan.FFmpeg`): the check ignores case.
+            let text = i.commands().join(" ").to_ascii_lowercase();
+            assert!(
+                text.contains("ffmpeg"),
+                "{i:?} does not install ffmpeg: {:?}",
+                i.commands()
+            );
+            assert!(
+                text.contains("tesseract"),
+                "{i:?} does not install tesseract: {:?}",
+                i.commands()
+            );
+            assert!(
+                !i.commands().iter().any(|c| c.contains("ffprobe")),
+                "{i:?} installs ffprobe on its own instead of with ffmpeg"
+            );
+            assert!(!i.note(Lang::Ru).is_empty(), "{i:?} explains no language packs");
+        }
+        // Nothing is installed on an unknown system: the pages are named, not a guessed command.
+        assert!(Installer::Unknown.commands().is_empty());
+        assert!(!Installer::Unknown.pages().is_empty());
+        // The command and the pages are shown in both languages with the system's own name.
+        assert_eq!(Installer::Pacman.system(), "Arch Linux");
+        assert!(Installer::Windows.note(Lang::En).contains("language packs"));
+        assert!(Installer::Windows.note(Lang::Ru).contains("языковые пакеты"));
     }
 
     #[test]

@@ -1808,8 +1808,8 @@ fall apart when the window is narrow.
 the top strip visibly taller than 32 logical px) and the report "при узком окне вся вёрстка плывёт,
 элементы в центральной части наезжают друг на друга".
 
-**Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 a warning mark for a limited feature and its
-info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
+**Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 (done 2026-11-27) a warning
+mark for a limited feature and its info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
 M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
@@ -1905,7 +1905,7 @@ are gone from the panel. A headless frame at 1240×840 and a test of the scope a
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `.pi/skills/ui-design/SKILL.md`, `plan/I18N.md`.
 
-**M26.2 — a limited feature shows a warning mark, and the mark explains itself.**
+**M26.2 — a limited feature shows a warning mark, and the mark explains itself.** ✅ (done 2026-11-27)
 **Goal.** The owner sees that something is limited before hunting for the reason, and one click
 tells what is lost and what to do — per operating system.
 
@@ -1936,6 +1936,23 @@ three found there is no mark; a click opens the dialog (a headless test), the OS
 chosen by the target, and the text is in both languages.
 
 **Files.** `src/app.rs`, `src/i18n.rs`, `src/tools.rs`, `docs/UI.md`.
+
+**Done.** `tools::installer()` names the package manager of the running system — by the target, and on
+Linux by what is really installed (`/etc/arch-release` or `pacman` — Arch, `apt` — Debian/Ubuntu),
+with the official pages named when nothing is recognised — and holds the command, the page list and
+the language-pack note per system. `App::refresh_tool_states` fills `tools_missing` from the same
+probe `doctor` uses, so a frame starts no process, and the status bar draws the amber `Warning` mark
+16 px after the state word while that list is not empty. `App::limited_modal` is the dialog: one row
+per program with its state line and what is lost, "How to install on <system>:" with the command on
+the `field` tone, the note, the pages as plain words, the line that the app installs and downloads
+nothing and opens no browser, where the path goes in "Settings", the accent "Copy the commands" and
+"Close". The mark and the dialog disappear in the same frame the program starts. The "Find the
+programs" sentence of criterion 2 arrives with M26.3, when the button exists: the dialog points at
+the path fields today, which is the truth on this build. Measured: `cargo test` 337 passed (the new
+`a_missing_program_leaves_a_warning_mark_and_its_dialog` with a broken tesseract path and the
+`tools::the_install_lines_follow_the_running_system` unit test), `cargo test --test
+source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer
+diagnostics` 0 errors; the dialog is 674×333 px at 1240×840 and its card stays inside the frame.
 
 **M26.3 — "Find the programs": one press instead of typing paths.**
 **Goal.** The owner does not need to know where the system keeps `ffmpeg` and `tesseract`.

@@ -2681,6 +2681,11 @@ struct App {
     /// The verified state of the programs (a version or an error) — they are not started on every frame.
     /// One line per program of `tools::ALL`: the version, the file found, the source.
     tool_states: Vec<String>,
+    /// The programs that do not start (M26.2): the status bar carries a warning mark while this is
+    /// not empty, and its dialog names each one with what is lost and how to install it.
+    tools_missing: Vec<tools::Tool>,
+    /// The info dialog of that warning mark (M26.2). It closes by itself when every program starts.
+    limited_open: bool,
     /// The "Settings" dialog: whether it is open and which section is shown.
     settings_open: bool,
     settings_tab: SettingsTab,
@@ -2880,6 +2885,8 @@ impl App {
             tesseract: None,
             tools_input: tools::Tools::default(),
             tool_states: vec![String::new(); tools::ALL.len()],
+            tools_missing: Vec::new(),
+            limited_open: false,
             settings_open: false,
             settings_tab: SettingsTab::Interface,
             details_open: true,
@@ -5199,6 +5206,165 @@ impl App {
         }
     }
 
+    /// M26.2: the dialog behind the warning mark of the status bar. One row per program that does
+    /// not start — what is lost without it — and the commands that install it on the running
+    /// system. The app installs and downloads nothing and opens no browser (AGENTS.md §1): the
+    /// commands are copied to the clipboard, the download pages are only named.
+    fn limited_modal(&mut self, ctx: &egui::Context) {
+        if !self.limited_open {
+            return;
+        }
+        // The programs came back while the dialog was open: the mark is gone, the dialog follows.
+        if self.tools_missing.is_empty() {
+            self.limited_open = false;
+            return;
+        }
+        let lang = self.settings.lang;
+        let installer = tools::installer();
+        let missing = self.tools_missing.clone();
+        let states = self.tool_states.clone();
+        let commands = installer.commands();
+        let mut close = false;
+        let mut copy = false;
+        let modal = egui::Modal::new(egui::Id::unique("photocat-limited")).frame(dialog_frame(ctx));
+        let resp = modal.show(ctx, |ui| {
+            ui.set_min_width(560.0);
+            ui.set_max_width(640.0);
+            ui.horizontal(|ui| {
+                icon_mark_color(ui, Icon::Warning, 18.0, theme(ui).accent);
+                ui.label(
+                    egui::RichText::new(t(lang, "Some features are limited"))
+                        .size(14.0)
+                        .strong(),
+                );
+            });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "photocat works without them: only their own work is off, everything else works as before.",
+                ))
+                .size(12.0)
+                .color(dim(ui)),
+            );
+            ui.add_space(8.0);
+            // One row per program: its name, the honest state line of "Settings" (the version or
+            // the error, the file found, why it is needed) and what is lost without it.
+            for tool in &missing {
+                let i = tools::ALL.iter().position(|t| t == tool).unwrap_or_default();
+                ui.label(
+                    egui::RichText::new(tool.name())
+                        .monospace()
+                        .size(12.0)
+                        .strong(),
+                );
+                let state = states.get(i).map(String::as_str).unwrap_or("");
+                ui.add(egui::Label::new(num(ui, state, 10.0).color(dim(ui))).wrap());
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!(
+                            "{}: {}",
+                            t(lang, "without it"),
+                            tool.without(lang)
+                        ))
+                        .size(11.0),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(6.0);
+            }
+            hairline(ui);
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(i18n::fill(
+                    lang,
+                    "How to install on {}:",
+                    &[installer.system().to_string()],
+                ))
+                .size(12.0)
+                .strong(),
+            );
+            if !commands.is_empty() {
+                let th = theme(ui);
+                egui::Frame::new()
+                    .fill(th.field)
+                    .corner_radius(egui::CornerRadius::same(4))
+                    .inner_margin(egui::Margin::symmetric(8, 6))
+                    .show(ui, |ui| {
+                        for command in commands {
+                            ui.add(
+                                egui::Label::new(num(ui, *command, 11.0).color(th.text)).wrap(),
+                            );
+                        }
+                    });
+                let note = installer.note(lang);
+                if !note.is_empty() {
+                    ui.label(egui::RichText::new(note).size(11.0).color(dim(ui)));
+                }
+            }
+            let pages = installer.pages();
+            if !pages.is_empty() {
+                ui.label(
+                    egui::RichText::new(t(
+                        lang,
+                        "The pages the programs come from — named here only, nothing is opened:",
+                    ))
+                    .size(11.0)
+                    .color(dim(ui)),
+                );
+                for page in pages {
+                    ui.label(num(ui, *page, 11.0).color(dim(ui)));
+                }
+            }
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(t(
+                        lang,
+                        "photocat installs and downloads nothing itself and opens no browser: copy the command and run it in a terminal.",
+                    ))
+                    .size(11.0)
+                    .color(dim(ui)),
+                )
+                .wrap(),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(t(
+                        lang,
+                        "After installing, set the path in “Settings → External programs” (“Text on photos” for tesseract) — or leave the field empty, and photocat finds the program in PATH.",
+                    ))
+                    .size(11.0)
+                    .color(dim(ui)),
+                )
+                .wrap(),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if !commands.is_empty()
+                    && ui
+                        .add(WordButton::primary(
+                            Icon::ContentCopy,
+                            t(lang, "Copy the commands"),
+                        ))
+                        .clicked()
+                {
+                    copy = true;
+                }
+                if word_button(ui, Icon::Close, t(lang, "Close")).clicked() {
+                    close = true;
+                }
+            });
+        });
+        if resp.backdrop_response.clicked() || close {
+            self.limited_open = false;
+        }
+        if copy {
+            ctx.copy_text(commands.join("\n"));
+            self.status = t(lang, "the commands are copied to the clipboard").into();
+        }
+    }
+
     fn start_trash(&mut self) {
         if self.trash_rx.is_some() {
             return;
@@ -6742,6 +6908,15 @@ impl App {
                     .color(if state.is_some() { th.text } else { th.text_med }),
             )
             .on_hover_text(pass_hint);
+            // M26.2: a program that does not start limits its own work, and the mark says so
+            // before the owner hunts for the reason. No mark when everything is found.
+            if !self.tools_missing.is_empty() {
+                ui.add_space(2.0);
+                let hint = t(lang, "some features are limited — click for the details");
+                if icon_button_tone(ui, Icon::Warning, 16.0, Some(th.accent), hint).clicked() {
+                    self.limited_open = true;
+                }
+            }
             ui.add_space(4.0);
             hairline_vertical(ui);
             ui.add_space(4.0);
@@ -10009,8 +10184,11 @@ impl App {
     }
 
     /// One pass over the programs: the version, the file found, the source. Run on reload and on save.
+    /// The same pass fills `tools_missing` (M26.2), so the warning mark of the status bar costs no
+    /// second launch of the programs: a register that does not start is missing.
     fn refresh_tool_states(&mut self) {
         let lang = self.settings.lang;
+        let mut missing = Vec::new();
         self.tool_states = tools::ALL.iter().map(|&tool| {
             let where_ = match self.settings.tools.locate(tool) {
                 Some(p) => format!(
@@ -10030,13 +10208,17 @@ impl App {
                     short_version(&v),
                     tool.purpose(lang)
                 ),
-                Err(e) => format!(
-                    "{}: {e:#} · {where_} · {}",
-                    t(lang, "does not work"),
-                    tool.purpose(lang)
-                ),
+                Err(e) => {
+                    missing.push(tool);
+                    format!(
+                        "{}: {e:#} · {where_} · {}",
+                        t(lang, "does not work"),
+                        tool.purpose(lang)
+                    )
+                }
             }
         }).collect();
+        self.tools_missing = missing;
     }
 
     /// The path to a program is saved only after a successful version launch.
@@ -11681,6 +11863,19 @@ const ICON_W: f32 = 1.5;
 
 /// An icon button of the playback bar: 32 px, the tooltip is mandatory.
 fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Response {
+    icon_button_tone(ui, icon, size, None, hint)
+}
+
+/// The same target in a given tone: the amber warning mark of the status bar (M26.2), where the
+/// colour itself is the signal — the shape says "attention", the tint says "not an error".
+/// `None` keeps the theme's own tone, which follows the pointer.
+fn icon_button_tone(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    size: f32,
+    tone: Option<egui::Color32>,
+    hint: &str,
+) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
     let resp = resp
         .on_hover_text(hint)
@@ -11692,7 +11887,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, hint: &str) -> egui::Re
         rect.center(),
         size * 0.30,
         icon,
-        visuals.fg_stroke.color,
+        tone.unwrap_or(visuals.fg_stroke.color),
     );
     resp
 }
@@ -13768,6 +13963,7 @@ impl eframe::App for App {
         self.album_pick_modal(ctx);
         self.export_modal(ctx);
         self.trash_modal(ctx);
+        self.limited_modal(ctx);
         self.poll_photo(ctx);
         self.poll_video(ctx);
 
@@ -15932,6 +16128,7 @@ mod tests {
     };
     use crate::embed;
     use crate::i18n::{self, t};
+    use crate::tools;
     use std::collections::BTreeSet;
 
     fn file_row(id: i64, kind: &str, name: &str) -> db::FileRow {
@@ -16547,6 +16744,8 @@ mod tests {
         Export,
         Trash,
         Settings,
+        /// M26.2: the info dialog of a limited feature (a program that does not start).
+        Limited,
     }
 
     /// The state a dialog needs and the function that draws it: one place for both, so a test
@@ -16587,6 +16786,14 @@ mod tests {
             Dialog::Settings => {
                 app.settings_open = true;
                 App::settings_modal
+            }
+            Dialog::Limited => {
+                // A path that does not start: the same state the status bar reports on a machine
+                // without tesseract, and the mark and the dialog are built from it.
+                app.settings.tools.tesseract = "/nonexistent/photocat-tesseract".into();
+                app.refresh_tool_states();
+                app.limited_open = true;
+                App::limited_modal
             }
         }
     }
@@ -22326,6 +22533,117 @@ mod tests {
         );
     }
 
+    /// M26.2: a program that does not start limits only its own work, and the status bar says so
+    /// with a warning mark before the owner hunts for the reason. A click opens the dialog of the
+    /// running system: one row per program, what is lost without it and the command to copy. No
+    /// mark when every program is found, and the mark and the dialog go in the same frame the
+    /// programs are repaired.
+    #[test]
+    fn a_missing_program_leaves_a_warning_mark_and_its_dialog() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-limited.db"));
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        // The mark is the only 16×16 target in the bottom strip (the separator there is 1 px wide):
+        // it is found by its size and its place, as a person finds it by the eye.
+        let mark = |app: &mut App| {
+            window_fills(app, &ctx)
+                .into_iter()
+                .map(|(r, _)| r)
+                .find(|r| {
+                    (r.height() - 16.0).abs() < 0.5
+                        && (r.width() - 16.0).abs() < 0.5
+                        && r.bottom() > 840.0 - 28.0
+                })
+        };
+        assert!(mark(&mut app).is_none(), "the mark is drawn with no missing program");
+        // A path that does not start: exactly one program is missing — the check `doctor` runs.
+        app.settings.tools.tesseract = "/nonexistent/photocat-tesseract".into();
+        app.tools_input = app.settings.tools.clone();
+        app.refresh_tool_states();
+        assert_eq!(app.tools_missing, vec![tools::Tool::Tesseract]);
+        let r = mark(&mut app).expect("the warning mark of a limited feature is not drawn");
+        // The dialog stays closed until the mark is pressed.
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            !texts.iter().any(|t| t == "Some features are limited"),
+            "the dialog opens by itself: {texts:?}"
+        );
+        click_at(&mut app, &ctx, r.center());
+        assert!(app.limited_open, "the mark does not open its dialog");
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Some features are limited"),
+            "the dialog has no title: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "tesseract"), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t.contains("OCR is off")),
+            "the dialog does not say what is lost: {texts:?}"
+        );
+        // The command of the running system, and the honest promise that nothing is installed.
+        let commands = tools::installer().commands();
+        assert!(!commands.is_empty(), "no command for this system");
+        for command in commands {
+            assert!(
+                texts.iter().any(|t| t == command),
+                "the dialog hides “{command}”: {texts:?}"
+            );
+        }
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("installs and downloads nothing")),
+            "the dialog does not say that the app installs nothing: {texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "Copy the commands"), "{texts:?}");
+        // The dialog fits the window: a modal that runs past the frame hides its own buttons (M22.12).
+        let mut sized = dialog_app("limited-size");
+        let draw = open_dialog(&mut sized, Dialog::Limited);
+        // A context of its own: the dialog parts measure the clock from zero, and the window's
+        // clock has already run here.
+        let dctx = egui::Context::default();
+        let parts = dialog_parts(&mut sized, &dctx, draw);
+        let card = parts
+            .rects
+            .iter()
+            .filter(|(_, fill, stroke, radius)| {
+                *fill == super::DARK.card
+                    && stroke.color == super::DARK.border
+                    && *radius == egui::CornerRadius::same(super::RADIUS_CARD as u8)
+            })
+            .max_by(|a, b| a.0.width().total_cmp(&b.0.width()))
+            .map(|(r, ..)| *r)
+            .expect("the dialog is not a card");
+        assert!(
+            card.width() <= 1240.0 - 32.0 && card.height() <= 840.0 - 32.0,
+            "the dialog does not fit the window: {card:?}"
+        );
+        // The same dialog in the second language: the rows and the command stay the command.
+        app.settings.lang = i18n::Lang::Ru;
+        app.refresh_tool_states();
+        let texts = window_frame(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|t| t == "Часть возможностей ограничена"),
+            "the dialog is not translated: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Скопировать команды"),
+            "the copy button is not translated: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("OCR выключен")),
+            "what is lost is not translated: {texts:?}"
+        );
+        // The program is back: the mark and the dialog go in the same frame, without a restart.
+        app.settings.lang = i18n::Lang::En;
+        app.settings.tools.tesseract.clear();
+        app.tools_input = app.settings.tools.clone();
+        app.refresh_tool_states();
+        assert!(app.tools_missing.is_empty(), "the program is still missing");
+        assert!(mark(&mut app).is_none(), "the mark survives the repair");
+        assert!(!app.limited_open, "the dialog survives the repair");
+    }
+
     /// M25.8: the state pill left the top strip and the search field took its former width — the
     /// field is the mock-up's 576 px plus the ~70 px the pill used.
     #[test]
@@ -24096,6 +24414,7 @@ mod tests {
                 Dialog::Export,
                 Dialog::Trash,
                 Dialog::Settings,
+                Dialog::Limited,
             ] {
                 let mut app = dialog_app("cards");
                 app.settings.theme = mode;

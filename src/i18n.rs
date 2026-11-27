@@ -1939,6 +1939,40 @@ const PAIRS: &[(&str, &str)] = &[
     ("transport", "транспорт"),
     ("plants", "растения"),
 
+    // --- M26.2: the warning mark of a limited feature and its info dialog -------
+    (
+        "some features are limited — click for the details",
+        "часть возможностей ограничена — нажмите, чтобы узнать подробности",
+    ),
+    ("Some features are limited", "Часть возможностей ограничена"),
+    (
+        "photocat works without them: only their own work is off, everything else works as before.",
+        "photocat работает и без них: отключается только их работа, всё остальное работает как прежде.",
+    ),
+    ("How to install on {}:", "Как установить в системе {}:"),
+    (
+        "the tesseract installer offers the Russian and English language packs",
+        "установщик tesseract предлагает русский и английский языковые пакеты",
+    ),
+    (
+        "the command brings the Russian and English language packs of tesseract",
+        "команда ставит и русский с английским языковые пакеты tesseract",
+    ),
+    (
+        "The pages the programs come from — named here only, nothing is opened:",
+        "Страницы, откуда берутся программы, — только названы, ничего не открывается:",
+    ),
+    (
+        "photocat installs and downloads nothing itself and opens no browser: copy the command and run it in a terminal.",
+        "photocat сам ничего не устанавливает и не скачивает и не открывает браузер: скопируйте команду и выполните её в терминале.",
+    ),
+    (
+        "After installing, set the path in “Settings → External programs” (“Text on photos” for tesseract) — or leave the field empty, and photocat finds the program in PATH.",
+        "После установки задайте путь в «Настройках → Внешние программы» (для tesseract — в «Текст на фото») — или оставьте поле пустым, и photocat найдёт программу в PATH.",
+    ),
+    ("Copy the commands", "Скопировать команды"),
+    ("the commands are copied to the clipboard", "команды скопированы в буфер обмена"),
+
 ];
 
 #[cfg(test)]

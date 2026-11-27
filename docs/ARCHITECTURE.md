@@ -632,6 +632,17 @@ status line and does not save a non-working path; `settings --tesseract PATH` in
 code 2 on an error and writes nothing to the DB. There is nothing to check for an empty path — the
 program is looked up in `PATH` at work time.
 
+**A limited feature says so (M26.2).** The same `version()` check that `doctor` runs decides whether
+the status bar carries a warning mark: `App::refresh_tool_states` probes the three programs once on
+load and after the programs are saved, and a program that does not start goes into
+`tools_missing` — no process is started on a frame. The mark's dialog shows per program its state
+line and what is lost, then the command of the running system: `tools::installer()` chooses it by
+the target and, on Linux, by what is really installed (`/etc/arch-release` or `/usr/bin/pacman` —
+Arch; `apt`/`apt-get` — Debian/Ubuntu), with the official pages named when nothing is recognised.
+The command is only copied to the clipboard and the pages are only named: the app installs,
+downloads and opens nothing (AGENTS.md §1), and the mark disappears in the same frame the program
+starts.
+
 **`doctor`** prints for each program the version, where the path comes from (settings or `PATH`),
 the file it found, why it is needed and what breaks without it; then the tesseract languages against
 `settings.ocr_lang` (`rus+eng` by default), the CLIP model and the DB size. A missing program is a
@@ -649,4 +660,5 @@ in `PATH` (without tesseract only OCR is lost — everything else works, the wei
 because it is the binary's own HTTPS client, ADR 0047).
 What exactly is present on the machine is printed by `photocat doctor`; packages are installed with
 the OS package manager (Arch: `tesseract` + `tesseract-data-rus` + `tesseract-data-eng`,
-Windows/macOS — their own ffmpeg and tesseract builds).
+Windows/macOS — their own ffmpeg and tesseract builds) — and the app names that command for the
+system it runs on instead of asking the owner to look it up (M26.2).
