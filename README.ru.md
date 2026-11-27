@@ -13,6 +13,18 @@
 Что менялось и когда: [CHANGELOG.ru.md](CHANGELOG.ru.md). Знак и иконка окна лежат в
 [`assets/`](assets/) (ADR 0052).
 
+## Снимки экранов
+
+![Архив после индексации](docs/screenshots/ru/main-grid.jpg)
+*Архив после индексации: сетка по месяцам, карточка снимка и фильтры.*
+
+![Полный экран](docs/screenshots/ru/viewer-faces.jpg)
+*Полный экран: рамки лиц, строка инструментов и серия дня.*
+
+![Лица](docs/screenshots/ru/people.jpg)
+*Названная группа лиц. Все экраны — в [docs/SCREENSHOTS.ru.md](docs/SCREENSHOTS.ru.md), на английском
+и на русском.*
+
 ## Сборка
 
 ```bash

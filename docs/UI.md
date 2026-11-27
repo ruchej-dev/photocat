@@ -2,6 +2,8 @@
 
 *Русская версия: [UI.ru.md](UI.ru.md).*
 
+Every screen with its screenshots: [SCREENSHOTS.md](SCREENSHOTS.md).
+
 The owner is a person who sorts out a family archive, not a designer and not a photographer. The
 screen must be dense, dark and predictable: a grid of snapshots, one status line, a filter panel.
 Nothing that needs to be learned.

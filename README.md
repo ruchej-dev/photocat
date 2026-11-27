@@ -14,6 +14,18 @@ modified.
 What changed and when: [CHANGELOG.md](CHANGELOG.md). The mark and the window icon live in
 [`assets/`](assets/) (ADR 0052).
 
+## Screenshots
+
+![The archive after indexing](docs/screenshots/en/main-grid.jpg)
+*The archive after indexing: the month grid, the file card and the filters.*
+
+![The full-screen viewer](docs/screenshots/en/viewer-faces.jpg)
+*The full-screen viewer: face boxes, the tools row and the series of the day.*
+
+![People](docs/screenshots/en/people.jpg)
+*A named face group. Every screen is in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md), in English and in
+Russian.*
+
 ## Build
 
 ```bash

@@ -16103,7 +16103,7 @@ impl eframe::App for App {
                 (
                     t(lang, "Duplicates & series").to_string(),
                     {
-                            i18n::fill(lang, "{} groups, {} spare", &[groups.len().to_string(), db::human_in(lang, waste).to_string()])
+                            i18n::fill(lang, "{}, {} spare", &[i18n::count(lang, groups.len(), "group"), db::human_in(lang, waste).to_string()])
                         },
                 )
             }
@@ -16130,7 +16130,9 @@ impl eframe::App for App {
             ),
             View::Trash => (
                 t(lang, "Trash").to_string(),
-                i18n::fill(lang, "{} files, {}", &[self.trash_items.len().to_string(), db::human_in(lang, self.trash_items.iter().map(|r| r.size).sum()).to_string()]),
+                // The rows were taken from `self` above, before the title is built: the header
+                // must count the local list, otherwise it always says "0 files, 0 B".
+                i18n::fill(lang, "{} files, {}", &[trash_items.len().to_string(), db::human_in(lang, trash_items.iter().map(|r| r.size).sum()).to_string()]),
             ),
             // The "Integrity" screen is drawn before the grid (see `ui`); the branch is needed only
             // for the enum match to be complete.
@@ -18069,9 +18071,9 @@ impl eframe::App for App {
                     let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
                     self.status = i18n::fill(
                         lang,
-                        "{} groups, {} duplicates, in {} s",
+                        "{}, {} duplicates, in {} s",
                         &[
-                            self.groups.len().to_string(),
+                            i18n::count(lang, self.groups.len(), "group"),
                             db::human_in(lang, waste),
                             format!("{:.1}", t0.elapsed().as_secs_f32()),
                         ],
