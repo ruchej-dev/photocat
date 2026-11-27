@@ -146,6 +146,11 @@ const NOUNS: &[(&str, [&str; 2], [&str; 3])] = &[
     ("shot", ["photo", "photos"], ["снимок", "снимка", "снимков"]),
     ("person", ["person", "people"], ["лицо", "лица", "лиц"]),
     ("group", ["group", "groups"], ["группа", "группы", "групп"]),
+    (
+        "proposal",
+        ["proposal", "proposals"],
+        ["предложение", "предложения", "предложений"],
+    ),
     ("tag", ["tag", "tags"], ["тег", "тега", "тегов"]),
     ("album", ["album", "albums"], ["альбом", "альбома", "альбомов"]),
     ("year", ["year", "years"], ["год", "года", "лет"]),
@@ -295,10 +300,12 @@ subcommands:
   tags [--list] [--add LABEL --prompt TEXT] [--enable ID] [--disable ID] [--rm ID]
        [--export FILE] [--import FILE] [--reset]
                                             the model's tag dictionary: labels, prompts, order
-  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
+  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list] [--quarantine]
                                             people: detection, embeddings, groups
   faces download --yes | label --id N --name NAME | split --id N
-                                            face weights, name a group, split a face out
+        | confirm --id N | reject --id N | confirm --all | reject --all
+                                            face weights, name a group, split a face out,
+                                            answer the quarantine
   ocr [--jobs N] [--all] [--dry-run] [--file PATH]
                                             text from documents and screenshots (tesseract)
   search <query> [--top N] [--text]        semantic search or search in the text on photos
@@ -339,10 +346,12 @@ default: GUI"#,
   tags [--list] [--add МЕТКА --prompt ТЕКСТ] [--enable ID] [--disable ID] [--rm ID]
        [--export FILE] [--import FILE] [--reset]
                                             словарь тегов модели: метки, промпты, порядок
-  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list]
+  faces [--jobs N] [--threshold X] [--dry-run] [--recluster] [--list] [--quarantine]
                                             лица: детекция, эмбеддинги, группы
   faces download --yes | label --id N --name ИМЯ | split --id N
-                                            веса лиц, подпись группы, разъединить лицо
+        | confirm --id N | reject --id N | confirm --all | reject --all
+                                            веса лиц, подпись группы, разъединить лицо,
+                                            ответить на карантин
   ocr [--jobs N] [--all] [--dry-run] [--file PATH]
                                             текст с документов и скриншотов (tesseract)
   search <запрос> [--top N] [--text]        смысловой поиск или поиск по тексту на фото
@@ -781,12 +790,14 @@ const PAIRS: &[(&str, &str)] = &[
     ("e.g. Lisa", "например, Лиза"),
     ("Save the name", "Сохранить имя"),
     (
-        "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is \
-         split by the crossed-head button on the tile and the view stays where it was; tick \
-         several strangers and “Split the picked” takes them all out at once.",
-        "Подпись закрепляет группу: пересборка по порогу её не перемешает. Ложную склейку \
-         разъединяет кнопка с перечёркнутой головой на плитке, и вид остаётся на месте; отметьте \
-         нескольких чужих и «Отделить выбранные» уберёт их всех разом.",
+        "A name pins the group: rebuilding by threshold will not shuffle it, and the closeness in \
+         “Tuning” adds faces only through the quarantine. A wrong merge is split by the \
+         crossed-head button on the tile and the view stays where it was; tick several strangers \
+         and “Split the picked” takes them all out at once.",
+        "Подпись закрепляет группу: пересборка по порогу её не перемешает, а близость в \
+         «Настройке» добавляет лица только через карантин. Ложную склейку разъединяет кнопка с \
+         перечёркнутой головой на плитке, и вид остаётся на месте; отметьте нескольких чужих и \
+         «Отделить выбранные» уберёт их всех разом.",
     ),
     (
         "Pick a group in the list to name it, or split the tiles.",
@@ -801,8 +812,8 @@ const PAIRS: &[(&str, &str)] = &[
     ),
     ("Unpick", "Снять выбор"),
     (
-        "No faces yet: press “Find faces” on the left (the face model is required).",
-        "Лиц пока нет: нажмите «Найти лица» слева (нужна модель лиц).",
+        "No faces yet: press “Find faces” above (the face model is required).",
+        "Лиц пока нет: нажмите «Найти лица» выше (нужна модель лиц).",
     ),
     ("No faces in this group.", "В этой группе нет лиц."),
     ("no frame", "нет кадра"),
@@ -2200,22 +2211,22 @@ const PAIRS: &[(&str, &str)] = &[
         "после установки нажмите «Найти программы» ещё раз",
     ),
 
-    // --- M26.11: a named person is recognized in every catalog ------------------
+    // --- M26.11, the quarantine since M26.17: a proposal waits for a confirmation ------
     (
         "no named people yet: there is nothing to match to",
         "названных людей пока нет: сопоставлять некому",
     ),
     (
-        "matched {} faces to {} named people",
-        "сопоставлено {} лиц {} названным людям",
+        "would propose {} faces to {} named people",
+        "будет предложено {} лиц {} названным людям",
     ),
     (
-        "would match {} faces to {} named people",
-        "будет сопоставлено {} лиц {} названным людям",
+        "proposed {} faces to {} named people — they wait in quarantine",
+        "предложено {} лиц {} названным людям — они ждут в карантине",
     ),
     (
-        "no automatic match yet: {} named",
-        "автоматических сопоставлений пока нет: названных — {}",
+        "no new proposal yet: {} named",
+        "новых предложений пока нет: названных — {}",
     ),
     (
         "{} left — the lead was too small",
@@ -2225,48 +2236,115 @@ const PAIRS: &[(&str, &str)] = &[
         "{} left — no named person is close enough",
         "{} осталось — ни один названный человек не достаточно близок",
     ),
+    // --- M26.16: the thresholds explain themselves and count their effect --------------
+    ("Tuning", "Настройка"),
     (
-        "A face joins a named person at:",
-        "Лицо присоединяется к названному человеку при близости:",
+        "the merge threshold and the two sliders of the matching step; they decide the next pass, not the group on screen",
+        "порог склейки и два ползунка сопоставления; они решают следующий проход, а не группу на экране",
+    ),
+    ("Merge threshold", "Порог склейки"),
+    ("Closeness to a named person", "Близость к названному"),
+    ("Lead over the next person", "Перевес над следующим"),
+    (
+        "how close a free face must be to a named person to be offered to you",
+        "насколько близко неназванное лицо должно быть к названному человеку, чтобы его вам предложили",
     ),
     (
-        "and leads the next person by:",
-        "и опережает следующего человека на:",
+        "a face is offered only when it is at least that close and leads the next person by this much; a wrong match is turned down on its tile",
+        "лицо предлагается, только когда оно настолько близко и опережает следующего человека на эту величину; ошибочное предложение отклоняется на плитке",
     ),
     (
-        "a face joins a named person only when it is at least that close and leads the next person by this much; the close face joins the group with the “auto” mark and a wrong match is split off the tile",
-        "лицо присоединяется к названному человеку только когда оно настолько близко и опережает следующего человека на эту величину; хорошо похожее лицо входит в группу с пометкой «авто», а ошибочное сопоставление отделяется кнопкой на плитке",
+        "These values decide the next pass — not the group on screen. “Rebuild groups” applies the merge threshold and looks for the named people; a name is checked as soon as it is saved.",
+        "Эти значения решают следующий проход, а не группу на экране. «Пересобрать группы» применяет порог склейки и ищет названных людей; имя проверяется сразу после сохранения.",
     ),
     (
-        "matched automatically: {} close to this person — split it off if it is not them",
-        "сопоставлено автоматически: близость {} — отделите, если это не он",
-    ),
-    ("auto", "авто"),
-    ("Detach the auto-matched", "Отделить сопоставленные автоматически"),
-    (
-        "every face that joined this person by itself moves into one unnamed group; the faces you placed stay, and the next matching step leaves them alone",
-        "каждое лицо, присоединившееся к этому человеку само, перейдёт в одну безымянную группу; расставленные вами лица остаются, и следующий шаг сопоставления их не тронет",
+        "counting the free faces at {} / {}…",
+        "считаю неназванные лица при {} / {}…",
     ),
     (
-        "Detach the automatically matched?",
-        "Отделить сопоставленные автоматически?",
+        "No named people yet: name a group and the free faces that resemble it will be offered here.",
+        "Названных людей пока нет: назовите группу, и похожие на неё неназванные лица появятся здесь.",
     ),
     (
-        "Automatic matches: {}",
-        "Автоматических сопоставлений: {}",
+        "At {} / {}: 0 of {} free faces would join a named person ({} close but ambiguous, {} farther)",
+        "При {} / {}: из {} неназванных лиц к названному человеку не подойдёт никто ({} близко, но неоднозначно, {} дальше)",
     ),
     (
-        "They move into one unnamed group and stay there: the next matching step leaves them alone. The faces you named or placed by hand stay in the group. Rows only — the photos and the crops are untouched.",
-        "Они перейдут в одну безымянную группу и останутся там: следующий шаг сопоставления их не тронет. Лица, названные или расставленные вами, остаются в группе. Только строки — фото и кропы не трогаются.",
+        "At {} / {}: {} of {} free faces would join a named person ({} close but ambiguous, {} farther)",
+        "При {} / {}: {} из {} неназванных лиц подойдут к названному человеку ({} близко, но неоднозначно, {} дальше)",
     ),
-    ("Detach them", "Отделить их"),
-    ("no automatic match left in this group", "в этой группе автоматических сопоставлений не осталось"),
+    ("Look for the named people", "Искать названных людей"),
     (
-        "{} faces left the group into one unnamed group; the screen stays here",
-        "{} лиц ушли из группы в одну безымянную; экран остаётся на месте",
+        "compares the free faces with the named people and puts the close ones into the quarantine; no group changes until you confirm a face",
+        "сравнивает неназванные лица с названными людьми и помещает похожие в карантин; ни одна группа не меняется, пока вы не подтвердите лицо",
     ),
-    ("faces not detached", "лица не отделены"),
-
+    // --- M26.17: the quarantine --------------------------------------------------------
+    ("Quarantine", "Карантин"),
+    (
+        "faces that resemble a person you named; nothing has joined a group until you confirm",
+        "лица, похожие на названного человека; ни одно не входит в группу, пока вы не подтвердите",
+    ),
+    (
+        "in quarantine: {} — open the group list to confirm them",
+        "в карантине: {} — откройте список групп, чтобы подтвердить",
+    ),
+    (
+        "Each face resembles a person you named. Nothing has joined a group: the tick confirms it, the crossed head turns it down and the face stays where it is.",
+        "Каждое лицо похоже на названного человека. В группу пока никто не вошёл: галочка подтверждает, перечёркнутая голова отклоняет, и лицо остаётся на месте.",
+    ),
+    (
+        "Nothing waits for confirmation. Name a group, then open “Tuning” and press “Look for the named people”: the close faces will be offered here.",
+        "Подтверждать нечего. Назовите группу, откройте «Настройку» и нажмите «Искать названных людей»: похожие лица появятся здесь.",
+    ),
+    ("Confirm all", "Подтвердить все"),
+    (
+        "every face below joins the person it resembles; a wrong one is split off on its tile afterwards",
+        "каждое лицо ниже входит к человеку, на которого похоже; ошибочное потом отделяется кнопкой на плитке",
+    ),
+    (
+        "confirm: this face joins the person it resembles",
+        "подтвердить: лицо входит к человеку, на которого похоже",
+    ),
+    (
+        "turn down: not this person; the face stays where it is",
+        "отклонить: это не тот человек; лицо остаётся на месте",
+    ),
+    (
+        "looks like {} at {} — confirm it or turn it down; nothing has changed yet",
+        "похоже на {} с близостью {} — подтвердите или отклоните; пока ничего не изменилось",
+    ),
+    ("looking for the named people…", "ищу названных людей…"),
+    ("nothing waits in quarantine", "в карантине ничего не ждёт"),
+    (
+        "the named people are not looked for",
+        "названные люди не найдены",
+    ),
+    (
+        "a face number is needed: faces confirm --id N",
+        "нужен номер лица: faces confirm --id N",
+    ),
+    (
+        "the free faces are not counted",
+        "неназванные лица не посчитаны",
+    ),
+    (
+        "1 face joined the person it resembles",
+        "1 лицо вошло к человеку, на которого похоже",
+    ),
+    (
+        "{} faces joined the person they resemble",
+        "{} лиц вошли к человеку, на которого похожи",
+    ),
+    (
+        "1 face stays where it is — the person is not them",
+        "1 лицо остаётся на месте — это не тот человек",
+    ),
+    (
+        "{} faces stay where they are — the person is not them",
+        "{} лиц остаются на месте — это не тот человек",
+    ),
+    ("the faces are not confirmed", "лица не подтверждены"),
+    ("the faces are not turned down", "лица не отклонены"),
 ];
 
 #[cfg(test)]

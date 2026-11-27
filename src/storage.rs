@@ -111,6 +111,7 @@ pub fn clear_faces(db_path: &Path) -> Result<Cleared> {
     let cleared = clear_cache_dir(&db::cache_dir().join("faces"))?;
     let conn = db::open(db_path)?;
     let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM face_matches", [])?;
     tx.execute("DELETE FROM faces", [])?;
     tx.execute("DELETE FROM face_scans", [])?;
     tx.execute("DELETE FROM face_clusters", [])?;
@@ -127,6 +128,7 @@ pub fn reset_index(db_path: &Path) -> Result<()> {
         "embeddings",
         "tags",
         "tag_hidden",
+        "face_matches",
         "faces",
         "face_scans",
         "face_clusters",

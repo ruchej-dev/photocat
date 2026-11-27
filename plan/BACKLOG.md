@@ -2445,6 +2445,198 @@ own top. Three tests hold it: the 14-frame × three-size frame check with "no wo
 pane", the long-data check, and the switch-after-scroll check. The table before/after is in
 `plan/STATUS.md`.
 
+**M26.14 — the settings of the People screen live on its page.** ✅ (done 2026-11-27)
+**Goal.** The left panel is the map of the application, not a drawer of the current screen: the face
+model, its download and the three thresholds move from the panel into the page that owns the faces.
+
+**Source.** The owner's message of 2026-11-27: "в левой панели находятся настройки для определения
+лиц. Перенести на страницу с лицами".
+
+**What was there.** M26.5 moved the whole "People" pane of the settings dialog into the left panel as
+one block. On the People screen the panel therefore carried the model line, the licence, the consent
+and the download, three stacked sliders, the counters and the two passes — while the page below it
+held the groups and their crops. The panel scrolled to reach the pass whose result is on the page.
+
+**Acceptance criteria.**
+1. The block stands at the top of the People page: the state line with "Check the face model" on the
+   row, the licence, the consent and the download with its progress and one "Stop" (only while the
+   weights are missing or coming), the three thresholds in one wrapping row
+   (`threshold_field`), one line of counters, "Find faces (N)" / "Resume (N)" and "Rebuild groups".
+   The left panel draws no settings of this screen.
+2. The group list keeps its places: the right panel of a wide window (M22.26), the left panel of a
+   narrow one. The "all together" switch stands with the tiles it changes and still needs two marked
+   groups — fewer marks switch it off.
+3. The block is drawn inside the content panel, where the tiles already hold their textures, so it
+   borrows the numbers and the consent (`FaceSettings`) and reports the press
+   (`FaceSettingsPress`); the frame applies it after the borrows are released.
+4. The page keeps its room for the crops: the three sliders sit side by side, not stacked, and no
+   word and no target leaves the window or overlaps another at 700×600 … 2539×1000.
+5. Nothing about the archive, the DB schema or the face tables changes; the strings go through the
+   `PAIRS` table and `plan/I18N.md` follows.
+
+**Acceptance.** No face setting in the left panel; the People page carries the model, its consent and
+download, the thresholds, the counters and both passes; a headless frame of the screen in both
+languages at a wide and a narrow size.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`.
+
+**Done (2026-11-27).** The block is now `FaceSettings::draw` at the top of the People page: the state
+line `buffalo_l · 182.4 MiB · in place` in the accent with "Check the face model" on the same row, the
+licence line at 10 px, the consent and "Download the face model" with `face files: N/M` and its
+"Stop" while the weights are missing or coming, then the three thresholds in one wrapping row (a
+132 px slider each, the labels above), one line of counters (`N faces in M photos, K groups · N of M
+photos have no faces yet · N photos skipped — their folders have faces off`) and the
+"Find faces (N)" / "Rebuild groups" row. The left panel keeps the group list for a narrow window
+only (`face_groups_block`); a wide window draws it in the right panel as before. The "all together"
+switch moved out of the block into the content, where the faces of the frame are at hand, and
+`face_list_rows` switches it off with fewer than two marked groups. Two tests hold the move: the
+settings test now asserts every setting's x ≥ 260 px (the old code fails it), and the group-list test
+adds a 900×1400 frame where "Groups" and "All people · 2" are in the left panel while the merge
+threshold stays on the page. `cargo test` 360 passed + 3 guard tests, `cargo clippy --all-targets`
+clean, `cargo test --test source_language` 3. Nothing on disk, in the schema or in the face tables
+changed.
+
+**M26.15 — a changelog, and the rule that keeps it.** ✅ (done 2026-11-27)
+**Goal.** A person — the owner first — opens one file and reads what changed in photocat and when,
+without walking 158 commit messages or a 4000-line status log. The habit is written into the
+constitution, so the file cannot quietly die.
+
+**Source.** The owner's message of 2026-11-27: "запиши в правило вести CHANGELOG.md и создай его".
+
+**Acceptance criteria.**
+1. `CHANGELOG.md` exists at the root in Keep a Changelog format with `## [Unreleased]` on top and the
+   first line of development under it, grouped as `Added` / `Changed` / `Fixed` / `Removed`; every
+   bullet names its milestone, and the header says how the file is kept and that
+   `plan/STATUS.md` carries the numbers.
+2. `CHANGELOG.ru.md` is the second variant and both files link to each other (the repository rule of
+   §6 and the list in `plan/I18N.md`).
+3. `AGENTS.md` §6 and `AGENTS.ru.md` §6 carry the rule: a commit that changes what the owner sees,
+   what a command does or what appears on disk adds one line under `[Unreleased]` in both files, in
+   the same commit, with the milestone in brackets; a release takes the section, gives it a version
+   and a date, bumps `version` in `Cargo.toml` and starts an empty one.
+4. `README.md` and `README.ru.md` point at the changelog; both were the entry points a stranger reads.
+5. No code, no schema and no archive file changes.
+
+**Acceptance.** The rule is in both constitutions; the file exists in both languages; the history of
+0.1.0 is readable in one screen and every line points at its milestone.
+
+**Files.** `CHANGELOG.md`, `CHANGELOG.ru.md`, `AGENTS.md`, `AGENTS.ru.md`, `README.md`,
+`README.ru.md`, `plan/I18N.md`, `plan/STATUS.md`.
+
+**Done (2026-11-27).** `CHANGELOG.md` and `CHANGELOG.ru.md` are the same document in two languages:
+the Keep a Changelog header with the rule, `[Unreleased]` holding this task, and
+`[0.1.0] — the first line of development, 2026-11-22 … 2026-11-27 (not released yet)` with 24 `Added`,
+7 `Changed`, 5 `Fixed` and one `Removed` bullet, each ending in the milestone that made it (M1 … M26.14).
+The rule stands as the second bullet of `AGENTS.md` §6 and of `AGENTS.ru.md` §6 — the changelog is part
+of the change, one line, in both files, in the same commit, and a changelog that lies is a defect.
+`README.md` / `README.ru.md` link the pair, `plan/I18N.md` lists it among the bilingual files. No code
+changed: `cargo test` 360 passed, `cargo clippy --all-targets` clean, `check.sh` 55 checks.
+
+**Not doing.** Generating the file from commits (a git log is not a changelog); a version number per
+milestone (photos of the number would age: `0.1.0` stays the development line until the first release);
+a `CHANGELOG` for the Russian-only local report `plan/M3-clusters.md`.
+
+**M26.16 — the People page keeps its thresholds behind one switch, and they say what they do.** ✅ (done 2026-11-27)
+**Goal.** The top of the People page stops taking half the window, and a slider stops looking like a
+control of the open group: the page opens with three lines and one row of actions, the thresholds
+open on demand, and the matching sliders count what they would propose before anything is written.
+
+**Source.** The owner's message of 2026-11-27 with the screenshot `~/Pictures/Screenshots/Screenshot
+from 2026-11-27 17-07-09.png`: "верхняя часть вкладки лиц занимает много места. Сделай вёрстку
+компактнее. Когда выбрана группа лиц, которая определена, то не понятно, как влияют все эти
+регулировки. Я покрутил и не увидел."
+
+**What was there.** M26.14 put the whole settings block on the page: model line, licence, three
+sliders whose labels stood above them (two of the labels wrapped), counters and the passes. The
+three sliders took a third of a 840 px window before the first crop, and they were applied only by
+"Rebuild groups" — a value could be dragged from 0.50 to 0.30 and nothing on the screen moved.
+
+**Acceptance criteria.**
+1. The block is the model line with "Check the face model", the licence, one line of counters and one
+   row of actions ("Find faces (N)", "Rebuild groups", "Tuning · 0.45 / 0.50 / 0.03").
+2. "Tuning" opens three wrapping one-line rows (label 160 px, slider 150 px, the number) under the actions,
+   one sentence that they decide the next pass and not the group on screen, the live count of the
+   matching step and "Look for the named people". The count is a background dry run
+   (`faces::plan_named`), started when the block opens and after a value changes — never per frame —
+   and a stale count names the values it was counted at.
+3. The values are saved on release, not on every frame of a drag.
+4. The group on screen begins at ≤ 260 px on a 1240×840 window with the thresholds closed; the
+   strings go through the `PAIRS` table; `docs/UI.md` and `plan/I18N.md` follow.
+5. No archive file, no DB schema and no face table changes.
+
+**Acceptance.** A headless frame of the page with the thresholds closed and open in both languages;
+the positions measured and written to `docs/ARCHITECTURE.md`; `cargo test` green.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `docs/ARCHITECTURE.md`, `plan/I18N.md`,
+`plan/STATUS.md`.
+
+**Done (2026-11-27).** The page opens with the model line, the licence, one counters line and the
+action row; "Tuning" carries `0.45 / 0.50 / 0.03` and opens three 26 px rows. The values are applied
+by "Rebuild groups" and by "Look for the named people" (matching only), and a name is still checked
+when it is saved. The count is `faces::plan_named` in a thread: 82 ms at 0.40 on the corpus, 23
+proposals to 5 named people; on the same page the group's name field stands at y 255.5 with the
+thresholds closed and at 379.5 with them open. `cargo test` 362 passed, `clippy --all-targets` clean,
+`check.sh` 55 checks, `source_language` 3.
+
+**Not doing.** A live re-clustering preview for the merge threshold (it is O(n²) over 2498 faces and
+would freeze the window); a second "apply" button — "Rebuild groups" is the action the screen
+already has.
+
+**M26.17 — an automatic face match waits in a quarantine for the owner's confirmation.** ✅ (done 2026-11-27)
+**Goal.** The matching step may look for a named person in every catalog, but it must not edit that
+person's group by itself: a wrong merge of relatives is the owner's to catch, and catching it after
+the fact is too late. A proposal waits in a quarantine; the owner's tick makes it a member.
+
+**Source.** The owner's message of 2026-11-27: "Есть группа лиц Ника. Там присутствуют фотографии
+человека Федя… Может ли система автоматически переопределить и найти тут всех Федь?.. Если да, то
+такой автопределитель надо сделать так, что бы не сразу помещал в существующую группу, потому что
+может ошибиться, а помещал в карантин для подтверждения."
+
+**What was there.** M26.11 moved a free face into the best named group as soon as the closeness and
+the lead passed; the tile carried `auto <cosine>` and a named group carried "Detach the auto-matched
+(N)". At the default 0.50 nothing matched on the owner's archive (the closest free face is 0.448); at
+0.40 the same code would have put 23 unverified faces into 5 people's groups.
+
+**Acceptance criteria.**
+1. Schema 10: `face_matches(face_id PRIMARY KEY, cluster_id, score, created_at)`; a face that an
+   older version placed automatically stays in its group, is pinned (`manual=1`) and loses
+   `match_score`, so nothing jumps on the upgrade.
+2. `faces::match_named` replaces the proposal table in one transaction and moves no face; `manual=1`
+   faces and members of named groups are never candidates; a proposal never becomes a reference
+   vector. The report says "proposed N faces to M named people — they wait in quarantine".
+3. The People screen has a "Quarantine · N" row in the group list (always there, one click) and a
+   sub-list: the person and the cosine on each tile, the tick to confirm, the crossed head to turn
+   down, "Confirm all (N)", an empty state that says how proposals appear and an accent line in the
+   counters while anything waits.
+4. A confirmation joins the named group with `manual=1` (kept by a rebuild); a refusal keeps the face
+   where it is and pins it, so the next step does not offer it again. Both delete the proposal and
+   touch rows only.
+5. CLI parity: `faces --quarantine`, `faces confirm --id N|--all`, `faces reject --id N|--all`.
+6. The `auto` mark, the detach action and their dialog leave the table and the screen — nothing joins
+   by itself, so there is nothing to undo. Rows only: no photo, no crop and no archive file is
+   touched.
+7. Proposals are cleaned when a face or a file goes away, when a face is moved by the owner or the
+   clustering, when a group loses its name or goes away, and by `storage` clean-ups.
+
+**Acceptance.** The real archive on a copy: at 0.40, 23 proposals to 5 named people, one confirmation
+moves exactly one face and the next dry run offers 22; `cargo test`, `clippy --all-targets`,
+`source_language`, `check.sh`; the numbers in `plan/STATUS.md`.
+
+**Files.** `src/db.rs`, `src/faces.rs`, `src/app.rs`, `src/main.rs`, `src/storage.rs`, `src/i18n.rs`,
+`docs/ARCHITECTURE.md`, `docs/DECISIONS.md` (ADR 0051), `docs/UI.md`, `plan/I18N.md`,
+`plan/STATUS.md`, `CHANGELOG.md`, `CHANGELOG.ru.md`.
+
+**Done (2026-11-27).** Schema 10 adds `face_matches` and pins the faces an older version matched
+(0 rows on the real DB). The step writes proposals; the People screen and `faces --quarantine` /
+`confirm` / `reject` answer them; "Detach the auto-matched" and the `auto` mark are gone. On a copy
+of the real DB at 0.40: 23 proposals to 5 named people in 0.545 s of rebuild (the plan alone 82 ms),
+the default 0.50 proposes nothing; confirming one moves it into the group and pins it, the next dry
+run offers 22. `cargo test` 362 passed + `source_language` 3, `clippy --all-targets` clean,
+`check.sh` 55 checks.
+
+**Not doing.** Auto-confirmation of a proposal (a guessed group is the thing this task removes);
+deleting a refused face or its crop; showing a proposal as a member of the group (it is not one).
+
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
 is enough); a responsive web-style reflow of every screen (the six breakpoints are the contract).

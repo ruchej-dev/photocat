@@ -33,8 +33,8 @@ The time to the first correct click in a test is **no more than 1 second** for f
 | Filter by path/date, "All / Photos / Videos" | left panel, the "Filter" section | 0–1 click |
 | Active filters and their reset | above the grid, chips with "×" | 1 click |
 | Tile size | above the grid, to the right of the view title | 0 |
-| The main action of the view (find groups / find faces / recognize documents) | left panel, the first group after navigation | 1 click |
-| The view threshold | there too, before the action | 0 clicks |
+| The main action of the view (find groups / find faces) | the screen's own block: the top of the People page (M26.14), the left panel for the duplicates | 1 click |
+| The view threshold | in the same block, above the action | 0 clicks |
 | View totals (how many groups, faces, texts) | next to the action | 0 clicks |
 | The card of the selected file | right panel | 0 clicks after selection |
 | Models, limits, tag thresholds, program paths | "Settings" in the top bar, sections in the dialog | 1–2 clicks — acceptable, this is rare |

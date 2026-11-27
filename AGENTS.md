@@ -102,7 +102,8 @@ The one-dependency rule: **a module depends only on lower layers**. Checked by
   owner's later choice always wins.
 - Previews: `~/.cache/photocat/thumbs/<2 chars>/<sha256[..24]>.jpg`, 320 px on the long side.
 - Faces: crops `~/.cache/photocat/faces/<2 chars>/<sha256[..24]>-<N>.jpg`, 112×112; vectors and
-  groups are in the DB.
+  groups are in the DB, and the automatic matches that wait for the owner are the `face_matches`
+  rows of the quarantine (M26.17) — a proposal, not a membership.
 - Models: by default `<cache>/photocat/models/<id>/`, faces — `<models_dir>/faces/` (182.4 MiB);
   path, size limit and model choice are in the app settings. Four entries in the catalogue
   (`models list`): two CLIP ViT-B/32 (multilingual 217.5 MiB — the default, English 148.6 MiB),
@@ -150,6 +151,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh   # layer bounds; the arch
 ./target/release/photocat faces --dry-run                # how many photos have no faces yet
 ./target/release/photocat faces --list                   # face groups with names and counts
 ./target/release/photocat faces --recluster --threshold 0.45  # rebuild groups
+./target/release/photocat faces --quarantine              # proposals waiting for a confirmation
+./target/release/photocat faces confirm --id 5            # confirm a proposal (or --all)
 ./target/release/photocat play video.mp4                 # built-in player, headless (benchmark)
 ./target/release/photocat play video.mp4 --decode-only   # decode only: fps and frame cost
 ./target/release/photocat faces download --yes           # face weights (network, consent only)
@@ -256,7 +259,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   text tower (M15.6, ADR 0041).
 - People (M6): SCRFD + ArcFace, threshold 0.45 by default; 2498 faces on 856 corpus photos in 630 s,
   617 groups. The detector occasionally finds a "face" on a screen or a statue and mixes up relatives
-  — a false merge is split with the "not him" button, a name pins a group. The face model is
+  — a false merge is split with the "not him" button, a name pins a group, and an automatic match
+  waits in the quarantine (M26.17) until the owner confirms it. The face model is
   182.4 MiB. OCR needs `tesseract` in `PATH` and the `rus`/`eng` language packs; without it
   everything else works and the "Recognize text" button is disabled. Out of 357 corpus candidates,
   text was found in 138 (before M23.6 only 203 were proposed: the tag branch of the heuristic was

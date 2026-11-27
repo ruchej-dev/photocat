@@ -6,11 +6,31 @@ All notable changes to photocat. The format follows [Keep a Changelog](https://k
 the versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 **How this file is kept** (`AGENTS.md` §6). Every commit that changes what the owner sees, what a
-command does or what appears on disk adds one line under `## [Unreleased]
+command does or what appears on disk adds one line under `## [Unreleased]` in the same commit — a
+short phrase, not a story — and updates `CHANGELOG.ru.md` with the same line. The milestone in
+brackets (`[M26.14]`) points at the entry in `plan/STATUS.md`, where the numbers, the measurements and
+the acceptance live: the changelog is the history a person reads, the status log is the record a
+maintainer needs. A release takes the `[Unreleased]` section, gives it a version and a date, bumps
+`version` in `Cargo.toml` and starts a new empty `[Unreleased]`.
+
+## [Unreleased]
 
 ### Added
 
 - This changelog, and the rule that keeps it — `AGENTS.md` §6, `plan/I18N.md` [M26.15].
+- The People page keeps its thresholds behind one “Tuning” switch that shows the values and counts
+  what the matching sliders would propose before a pass runs [M26.16].
+- Automatic face matches wait in a quarantine until the owner confirms them: “Quarantine · N” in the
+  group list, “Confirm all”, and `faces --quarantine` / `confirm` / `reject` [M26.17].
+
+### Changed
+
+- An automatic match no longer joins a named group by itself: the step proposes a face, and a
+  confirmation or a refusal is the owner's decision [M26.17].
+
+### Removed
+
+- “Detach the auto-matched” and the `auto` mark: nothing joins a group by itself any more [M26.17].
 
 ## [0.1.0] — the first line of development, 2026-11-22 … 2026-11-27 (not released yet)
 

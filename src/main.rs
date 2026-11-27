@@ -219,6 +219,44 @@ fn main() -> Result<()> {
                     }
                     return Ok(());
                 }
+                "confirm" | "reject" => {
+                    let confirm = args.get(1).map(String::as_str) == Some("confirm");
+                    let ids: Vec<i64> = if has_flag(&args, "--all") {
+                        let conn = db::open(&db_path)?;
+                        db::load_face_proposals(&conn)?
+                            .iter()
+                            .map(|p| p.face.id)
+                            .collect()
+                    } else {
+                        let id = flag_str(&args, "--id")
+                            .and_then(|v| v.parse::<i64>().ok())
+                            .unwrap_or(0);
+                        if id == 0 {
+                            eprintln!(
+                                "{}",
+                                i18n::t(
+                                    lang,
+                                    "a face number is needed: faces confirm --id N"
+                                )
+                            );
+                            std::process::exit(2);
+                        }
+                        vec![id]
+                    };
+                    if ids.is_empty() {
+                        println!("{}", i18n::t(lang, "nothing waits in quarantine"));
+                        return Ok(());
+                    }
+                    // The owner's answer to the quarantine (M26.17): rows only — the photos, the
+                    // crops and the groups of other faces stay as they are.
+                    let n = if confirm {
+                        faces::confirm_matches(&db_path, &ids)?
+                    } else {
+                        faces::reject_matches(&db_path, &ids)?
+                    };
+                    println!("{}", faces::answer_report(lang, n, confirm));
+                    return Ok(());
+                }
                 "split" => {
                     let id = flag_str(&args, "--id")
                         .and_then(|v| v.parse::<i64>().ok())
@@ -246,6 +284,20 @@ fn main() -> Result<()> {
             let threshold = flag_str(&args, "--threshold")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(settings.face_threshold);
+            if has_flag(&args, "--quarantine") {
+                let conn = db::open(&db_path)?;
+                let proposals = db::load_face_proposals(&conn)?;
+                if proposals.is_empty() {
+                    println!("{}", i18n::t(lang, "nothing waits in quarantine"));
+                }
+                for p in proposals {
+                    println!(
+                        "{} → {} {:.2}  {}",
+                        p.face.id, p.target_label, p.similarity, p.face.path
+                    );
+                }
+                return Ok(());
+            }
             if has_flag(&args, "--dry-run") {
                 let plan = faces::plan(&db_path)?;
                 let model = if faces::model_present(&settings) {
@@ -1887,22 +1939,22 @@ mod cli_i18n_tests {
         };
         assert_eq!(
             matched.to_string(),
-            "matched 12 faces to 3 named people; 4 left — the lead was too small; \
+            "proposed 12 faces to 3 named people — they wait in quarantine; 4 left — the lead was too small; \
              2 left — no named person is close enough"
         );
         matched.lang = Lang::Ru;
         let ru = matched.to_string();
         assert!(
-            ru.contains("сопоставлено 12 лиц 3 названным людям")
+            ru.contains("предложено 12 лиц 3 названным людям")
                 && ru.contains("4 осталось — перевес слишком мал"),
             "{ru}"
         );
         matched.dry_run = true;
         matched.lang = Lang::En;
-        assert!(matched.to_string().starts_with("would match 12 faces"));
+        assert!(matched.to_string().starts_with("would propose 12 faces"));
         matched.matched = 0;
         matched.people = 0;
-        assert!(matched.to_string().starts_with("no automatic match yet: 5 named"));
+        assert!(matched.to_string().starts_with("no new proposal yet: 5 named"));
         matched.named = 0;
         assert!(matched
             .to_string()
@@ -1925,13 +1977,15 @@ mod cli_i18n_tests {
         };
         assert!(clusters.to_string().contains("20 faces, 5 groups"));
         assert!(
-            clusters.to_string().ends_with("; matched 12 faces to 3 named people"),
+            clusters
+                .to_string()
+                .ends_with("; proposed 12 faces to 3 named people — they wait in quarantine"),
             "{clusters}"
         );
         clusters.lang = Lang::Ru;
         assert!(clusters.to_string().contains("лиц 20, групп 5"));
         clusters.matched.lang = Lang::Ru;
-        assert!(clusters.to_string().contains("сопоставлено 12 лиц 3 названным людям"));
+        assert!(clusters.to_string().contains("предложено 12 лиц 3 названным людям"));
 
         // embed
         let mut embed = embed::EmbedStats {

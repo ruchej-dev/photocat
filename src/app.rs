@@ -31,6 +31,8 @@ type IntegrityReply = (IntegrityJob, Result<IntegrityOutcome>);
 enum FaceReply {
     Scan(Result<faces::Stats>),
     Cluster(Result<faces::ClusterStats>),
+    /// Only the matching step (M26.17): the proposals for the named people, no rebuild.
+    Match(Result<faces::MatchReport>),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1452,6 +1454,397 @@ fn card_block(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
             ui.set_width(width.max(0.0));
             add(ui);
         });
+}
+
+/// What the owner pressed in the settings block of the People screen (M26.14). The block is drawn
+/// inside the content panel, where the tiles already hold the textures, so it borrows its numbers
+/// and the consent rather than the whole `App` and reports the press for the frame to apply.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum FaceSettingsPress {
+    #[default]
+    None,
+    Save,
+    Check,
+    Download,
+    StopDownload,
+    FindFaces,
+    Recluster,
+    StopPass,
+    /// The thresholds open and close (M26.16).
+    Tune,
+    /// Look for the named people only, without rebuilding the groups (M26.17).
+    Match,
+}
+
+/// The settings of the People screen (M26.14, compact since M26.16): one line of state, one line of
+/// counters, one row of actions and, on demand, the three thresholds with a count of what the
+/// matching sliders would do. They were the block of the left panel since M26.5; the page that owns
+/// the faces owns its settings, and the left panel stays the map of the application.
+struct FaceSettings<'a> {
+    lang: Lang,
+    threshold: &'a mut f32,
+    match_at: &'a mut f32,
+    match_margin: &'a mut f32,
+    consent: &'a mut bool,
+    model_here: bool,
+    model_bytes: i64,
+    downloading: bool,
+    download_progress: Option<&'a db::Progress>,
+    pass_running: bool,
+    pass_progress: Option<&'a db::Progress>,
+    clusters: usize,
+    faces: i64,
+    photos: i64,
+    todo: i64,
+    images: i64,
+    skipped: i64,
+    /// Faces waiting in the quarantine (M26.17): named in the counters and counted by the list.
+    quarantine: usize,
+    /// The thresholds are open. The page spends the room only when the owner asks for it (M26.16).
+    open: bool,
+    /// What the matching step would propose at the openness and the lead shown (M26.16): counted in
+    /// the background, never per frame.
+    plan: Option<&'a faces::MatchReport>,
+    /// The values the plan was counted at, so a stale count names its own numbers.
+    plan_at: Option<(f32, f32)>,
+    /// The count is running; the row says so instead of showing an older number as the new one.
+    plan_counting: bool,
+}
+
+impl FaceSettings<'_> {
+    fn draw(&mut self, ui: &mut egui::Ui) -> FaceSettingsPress {
+        let lang = self.lang;
+        let mut press = FaceSettingsPress::None;
+        block(ui, |ui| {
+            // The model, its size and its licence: the weights come by the owner's press only and
+            // never leave the machine afterwards. The one action of the line rides next to it, so
+            // with the weights in place the block opens with two facts and no button of its own.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} · {} · {}",
+                        faces::MODEL_ID,
+                        db::human_in(lang, self.model_bytes),
+                        if self.model_here {
+                            t(lang, "in place")
+                        } else {
+                            t(lang, "not downloaded")
+                        }
+                    ))
+                    .size(11.0)
+                    .color(if self.model_here { accent(ui) } else { dim(ui) }),
+                );
+                if self.model_here
+                    && !self.downloading
+                    && word_button(ui, Icon::CheckCircle, t(lang, "Check the face model")).clicked()
+                {
+                    press = FaceSettingsPress::Check;
+                }
+            });
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
+                ))
+                .size(10.0)
+                .color(dim(ui)),
+            );
+            // The consent and the download stand here only while the weights are missing or coming:
+            // with the model in place the block keeps its room for the pass (M26.5).
+            if !self.model_here || self.downloading {
+                ui.add_space(4.0);
+                ui.checkbox(
+                    self.consent,
+                    t(lang, "I allow the face weights to be downloaded (photos are not sent)"),
+                );
+                if ui
+                    .add_enabled(
+                        *self.consent && !self.downloading,
+                        WordButton::primary(Icon::Download, t(lang, "Download the face model")),
+                    )
+                    .clicked()
+                {
+                    press = FaceSettingsPress::Download;
+                }
+                if !*self.consent {
+                    ui.label(
+                        egui::RichText::new(t(
+                            lang,
+                            "the button is disabled: network consent is required",
+                        ))
+                        .size(10.0)
+                        .color(dim(ui)),
+                    );
+                }
+                if let Some(p) = self.download_progress {
+                    let (done, total) = (p.done(), p.total());
+                    let frac = if total > 0 {
+                        done as f32 / total as f32
+                    } else {
+                        0.0
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .desired_width(ui.available_width())
+                            .text(if total > 0 {
+                                format!("{} {done}/{total}", t(lang, "face files:"))
+                            } else {
+                                p.msg()
+                            }),
+                    );
+                    ui.label(egui::RichText::new(p.msg()).size(10.0).color(dim(ui)));
+                    if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked() {
+                        press = FaceSettingsPress::StopDownload;
+                    }
+                }
+            }
+            // The counters: one line, and the quarantine is named inside it while it is not empty
+            // (M26.17) — a proposal nobody sees would be a proposal nobody answers.
+            let mut facts = format!(
+                "{} · {}",
+                i18n::fill(lang, "{} faces in {} photos, {} groups", &[self.faces.to_string(), self.photos.to_string(), self.clusters.to_string()]),
+                i18n::fill(lang, "{} of {} photos have no faces yet", &[self.todo.to_string(), self.images.to_string()])
+            );
+            if self.skipped > 0 {
+                facts.push_str(&format!(
+                    " · {}",
+                    i18n::fill(
+                        lang,
+                        "{} photos skipped — their folders have faces off",
+                        &[self.skipped.to_string()],
+                    )
+                ));
+            }
+            ui.label(egui::RichText::new(facts).size(11.0).color(dim(ui)));
+            if self.quarantine > 0 {
+                ui.label(
+                    egui::RichText::new(i18n::fill(
+                        lang,
+                        "in quarantine: {} — open the group list to confirm them",
+                        &[i18n::count(lang, self.quarantine, "proposal")],
+                    ))
+                    .size(11.0)
+                    .color(accent(ui)),
+                );
+            }
+            // The passes and the switch of the thresholds: one row, so the crops start high on the
+            // page (M26.16). The values stand on the switch, and its hint says what they do not do.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if self.pass_running {
+                    ui.label(t(lang, "reclustering…"));
+                    if self.pass_progress.is_some()
+                        && word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
+                    {
+                        press = FaceSettingsPress::StopPass;
+                    }
+                } else {
+                    let scan_label = if self.todo < self.images {
+                        format!("{} ({})", t(lang, "Resume"), self.todo)
+                    } else {
+                        format!("{} ({})", t(lang, "Find faces"), self.todo)
+                    };
+                    if ui
+                        .add_enabled(
+                            self.model_here && self.todo > 0,
+                            WordButton::new(
+                                if self.todo < self.images {
+                                    Icon::Play
+                                } else {
+                                    Icon::Face
+                                },
+                                scan_label,
+                            ),
+                        )
+                        .on_hover_text(t(
+                            lang,
+                            "a long pass: detection and embeddings run locally, no network; photos already scanned are skipped by sha256",
+                        ))
+                        .clicked()
+                    {
+                        press = FaceSettingsPress::FindFaces;
+                    }
+                    if ui
+                        .add_enabled(
+                            self.faces > 0,
+                            WordButton::new(Icon::Refresh, t(lang, "Rebuild groups")),
+                        )
+                        .on_hover_text(t(
+                            lang,
+                            "the threshold applies to faces; manual names and splits are kept",
+                        ))
+                        .clicked()
+                    {
+                        press = FaceSettingsPress::Recluster;
+                    }
+                }
+                if ui
+                    .add(WordButton::picked(
+                        Icon::Settings,
+                        format!(
+                            "{} · {:.2} / {:.2} / {:.2}",
+                            t(lang, "Tuning"),
+                            self.threshold,
+                            self.match_at,
+                            self.match_margin
+                        ),
+                        self.open,
+                    ))
+                    .on_hover_text(t(
+                        lang,
+                        "the merge threshold and the two sliders of the matching step; they decide the next pass, not the group on screen",
+                    ))
+                    .clicked()
+                {
+                    press = FaceSettingsPress::Tune;
+                }
+            });
+            if self.open {
+                ui.add_space(4.0);
+                // The three values, one 26 px row each: the word on the left, the slider and its
+                // number on the right. Stacked, no label has to wrap and no row moves on a click
+                // (M26.16).
+                let mut save = false;
+                ui.scope(|ui| {
+                    ui.spacing_mut().slider_width = 150.0;
+                    ui.spacing_mut().item_spacing = egui::vec2(10.0, 4.0);
+                    save |= tuning_row(
+                        ui,
+                        t(lang, "Merge threshold"),
+                        self.threshold,
+                        0.20..=0.70,
+                        t(
+                            lang,
+                            "A higher threshold — fewer false merges, but one person may split into groups. The SCRFD and ArcFace models are ONNX, local.",
+                        ),
+                    );
+                    save |= tuning_row(
+                        ui,
+                        t(lang, "Closeness to a named person"),
+                        self.match_at,
+                        0.30..=0.80,
+                        t(lang, "how close a free face must be to a named person to be offered to you"),
+                    );
+                    save |= tuning_row(
+                        ui,
+                        t(lang, "Lead over the next person"),
+                        self.match_margin,
+                        0.00..=0.10,
+                        t(
+                            lang,
+                            "a face is offered only when it is at least that close and leads the next person by this much; a wrong match is turned down on its tile",
+                        ),
+                    );
+                });
+                if save {
+                    press = FaceSettingsPress::Save;
+                }
+                ui.label(
+                    egui::RichText::new(t(
+                        lang,
+                        "These values decide the next pass — not the group on screen. “Rebuild groups” applies the merge threshold and looks for the named people; a name is checked as soon as it is saved.",
+                    ))
+                    .size(10.0)
+                    .color(dim(ui)),
+                );
+                // What the matching sliders would do right now (M26.16): the count runs in the
+                // background when the block opens and after a value changes. A stale count names
+                // the values it was counted at, so the sentence can never lie.
+                if self.plan_counting {
+                    ui.label(
+                        egui::RichText::new(i18n::fill(
+                            lang,
+                            "counting the free faces at {} / {}…",
+                            &[
+                                format!("{:.2}", self.match_at),
+                                format!("{:.2}", self.match_margin),
+                            ],
+                        ))
+                        .size(10.0)
+                        .color(dim(ui)),
+                    );
+                } else if let (Some(plan), Some((at, margin))) = (self.plan, self.plan_at) {
+                    let total = plan.matched + plan.left_small + plan.left_far;
+                    let line = if plan.named == 0 {
+                        t(
+                            lang,
+                            "No named people yet: name a group and the free faces that resemble it will be offered here.",
+                        )
+                        .to_string()
+                    } else if plan.matched == 0 {
+                        i18n::fill(
+                            lang,
+                            "At {} / {}: 0 of {} free faces would join a named person ({} close but ambiguous, {} farther)",
+                            &[
+                                format!("{at:.2}"),
+                                format!("{margin:.2}"),
+                                total.to_string(),
+                                plan.left_small.to_string(),
+                                plan.left_far.to_string(),
+                            ],
+                        )
+                    } else {
+                        i18n::fill(
+                            lang,
+                            "At {} / {}: {} of {} free faces would join a named person ({} close but ambiguous, {} farther)",
+                            &[
+                                format!("{at:.2}"),
+                                format!("{margin:.2}"),
+                                plan.matched.to_string(),
+                                total.to_string(),
+                                plan.left_small.to_string(),
+                                plan.left_far.to_string(),
+                            ],
+                        )
+                    };
+                    ui.label(egui::RichText::new(line).size(10.0).color(dim(ui)));
+                    if ui
+                        .add_enabled(
+                            plan.named > 0,
+                            WordButton::new(Icon::Face, t(lang, "Look for the named people")),
+                        )
+                        .on_hover_text(t(
+                            lang,
+                            "compares the free faces with the named people and puts the close ones into the quarantine; no group changes until you confirm a face",
+                        ))
+                        .clicked()
+                    {
+                        press = FaceSettingsPress::Match;
+                    }
+                }
+            }
+        });
+        press
+    }
+}
+
+/// One threshold of the People screen (M26.16): the word on the left, the slider and its number on
+/// the right, one 26 px row. `true` when the value should be saved — on release, not on every
+/// frame of a drag.
+fn tuning_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    hint: &str,
+) -> bool {
+    let mut save = false;
+    // Wrapped, not a plain row: a 700 px window leaves ~400 px for the block, and a row that does
+    // not fit must fold instead of painting past the window (M26.6's rule).
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.add_sized(
+            [160.0, 18.0],
+            egui::Label::new(egui::RichText::new(label).size(11.0)).truncate(),
+        );
+        let r = ui.add(egui::Slider::new(value, range).step_by(0.01));
+        if r.drag_stopped() || r.lost_focus() {
+            save = true;
+        }
+        r.on_hover_text(hint);
+    });
+    save
 }
 
 /// The frame of a dialog (M22.10): the card tone, a 1 px line and the 8 px radius of a card, with
@@ -2886,13 +3279,22 @@ struct App {
     /// Faces: the groups, the faces of the selected group and the progress of a pass.
     face_clusters: Vec<db::FaceCluster>,
     face_views: Vec<db::FaceView>,
+    /// The faces the matching step proposed for a named person (M26.17): they wait here until the
+    /// owner confirms or turns them down; no membership has changed yet.
+    face_proposals: Vec<db::FaceProposal>,
+    /// The quarantine sub-list of the People screen is open (M26.17).
+    face_quarantine: bool,
+    /// The thresholds of the People page are open (M26.16): a state of the screen, not a setting.
+    face_tuning_open: bool,
+    /// The count of what the matching sliders would propose, computed off the UI thread with the
+    /// values it was started with (M26.16).
+    face_plan: Option<faces::MatchReport>,
+    face_plan_at: Option<(f32, f32)>,
+    face_plan_rx: Option<mpsc::Receiver<Result<faces::MatchReport>>>,
     face_textures: HashMap<i64, egui::TextureHandle>,
     face_missing: HashSet<i64>,
     face_selected_cluster: Option<i64>,
     face_label_input: String,
-    /// The confirmation of "Detach the auto-matched" (M26.11): rows only, but the press undoes
-    /// every automatic match of one group at once, so it asks first.
-    face_detach_confirm: Option<i64>,
     face_images: usize,
     /// Photos whose catalog has the face pass off (M26.9).
     face_skipped: usize,
@@ -3317,11 +3719,16 @@ impl App {
             cal_day: None,
             face_clusters: Vec::new(),
             face_views: Vec::new(),
+            face_proposals: Vec::new(),
+            face_quarantine: false,
+            face_tuning_open: false,
+            face_plan: None,
+            face_plan_at: None,
+            face_plan_rx: None,
             face_textures: HashMap::new(),
             face_missing: HashSet::new(),
             face_selected_cluster: None,
             face_label_input: String::new(),
-            face_detach_confirm: None,
             face_images: 0,
             face_skipped: 0,
             face_todo: 0,
@@ -3507,6 +3914,12 @@ impl App {
                 .into_iter()
                 .filter(|cl| !cl.label.is_empty() || visible_clusters.contains(&cl.id))
                 .collect();
+            // The quarantine (M26.17): a proposal about a hidden file is not shown, so a
+            // switched-off catalog takes its faces out of the list as it does everywhere else.
+            let face_proposals: Vec<db::FaceProposal> = db::load_face_proposals(&c)?
+                .into_iter()
+                .filter(|p| !settings.path_hidden(&p.face.path) && in_scope(&p.face.path))
+                .collect();
             let face_faces = face_views.len() as i64;
             let face_photos = face_views
                 .iter()
@@ -3544,6 +3957,7 @@ impl App {
                 face_images,
                 face_skipped,
                 face_todo,
+                face_proposals,
             ))
         }) {
             Ok((
@@ -3562,6 +3976,7 @@ impl App {
                 face_images,
                 face_skipped,
                 face_todo,
+                face_proposals,
             )) => {
                 // The language comes from the settings that have just been read: the `lang` of
                 // this frame is still the default one on the first load, and the first status line
@@ -3628,6 +4043,7 @@ impl App {
                 self.face_images = face_images;
                 self.face_skipped = face_skipped;
                 self.face_todo = face_todo;
+                self.face_proposals = face_proposals;
                 if !self
                     .face_clusters
                     .iter()
@@ -5979,67 +6395,6 @@ impl App {
         }
     }
 
-    /// The confirmation of "Detach the auto-matched" (M26.11): one press undoes every automatic
-    /// match of the open group, so it asks first. Rows only — the photos, the crops and the
-    /// archive are untouched.
-    fn face_detach_modal(&mut self, ctx: &egui::Context) {
-        let Some(cluster_id) = self.face_detach_confirm else {
-            return;
-        };
-        let lang = self.settings.lang;
-        let n = self
-            .face_views
-            .iter()
-            .filter(|f| f.cluster_id == Some(cluster_id) && !f.manual)
-            .count();
-        let label = self
-            .face_clusters
-            .iter()
-            .find(|c| c.id == cluster_id)
-            .map(|c| c.label.clone())
-            .unwrap_or_default();
-        let mut confirmed = false;
-        let mut cancel = false;
-        let modal =
-            egui::Modal::new(egui::Id::unique("photocat-face-detach")).frame(dialog_frame(ctx));
-        let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(dialog_width(ctx, 460.0));
-            ui.label(egui::RichText::new(t(lang, "Detach the automatically matched?")).size(14.0));
-            ui.add_space(4.0);
-            if !label.is_empty() {
-                ui.label(egui::RichText::new(&label).size(13.0).strong());
-            }
-            let facts = i18n::fill(lang, "Automatic matches: {}", &[n.to_string()]);
-            ui.label(num(ui, &facts, 11.0).color(dim(ui)));
-            ui.label(t(
-                lang,
-                "They move into one unnamed group and stay there: the next matching step leaves them alone. The faces you named or placed by hand stay in the group. Rows only — the photos and the crops are untouched.",
-            ));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(WordButton::primary(Icon::Remove, t(lang, "Detach them")))
-                    .clicked()
-                {
-                    confirmed = true;
-                }
-                if word_button(ui, Icon::Close, t(lang, "Cancel")).clicked() {
-                    cancel = true;
-                }
-            });
-        });
-        if resp.backdrop_response.clicked() {
-            cancel = true;
-        }
-        if cancel {
-            self.face_detach_confirm = None;
-        }
-        if confirmed {
-            self.face_detach_confirm = None;
-            self.detach_auto_faces(cluster_id);
-        }
-    }
-
     /// M26.2: the dialog behind the warning mark of the status bar. One row per program that does
     /// not start — what is lost without it — and the commands that install it on the running
     /// system. The app installs and downloads nothing and opens no browser (AGENTS.md §1): the
@@ -8370,7 +8725,9 @@ impl App {
         }
         match self.view {
             View::Dupes => self.dupes_controls(ui),
-            View::Faces => self.faces_controls(ui, show_faces),
+            // The People screen keeps its settings on its page (M26.14); a narrow window keeps the
+            // list of groups here, the wide one draws it in the right panel (M22.26).
+            View::Faces if show_faces => self.face_groups_block(ui),
             _ => {}
         }
         self.model_block(ui);
@@ -8566,265 +8923,21 @@ impl App {
         });
     }
 
-    /// The controls of the "Faces" view — the whole of what the settings dialog used to keep in a
-    /// section of its own (M26.5): the model with its licence, the consent and the download, the
-    /// merge threshold, the pass over the photos, the regrouping and the "all together" search. The
-    /// list of groups is the right panel of the screen (M22.26); only a narrow window keeps it here.
-    fn faces_controls(&mut self, ui: &mut egui::Ui, show_lists: bool) {
+    /// The list of groups as a block: a wide window draws it in the right panel, a narrow one keeps
+    /// it here, in the left panel (M22.26, M26.14).
+    fn face_groups_block(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
-        let model = faces::model_present(&self.settings);
-        let downloading = self.face_download_rx.is_some();
         block(ui, |ui| {
             ui.label(
-                egui::RichText::new(t(lang, "People"))
+                egui::RichText::new(t(lang, "Groups"))
                     .size(11.0)
                     .color(dim(ui)),
             );
             ui.add_space(4.0);
-            // The model, its size and its licence: the weights come by the owner's press only and
-            // never leave the machine afterwards.
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · {} · {}",
-                    faces::MODEL_ID,
-                    db::human_in(lang, faces::model_bytes(&self.settings)),
-                    if model {
-                        t(lang, "in place")
-                    } else {
-                        t(lang, "not downloaded")
-                    }
-                ))
-                .size(11.0)
-                .color(if model { accent(ui) } else { dim(ui) }),
-            );
-            ui.label(
-                egui::RichText::new(t(
-                    lang,
-                    "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
-                ))
-                .size(10.0)
-                .color(dim(ui)),
-            );
-            // The consent and the download stand here only while the weights are missing or coming:
-            // with the model in place the block keeps its room for the pass (M26.5).
-            if !model || downloading {
-                ui.add_space(4.0);
-                ui.checkbox(
-                    &mut self.face_download_consent,
-                    t(lang, "I allow the face weights to be downloaded (photos are not sent)"),
-                );
-                if ui
-                    .add_enabled(
-                        self.face_download_consent && !downloading,
-                        WordButton::primary(Icon::Download, t(lang, "Download the face model")),
-                    )
-                    .clicked()
-                {
-                    self.start_face_download();
-                }
-                if !self.face_download_consent {
-                    ui.label(
-                        egui::RichText::new(t(
-                            lang,
-                            "the button is disabled: network consent is required",
-                        ))
-                        .size(10.0)
-                        .color(dim(ui)),
-                    );
-                }
-                if let Some(p) = &self.face_download_progress {
-                    let (done, total) = (p.done(), p.total());
-                    let frac = if total > 0 {
-                        done as f32 / total as f32
-                    } else {
-                        0.0
-                    };
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(ui.available_width())
-                            .text(if total > 0 {
-                                format!("{} {done}/{total}", t(lang, "face files:"))
-                            } else {
-                                p.msg()
-                            }),
-                    );
-                    ui.label(egui::RichText::new(p.msg()).size(10.0).color(dim(ui)));
-                    if word_button(ui, Icon::Stop, t(lang, "Stop")).clicked() {
-                        p.cancel();
-                        self.status = t(lang, "the face model download: stopping…").into();
-                    }
-                }
-            } else if word_button(ui, Icon::CheckCircle, t(lang, "Check the face model")).clicked()
-            {
-                match faces::check_model(&self.settings) {
-                    Ok(()) => {
-                        self.status = t(lang, "the face model is checked: sha256 matched").into()
-                    }
-                    Err(e) => {
-                        self.status = format!("{}: {e:#}", t(lang, "the face model is not ready"))
-                    }
-                }
-            }
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(format!(
-                "{} {:.2}",
-                t(lang, "Merge threshold:"),
-                self.settings.face_threshold
-            )));
-            let r = ui.add(
-                egui::Slider::new(&mut self.settings.face_threshold, 0.20..=0.70).step_by(0.01),
-            );
-            if r.drag_stopped() || r.lost_focus() {
-                self.save_settings();
-            }
-            r.on_hover_text(t(
-                lang,
-                "A higher threshold — fewer false merges, but one person may split into groups. The SCRFD and ArcFace models are ONNX, local.",
-            ));
-            // The matching step (M26.11): a face joins a named person only when it is close enough
-            // and leads the next person by a margin — a relative's face is left alone, not guessed.
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new(format!(
-                "{} {:.2}",
-                t(lang, "A face joins a named person at:"),
-                self.settings.face_match
-            )));
-            let m = ui.add(
-                egui::Slider::new(&mut self.settings.face_match, 0.30..=0.80).step_by(0.01),
-            );
-            if m.drag_stopped() || m.lost_focus() {
-                self.save_settings();
-            }
-            ui.label(egui::RichText::new(format!(
-                "{} {:.2}",
-                t(lang, "and leads the next person by:"),
-                self.settings.face_match_margin
-            )));
-            let g = ui.add(
-                egui::Slider::new(&mut self.settings.face_match_margin, 0.00..=0.10)
-                    .step_by(0.01),
-            );
-            if g.drag_stopped() || g.lost_focus() {
-                self.save_settings();
-            }
-            g.on_hover_text(t(
-                lang,
-                "a face joins a named person only when it is at least that close and leads the next person by this much; the close face joins the group with the “auto” mark and a wrong match is split off the tile",
-            ));
-            let found = i18n::fill(lang, "{} faces in {} photos, {} groups", &[self.face_faces.to_string(), self.face_photos.to_string(), self.face_clusters.len().to_string()]);
-            ui.label(egui::RichText::new(found).size(11.0).color(dim(ui)));
-            let todo = {
-                    i18n::fill(lang, "{} of {} photos have no faces yet", &[self.face_todo.to_string(), self.face_images.to_string()])
-                };
-            ui.label(egui::RichText::new(todo).size(11.0).color(dim(ui)));
-            if self.face_skipped > 0 {
-                let skipped = i18n::fill(
-                    lang,
-                    "{} photos skipped — their folders have faces off",
-                    &[self.face_skipped.to_string()],
-                );
-                ui.label(egui::RichText::new(skipped).size(11.0).color(dim(ui)));
-            }
-            ui.add_space(4.0);
-            if self.face_rx.is_some() {
-                ui.label(t(lang, "reclustering…"));
-                if let Some(p) = &self.face_progress
-                    && word_button(ui, Icon::Stop, t(lang, "Stop")).clicked()
-                {
-                    p.cancel();
-                    self.status = t(lang, "people: stopping after the current photos…").into();
-                }
-            } else {
-                let scan_label = if self.face_todo < self.face_images {
-                    format!("{} ({})", t(lang, "Resume"), self.face_todo)
-                } else {
-                    format!("{} ({})", t(lang, "Find faces"), self.face_todo)
-                };
-                if ui
-                    .add_enabled(
-                        model && self.face_todo > 0,
-                        WordButton::new(
-                            if self.face_todo < self.face_images {
-                                Icon::Play
-                            } else {
-                                Icon::Face
-                            },
-                            scan_label,
-                        ),
-                    )
-                    .on_hover_text(t(
-                        lang,
-                        "a long pass: detection and embeddings run locally, no network; photos already scanned are skipped by sha256",
-                    ))
-                    .clicked()
-                {
-                    self.start_faces();
-                }
-                if ui
-                    .add_enabled(
-                        self.face_faces > 0,
-                        WordButton::new(Icon::Refresh, t(lang, "Rebuild groups")),
-                    )
-                    .on_hover_text(t(
-                        lang,
-                        "the threshold applies to faces; manual names and splits are kept",
-                    ))
-                    .clicked()
-                {
-                    self.start_face_clusters();
-                }
-            }
-            // The list of groups is the right panel of the screen; only a narrow window keeps it
-            // here (M22.26).
-            if show_lists {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(t(lang, "Groups"))
-                        .size(11.0)
-                        .color(dim(ui)),
-                );
-                egui::ScrollArea::vertical()
-                    .id_salt("face-clusters")
-                    .max_height(220.0)
-                    .show(ui, |ui| self.face_list_rows(ui));
-            }
-            // "All together": the photos that hold at least one face from each marked group.
-            if self.face_picked_clusters.len() >= 2 {
-                let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
-                for f in &self.face_views {
-                    if let Some(cid) = f.cluster_id
-                        && self.face_picked_clusters.contains(&cid)
-                    {
-                        per_file.entry(f.file_id).or_default().insert(cid);
-                    }
-                }
-                let n = per_file
-                    .values()
-                    .filter(|set| self.face_picked_clusters.iter().all(|c| set.contains(c)))
-                    .count();
-                if ui
-                    .add_enabled(
-                        n > 0,
-                        WordButton::new(
-                            Icon::Face,
-                            if self.face_together {
-                                format!("{} ({n})", t(lang, "Show the photos (together)"))
-                            } else {
-                                format!("{} ({n})", t(lang, "Photos with everyone together"))
-                            },
-                        ),
-                    )
-                    .on_hover_text(t(
-                        lang,
-                        "show only photos that have a face from every marked group",
-                    ))
-                    .clicked()
-                {
-                    self.face_together = !self.face_together;
-                }
-            } else {
-                self.face_together = false;
-            }
+            egui::ScrollArea::vertical()
+                .id_salt("face-clusters")
+                .max_height(220.0)
+                .show(ui, |ui| self.face_list_rows(ui));
         });
     }
 
@@ -8832,6 +8945,11 @@ impl App {
     /// together" search and the best face of the group as its icon (M22.26).
     fn face_list_rows(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
+        // The "all together" search needs two groups: with fewer marked it is simply off, so the
+        // switch can never claim a search that is not there (M26.14).
+        if self.face_picked_clusters.len() < 2 {
+            self.face_together = false;
+        }
         let clusters = self.face_clusters.clone();
         // The faces are ordered by quality, so the first one of a group is its icon.
         let mut best: HashMap<i64, (i64, Option<String>)> = HashMap::new();
@@ -8840,13 +8958,33 @@ impl App {
                 best.entry(cid).or_insert((f.id, f.thumb.clone()));
             }
         }
+        // The quarantine stands above the groups (M26.17): the proposals need an answer, and a
+        // face that waits here is not in any group yet. The row is always there — zero is a number
+        // too, and the empty list explains how proposals appear.
+        let quarantine = self.face_proposals.len();
         if ui
             .selectable_label(
-                self.face_selected_cluster.is_none(),
+                self.face_quarantine,
+                format!("{} · {}", t(lang, "Quarantine"), quarantine),
+            )
+            .on_hover_text(t(
+                lang,
+                "faces that resemble a person you named; nothing has joined a group until you confirm",
+            ))
+            .clicked()
+        {
+            self.face_quarantine = true;
+            self.face_selected_cluster = None;
+            self.face_label_input.clear();
+        }
+        if ui
+            .selectable_label(
+                !self.face_quarantine && self.face_selected_cluster.is_none(),
                 format!("{} · {}", t(lang, "All people"), self.face_faces),
             )
             .clicked()
         {
+            self.face_quarantine = false;
             self.face_selected_cluster = None;
             self.face_label_input.clear();
         }
@@ -8879,9 +9017,13 @@ impl App {
                     i18n::count(lang, c.photos as usize, "photo")
                 );
                 if ui
-                    .selectable_label(self.face_selected_cluster == Some(c.id), line)
+                    .selectable_label(
+                        !self.face_quarantine && self.face_selected_cluster == Some(c.id),
+                        line,
+                    )
                     .clicked()
                 {
+                    self.face_quarantine = false;
                     self.face_selected_cluster = Some(c.id);
                     self.face_label_input = c.label;
                 }
@@ -12358,25 +12500,68 @@ impl App {
         }
     }
 
-    /// Every face the matching step put into this group leaves it in one action (M26.11): the
-    /// group keeps the faces the owner placed, the others move into one unnamed group and stay
-    /// pinned, so the next matching step does not put them back. Rows only.
-    fn detach_auto_faces(&mut self, cluster_id: i64) {
+    /// Count what the matching sliders would propose (M26.16): the same step as a rebuild's last
+    /// phase, in dry-run mode, off the UI thread. It reads the DB and writes nothing.
+    fn start_face_plan(&mut self) {
+        if self.face_plan_rx.is_some() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let settings = self.settings.clone();
+        let (tx, rx) = mpsc::channel();
+        self.face_plan_rx = Some(rx);
+        self.face_plan = None;
+        self.face_plan_at = Some((settings.face_match, settings.face_match_margin));
+        std::thread::spawn(move || {
+            let _ = tx.send(faces::plan_named(&db_path, &settings));
+        });
+    }
+
+    /// Look for the named people only (M26.17): the cheap half of a rebuild, it rewrites the
+    /// quarantine and moves no face. The groups stay as they are.
+    fn start_face_match(&mut self) {
+        if self.face_rx.is_some() {
+            return;
+        }
+        let db_path = self.db_path.clone();
+        let settings = self.settings.clone();
         let lang = self.settings.lang;
-        match faces::detach_auto(&self.db_path, cluster_id) {
+        let (tx, rx) = mpsc::channel();
+        self.face_rx = Some(rx);
+        self.status = t(lang, "looking for the named people…").into();
+        std::thread::spawn(move || {
+            let _ = tx.send(FaceReply::Match(faces::match_named(&db_path, &settings)));
+        });
+    }
+
+    /// The owner answered the quarantine (M26.17): confirmed faces join the person they resemble
+    /// and are pinned, turned-down ones stay where they are and are pinned too. Rows only.
+    fn answer_quarantine(&mut self, face_ids: &[i64], confirm: bool) {
+        let lang = self.settings.lang;
+        let result = if confirm {
+            faces::confirm_matches(&self.db_path, face_ids)
+        } else {
+            faces::reject_matches(&self.db_path, face_ids)
+        };
+        match result {
             Ok(n) => {
+                self.face_plan_at = None;
                 self.reload();
-                self.status = if n == 0 {
-                    t(lang, "no automatic match left in this group").into()
-                } else {
-                    i18n::fill(
-                        lang,
-                        "{} faces left the group into one unnamed group; the screen stays here",
-                        &[n.to_string()],
-                    )
-                };
+                self.status = faces::answer_report(lang, n, confirm);
             }
-            Err(e) => self.status = format!("{}: {e:#}", t(lang, "faces not detached")),
+            Err(e) => {
+                self.status = format!(
+                    "{}: {e:#}",
+                    t(
+                        lang,
+                        if confirm {
+                            "the faces are not confirmed"
+                        } else {
+                            "the faces are not turned down"
+                        }
+                    )
+                )
+            }
         }
     }
 
@@ -12559,11 +12744,24 @@ struct FaceCells {
     dir: PathBuf,
     selected_file: Option<i64>,
     split_clicked: Option<i64>,
+    /// The quarantine's tick: a proposed face the owner confirmed this frame (M26.17).
+    confirmed: Option<i64>,
+    /// The quarantine's crossed head: the owner turned this proposal down (M26.17).
+    rejected: Option<i64>,
     open_clicked: Option<i64>,
     viewer_clicked: Option<i64>,
     /// The selected faces: a name can be given to several at once.
     picked: HashSet<i64>,
     tile: f32,
+}
+
+/// What a face tile is for (M26.17): inside a group the two round targets pick and split, in the
+/// quarantine they confirm and turn down. The tile itself — the crop, the date, the score and the
+/// card — is the same one, so a face looks the same everywhere.
+#[derive(Clone, Copy)]
+enum FaceTile<'a> {
+    Group { can_split: bool },
+    Quarantine { target: &'a str, similarity: f32 },
 }
 
 fn draw_face_cell(
@@ -12572,7 +12770,7 @@ fn draw_face_cell(
     cs: &mut FaceCells,
     f: &db::FaceView,
     lang: i18n::Lang,
-    can_split: bool,
+    mode: FaceTile<'_>,
 ) {
     let w = cs.tile.clamp(100.0, 260.0);
     let th = theme(ui);
@@ -12637,92 +12835,121 @@ fn draw_face_cell(
             egui::FontId::monospace(10.0),
             th.text_dim,
         );
-        // A false merge is split right on the tile, without going to another screen. The target
-        // is relevant only inside one group: in "All people" there is nothing to split off
-        // (M22.26).
-        if can_split {
-            let btn = egui::Rect::from_min_size(
-                egui::pos2(img_rect.right() - 30.0, img_rect.top() + 6.0),
-                egui::vec2(24.0, 24.0),
-            );
-            let r = tile_icon_target(
-                ui,
-                egui::Id::unique(("face-split", f.id)),
-                btn,
-                Icon::NotHim,
-                false,
-                t(lang, "split this face into a new group; this screen stays here"),
-            );
-            pointer_on_button |= r.hovered();
-            if r.clicked() {
-                cs.split_clicked = Some(f.id);
-                button_clicked = true;
-            }
-        }
-        // A batch naming: mark several faces and give them one name. An empty circle before the
-        // pick, the tick in the accent after it (M22.26).
-        let pick = egui::Rect::from_min_size(
+        // The two round targets carry the meaning of the moderation on the tile: the left one
+        // accepts (the pick of a group, the confirmation of a proposal), the right one turns a
+        // stranger away (the split of a group, the crossed head of the quarantine, M26.17).
+        let confirm_target = egui::Rect::from_min_size(
             egui::pos2(img_rect.left() + 6.0, img_rect.top() + 6.0),
             egui::vec2(24.0, 24.0),
         );
-        let is_picked = cs.picked.contains(&f.id);
-        let r = tile_icon_target(
-            ui,
-            egui::Id::unique(("face-pick", f.id)),
-            pick,
-            if is_picked {
-                Icon::CheckCircle
-            } else {
-                Icon::Pick
-            },
-            is_picked,
-            t(lang, "mark this face for a shared name"),
-        );
-        pointer_on_button |= r.hovered();
-        if r.clicked() {
-            if is_picked {
-                cs.picked.remove(&f.id);
-            } else {
-                cs.picked.insert(f.id);
+        match mode {
+            FaceTile::Group { can_split } => {
+                if can_split {
+                    let btn = egui::Rect::from_min_size(
+                        egui::pos2(img_rect.right() - 30.0, img_rect.top() + 6.0),
+                        egui::vec2(24.0, 24.0),
+                    );
+                    let r = tile_icon_target(
+                        ui,
+                        egui::Id::unique(("face-split", f.id)),
+                        btn,
+                        Icon::NotHim,
+                        false,
+                        t(lang, "split this face into a new group; this screen stays here"),
+                    );
+                    pointer_on_button |= r.hovered();
+                    if r.clicked() {
+                        cs.split_clicked = Some(f.id);
+                        button_clicked = true;
+                    }
+                }
+                // A batch naming: mark several faces and give them one name. An empty circle
+                // before the pick, the tick in the accent after it (M22.26).
+                let is_picked = cs.picked.contains(&f.id);
+                let r = tile_icon_target(
+                    ui,
+                    egui::Id::unique(("face-pick", f.id)),
+                    confirm_target,
+                    if is_picked {
+                        Icon::CheckCircle
+                    } else {
+                        Icon::Pick
+                    },
+                    is_picked,
+                    t(lang, "mark this face for a shared name"),
+                );
+                pointer_on_button |= r.hovered();
+                if r.clicked() {
+                    if is_picked {
+                        cs.picked.remove(&f.id);
+                    } else {
+                        cs.picked.insert(f.id);
+                    }
+                    button_clicked = true;
+                }
+                if is_picked {
+                    ui.painter().rect_stroke(
+                        img_rect,
+                        egui::CornerRadius::same(RADIUS_CARD as u8),
+                        egui::Stroke::new(2.0, accent(ui)),
+                        egui::StrokeKind::Inside,
+                    );
+                }
             }
-            button_clicked = true;
-        }
-        if is_picked {
-            ui.painter().rect_stroke(
-                img_rect,
-                egui::CornerRadius::same(RADIUS_CARD as u8),
-                egui::Stroke::new(2.0, accent(ui)),
-                egui::StrokeKind::Inside,
-            );
-        }
-        // A face the matching step brought into a named person says so (M26.11): "auto" in mono 10
-        // on a scrim at the foot of the frame. The owner's own placements carry no mark — the
-        // crossed-head button next to it undoes this one, and the group has "Detach the auto-matched".
-        if let Some(sim) = f.match_score.filter(|_| !f.manual) {
-            let text = t(lang, "auto");
-            let galley = ui.painter().layout_no_wrap(
-                format!("{text} {sim:.2}"),
-                egui::FontId::monospace(10.0),
-                egui::Color32::WHITE,
-            );
-            let pad = egui::vec2(4.0, 2.0);
-            let badge = egui::Rect::from_min_size(
-                egui::pos2(
-                    img_rect.left() + 6.0,
-                    img_rect.bottom() - 6.0 - galley.size().y - pad.y * 2.0,
-                ),
-                galley.size() + pad * 2.0,
-            );
-            ui.painter().rect_filled(
-                badge,
-                egui::CornerRadius::same(4),
-                egui::Color32::from_black_alpha(160),
-            );
-            ui.painter().galley(
-                badge.min + pad,
-                galley,
-                egui::Color32::WHITE,
-            );
+            FaceTile::Quarantine { target, similarity } => {
+                let r = tile_icon_target(
+                    ui,
+                    egui::Id::unique(("face-confirm", f.id)),
+                    confirm_target,
+                    Icon::CheckCircle,
+                    false,
+                    t(lang, "confirm: this face joins the person it resembles"),
+                );
+                pointer_on_button |= r.hovered();
+                if r.clicked() {
+                    cs.confirmed = Some(f.id);
+                    button_clicked = true;
+                }
+                let btn = egui::Rect::from_min_size(
+                    egui::pos2(img_rect.right() - 30.0, img_rect.top() + 6.0),
+                    egui::vec2(24.0, 24.0),
+                );
+                let r = tile_icon_target(
+                    ui,
+                    egui::Id::unique(("face-reject", f.id)),
+                    btn,
+                    Icon::NotHim,
+                    false,
+                    t(lang, "turn down: not this person; the face stays where it is"),
+                );
+                pointer_on_button |= r.hovered();
+                if r.clicked() {
+                    cs.rejected = Some(f.id);
+                    button_clicked = true;
+                }
+                // The proposal names the person and the closeness in mono 10 on a scrim at the
+                // foot of the frame: the same badge a non-confirmed mark wore in M26.11.
+                let galley = ui.painter().layout_no_wrap(
+                    format!("{target} {similarity:.2}"),
+                    egui::FontId::monospace(10.0),
+                    egui::Color32::WHITE,
+                );
+                let pad = egui::vec2(4.0, 2.0);
+                let badge = egui::Rect::from_min_size(
+                    egui::pos2(
+                        img_rect.left() + 6.0,
+                        img_rect.bottom() - 6.0 - galley.size().y - pad.y * 2.0,
+                    ),
+                    galley.size() + pad * 2.0,
+                );
+                ui.painter().rect_filled(
+                    badge,
+                    egui::CornerRadius::same(4),
+                    egui::Color32::from_black_alpha(160),
+                );
+                ui.painter()
+                    .galley(badge.min + pad, galley, egui::Color32::WHITE);
+            }
         }
     }
     if cs.selected_file == Some(f.file_id) {
@@ -12742,16 +12969,15 @@ fn draw_face_cell(
     if resp.hovered()
         && let Some(t) = cs.textures.get(&f.id).cloned()
     {
-        let matched = f.match_score.filter(|_| !f.manual);
         resp.on_hover_ui_at_pointer(|ui| {
             let big = egui::load::SizedTexture::new(t.id(), t.size_vec2());
             ui.add(egui::Image::new(big).max_size(egui::vec2(300.0, 300.0)));
             ui.label(&f.path);
-            if let Some(sim) = matched {
+            if let FaceTile::Quarantine { target, similarity } = mode {
                 ui.label(i18n::fill(
                     lang,
-                    "matched automatically: {} close to this person — split it off if it is not them",
-                    &[format!("{sim:.2}")],
+                    "looks like {} at {} — confirm it or turn it down; nothing has changed yet",
+                    &[target.to_string(), format!("{similarity:.2}")],
                 ));
             }
         });
@@ -15346,6 +15572,8 @@ impl eframe::App for App {
                     match res {
                         FaceReply::Scan(Ok(mut stats)) => {
                             self.reload();
+                            // The groups and the quarantine moved: count them again (M26.16).
+                            self.face_plan_at = None;
                             stats.lang = self.settings.lang;
                             self.status = stats.to_string();
                         }
@@ -15355,12 +15583,23 @@ impl eframe::App for App {
                         }
                         FaceReply::Cluster(Ok(mut stats)) => {
                             self.reload();
+                            self.face_plan_at = None;
                             stats.lang = self.settings.lang;
                             self.status = stats.to_string();
                         }
                         FaceReply::Cluster(Err(e)) => {
                             let lang = self.settings.lang;
                             self.status = format!("{}: {e:#}", t(lang, "groups not built"))
+                        }
+                        FaceReply::Match(Ok(mut report)) => {
+                            self.reload();
+                            self.face_plan_at = None;
+                            report.lang = self.settings.lang;
+                            self.status = report.to_string();
+                        }
+                        FaceReply::Match(Err(e)) => {
+                            let lang = self.settings.lang;
+                            self.status = format!("{}: {e:#}", t(lang, "the named people are not looked for"))
                         }
                     }
                 }
@@ -15370,6 +15609,38 @@ impl eframe::App for App {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.face_rx = None;
                     self.face_progress = None;
+                }
+            }
+        }
+
+        // The count of what the matching sliders would propose (M26.16): a background dry run,
+        // never per frame. A stale count names the values it was counted at, so this only has to
+        // store the result.
+        if let Some(rx) = &self.face_plan_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.face_plan_rx = None;
+                    match res {
+                        // A count asked for before a face moved is not the count of now: the
+                        // frame that changed the faces cleared `face_plan_at`, so the answer is
+                        // dropped and the next frame asks again (M26.16).
+                        Ok(report) => {
+                            if self.face_plan_at.is_some() {
+                                self.face_plan = Some(report);
+                            }
+                        }
+                        Err(e) => {
+                            let lang = self.settings.lang;
+                            self.status =
+                                format!("{}: {e:#}", t(lang, "the free faces are not counted"));
+                        }
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(150));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.face_plan_rx = None;
                 }
             }
         }
@@ -15561,7 +15832,6 @@ impl eframe::App for App {
         self.album_pick_modal(ctx);
         self.export_modal(ctx);
         self.trash_modal(ctx);
-        self.face_detach_modal(ctx);
         self.limited_modal(ctx);
         self.poll_photo(ctx);
         self.poll_video(ctx);
@@ -15634,6 +15904,9 @@ impl eframe::App for App {
         let mut trash_restore_all = false;
         let face_clusters = std::mem::take(&mut self.face_clusters);
         let face_views = std::mem::take(&mut self.face_views);
+        // The quarantine (M26.17): the face → person proposals, drawn as their own list.
+        let face_proposals = std::mem::take(&mut self.face_proposals);
+        let face_quarantine = self.face_quarantine;
         let mut face_picked = self.face_picked.clone();
         let mut clear_picked = false;
         let mut face_group_input = self.face_group_input.clone();
@@ -15643,6 +15916,8 @@ impl eframe::App for App {
             dir: db::cache_dir().join("faces"),
             selected_file: self.selected,
             split_clicked: None,
+            confirmed: None,
+            rejected: None,
             open_clicked: None,
             viewer_clicked: None,
             picked: face_picked.clone(),
@@ -15658,8 +15933,17 @@ impl eframe::App for App {
         let mut face_assign: Option<String> = None;
         // The ticked strangers leave the open group in one press (M26.10).
         let mut face_split_picked = false;
-        // The faces the matching step put into the open group leave it in one press (M26.11).
-        let mut face_detach_auto = false;
+        // The quarantine is answered per face, or all at once (M26.17).
+        let mut face_confirm: Vec<i64> = Vec::new();
+        let mut face_reject: Vec<i64> = Vec::new();
+        let mut face_confirm_all = false;
+        // The "all together" search switches off and on again on the page (M26.14).
+        let mut face_together_toggle = false;
+        // What the settings block of the People screen reported this frame (M26.14).
+        let mut face_press = FaceSettingsPress::None;
+        // The count of the matching sliders is started after the tiles release the borrows
+        // (M26.16).
+        let mut face_plan_request = false;
         let mut reset = false;
         let mut empty_click = false;
         let mut album_pick_request = false;
@@ -17100,6 +17384,160 @@ impl eframe::App for App {
                     });
             }
             View::Faces => {
+                // The settings of the screen open its page (M26.14): the model, its licence, its
+                // download, the three thresholds and the two passes stand above the groups they
+                // act on, not in the panel that is the map of the application. The block reports
+                // the press, and the frame applies it once the tiles release their borrows.
+                let model_here = faces::model_present(&self.settings);
+                let model_bytes = faces::model_bytes(&self.settings);
+                // The count of what the matching sliders would do starts off the UI thread once
+                // the tiles release their borrow, whenever the thresholds are open and the count
+                // is stale (M26.16).
+                if self.face_tuning_open
+                    && self.face_plan_rx.is_none()
+                    && self.face_plan_at
+                        != Some((self.settings.face_match, self.settings.face_match_margin))
+                {
+                    face_plan_request = true;
+                }
+                face_press = FaceSettings {
+                    lang,
+                    threshold: &mut self.settings.face_threshold,
+                    match_at: &mut self.settings.face_match,
+                    match_margin: &mut self.settings.face_match_margin,
+                    consent: &mut self.face_download_consent,
+                    model_here,
+                    model_bytes,
+                    downloading: self.face_download_rx.is_some(),
+                    download_progress: self.face_download_progress.as_deref(),
+                    pass_running: self.face_rx.is_some(),
+                    pass_progress: self.face_progress.as_deref(),
+                    clusters: face_clusters.len(),
+                    faces: face_total,
+                    photos: face_photos,
+                    todo: self.face_todo as i64,
+                    images: self.face_images as i64,
+                    skipped: self.face_skipped as i64,
+                    quarantine: face_proposals.len(),
+                    open: self.face_tuning_open,
+                    plan: self.face_plan.as_ref(),
+                    plan_at: self.face_plan_at,
+                    plan_counting: self.face_plan_rx.is_some(),
+                }
+                .draw(ui);
+                // The quarantine (M26.17): the faces the matching step offers for the named
+                // people. Nothing has joined a group — each tile waits for a confirmation, and a
+                // turned-down face stays where it is and is not offered again.
+                if face_quarantine {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(t(lang, "Quarantine"))
+                                .size(14.0)
+                                .strong(),
+                        );
+                        let people = face_proposals
+                            .iter()
+                            .map(|p| p.target_id)
+                            .collect::<HashSet<i64>>()
+                            .len();
+                        let facts = format!(
+                            "{} · {}",
+                            i18n::count(lang, face_proposals.len(), "proposal"),
+                            i18n::count(lang, people, "person")
+                        );
+                        ui.label(num(ui, facts, 11.0).color(dim(ui)));
+                    });
+                    ui.label(t(
+                        lang,
+                        "Each face resembles a person you named. Nothing has joined a group: the tick confirms it, the crossed head turns it down and the face stays where it is.",
+                    ));
+                    if face_proposals.is_empty() {
+                        ui.add_space(12.0);
+                        ui.label(t(
+                            lang,
+                            "Nothing waits for confirmation. Name a group, then open “Tuning” and press “Look for the named people”: the close faces will be offered here.",
+                        ));
+                    } else {
+                        ui.add_space(2.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add(WordButton::primary(
+                                    Icon::CheckCircle,
+                                    format!("{} ({})", t(lang, "Confirm all"), face_proposals.len()),
+                                ))
+                                .on_hover_text(t(
+                                    lang,
+                                    "every face below joins the person it resembles; a wrong one is split off on its tile afterwards",
+                                ))
+                                .clicked()
+                            {
+                                face_confirm_all = true;
+                            }
+                        });
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    for p in &face_proposals {
+                                        draw_face_cell(
+                                            ui,
+                                            ctx,
+                                            &mut face_cells,
+                                            &p.face,
+                                            lang,
+                                            FaceTile::Quarantine {
+                                                target: &p.target_label,
+                                                similarity: p.similarity,
+                                            },
+                                        );
+                                    }
+                                });
+                            });
+                        if let Some(id) = face_cells.confirmed.take() {
+                            face_confirm.push(id);
+                        }
+                        if let Some(id) = face_cells.rejected.take() {
+                            face_reject.push(id);
+                        }
+                    }
+                } else {
+                // "All together": the photos that hold at least one face from each marked group.
+                // The switch stands with the tiles it changes (M26.14) and counts them here, where
+                // the faces of the frame are at hand.
+                if face_picked_clusters.len() >= 2 {
+                    let mut per_file: HashMap<i64, HashSet<i64>> = HashMap::new();
+                    for f in &face_views {
+                        if let Some(cid) = f.cluster_id
+                            && face_picked_clusters.contains(&cid)
+                        {
+                            per_file.entry(f.file_id).or_default().insert(cid);
+                        }
+                    }
+                    let n = per_file
+                        .values()
+                        .filter(|set| face_picked_clusters.iter().all(|c| set.contains(c)))
+                        .count();
+                    if ui
+                        .add_enabled(
+                            n > 0,
+                            WordButton::new(
+                                Icon::Face,
+                                if face_together {
+                                    format!("{} ({n})", t(lang, "Show the photos (together)"))
+                                } else {
+                                    format!("{} ({n})", t(lang, "Photos with everyone together"))
+                                },
+                            ),
+                        )
+                        .on_hover_text(t(
+                            lang,
+                            "show only photos that have a face from every marked group",
+                        ))
+                        .clicked()
+                    {
+                        face_together_toggle = true;
+                    }
+                }
                 let faces_n = |n: usize| {
                     i18n::count(lang, n,"person")
                 };
@@ -17196,7 +17634,7 @@ impl eframe::App for App {
                     });
                     ui.label(t(
                         lang,
-                        "A name pins the group: rebuilding by threshold will not shuffle it. A wrong merge is split by the crossed-head button on the tile and the view stays where it was; tick several strangers and “Split the picked” takes them all out at once.",
+                        "A name pins the group: rebuilding by threshold will not shuffle it, and the closeness in “Tuning” adds faces only through the quarantine. A wrong merge is split by the crossed-head button on the tile and the view stays where it was; tick several strangers and “Split the picked” takes them all out at once.",
                     ));
                 } else {
                     ui.label(
@@ -17260,29 +17698,6 @@ impl eframe::App for App {
                     {
                         face_split_picked = true;
                     }
-                    // Only a named group has automatic matches to undo: the tiles it received by
-                    // themselves carry no "manual" of the owner (M26.11).
-                    let auto_n = shown.iter().filter(|f| !f.manual).count();
-                    let named_group = current
-                        .as_ref()
-                        .is_some_and(|c| !c.label.trim().is_empty());
-                    if named_group
-                        && ui
-                            .add_enabled(
-                                auto_n > 0,
-                                WordButton::new(
-                                    Icon::Remove,
-                                    format!("{} ({auto_n})", t(lang, "Detach the auto-matched")),
-                                ),
-                            )
-                            .on_hover_text(t(
-                                lang,
-                                "every face that joined this person by itself moves into one unnamed group; the faces you placed stay, and the next matching step leaves them alone",
-                            ))
-                            .clicked()
-                    {
-                        face_detach_auto = true;
-                    }
                     if ui
                         .add_enabled(
                             !face_picked.is_empty(),
@@ -17298,7 +17713,7 @@ impl eframe::App for App {
                     ui.add_space(12.0);
                     ui.label(t(
                         lang,
-                        "No faces yet: press “Find faces” on the left (the face model is required).",
+                        "No faces yet: press “Find faces” above (the face model is required).",
                     ));
                 } else if shown.is_empty() {
                     ui.label(t(lang, "No faces in this group."));
@@ -17314,11 +17729,14 @@ impl eframe::App for App {
                                     &mut face_cells,
                                     f,
                                     lang,
-                                    face_selected.is_some(),
+                                    FaceTile::Group {
+                                        can_split: face_selected.is_some(),
+                                    },
                                 );
                             }
                         });
                     });
+                }
                 }
             }
             View::Trash => {
@@ -17474,6 +17892,7 @@ impl eframe::App for App {
         self.album_browse_all = album_browse;
         self.face_clusters = face_clusters;
         self.face_views = face_views;
+        self.face_proposals = face_proposals;
         let face_split = face_cells.split_clicked;
         let face_open = face_cells.open_clicked;
         let face_viewer = face_cells.viewer_clicked;
@@ -17649,6 +18068,8 @@ impl eframe::App for App {
             // the status says how many joined the person.
             match faces::label(&self.db_path, id, &label) {
                 Ok(matched) => {
+                    // The proposals have just been rewritten: the count of the thresholds is stale.
+                    self.face_plan_at = None;
                     let mut line = if label.is_empty() {
                         t(lang, "group name removed").to_string()
                     } else {
@@ -17663,8 +18084,68 @@ impl eframe::App for App {
                 Err(e) => self.status = format!("{}: {e:#}", t(lang, "name not saved")),
             }
         }
-        if face_detach_auto {
-            self.face_detach_confirm = face_selected;
+        if face_together_toggle {
+            self.face_together = !self.face_together;
+        }
+        if face_press != FaceSettingsPress::None {
+            let lang = self.settings.lang;
+            match face_press {
+                FaceSettingsPress::None => {}
+                FaceSettingsPress::Save => {
+                    self.save_settings();
+                    // A new closeness or lead: count what it would propose (M26.16).
+                    self.face_plan_at = None;
+                }
+                FaceSettingsPress::Tune => {
+                    self.face_tuning_open = !self.face_tuning_open;
+                    self.face_plan_at = None;
+                }
+                FaceSettingsPress::Match => self.start_face_match(),
+                FaceSettingsPress::Check => match faces::check_model(&self.settings) {
+                    Ok(()) => {
+                        self.status = t(lang, "the face model is checked: sha256 matched").into()
+                    }
+                    Err(e) => {
+                        self.status = format!("{}: {e:#}", t(lang, "the face model is not ready"))
+                    }
+                },
+                FaceSettingsPress::Download => self.start_face_download(),
+                FaceSettingsPress::StopDownload => {
+                    if let Some(p) = &self.face_download_progress {
+                        p.cancel();
+                        self.status = t(lang, "the face model download: stopping…").into();
+                    }
+                }
+                FaceSettingsPress::FindFaces => self.start_faces(),
+                FaceSettingsPress::Recluster => self.start_face_clusters(),
+                FaceSettingsPress::StopPass => {
+                    if let Some(p) = &self.face_progress {
+                        p.cancel();
+                        self.status =
+                            t(lang, "people: stopping after the current photos…").into();
+                    }
+                }
+            }
+        }
+        // The quarantine's answers (M26.17): a confirmed face joins the person it resembles, a
+        // turned-down one stays where it is and is pinned. A bulk confirmation asks nothing more —
+        // the list was on the screen — and a wrong one is split off on its tile afterwards.
+        if face_confirm_all {
+            let ids: Vec<i64> = self.face_proposals.iter().map(|p| p.face.id).collect();
+            if !ids.is_empty() {
+                self.answer_quarantine(&ids, true);
+            }
+        }
+        if !face_confirm.is_empty() {
+            self.answer_quarantine(&face_confirm, true);
+        }
+        if !face_reject.is_empty() {
+            self.answer_quarantine(&face_reject, false);
+        }
+        // The count of the matching sliders is started after the presses of the block: a value
+        // that was just saved is counted once, with the new number (M26.16).
+        if face_plan_request {
+            self.start_face_plan();
         }
         if let Some(face_id) = face_split {
             let open = self.face_selected_cluster;
@@ -19799,8 +20280,6 @@ mod tests {
             thumb: None,
             score: 0.62,
             cluster_id: Some(7),
-            manual: true,
-            match_score: None,
         }];
         app.face_selected_cluster = Some(7);
         app.settings.lang = i18n::Lang::En;
@@ -19849,9 +20328,94 @@ mod tests {
         }
     }
 
-    /// M26.5: the "People" pane of the settings dialog lives on the People screen now — the model
+
+    /// M26.16: the People page starts with the model, one line of counters and one row of actions;
+    /// the three thresholds live behind the "Tuning" switch, and the switch carries their values.
+    /// The group on screen begins at 223 px instead of the row that stood under a stack of
+    /// sliders, which took the whole first screen of a laptop window.
+    #[test]
+    fn the_people_page_keeps_its_thresholds_behind_one_switch() {
+        let mut app = App::new(std::path::PathBuf::from(
+            "/tmp/photocat-test-people-compact.db",
+        ));
+        app.face_faces = 2;
+        app.face_photos = 1;
+        app.face_images = 2;
+        app.face_todo = 0;
+        app.face_clusters = vec![db::FaceCluster {
+            id: 7,
+            label: "Lisa".into(),
+            faces: 1,
+            photos: 1,
+        }];
+        app.face_views = vec![db::FaceView {
+            id: 1,
+            file_id: 1,
+            path: "/tmp/a.jpg".into(),
+            taken_at: Some("2024-05-01".into()),
+            thumb: None,
+            score: 0.62,
+            cluster_id: Some(7),
+        }];
+        app.face_selected_cluster = Some(7);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Faces;
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        let pos = |layout: &[(String, egui::Pos2)], needle: &str| {
+            layout
+                .iter()
+                .find(|(t, _)| t == needle)
+                .map(|(_, p)| *p)
+                .unwrap_or_else(|| panic!("no “{needle}”: {layout:?}"))
+        };
+        let layout = window_layout(&mut app, &ctx, size);
+        pos(&layout, "Tuning · 0.45 / 0.50 / 0.03");
+        assert!(
+            !layout.iter().any(|(t, _)| t == "Merge threshold"),
+            "the thresholds are open without a press: {layout:?}"
+        );
+        // The group on screen begins at 223 px; the old stack of three slider labels pushed it
+        // past the first screen of a laptop window.
+        assert!(
+            pos(&layout, "Person's name:").y <= 260.0,
+            "the settings still take the top of the page: {:?}",
+            pos(&layout, "Person's name:")
+        );
+        // The switch opens the three rows under the actions row, and the values stay on the switch.
+        app.face_tuning_open = true;
+        let layout = window_layout(&mut app, &ctx, size);
+        let open = pos(&layout, "Merge threshold");
+        assert!(
+            open.y >= 200.0 && open.y <= 240.0,
+            "the thresholds do not open under the actions row: {open:?}"
+        );
+        assert!(
+            pos(&layout, "Closeness to a named person").y > open.y,
+            "the matching sliders do not follow the merge threshold: {layout:?}"
+        );
+        pos(&layout, "Lead over the next person");
+        assert!(
+            pos(&layout, "Person's name:").y > 340.0,
+            "the page did not spend the room on the open thresholds: {:?}",
+            pos(&layout, "Person's name:")
+        );
+        // A 700 px window leaves ~400 px for the block: the open rows fold instead of painting
+        // past the window edge (M26.6's rule).
+        let narrow = egui::vec2(700.0, 600.0);
+        let win = egui::Rect::from_min_size(egui::Pos2::ZERO, narrow);
+        for (text, rect) in clipped_words_at(&mut app, &ctx, narrow) {
+            assert!(
+                win.contains_rect(rect),
+                "the open thresholds paint “{text}” outside a 700×600 window: {rect:?}"
+            );
+        }
+    }
+
+    /// M26.5/M26.14: the "People" pane of the settings dialog lives on the People screen — the model
     /// with its licence, the consent and "Download the face model" with its progress and "Stop",
-    /// the merge threshold and "Rebuild groups" — and the dialog keeps no section for it.
+    /// the merge threshold and "Rebuild groups" — the screen owns its settings on its page, not in
+    /// the left panel, and the dialog keeps no section for it.
     #[test]
     fn the_people_screen_owns_its_face_model_settings() {
         let mut app = App::new(std::path::PathBuf::from(
@@ -19871,12 +20435,14 @@ mod tests {
             photos: 1,
         }];
         app.view = View::Faces;
+        // The thresholds live behind the "Tuning" switch since M26.16; the test opens it.
+        app.face_tuning_open = true;
         let ctx = egui::Context::default();
         let texts = window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 1400.0));
         for needle in [
             "Download the face model",
             "the button is disabled: network consent is required",
-            "Merge threshold: 0.45",
+            "Merge threshold",
             "Rebuild groups",
             "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
         ] {
@@ -19890,6 +20456,34 @@ mod tests {
                 .iter()
                 .any(|t| t.contains(super::faces::MODEL_ID) && t.contains("not downloaded")),
             "the model state is not on the screen: {texts:?}"
+        );
+        // M26.14: the settings stand on the page of the screen, right of the 260 px left panel that
+        // is the map of the application — they left the panel for the page that owns the faces.
+        let layout = window_layout(&mut app, &ctx, egui::vec2(1240.0, 1400.0));
+        for needle in [
+            "Merge threshold",
+            "Download the face model",
+            "Rebuild groups",
+            "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use",
+        ] {
+            let pos = layout
+                .iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, p)| *p)
+                .unwrap_or_else(|| panic!("no “{needle}” in the frame: {layout:?}"));
+            assert!(
+                pos.x >= super::LEFT_W,
+                "“{needle}” still stands in the left panel: {pos:?}"
+            );
+        }
+        let model_pos = layout
+            .iter()
+            .find(|(text, _)| text.contains(super::faces::MODEL_ID))
+            .map(|(_, p)| *p)
+            .expect("the model state line is missing");
+        assert!(
+            model_pos.x >= super::LEFT_W,
+            "the model state line still stands in the left panel: {model_pos:?}"
         );
         // A running download shows its progress and one "Stop": the transfer can be interrupted.
         let p = std::sync::Arc::new(db::Progress::default());
@@ -19953,11 +20547,10 @@ mod tests {
             thumb: None,
             score: 0.62,
             cluster_id: Some(7),
-            manual: true,
-            match_score: None,
         }];
         app.settings.lang = i18n::Lang::En;
         app.view = View::Faces;
+        app.face_tuning_open = true;
         let ctx = egui::Context::default();
         let size = egui::vec2(1240.0, 1400.0);
         let layout = window_layout(&mut app, &ctx, size);
@@ -19986,6 +20579,33 @@ mod tests {
                 "the dead control “{word}” is drawn on the People screen: {layout:?}"
             );
         }
+        // A narrow window has no room for a 280 px list beside the tiles: the list goes back into
+        // the left panel, while the settings stay on the page (M26.14).
+        // A tall window: at 700 px the left panel scrolls, and a word below the fold is not drawn.
+        let small = egui::vec2(900.0, 1400.0);
+        let layout = window_layout(&mut app, &ctx, small);
+        let pos = |needle: &str| {
+            layout
+                .iter()
+                .find(|(t, _)| t == needle)
+                .map(|(_, p)| *p)
+                .unwrap_or_else(|| panic!("no “{needle}” at 900×1400: {layout:?}"))
+        };
+        assert!(
+            pos("Groups").x < super::LEFT_W,
+            "the group list left the left panel of a narrow window: {:?}",
+            pos("Groups")
+        );
+        assert!(
+            pos("All people · 2").x < super::LEFT_W,
+            "the group rows left the left panel of a narrow window: {:?}",
+            pos("All people · 2")
+        );
+        assert!(
+            pos("Merge threshold").x >= super::LEFT_W,
+            "the settings of the screen are in the left panel of a narrow window: {:?}",
+            pos("Merge threshold")
+        );
     }
 
     /// M21.4d: the trash is translated completely — the screen, the tile and the confirmation dialog.
@@ -20310,8 +20930,6 @@ mod tests {
             thumb: None,
             score: 0.62,
             cluster_id: Some(7),
-            manual: true,
-            match_score: None,
         }];
         app.face_selected_cluster = Some(7);
         app.face_picked.insert(1);
@@ -20451,17 +21069,17 @@ mod tests {
         assert_ne!(moved.cluster_id, Some(named), "the split face is still in the group");
     }
 
-    /// M26.11: naming a person finds the free faces at once. The named group shows the faces that
-    /// joined by themselves with an "auto" mark, the group action takes them all back out in one
-    /// press, and the screen stays where it was.
+    /// M26.17: naming a person proposes the free faces instead of adding them. The quarantine
+    /// lists the proposals with the person and the closeness, "Confirm all" moves them into the
+    /// group and pins them, and the screen says what happened.
     #[test]
-    fn naming_a_person_matches_faces_and_the_auto_mark_can_be_detached() {
+    fn the_quarantine_confirms_a_proposal_and_moves_the_face_only_then() {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let path = std::env::temp_dir().join(format!(
-            "photocat-auto-match-{}-{stamp}.db",
+            "photocat-quarantine-{}-{stamp}.db",
             std::process::id()
         ));
         let (named, free) = {
@@ -20511,9 +21129,15 @@ mod tests {
                 .unwrap();
             (named, free)
         };
-        // The name is the last decision: the matching step runs with it.
+        // The name is the last decision: the matching step runs with it and writes a proposal.
         let report = crate::faces::label(&path, named, "Lisa").unwrap();
         assert_eq!((report.matched, report.people), (1, 1), "{report}");
+        let moved = db::load_faces(&db::open(&path).unwrap()).unwrap();
+        let proposed = moved.iter().find(|f| f.id == free).unwrap();
+        assert_eq!(
+            proposed.cluster_id, None,
+            "a proposal moved the face into the group before the owner answered"
+        );
 
         let mut app = App::new(path.clone());
         app.settings.lang = i18n::Lang::En;
@@ -20523,61 +21147,48 @@ mod tests {
         let size = egui::vec2(1240.0, 840.0);
         let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
         assert!(
-            texts.iter().any(|t| t.starts_with("auto 0.")),
-            "the matched face wears no “auto” mark: {texts:?}"
+            texts.iter().any(|t| t == "in quarantine: 1 proposal — open the group list to confirm them"),
+            "the counters do not name the quarantine: {texts:?}"
         );
+        // The row is a selectable label of the group list, so its place comes from the frame.
+        let row = window_layout(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t == "Quarantine · 1")
+            .map(|(_, p)| p)
+            .expect("the group list has no quarantine row");
+        click_at(&mut app, &ctx, row + egui::vec2(6.0, 4.0));
+        assert!(app.face_quarantine, "the quarantine did not open");
+        let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        assert!(
+            texts.iter().any(|t| t.starts_with("Lisa 0.")),
+            "the proposal does not name the person and the closeness: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Each face resembles a person you named. Nothing has joined a group: the tick confirms it, the crossed head turns it down and the face stays where it is."),
+            "the quarantine does not explain itself: {texts:?}"
+        );
+        // A wrong merge is undone on a tile, and nothing joins the group by itself.
         let at = targets_at(&mut app, &ctx, size)
             .into_iter()
-            .find(|(t, _)| t == "Detach the auto-matched (1)")
+            .find(|(t, _)| t == "Confirm all (1)")
             .map(|(_, r)| r.center())
-            .expect("the named group has no way to detach the automatic match");
+            .expect("the quarantine has no bulk confirmation");
         click_at(&mut app, &ctx, at);
-        assert_eq!(
-            app.face_detach_confirm,
-            Some(named),
-            "the press did not ask for a confirmation"
-        );
-        let dialog = modal_frame(&mut app, &ctx, App::face_detach_modal);
-        for want in [
-            "Detach the automatically matched?",
-            "Automatic matches: 1",
-            "Detach them",
-            "Cancel",
-        ] {
-            assert!(
-                dialog.iter().any(|t| t == want),
-                "missing “{want}” in the dialog: {dialog:?}"
-            );
-        }
-        let go = targets_at(&mut app, &ctx, size)
-            .into_iter()
-            .find(|(t, _)| t == "Detach them")
-            .map(|(_, r)| r.center())
-            .expect("the confirmation has no “Detach them”");
-        click_at(&mut app, &ctx, go);
-        assert!(app.face_detach_confirm.is_none(), "the dialog stayed open");
-        assert_eq!(app.face_selected_cluster, Some(named), "the screen jumped");
         assert!(
-            app.status.contains("left the group into one unnamed group"),
+            app.status.contains("joined the person it resembles"),
             "the status does not say what happened: {:?}",
             app.status
         );
+        let faces = db::load_faces(&db::open(&path).unwrap()).unwrap();
+        let joined = faces.iter().find(|f| f.id == free).unwrap();
+        assert_eq!(joined.cluster_id, Some(named), "the confirmed face did not join");
+        assert!(joined.manual, "the confirmed face is not pinned");
+        assert!(app.face_proposals.is_empty(), "the answered proposal is still there");
         let texts = window_frame_at(&mut app, &ctx, Vec::new(), size);
         assert!(
-            !texts.iter().any(|t| t.starts_with("auto 0.")),
-            "the detached face still wears the “auto” mark: {texts:?}"
+            texts.iter().any(|t| t == "Nothing waits for confirmation. Name a group, then open “Tuning” and press “Look for the named people”: the close faces will be offered here."),
+            "the empty quarantine does not explain how proposals appear: {texts:?}"
         );
-        // The face is out of the group and pinned, so a second matching step leaves it.
-        let faces = db::load_faces(&db::open(&path).unwrap()).unwrap();
-        let moved = faces.iter().find(|f| f.id == free).unwrap();
-        assert!(moved.manual, "the detached face is not pinned");
-        assert_ne!(moved.cluster_id, Some(named));
-        let again = crate::faces::match_named(
-            &path,
-            &crate::db::load_settings(&db::open(&path).unwrap()),
-        )
-        .unwrap();
-        assert_eq!(again.matched, 0, "the detached face came back: {again}");
     }
 
     /// M22.9: the trash counts in mono and has exactly one red word — its one action that changes
@@ -22064,8 +22675,6 @@ mod tests {
                 thumb: None,
                 score: 0.9,
                 cluster_id: Some(7),
-                manual: true,
-                match_score: None,
             },
             db::FaceView {
                 id: 11,
@@ -22075,8 +22684,6 @@ mod tests {
                 thumb: None,
                 score: 0.8,
                 cluster_id: Some(7),
-                manual: true,
-                match_score: None,
             },
         ];
         app.settings.lang = i18n::Lang::En;

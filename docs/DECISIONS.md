@@ -1381,3 +1381,29 @@ a Windows machine with Visual Studio, or the GNU target with ONNX Runtime built 
 
 **Forbids:** a bundled Visual Studio dependency for the owner, a static ONNX Runtime rebuild, a
 vendored `esaxx-rs`, and shipping the release without its runtime DLLs.
+
+## 0051. An automatic face match waits in a quarantine; the owner's confirmation is the membership
+
+**Decision (2026-11-27).** The matching step (M26.11) proposes a face for a named person and moves
+nothing: the proposal lives in `face_matches` (schema 10), the face stays in its own group, and only
+the owner's confirmation makes it a member (`manual=1`). A refusal pins the face where it is, so the
+next step does not offer it again. Both are rows only.
+
+**Why.** The owner's message of 2026-11-27: the automatic step had put Федя's photos into Ника's
+group, and a false merge of relatives is exactly what a cosine cannot rule out at 0.45–0.50. The
+closeness is a guess; a guess must not edit a family group before it is looked at. This is the
+"heavy operations show a plan first" rule of `AGENTS.md` §1 applied to the one ML step that writes
+into the owner's own structure. The default 0.50 proposed nothing on the real archive (the closest
+free face is 0.448), while 0.40 would have put 23 unverified faces into 5 people's groups.
+
+**What it costs and what we would do without it.** One more table, two `CREATE TABLE` lines of a
+schema bump, and a sub-list on the People screen; the step writes 23 rows instead of 23 `UPDATE`s on
+`faces` (the same order of magnitude). Without it the only way to keep the benefit of the matching
+step is the "auto" mark plus "Detach the auto-matched" of M26.11 — undo after a wrong merge, which
+is the wrong order for a person's group. A confidence threshold alone cannot replace the quarantine:
+the false merges are the near ties the sliders already try to avoid.
+
+**Forbids:** moving a face into a named group on a similarity alone; treating a proposal as a
+member (the matching step must never read `face_matches` as a reference, or a run would cascade
+through its own guesses); deleting a face or a photo when a proposal is refused; a proposal without
+a name (a group that loses its label takes its proposals with it).

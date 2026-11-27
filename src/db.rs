@@ -103,7 +103,7 @@ pub fn open(db: &Path) -> Result<Connection> {
 /// The schema version. It changes together with the DDL below: old DBs catch up once.
 /// While the version matches, `open` writes nothing — the DB can be read in parallel
 /// with a long pass (indexing, OCR) without hitting a lock.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 fn init(c: &Connection) -> Result<()> {
     c.execute_batch(
@@ -252,6 +252,13 @@ fn init(c: &Connection) -> Result<()> {
             label      TEXT NOT NULL DEFAULT '',
             created_at INTEGER NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS face_matches(
+            face_id    INTEGER PRIMARY KEY,
+            cluster_id INTEGER NOT NULL,
+            score      REAL NOT NULL,
+            created_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_face_matches_cluster ON face_matches(cluster_id);
          CREATE TABLE IF NOT EXISTS face_scans(
             file_id    INTEGER PRIMARY KEY,
             sha256     TEXT NOT NULL,
@@ -262,6 +269,7 @@ fn init(c: &Connection) -> Result<()> {
          AFTER UPDATE OF sha256 ON files
          WHEN old.sha256 IS NOT new.sha256
          BEGIN
+            DELETE FROM face_matches WHERE face_id IN (SELECT id FROM faces WHERE file_id = new.id);
             DELETE FROM faces WHERE file_id = new.id;
             DELETE FROM face_scans WHERE file_id = new.id;
          END;
@@ -337,6 +345,29 @@ fn init(c: &Connection) -> Result<()> {
     if version < 8 {
         c.execute("UPDATE files SET thumb = NULL WHERE kind = 'image'", [])?;
     }
+    // Schema 10: the matching step no longer moves a face into a named group by itself — it
+    // leaves the face where it is and writes a proposal into `face_matches` that waits for the
+    // owner's confirmation (M26.17). The faces an older version placed automatically stay where
+    // they are and are pinned, so nothing jumps on the upgrade and the quarantine starts empty.
+    if version < 10 {
+        c.execute(
+            "UPDATE faces SET manual=1, match_score=NULL WHERE match_score IS NOT NULL",
+            [],
+        )?;
+    }
+    // The trigger of an older version does not know `face_matches`: it is replaced here, because
+    // `CREATE TRIGGER IF NOT EXISTS` would keep the old body (as with the CLIP trigger above).
+    c.execute_batch(
+        "DROP TRIGGER IF EXISTS invalidate_faces_after_sha_change;
+         CREATE TRIGGER invalidate_faces_after_sha_change
+         AFTER UPDATE OF sha256 ON files
+         WHEN old.sha256 IS NOT new.sha256
+         BEGIN
+            DELETE FROM face_matches WHERE face_id IN (SELECT id FROM faces WHERE file_id = new.id);
+            DELETE FROM faces WHERE file_id = new.id;
+            DELETE FROM face_scans WHERE file_id = new.id;
+         END;",
+    )?;
     // Tags of older versions had no model in the source; they move to the current model id.
     c.execute(
         "UPDATE tags SET source='clip:clip-vit-b32-multilingual' WHERE source='clip'",
@@ -915,11 +946,14 @@ pub fn forget_catalog_derived(conn: &Connection, root: &str) -> Result<Forgotten
         let mut ocr = tx.prepare("DELETE FROM ocr WHERE file_id=?1")?;
         let mut scans = tx.prepare("DELETE FROM face_scans WHERE file_id=?1")?;
         let mut faces = tx.prepare("DELETE FROM faces WHERE file_id=?1")?;
+        let mut matches =
+            tx.prepare("DELETE FROM face_matches WHERE face_id IN (SELECT id FROM faces WHERE file_id=?1)")?;
         for id in &ids {
             out.tags += tags.execute([id])?;
             out.vectors += vectors.execute([id])?;
             out.ocr += ocr.execute([id])?;
             scans.execute([id])?;
+            matches.execute([id])?;
             out.faces += faces.execute([id])?;
         }
     }
@@ -1487,6 +1521,10 @@ fn delete_file_rows_tx(tx: &Connection, ids: &[i64]) -> Result<()> {
         tx.execute("DELETE FROM tags WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM tag_hidden WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM user_tags WHERE file_id=?1", params![id])?;
+        tx.execute(
+            "DELETE FROM face_matches WHERE face_id IN (SELECT id FROM faces WHERE file_id=?1)",
+            params![id],
+        )?;
         tx.execute("DELETE FROM faces WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM face_scans WHERE file_id=?1", params![id])?;
         tx.execute("DELETE FROM files WHERE id=?1", params![id])?;
@@ -1588,11 +1626,19 @@ pub struct FaceView {
     pub thumb: Option<String>,
     pub score: f32,
     pub cluster_id: Option<i64>,
-    /// The owner set this face's group by hand (named it, gathered it, split it off) — M26.11.
-    pub manual: bool,
-    /// The similarity that put the face into its named group automatically; `None` when the face
-    /// was clustered or placed by hand.
-    pub match_score: Option<f32>,
+}
+
+/// A face that the matching step proposes for a named person (M26.17): it stays where it is — in
+/// its own group or without one — and waits in the quarantine until the owner confirms it or turns
+/// it down. Nothing has moved yet.
+#[derive(Debug, Clone)]
+pub struct FaceProposal {
+    pub face: FaceView,
+    /// The named group the face resembles.
+    pub target_id: i64,
+    pub target_label: String,
+    /// The cosine of the closest member of that group.
+    pub similarity: f32,
 }
 
 /// A face box over the frame of its file (M22.7): the photo in the full screen marks who is
@@ -1655,6 +1701,10 @@ pub fn save_faces_for_file(
     sha256: &str,
     faces: &[FaceRow],
 ) -> Result<()> {
+    conn.execute(
+        "DELETE FROM face_matches WHERE face_id IN (SELECT id FROM faces WHERE file_id=?1)",
+        params![file_id],
+    )?;
     conn.execute("DELETE FROM faces WHERE file_id=?1", params![file_id])?;
     {
         let mut st = conn.prepare(
@@ -1717,8 +1767,7 @@ pub fn load_faces(conn: &Connection) -> Result<Vec<FaceRow>> {
 /// Faces for the grid: `cluster_id=None` means all. The large and confident ones come first.
 pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec<FaceView>> {
     let mut st = conn.prepare(
-        "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id,f.manual,
-                f.match_score
+        "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id
          FROM faces f JOIN files fi ON fi.id=f.file_id
          WHERE ?1 IS NULL OR f.cluster_id=?1
          ORDER BY f.quality DESC, f.id",
@@ -1732,8 +1781,6 @@ pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec
             thumb: r.get(4)?,
             score: r.get(5)?,
             cluster_id: r.get(6)?,
-            manual: r.get::<_, i64>(7)? != 0,
-            match_score: r.get(8)?,
         })
     })?;
     let mut out = Vec::new();
@@ -1741,6 +1788,119 @@ pub fn load_face_views(conn: &Connection, cluster_id: Option<i64>) -> Result<Vec
         out.push(r?);
     }
     Ok(out)
+}
+
+/// The faces waiting in the quarantine, grouped by the person they resemble (M26.17): the closest
+/// proposal of every person first, then the rest. The face is still in its own group — a proposal
+/// is not a membership.
+pub fn load_face_proposals(conn: &Connection) -> Result<Vec<FaceProposal>> {
+    let mut st = conn.prepare(
+        "SELECT f.id,f.file_id,fi.path,fi.taken_at,f.thumb,f.score,f.cluster_id,
+                m.cluster_id,COALESCE(c.label,''),m.score
+         FROM face_matches m
+         JOIN faces f ON f.id=m.face_id
+         JOIN files fi ON fi.id=f.file_id
+         JOIN face_clusters c ON c.id=m.cluster_id
+         ORDER BY c.label, m.score DESC, f.id",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok(FaceProposal {
+            face: FaceView {
+                id: r.get(0)?,
+                file_id: r.get(1)?,
+                path: r.get(2)?,
+                taken_at: r.get(3)?,
+                thumb: r.get(4)?,
+                score: r.get(5)?,
+                cluster_id: r.get(6)?,
+            },
+            target_id: r.get(7)?,
+            target_label: r.get(8)?,
+            similarity: r.get(9)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// Write the proposals of one matching step and drop every older one (M26.17): the step is
+/// deterministic, so a proposal the owner has not answered yet is the same proposal again. A
+/// person who lost the name leaves the table — no proposal without a name.
+pub fn replace_face_matches(
+    conn: &mut Connection,
+    matches: &[(i64, i64, f32)],
+) -> Result<usize> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM face_matches", [])?;
+    {
+        let mut st = tx.prepare(
+            "INSERT INTO face_matches(face_id,cluster_id,score,created_at) VALUES(?1,?2,?3,?4)",
+        )?;
+        for &(face_id, cluster_id, score) in matches {
+            st.execute(params![face_id, cluster_id, score, now()])?;
+        }
+    }
+    tx.commit()?;
+    Ok(matches.len())
+}
+
+/// The owner confirmed the proposals of these faces (M26.17): each moves into the named group it
+/// resembles and is pinned (`manual=1`), so a rebuild keeps the decision. The proposal rows go
+/// away, and a group the move emptied is swept. Rows only — no face crop and no photo is touched.
+pub fn confirm_face_matches(conn: &mut Connection, face_ids: &[i64]) -> Result<usize> {
+    let tx = conn.transaction()?;
+    let mut moved = 0usize;
+    {
+        // A group that lost its name in the meantime is not a person: the proposal is dropped
+        // rather than confirmed into an unnamed group (M26.17).
+        let mut target = tx.prepare(
+            "SELECT m.cluster_id FROM face_matches m JOIN face_clusters c ON c.id=m.cluster_id
+             WHERE m.face_id=?1 AND c.label<>''",
+        )?;
+        let mut apply = tx.prepare(
+            "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
+        )?;
+        let mut drop_it = tx.prepare("DELETE FROM face_matches WHERE face_id=?1")?;
+        for &face_id in face_ids {
+            let cluster: Option<i64> = target
+                .query_row([face_id], |r| r.get(0))
+                .optional()?;
+            if let Some(cluster_id) = cluster
+                && apply.execute(params![cluster_id, face_id])? > 0
+            {
+                moved += 1;
+            }
+            drop_it.execute([face_id])?;
+        }
+    }
+    tx.commit()?;
+    delete_empty_face_clusters(conn)?;
+    Ok(moved)
+}
+
+/// The owner turned the proposals of these faces down (M26.17): they stay in their own groups and
+/// are pinned by hand, so the next matching step does not bring them back. Rows only.
+pub fn reject_face_matches(conn: &mut Connection, face_ids: &[i64]) -> Result<usize> {
+    let tx = conn.transaction()?;
+    let mut pinned = 0usize;
+    {
+        let mut pin = tx.prepare("UPDATE faces SET manual=1, match_score=NULL WHERE id=?1")?;
+        let mut drop_it = tx.prepare("DELETE FROM face_matches WHERE face_id=?1")?;
+        for &face_id in face_ids {
+            pinned += pin.execute([face_id])?;
+            drop_it.execute([face_id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(pinned)
+}
+
+/// Forget every proposal: the faces stay where they are. Used when there is nothing to match to.
+pub fn clear_face_matches(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM face_matches", [])?)
 }
 
 /// The faces of one file with the names of their groups: the chips over the frame in the full
@@ -1800,8 +1960,8 @@ pub fn create_face_cluster(conn: &Connection) -> Result<i64> {
 }
 
 /// Store the assignment of faces to clusters. `manual` means the owner set it by hand.
-/// An assignment is not a match: a stale similarity from the matching step (M26.11) goes away,
-/// otherwise the tile would keep saying "auto" about a face the owner or the clustering moved.
+/// A moved face has no proposal left (M26.17): the quarantine speaks about where the face is now,
+/// and a membership the clustering or the owner decided is not a proposal.
 pub fn save_face_assignments(
     conn: &mut Connection,
     assignments: &[(i64, Option<i64>)],
@@ -1811,64 +1971,14 @@ pub fn save_face_assignments(
     {
         let mut st =
             tx.prepare("UPDATE faces SET cluster_id=?1, manual=?2, match_score=NULL WHERE id=?3")?;
+        let mut drop_it = tx.prepare("DELETE FROM face_matches WHERE face_id=?1")?;
         for &(face_id, cluster_id) in assignments {
             st.execute(params![cluster_id, manual as i64, face_id])?;
+            drop_it.execute([face_id])?;
         }
     }
     tx.commit()?;
     Ok(())
-}
-
-/// Move automatically matched faces into their named groups in one transaction (M26.11):
-/// `(face, group, similarity)`. `manual` stays 0 — the owner did not place these faces — and
-/// the similarity is kept so the tile can mark the face as "auto" and undo it.
-/// A face the owner has placed by hand (`manual = 1`) is never moved: the guard is in the SQL.
-pub fn apply_named_matches(conn: &mut Connection, matches: &[(i64, i64, f32)]) -> Result<usize> {
-    if matches.is_empty() {
-        return Ok(0);
-    }
-    let tx = conn.transaction()?;
-    let mut moved = 0usize;
-    {
-        let mut st = tx.prepare(
-            "UPDATE faces SET cluster_id=?1, manual=0, match_score=?2
-             WHERE id=?3 AND manual=0",
-        )?;
-        for &(face_id, cluster_id, score) in matches {
-            moved += st.execute(params![cluster_id, score, face_id])?;
-        }
-    }
-    tx.commit()?;
-    Ok(moved)
-}
-
-/// Take the faces the matching step put into a named group back out of it (M26.11): they move
-/// into one new unnamed group and are pinned by hand (`manual = 1`), so the next matching step
-/// does not put them back. Rows only — nothing on disk is touched. Returns how many left.
-pub fn detach_auto_faces(conn: &mut Connection, cluster_id: i64) -> Result<usize> {
-    let auto: Vec<i64> = {
-        let mut st = conn.prepare(
-            "SELECT id FROM faces WHERE cluster_id=?1 AND manual=0 ORDER BY id",
-        )?;
-        let rows = st.query_map([cluster_id], |r| r.get(0))?;
-        rows.collect::<rusqlite::Result<Vec<i64>>>()?
-    };
-    if auto.is_empty() {
-        return Ok(0);
-    }
-    let tx = conn.transaction()?;
-    tx.execute(
-        "INSERT INTO face_clusters(label,created_at) VALUES('',?1)",
-        params![now()],
-    )?;
-    let new_id = tx.last_insert_rowid();
-    let mut st = tx.prepare("UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2")?;
-    for face_id in &auto {
-        st.execute(params![new_id, face_id])?;
-    }
-    drop(st);
-    tx.commit()?;
-    Ok(auto.len())
 }
 
 pub fn label_face_cluster(conn: &Connection, cluster_id: i64, label: &str) -> Result<()> {
@@ -1909,8 +2019,10 @@ pub fn group_faces(conn: &Connection, face_ids: &[i64], label: &str) -> Result<i
         let mut st = tx.prepare(
             "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
         )?;
+        let mut drop_it = tx.prepare("DELETE FROM face_matches WHERE face_id=?1")?;
         for &id in face_ids {
             st.execute(params![cluster_id, id])?;
+            drop_it.execute([id])?;
         }
     }
     tx.commit()?;
@@ -1930,6 +2042,7 @@ pub fn split_face(conn: &mut Connection, face_id: i64) -> Result<i64> {
         "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
         params![cluster_id, face_id],
     )?;
+    tx.execute("DELETE FROM face_matches WHERE face_id=?1", [face_id])?;
     if n == 0 {
         anyhow::bail!("no such face: {face_id}");
     }
@@ -1961,6 +2074,7 @@ pub fn split_faces(conn: &mut Connection, face_ids: &[i64]) -> Result<SplitOutco
             "UPDATE faces SET cluster_id=?1, manual=1, match_score=NULL WHERE id=?2",
             params![cluster_id, face_id],
         )?;
+        tx.execute("DELETE FROM face_matches WHERE face_id=?1", [face_id])?;
         if n == 0 {
             out.missing += 1;
             tx.execute("DELETE FROM face_clusters WHERE id=?1", params![cluster_id])?;
@@ -1972,8 +2086,13 @@ pub fn split_faces(conn: &mut Connection, face_ids: &[i64]) -> Result<SplitOutco
     Ok(out)
 }
 
-/// Remove clusters without faces. A named cluster stays even while it is empty.
+/// Remove clusters without faces. A named cluster stays even while it is empty. A proposal to a
+/// group that is gone goes with it (M26.17): nothing waits for a person who is no longer there.
 pub fn delete_empty_face_clusters(conn: &Connection) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM face_matches WHERE cluster_id NOT IN (SELECT id FROM face_clusters)",
+        [],
+    )?;
     Ok(conn.execute(
         "DELETE FROM face_clusters
          WHERE label='' AND id NOT IN (
@@ -3720,10 +3839,11 @@ mod tests {
         assert!((load_settings(&c).face_match - 0.50).abs() < 1e-6);
     }
 
-    /// M26.11: an automatic match moves a free face and never a face the owner placed; the
-    /// similarity is kept for the tile, and detaching puts the whole matched set back.
+    /// M26.17: the matching step writes proposals and moves nothing; a confirmed face joins the
+    /// person it resembles and is pinned, a turned-down one stays where it is and is pinned too.
+    /// A proposal to a person who loses the name (or a group that goes away) does not survive.
     #[test]
-    fn an_automatic_match_respects_the_owner_and_can_be_detached() {
+    fn the_quarantine_confirms_and_turns_down_without_moving_anything_else() {
         let mut c = Connection::open_in_memory().unwrap();
         init(&c).unwrap();
         insert(&c, &row("/a.jpg", "aa", 1.0)).unwrap();
@@ -3741,34 +3861,121 @@ mod tests {
             cluster_id: None,
             manual: false,
         };
-        save_faces_for_file(&c, file_id, "aa", &[face(0), face(1)]).unwrap();
+        save_faces_for_file(&c, file_id, "aa", &[face(0), face(1), face(2)])
+            .unwrap();
         let ids: Vec<i64> = load_faces(&c).unwrap().iter().map(|f| f.id).collect();
         let named = create_face_cluster(&c).unwrap();
         label_face_cluster(&c, named, "Lisa").unwrap();
-        // The owner placed the second face in the group by hand; the first one is still free.
-        save_face_assignments(&mut c, &[(ids[1], Some(named))], true).unwrap();
-        // The owner's face is already in the group; the automatic one is not.
-        let moved = apply_named_matches(&mut c, &[(ids[1], named, 0.9), (ids[0], named, 0.97)])
+        // The owner placed the third face in the group by hand.
+        save_face_assignments(&mut c, &[(ids[2], Some(named))], true).unwrap();
+        // The step proposes two faces for Lisa and moves neither.
+        assert_eq!(
+            replace_face_matches(&mut c, &[(ids[0], named, 0.77), (ids[1], named, 0.61)])
+                .unwrap(),
+            2
+        );
+        let proposals = load_face_proposals(&c).unwrap();
+        assert_eq!(proposals.len(), 2);
+        assert_eq!(proposals[0].face.id, ids[0], "the closest proposal is first");
+        assert_eq!(proposals[0].target_label, "Lisa");
+        assert!((proposals[0].similarity - 0.77).abs() < 1e-6);
+        let faces = load_faces(&c).unwrap();
+        for id in [ids[0], ids[1]] {
+            assert_eq!(
+                faces.iter().find(|f| f.id == id).unwrap().cluster_id,
+                None,
+                "a proposal moved a face"
+            );
+        }
+        // A second step replaces the proposals and leaves the hand-placed face alone.
+        assert_eq!(
+            replace_face_matches(&mut c, &[(ids[1], named, 0.61)]).unwrap(),
+            1
+        );
+        assert_eq!(load_face_proposals(&c).unwrap().len(), 1);
+        // One confirmed: it joins Lisa and is pinned; the other stays proposed.
+        assert_eq!(confirm_face_matches(&mut c, &[ids[1]]).unwrap(), 1);
+        let faces = load_faces(&c).unwrap();
+        let joined = faces.iter().find(|f| f.id == ids[1]).unwrap();
+        assert_eq!(joined.cluster_id, Some(named));
+        assert!(joined.manual, "a confirmed face must survive a rebuild");
+        assert_eq!(load_face_proposals(&c).unwrap().len(), 0);
+        // The turned-down face keeps its place and is pinned, so the next step leaves it.
+        assert_eq!(
+            replace_face_matches(&mut c, &[(ids[0], named, 0.77)]).unwrap(),
+            1
+        );
+        assert_eq!(reject_face_matches(&mut c, &[ids[0]]).unwrap(), 1);
+        let faces = load_faces(&c).unwrap();
+        let turned_down = faces.iter().find(|f| f.id == ids[0]).unwrap();
+        assert_eq!(turned_down.cluster_id, None);
+        assert!(turned_down.manual);
+        assert!(load_face_proposals(&c).unwrap().is_empty());
+        // Nothing on disk is involved: every face row is still there.
+        assert_eq!(load_faces(&c).unwrap().len(), 3);
+        // A group that lost its name is not a person: the proposal is dropped, not confirmed.
+        replace_face_matches(&mut c, &[(ids[0], named, 0.77)]).unwrap();
+        c.execute("UPDATE face_clusters SET label='' WHERE id=?1", params![named])
             .unwrap();
-        assert_eq!(moved, 1, "a hand-placed face was moved by the matching step");
-        let views = load_face_views(&c, Some(named)).unwrap();
-        assert_eq!(views.len(), 2);
-        let auto = views.iter().find(|v| v.id == ids[0]).unwrap();
-        assert!(!auto.manual);
-        assert_eq!(auto.match_score, Some(0.97));
-        let own = views.iter().find(|v| v.id == ids[1]).unwrap();
-        assert!(own.manual);
-        assert_eq!(own.match_score, None, "a hand-placed face wears an “auto” mark");
-        // Detaching the automatic faces leaves the owner's decision and pins the moved face.
-        assert_eq!(detach_auto_faces(&mut c, named).unwrap(), 1);
-        let views = load_face_views(&c, None).unwrap();
-        let detached = views.iter().find(|v| v.id == ids[0]).unwrap();
-        assert!(detached.manual);
-        assert_eq!(detached.match_score, None);
-        assert_ne!(detached.cluster_id, Some(named));
-        assert_eq!(detach_auto_faces(&mut c, named).unwrap(), 0);
-        // Nothing on disk is involved: the file row is still there.
-        assert_eq!(load_faces(&c).unwrap().len(), 2);
+        assert_eq!(confirm_face_matches(&mut c, &[ids[0]]).unwrap(), 0);
+        assert!(load_face_proposals(&c).unwrap().is_empty());
+        c.execute("UPDATE face_clusters SET label='Lisa' WHERE id=?1", params![named])
+            .unwrap();
+        // A proposal to a group that is gone goes with it.
+        replace_face_matches(&mut c, &[(ids[0], named, 0.77)]).unwrap();
+        c.execute("DELETE FROM face_clusters WHERE id=?1", params![named])
+            .unwrap();
+        delete_empty_face_clusters(&c).unwrap();
+        assert!(load_face_proposals(&c).unwrap().is_empty());
+    }
+
+    /// M26.17: the proposal table of an older DB is created on the upgrade; a face an older
+    /// version matched by itself stays in its group and is pinned, so nothing jumps.
+    #[test]
+    fn the_upgrade_pins_the_old_automatic_matches() {
+        let mut c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        insert(&c, &row("/old.jpg", "aa", 1.0)).unwrap();
+        let file_id = id_of(&c, "/old.jpg");
+        save_faces_for_file(
+            &c,
+            file_id,
+            "aa",
+            &[FaceRow {
+                id: 0,
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 10,
+                score: 0.9,
+                quality: 0.8,
+                thumb: None,
+                embedding: vec![1.0, 0.0],
+                cluster_id: None,
+                manual: false,
+            }],
+        )
+        .unwrap();
+        let id = load_faces(&c).unwrap()[0].id;
+        let named = create_face_cluster(&c).unwrap();
+        label_face_cluster(&c, named, "Lisa").unwrap();
+        save_face_assignments(&mut c, &[(id, Some(named))], false).unwrap();
+        // The state of a schema 9 row: in a named group, not pinned, with the cosine.
+        c.execute(
+            "UPDATE faces SET manual=0, match_score=0.61 WHERE id=?1",
+            params![id],
+        )
+        .unwrap();
+        c.pragma_update(None, "user_version", 9).unwrap();
+        init(&c).unwrap();
+        let face = load_faces(&c).unwrap().remove(0);
+        assert_eq!(face.cluster_id, Some(named), "the face left its group on the upgrade");
+        assert!(face.manual, "the old automatic match is not pinned");
+        let score: Option<f32> = c
+            .query_row("SELECT match_score FROM faces WHERE id=?1", [id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(score, None, "the old “auto” mark survived the upgrade");
+        assert!(load_face_proposals(&c).unwrap().is_empty());
     }
 
     #[test]

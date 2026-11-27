@@ -121,6 +121,8 @@ ocr_fts(text)                          -- FTS5, content='ocr', content_rowid='fi
 faces(id, file_id, sha256, x, y, w, h, score, quality, thumb,
       embedding, cluster_id, manual, match_score, created_at)
 face_clusters(id, label, created_at)
+face_matches(face_id, cluster_id, score, created_at) -- a proposal waiting in the quarantine
+                                                     -- (M26.17, schema 10); PRIMARY KEY(face_id)
 face_scans(file_id, sha256, faces, created_at)       -- the photo has already been scanned
 albums(id, parent_id, position, name, name_key, note, created_at, updated_at)
 album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id))
@@ -168,11 +170,18 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   wipes the faces and the pass mark.
 - `faces.cluster_id`: the group; `face_clusters.label` is the name given by hand. A non-empty label
   also pins the group during a rebuild.
-- `faces.match_score`: the cosine that brought the face into a **named** group automatically
-  (M26.11, schema 9); `NULL` means the face was clustered or placed by the owner. Together with
-  `manual=0` it is the "auto" mark on the tile — an automatic match and a cluster are told apart,
-  because a rebuild clears the column (`db::save_face_assignments`), as does a split or a batch
-  naming: an assignment is not a similarity.
+- `faces.match_score`: a legacy column of schema 9. Until M26.17 the matching step put a face into a
+  named group by itself and kept the cosine here for the "auto" mark. Nothing writes it now: the
+  step only proposes (see `face_matches`), and the upgrade to schema 10 pins the faces an older
+  version placed (`manual=1`) and clears the column, so nothing moves on the upgrade. The column
+  stays for old DBs and is read by no code.
+- `face_matches`: the quarantine (M26.17, schema 10). One row per proposed face: the face stays in
+  its own group, `cluster_id` names the **named** group it resembles, `score` is the cosine of the
+  closest member. A proposal is not a membership: the matching step never reads this table, the
+  tiles list it, and a confirmation or a refusal deletes the row. The table is cleared by
+  `replace_face_matches` on every step (the step is deterministic), by the owner's answers, when a
+  face or a file goes away and when a group loses its last face; a proposal to a group that is gone
+  does not survive `delete_empty_face_clusters`.
 - `ocr.text`: text from a photo produced by `tesseract`. One row per file, `sha256` is the content
   at the moment of recognition; the trigger `invalidate_ocr_after_sha_change` wipes the text if the
   file was replaced. `ocr_fts` is FTS5 (`tokenize='unicode61'`), kept in sync by triggers on `ocr`.
@@ -334,36 +343,41 @@ can be assigned to one group in a batch (`db::group_faces`, `manual=1`).
    then rebuilds the groups: `db::load_faces`, the "cosine ≥ `face_threshold`" components
    (`faces::components`), one new group per component. Groups with a name and faces with
    `manual=1` are pinned: they are not re-clustered and not merged.
-2. **The matching step** (`faces::match_named(db_path, &settings)`, M26.11) is what makes a name
-   work across catalogs: detection already runs everywhere the pass is allowed, but a *new* face of
-   a person named in another folder stayed in an unnamed group, because a pinned group takes no part
-   in the components graph. The step reads the named groups' members once and the free faces once
-   (a free face is `manual=0` and not in a named group; a catalog with faces off and a switched-off
-   folder are skipped through `Settings::pass_allows`), and for every free face finds the closest
-   similarity to **each** named group. The face joins the best group only when that similarity is at
-   least `settings.face_match` (0.50) **and** leads the second named group by
-   `settings.face_match_margin` (0.03) — a relative is left alone rather than guessed; the rest are
-   counted as "the lead was too small" or "no named person is close enough". The decision is one
-   transaction (`db::apply_named_matches`, `manual` stays 0, `match_score` keeps the cosine), and
-   `delete_empty_face_clusters` sweeps a group the move emptied. Neither a named group nor a
-   `manual=1` face is ever a candidate, and nothing on disk is read or written.
-3. **When it runs.** At the end of `faces::recluster` — which is the tail of the pass, of
-   "Rebuild groups" and of `faces --recluster` — and right after a name is saved (`faces::label`, so
-   both the People screen's "Save the name" and `faces label` report it). One pass is
-   `free faces × named members` cosine products: 73–80 ms on the corpus with `rayon` over the free
-   faces, and never per frame; `faces --dry-run` runs the same code with writes turned off and says
-   "would match N faces to M named people".
-4. **Undo.** The tile of an automatic match shows `auto <cosine>` and its hint names the
-   similarity; the crossed-head target splits it off (`manual=1`), and "Detach the auto-matched (N)"
-   moves every `manual=0` face of a named group into one new unnamed group and pins them
-   (`db::detach_auto_faces`), so the next step does not put them back. A rebuild clears
-   `match_score` — an assignment made by the clustering or by the owner is not a match, and the
-   tile must not keep claiming one.
+2. **The matching step** (`faces::match_named(db_path, &settings)`, M26.11, proposals since
+   M26.17) is what makes a name work across catalogs: detection already runs everywhere the pass is
+   allowed, but a *new* face of a person named in another folder stayed in an unnamed group, because
+   a pinned group takes no part in the components graph. The step reads the named groups' members
+   once and the free faces once (a free face is `manual=0` and not in a named group; a catalog with
+   faces off and a switched-off folder are skipped through `Settings::pass_allows`), and for every
+   free face finds the closest similarity to **each** named group. The face is **proposed** for the
+   best group only when that similarity is at least `settings.face_match` (0.50) **and** leads the
+   second named group by `settings.face_match_margin` (0.03) — a relative is offered rather than
+   guessed; the rest are counted as "the lead was too small" or "no named person is close enough".
+   Nothing moves: `db::replace_face_matches` rewrites the proposal table in one transaction, and the
+   face stays in its own group. Neither a named group nor a `manual=1` face is ever a candidate,
+   nothing on disk is read or written, and a proposal never becomes a reference vector — so a step
+   cannot cascade through its own guesses.
+3. **When it runs.** At the end of `faces::recluster` — the tail of the pass, of "Rebuild groups"
+   and of `faces --recluster` — right after a name is saved (`faces::label`, so both the People
+   screen's "Save the name" and `faces label` report it), and from "Look for the named people"
+   (the step alone, no rebuild). One pass is `free faces × named members` cosine products: 73–80 ms
+   on the corpus with `rayon` over the free faces, and never per frame. `faces --dry-run` runs the
+   same code with writes turned off and says "would propose N faces to M named people"; the People
+   page runs the dry run in a background thread after a threshold changes (82 ms at 0.40 on the
+   corpus) and prints the count under the sliders.
+4. **The answer.** The quarantine (`App::face_quarantine`, `faces --quarantine`) lists the proposals
+   grouped by person with the cosine on each tile. A tick (`faces confirm`, "Confirm all")
+   calls `db::confirm_face_matches`: the face joins the named group it resembles with `manual=1`,
+   so a rebuild keeps the decision and the face becomes a reference vector from then on. The crossed
+   head (`faces reject`) calls `db::reject_face_matches`: the face stays where it is and is pinned
+   `manual=1`, so the next step does not offer it again. Both delete the proposal; both touch rows
+   only. A confirmation is undoable by the crossed-head split on the tile of the group, a refusal by
+   "Name the picked people" with the person's name (which is a new decision of the owner).
 5. **Cost and numbers.** The step is bounded by one read of the named members and one of the free
    faces; on the corpus 1587 free faces against 908 named members cost 73–80 ms. The measured
    distribution of the best similarity is in the Measurements table — in short, on the owner's
-   archive the closest free face is 0.448 from a named person, so the default 0.50 matches nothing
-   until the slider moves.
+   archive the closest free face is 0.448 from a named person, so the default 0.50 proposes nothing
+   and 0.40 proposes 23 faces to 5 named people.
 
 ## Album export (M20)
 
@@ -702,6 +716,8 @@ not with a different labelled set.
 | 2026-11-27 | 120 files copied from `день рожденья` + `январь 2018` (104 JPG, 14 MP4, 1 GIF, 1 TIFF; 2.1 GiB) in a clean cache with no model (M24.3) | `index`, `stats`, `dupes`, `organize` (dry run), `embed` and `search` with no model | **4.7 s**, 120/120, 0 errors, 119 previews 1.9 MiB, DB 220 KiB; `stats` 14 videos / 1.8 GiB + 106 images / 306.6 MiB, none without a date; `dupes` 2 groups / 4 files / 2.9 MiB; 56 day folders over 2017–2026; `embed` and `search` refuse with the models path and the `models download` command — no broken pass |
 | 2026-11-27 | the same 120 files, a temp models folder, real network, then a dead proxy (`HTTPS_PROXY=http://127.0.0.1:9`) in a fresh cache (M24.3) | `models download --id clip-vit-b32-multilingual --yes`, then `embed` and `search "cake"` / `search "торт"`; with the proxy: `models download --id clip-vit-b32-en --yes` | online: **35.5 s** for **217.5 MiB** in 4 files, every sha256 matched (~6.1 MiB/s), `embed` 120/120 in **10.7 s**, `search` 30 results in 9 ms and `торт` 5 in 10 ms; offline: 36 s of three attempts per address over the compatible models, then one message naming each URL and attempt plus "SigLIP 2 … bigger than the limit", no partial file left in the models folder, `stats` and `models list` keep working |
 | 2026-11-27 | this machine with `PATH` pointing at an empty folder — no `ffmpeg`, `ffprobe`, `tesseract` — a fresh cache (M24.3) | `doctor`, `index` of 5 photos + 2 videos, `ocr --dry-run`, `ocr`, `models download --id clip-vit-b32-en --yes`, the GUI | `doctor` names every program "не работает … No such file or directory" and what is lost; the index takes **0.2 s**, 7/7 rows, 2 errors ("видео без превью … running ffprobe …"), the videos without dHash and duration, the photos intact; `ocr --dry-run` names tesseract as not found and `ocr` refuses with the message; **148.6 MiB** of the English CLIP model downloaded with no program at all (the in-process client, ADR 0047); the window opens with the warning mark, the grid, "Без превью · 2" and the People block's disabled download with its consent line; `photocat stats \| head -2` used to panic with "failed printing to stdout: Broken pipe (os error 32)" and exits 0 now |
+| 2026-11-27 | a copy of the real DB, 2234 files, 2498 faces in 621 groups, 6 named people (Лиза 72, Настя 252, Ника 163, Федя 59, Саша 70, Ярослав 362) (M26.16/M26.17) | `faces --dry-run` at `face_match` 0.50 and 0.40, then `faces --recluster` and `faces --quarantine` on the copy, release | at 0.50 nothing is proposed (the closest free face is 0.448); at 0.40 the plan proposes **23 faces to 5 named people**, 1 left for a small lead and 1493 farther, in **82 ms** of wall clock; `faces --recluster` rewrites the same 23 proposals in **0.545 s** (621 groups, 9 pinned) and moves no face; `faces --quarantine` lists them with the person and the cosine, `faces confirm --id N` joins one and pins it, and the next dry run offers 22 |
+| 2026-11-27 | 1240×840 headless frames, a People page with one named group (M26.16) | the position of the open group's first row on the page (`cargo test the_people_page_keeps_its_thresholds_behind_one_switch`) | the settings block is three lines and one row of actions: with the thresholds closed the group's name field stands at **y 255.5** (the group heading at 223), with them open at 379.5 — the three sliders cost 124 px **only** while "Tuning" is pressed, and the switch itself carries `0.45 / 0.50 / 0.03`; the plan line under the sliders is a background dry run and never a per-frame computation |
 Rule: numbers without a corpus and a date do not enter the table.
 
 ## Long passes: cancel and resume

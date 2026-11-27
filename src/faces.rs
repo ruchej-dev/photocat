@@ -971,8 +971,8 @@ pub fn label(db_path: &Path, cluster_id: i64, label: &str) -> Result<MatchReport
     })
 }
 
-/// The result of one matching step (M26.11): how many free faces joined a named person, how many
-/// named people received one, and why the rest stayed.
+/// The result of one matching step (M26.11, proposals since M26.17): how many free faces were
+/// proposed for a named person, how many people received one, and why the rest stayed.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct MatchReport {
     pub matched: usize,
@@ -1007,22 +1007,24 @@ impl std::fmt::Display for MatchReport {
                 "no named people yet: there is nothing to match to",
             ));
         }
-        // "matched 0 faces to 0 named people" would read as if nobody were named at all, so a
-        // pass that moved nothing says how many people were there to match against.
+        // "proposed 0 faces to 0 named people" would read as if nobody were named at all, so a
+        // pass that proposed nothing says how many people were there to match against.
         let head = if self.matched == 0 {
             i18n::fill(
                 self.lang,
-                "no automatic match yet: {} named",
+                "no new proposal yet: {} named",
                 &[self.named.to_string()],
+            )
+        } else if self.dry_run {
+            i18n::fill(
+                self.lang,
+                "would propose {} faces to {} named people",
+                &[self.matched.to_string(), self.people.to_string()],
             )
         } else {
             i18n::fill(
                 self.lang,
-                if self.dry_run {
-                    "would match {} faces to {} named people"
-                } else {
-                    "matched {} faces to {} named people"
-                },
+                "proposed {} faces to {} named people — they wait in quarantine",
                 &[self.matched.to_string(), self.people.to_string()],
             )
         };
@@ -1053,12 +1055,14 @@ impl std::fmt::Display for MatchReport {
     }
 }
 
-/// A face of a named person joins that person's group by itself (M26.11): the owner names a
-/// grandmother once and every catalog finds her. Only free faces move — a face with `manual = 1`
-/// (named, gathered or split off by hand) and a face that already sits in a named group never do.
-/// The best named group wins only when it is at least `settings.face_match` close **and** leads the
-/// second named group by `settings.face_match_margin`; a relative's face is left alone rather than
-/// guessed. Nothing on disk and no row of the archive is touched.
+/// A free face that resembles a named person is proposed for that person (M26.11, quarantine
+/// since M26.17): the owner names a grandmother once and every catalog offers her faces for
+/// confirmation. Nothing joins a group by itself. Only free faces are proposed — a face with
+/// `manual = 1` (named, gathered or split off by hand) and a face that already sits in a named
+/// group never are. The best named group wins only when it is at least `settings.face_match` close
+/// **and** leads the second named group by `settings.face_match_margin`; a relative's face is left
+/// alone rather than guessed. The step replaces the proposal table and touches no membership, no
+/// crop and nothing on disk.
 pub fn match_named(db_path: &Path, settings: &db::Settings) -> Result<MatchReport> {
     match_named_in(db_path, settings, false)
 }
@@ -1090,6 +1094,10 @@ fn match_named_in(
         ..MatchReport::default()
     };
     if named.is_empty() {
+        // Nothing to match to: a proposal to a person without a name would be noise.
+        if !dry_run {
+            db::clear_face_matches(&conn)?;
+        }
         report.seconds = t0.elapsed().as_secs_f64();
         return Ok(report);
     }
@@ -1145,9 +1153,8 @@ fn match_named_in(
         .map(|(_, cid, _)| *cid)
         .collect::<HashSet<_>>()
         .len();
-    if !dry_run && !hits.is_empty() {
-        db::apply_named_matches(&mut conn, &hits)?;
-        db::delete_empty_face_clusters(&conn)?;
+    if !dry_run {
+        db::replace_face_matches(&mut conn, &hits)?;
     }
     report.seconds = t0.elapsed().as_secs_f64();
     Ok(report)
@@ -1181,14 +1188,39 @@ fn best_two_groups(embedding: &[f32], targets: &HashMap<i64, Vec<&[f32]>>) -> (f
     )
 }
 
-/// Take every face the matching step put into this group back out of it (M26.11): the faces the
-/// owner did not place by hand move into one unnamed group and stay pinned, so the next step does
-/// not put them back. Rows only.
-pub fn detach_auto(db_path: &Path, cluster_id: i64) -> Result<usize> {
+/// The owner confirmed proposals (M26.17): the faces join the named people they resemble and are
+/// pinned by hand. Rows only — no face crop and no photo is touched.
+pub fn confirm_matches(db_path: &Path, face_ids: &[i64]) -> Result<usize> {
     let mut conn = db::open(db_path)?;
-    let moved = db::detach_auto_faces(&mut conn, cluster_id)?;
-    db::delete_empty_face_clusters(&conn)?;
-    Ok(moved)
+    db::confirm_face_matches(&mut conn, face_ids)
+}
+
+/// The owner turned proposals down (M26.17): the faces stay where they are and are pinned, so the
+/// next step does not offer them again. Rows only.
+pub fn reject_matches(db_path: &Path, face_ids: &[i64]) -> Result<usize> {
+    let mut conn = db::open(db_path)?;
+    db::reject_face_matches(&mut conn, face_ids)
+}
+
+/// The status of an answer to the quarantine (M26.17), with the right number: one face joined or
+/// stayed, several joined or stayed. The app and the CLI say the same words.
+pub fn answer_report(lang: Lang, moved: usize, confirm: bool) -> String {
+    let (one, many) = if confirm {
+        (
+            "1 face joined the person it resembles",
+            "{} faces joined the person they resemble",
+        )
+    } else {
+        (
+            "1 face stays where it is — the person is not them",
+            "{} faces stay where they are — the person is not them",
+        )
+    };
+    if moved == 1 {
+        i18n::t(lang, one).to_string()
+    } else {
+        i18n::fill(lang, many, &[moved.to_string()])
+    }
 }
 
 /// A batch assignment: the picked faces go into one group with one name.
@@ -1378,13 +1410,16 @@ mod tests {
         };
         assert_eq!(cluster_of(&before, close_a), None, "the plan wrote a row");
 
-        // The step itself: both close faces join Ann, from two different catalogs.
+        // The step itself (M26.17): both close faces are proposed for Ann, from two different
+        // catalogs, and neither moves. They wait in the quarantine.
         let report = match_named(&path, &settings).unwrap();
         assert!(!report.dry_run);
         assert_eq!((report.named, report.matched, report.people), (2, 2, 1));
         assert_eq!((report.left_small, report.left_far), (1, 1), "{report}");
         assert!(
-            report.to_string().contains("matched 2 faces to 1 named people"),
+            report
+                .to_string()
+                .contains("proposed 2 faces to 1 named people — they wait in quarantine"),
             "{report}"
         );
         assert!(
@@ -1392,16 +1427,19 @@ mod tests {
             "{report}"
         );
         let after = db::load_faces(&db::open(&path).unwrap()).unwrap();
-        let views = db::load_face_views(&db::open(&path).unwrap(), None).unwrap();
         for id in [close_a, close_b] {
-            let f = after.iter().find(|f| f.id == id).unwrap();
-            assert_eq!(f.cluster_id, Some(ann), "the close face did not join Ann");
-            let v = views.iter().find(|v| v.id == id).unwrap();
-            assert!(!v.manual, "an automatic match must not look like a decision");
-            assert!(
-                v.match_score.is_some_and(|s| s > 0.9),
-                "the similarity is not kept"
+            assert_eq!(
+                cluster_of(&after, id),
+                None,
+                "a proposal moved the face into Ann"
             );
+        }
+        let proposals = db::load_face_proposals(&db::open(&path).unwrap()).unwrap();
+        assert_eq!(proposals.len(), 2, "the proposals are not stored");
+        for p in &proposals {
+            assert_eq!(p.target_id, ann);
+            assert_eq!(p.target_label, "Ann");
+            assert!(p.similarity > 0.9);
         }
         // The owner's own placement, the tie, the far face and the forbidden catalog stay.
         for id in [by_hand, far, tie, off] {
@@ -1411,33 +1449,28 @@ mod tests {
             after.iter().find(|f| f.id == by_hand).unwrap().manual,
             "the hand-placed face lost its pin"
         );
-
-        // "Detach the auto-matched": the group keeps Ann's own face, the two matched ones leave
-        // into one unnamed group and are pinned, so a second step leaves them alone.
-        assert_eq!(detach_auto(&path, ann).unwrap(), 2);
-        let detached = db::load_faces(&db::open(&path).unwrap()).unwrap();
-        let moved = cluster_of(&detached, close_a);
-        assert!(
-            moved.is_some() && moved != Some(ann),
-            "the face stayed in Ann"
-        );
-        assert_eq!(cluster_of(&detached, close_b), moved, "both left together");
-        let views = db::load_face_views(&db::open(&path).unwrap(), None).unwrap();
-        for id in [close_a, close_b] {
-            let f = detached.iter().find(|f| f.id == id).unwrap();
-            assert!(f.manual, "a detached face must not be matched again");
-            let v = views.iter().find(|v| v.id == id).unwrap();
-            assert!(
-                v.match_score.is_none(),
-                "a detached face kept its “auto” mark"
-            );
-        }
+        // A confirmed proposal joins Ann and is pinned; a turned-down one stays where it is and
+        // is pinned, so a second step does not offer it again.
+        assert_eq!(confirm_matches(&path, &[close_a]).unwrap(), 1);
+        assert_eq!(reject_matches(&path, &[close_b]).unwrap(), 1);
+        let answered = db::load_faces(&db::open(&path).unwrap()).unwrap();
+        assert_eq!(cluster_of(&answered, close_a), Some(ann));
+        assert!(answered.iter().find(|f| f.id == close_a).unwrap().manual);
+        assert_eq!(cluster_of(&answered, close_b), None);
+        assert!(answered.iter().find(|f| f.id == close_b).unwrap().manual);
+        // The confirmed face is a member of Ann now, so the 30° face is no longer ambiguous and
+        // is offered for her; the turned-down and hand-placed faces are not offered again.
         let again = match_named(&path, &settings).unwrap();
-        assert_eq!(
-            again.matched, 0,
-            "the detached faces were matched again: {again}"
+        assert_eq!(again.matched, 1, "an answered face was offered again: {again}");
+        assert_eq!((again.left_small, again.left_far), (0, 1), "{again}");
+        let proposals = db::load_face_proposals(&db::open(&path).unwrap()).unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].face.id, tie);
+        assert_eq!(proposals[0].target_id, ann);
+        assert!(
+            proposals.iter().all(|p| p.face.id != close_b),
+            "a turned-down face was offered again"
         );
-        assert_eq!((again.left_small, again.left_far), (1, 1));
     }
 
     /// M26.11 on the real archive: how close the free faces come to the people the owner has
@@ -1518,9 +1551,8 @@ mod tests {
                 r.seconds * 1000.0
             );
         }
-        let views = db::load_face_views(&db::open(&path).unwrap(), None).unwrap();
-        let auto = views.iter().filter(|v| v.match_score.is_some()).count();
-        println!("faces marked “auto” afterwards: {auto} of {}", views.len());
+        let proposals = db::load_face_proposals(&db::open(&path).unwrap()).unwrap();
+        println!("proposals waiting in quarantine: {}", proposals.len());
     }
 
     #[test]
