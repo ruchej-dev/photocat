@@ -667,9 +667,16 @@ const RIGHT_W: f32 = 280.0;
 /// `h-11` row and its `p-3.5` (M22.16).
 const PANEL_HEAD_H: f32 = 44.0;
 const PANEL_PAD: f32 = 12.0;
-/// The top bar is 32 px and the bottom one 28 px — mock-up metrics, not a matter of taste.
+/// The top bar is 32 px and the bottom one 28 px — mock-up metrics, not a matter of taste. The
+/// strip is one row of exactly `TOP_H` logical points at every scale (M26.4): a pass row or the
+/// reminder adds height under that row and never changes it.
 const TOP_H: f32 = 32.0;
 const STATUS_H: f32 = 28.0;
+/// The search well of the top bar: 28 px inside the 32 px strip, so the row keeps 2 px of air
+/// above and below it and nothing can grow the strip.
+const SEARCH_H: f32 = 28.0;
+/// The "Tiles" pill: 26 px — the height of an action button, a little shorter than the well.
+const PILL_H: f32 = 26.0;
 /// The search field of the top bar is never wider than the mock-up's `max-w-xl` (576 px);
 /// below that it takes the room between the mark and the tools.
 // The mock-up's `max-w-xl` gave the search field 576 px; the state pill left the top strip in
@@ -6501,8 +6508,11 @@ impl App {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let th = theme(ui);
-        let row = ui.max_rect();
-        let row_h = TOP_H - 6.0;
+        // The one row is computed in logical points and never from `pixels_per_point` (M26.4):
+        // `TOP_H` at every scale, whatever the panel holds. The pass rows and the reminder stand
+        // under it, in the same strip.
+        let full = ui.max_rect();
+        let row = egui::Rect::from_min_size(full.min, egui::vec2(full.width(), TOP_H));
         let gap = 8.0;
 
         // The three sectors are measured, not guessed: whatever the language, the search stays in
@@ -6539,7 +6549,6 @@ impl App {
         ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                ui.set_min_height(row_h);
                 if word_button(ui, Icon::Settings, t(lang, "Settings")).clicked() {
                     self.settings_open = true;
                 }
@@ -6567,21 +6576,27 @@ impl App {
             let w = avail.min(SEARCH_MAX_W);
             let x = x0 + (avail - w) * 0.5;
             let rect = egui::Rect::from_min_max(
-                egui::pos2(x, row.top()),
-                egui::pos2(x + w, row.bottom()),
+                egui::pos2(x, row.top() + (TOP_H - SEARCH_H) * 0.5),
+                egui::pos2(x + w, row.top() + (TOP_H + SEARCH_H) * 0.5),
             );
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.allocate_ui_with_layout(
-                    egui::vec2(w, row.height()),
+                    egui::vec2(w, SEARCH_H),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| self.search_field(ui, w),
                 );
             });
         }
+        // The one row is spent; whatever follows (a pass row, the reminder) goes under it, and the
+        // strip ends with its 1 px line.
+        ui.advance_cursor_after_rect(row);
         self.pass_rows(ui);
-        let r = ui.max_rect();
-        ui.painter()
-            .hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, th.border));
+        let r = ui.min_rect();
+        ui.painter().hline(
+            egui::Rangef::new(full.left(), full.right()),
+            r.bottom() - 0.5,
+            egui::Stroke::new(1.0, th.border),
+        );
     }
 
     /// The background passes that are running, in the order of their progress rows (M25.8). The
@@ -6665,12 +6680,16 @@ impl App {
             .fill(th.canvas)
             .stroke(egui::Stroke::new(1.0, th.border))
             .corner_radius(RADIUS_CARD)
-            .inner_margin(egui::Margin::symmetric(6, 5))
+            .inner_margin(egui::Margin::symmetric(6, 3))
             .show(ui, |ui| {
+                // 28 px in total: the well never stretches to the strip's height (M26.4).
+                ui.set_max_height(SEARCH_H - 8.0);
                 ui.set_width(inner);
+                // The row is as tall as `interact_size.y`, which `horizontal` reads before the
+                // closure runs — so it is set here, not inside (M26.4).
+                ui.spacing_mut().interact_size.y = 20.0;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.spacing_mut().interact_size.y = 20.0;
                     icon_mark_color(ui, Icon::Search, 14.0, th.text_dim);
                     let mode = ui
                         .add(WordButton::new(mode_icon, mode_text).compact())
@@ -6699,6 +6718,7 @@ impl App {
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut self.semantic_query)
                             .hint_text(hint)
+                            .margin(egui::Margin::symmetric(4, 2))
                             .desired_width(field_w),
                     );
                     enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -6749,8 +6769,11 @@ impl App {
             .corner_radius(egui::CornerRadius::same(RADIUS_CTRL as u8))
             .inner_margin(egui::Margin::symmetric(8, 4))
             .show(ui, |ui| {
+                // The pill is 26 px: its content may not fill the row, or the frame would stretch
+                // to the whole strip and let a pass row ratchet the top bar up (M26.4).
+                ui.set_max_height(PILL_H - 10.0);
                 // The pill sits in a right-to-left tool row; the glyph and the slider of the
-                // mock-up read left to right, and a 26 px slider would make the pill 36 px tall.
+                // mock-up read left to right, and a 26 px slider would make the pill taller.
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     ui.spacing_mut().interact_size.y = 16.0;
@@ -14078,8 +14101,17 @@ impl eframe::App for App {
             }
         }
 
+        // The strip is exactly `TOP_H` logical points: the panel reserves that size from the first
+        // frame and drops the egui separator line, because the bar paints its own 1 px bottom line
+        // (M26.4). A pass row or the reminder grows it under the one row.
         egui::Panel::top("top")
             .resizable(false)
+            .default_size(TOP_H)
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::side_top_panel(ui.style())
+                    .inner_margin(egui::Margin::symmetric(8, 0)),
+            )
             .show(ui, |ui| self.top_bar(ui));
         egui::Panel::bottom("status")
             .resizable(false)
@@ -16294,6 +16326,113 @@ mod tests {
     use crate::i18n::{self, t};
     use crate::tools;
     use std::collections::BTreeSet;
+
+    /// M26.4: the top strip is exactly `TOP_H` logical points at every `pixels_per_point`, and no
+    /// child may raise it. The regression: the search well and the "Tiles" pill filled the available
+    /// height, so every pass row a running job added was kept for good — on the owner's Windows
+    /// build the strip ended up twice the design (the screenshot of 2026-11-26).
+    #[test]
+    fn the_top_strip_is_top_h_at_every_scale_and_never_ratchets() {
+        use super::{LEFT_W, PILL_H, SEARCH_H, SEARCH_MAX_W, TOP_H};
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-top-strip.db"));
+        app.settings.lang = i18n::Lang::En;
+        let size = egui::vec2(1240.0, 840.0);
+        // One frame of the whole window at a given scale, with every filled rectangle.
+        let fills = |app: &mut App, ppp: f32| -> Vec<(egui::Rect, egui::Color32)> {
+            let ctx = egui::Context::default();
+            ctx.set_pixels_per_point(ppp);
+            super::style(&ctx);
+            let raw = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let mut frame = eframe::Frame::_new_kittest();
+            let mut rects = Vec::new();
+            // The panel remembers its size from the frame before, so the scale is measured after a
+            // few frames of the same context; every frame but the last is thrown away.
+            for pass in 0..4 {
+                let out = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+                if pass == 3 {
+                    for c in &out.shapes {
+                        collect_fills(&c.shape, &mut rects);
+                    }
+                }
+                out.drop_without_applying_deltas();
+            }
+            rects
+        };
+        // The band of the strip: the panel's own fill, the full window width.
+        let band = |rects: &[(egui::Rect, egui::Color32)]| -> f32 {
+            rects
+                .iter()
+                .find(|(r, _)| r.top() <= 0.5 && (r.width() - size.x).abs() < 1.0)
+                .map(|(r, _)| r.height())
+                .expect("the top strip is drawn")
+        };
+        // A child of the strip by its width and height: the well, the pill, the toggle, "Settings".
+        let find = |rects: &[(egui::Rect, egui::Color32)], w: (f32, f32), h: (f32, f32)| {
+            *rects
+                .iter()
+                .find(|(r, _)| {
+                    r.top() < TOP_H
+                        && (w.0..=w.1).contains(&r.width())
+                        && (h.0..=h.1).contains(&r.height())
+                })
+                .map(|(r, _)| r)
+                .unwrap_or_else(|| panic!("a child of the strip is missing: {rects:?}"))
+        };
+
+        for ppp in [1.0_f32, 1.5, 2.0] {
+            let f = fills(&mut app, ppp);
+            let h = band(&f);
+            assert!(
+                (h - TOP_H).abs() < 0.01,
+                "at {ppp} the strip is {h} px instead of {TOP_H}"
+            );
+            // The well, the pill, the details toggle and "Settings" keep their own heights, stand on
+            // the one row in that order and do not touch each other.
+            let well = find(&f, (SEARCH_MAX_W - 16.0, SEARCH_MAX_W + 16.0), (SEARCH_H, SEARCH_H));
+            let pill = find(&f, (100.0, 140.0), (PILL_H, PILL_H));
+            let toggle = find(&f, (27.0, 29.0), (27.0, 29.0));
+            let settings = find(&f, (60.0, 100.0), (PILL_H, PILL_H));
+            assert!(
+                well.right() < pill.left()
+                    && pill.right() < toggle.left()
+                    && toggle.right() < settings.left(),
+                "at {ppp} the children of the strip overlap: well {well:?}, pill {pill:?}, \
+                 toggle {toggle:?}, settings {settings:?}"
+            );
+            assert!(
+                [well, pill, toggle, settings]
+                    .iter()
+                    .all(|r| r.top() >= 0.0 && r.bottom() <= TOP_H),
+                "at {ppp} a child leaves the row: {well:?} {pill:?} {toggle:?} {settings:?}"
+            );
+            // The content panel begins right below the strip: no dead band.
+            assert!(
+                f.iter()
+                    .any(|(r, _)| (r.top() - TOP_H).abs() < 0.51 && r.left() >= LEFT_W - 0.5),
+                "at {ppp} the content does not begin at {TOP_H} px: {:?}",
+                f.iter().filter(|(r, _)| r.top() < TOP_H + 4.0).collect::<Vec<_>>()
+            );
+        }
+
+        // A pass row adds height under the one row while it runs; when the pass ends the strip is
+        // exactly `TOP_H` again — nothing ratchets.
+        let _ = fills(&mut app, 1.0);
+        app.progress = Some(std::sync::Arc::new(db::Progress::default()));
+        let running = band(&fills(&mut app, 1.0));
+        assert!(
+            running > TOP_H + 10.0,
+            "the pass row does not add height: {running} px"
+        );
+        app.progress = None;
+        let after = band(&fills(&mut app, 1.0));
+        assert!(
+            (after - TOP_H).abs() < 0.01,
+            "the strip stayed at {after} px after the pass instead of {TOP_H}"
+        );
+    }
 
     fn file_row(id: i64, kind: &str, name: &str) -> db::FileRow {
         db::FileRow {
@@ -22901,10 +23040,11 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = window_frame(&mut app, &ctx);
         let fills = window_fills(&mut app, &ctx);
-        // The frame of the well is the field's cap plus its 6 px of air on each side.
+        // The frame of the well is the field's cap plus its 6 px of air on each side; it is 28 px
+        // high inside the 32 px strip (M26.4).
         let field = fills.iter().find(|(r, _)| {
-            r.top() < 40.0
-                && (30.0..40.0).contains(&r.height())
+            r.top() < super::TOP_H
+                && (r.height() - super::SEARCH_H).abs() < 0.01
                 && (r.width() - super::SEARCH_MAX_W).abs() <= 16.0
         });
         assert!(

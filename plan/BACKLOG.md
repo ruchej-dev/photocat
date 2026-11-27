@@ -1809,8 +1809,8 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 элементы в центральной части наезжают друг на друга".
 
 **Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 (done 2026-11-27) a warning
-mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
-M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
+mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 (done 2026-11-27) the
+Windows top strip is as tall as the design says; M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
@@ -2005,7 +2005,7 @@ shell script, and `app::the_find_programs_button_reports_every_program` in both 
 found in `PATH` (`ffmpeg` 9.0.2, `tesseract` 5.5.4). The real window is the owner's review — the
 headless frame test covers both panes.
 
-**M26.4 — the Windows top strip is as tall as the design says.**
+**M26.4 — the Windows top strip is as tall as the design says.** ✅ (done 2026-11-27)
 **Goal.** The strip is exactly `TOP_H` (32 logical px) with its bottom line at any Windows scaling;
 the screenshot shows it roughly twice that.
 
@@ -2027,6 +2027,23 @@ the screenshot shows it roughly twice that.
 band is gone; the test per scale; the owner's review on the real window.
 
 **Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`.
+
+**Done.** The cause was not `pixels_per_point` but a feedback loop: the search well and the "Tiles"
+pill were given the row's own height and the row the panel's, so every child that appeared — a pass
+row, the reminder — was kept for good. On Windows the owner's build reached ~105 pt after indexing,
+OCR and the face pass; here the strip read 42 px at rest and 100 px after one pass row. `App::top_bar`
+now draws one row of exactly `TOP_H` (32 logical px) and spends it with `advance_cursor_after_rect`,
+so the pass rows and the reminder start under it; the search well is pinned at `SEARCH_H` (28 px) and
+the pill at `PILL_H` (26 px) with `Ui::set_max_height`, and the well's row height comes from
+`interact_size.y`, which `horizontal` reads before its closure (the old code set it inside, so the row
+was 26 px and the well 38). The panel reserves `TOP_H` from the first frame (`.default_size`) and
+drops egui's own separator line (`show_separator_line(false)`), because the bar paints its 1 px bottom
+line itself — one line, not two. Measured: the band is 32.0 px at `pixels_per_point` 1.0, 1.5 and
+2.0, the well 28 px, the pill 26 px, the content panel begins at 32 px, and after a progress row the
+strip returns to 32 px (the test `the_top_strip_is_top_h_at_every_scale_and_never_ratchets` fails on
+the old code with "at 1 the strip is 42 px instead of 32"); `cargo test` 341 passed,
+`cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics` 0 errors. The owner's review on the Windows window is the last word.
 
 **M26.5 — the face settings live on the People screen.**
 **Goal.** The People screen owns its model, threshold and passes, as the calendar owns its layers —
