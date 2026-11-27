@@ -425,12 +425,6 @@ const PAIRS: &[(&str, &str)] = &[
     ("no date", "без даты"),
     ("Search by path or date", "Поиск по пути или дате"),
     ("2024-05, vacation", "2024-05, отпуск"),
-    ("Folder", "Каталог"),
-    (
-        "path to a folder; several — with the “+” button",
-        "путь к каталогу; несколько — кнопкой «+»",
-    ),
-    ("Start indexing", "Индексировать"),
     ("Indexing", "Индексация"),
     ("Refresh", "Обновить"),
     ("Settings", "Настройки"),
@@ -557,8 +551,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("marks everything visible now; Ctrl+A does the same", "отметить всё, что видно сейчас; Ctrl+A делает то же"),
     ("picked", "выбрано"),
     (
-        "Add a folder with the “+” button or type a path above, then press “Index”.",
-        "Добавьте каталог кнопкой «+» или введите путь вверху, затем нажмите «Индексировать».",
+        "Add a folder with the “+” of the catalog block, then “Re-index” in its menu.",
+        "Добавьте каталог кнопкой «+» блока каталога, затем нажмите «Переиндексировать» в его меню.",
     ),
     ("nothing found", "ничего не найдено"),
     ("comparing copies and a sha256 manifest", "сверка копий и слепок sha256"),
@@ -1359,6 +1353,64 @@ const PAIRS: &[(&str, &str)] = &[
     ("the video has finished", "видео доиграло"),
     // Archive folders and the folder picker.
     ("Archive folders", "Каталоги архива"),
+    // The catalog block of the left panel and its menu (M26.7).
+    ("Working catalog", "Рабочий каталог"),
+    ("All catalogs", "Все каталоги"),
+    ("Storage catalogs", "Каталоги хранилища"),
+    ("connect a catalog: the folder picker", "подключить каталог: выбор папки"),
+    (
+        "the working catalog: {} — a click opens the menu of the storage",
+        "рабочий каталог: {} — клик откроет меню хранилища",
+    ),
+    (
+        "the whole visible index — a click opens the menu of the storage",
+        "весь видимый индекс — клик откроет меню хранилища",
+    ),
+    (
+        "the whole visible index: {} — drop the scope",
+        "весь видимый индекс: {} — снять ограничение",
+    ),
+    (
+        " · this folder is not on disk: the rows stay until the index is cleaned",
+        " · этой папки нет на диске: строки остаются, пока не очищен индекс",
+    ),
+    (
+        " · a click shows this catalog alone; the gear opens its settings",
+        " · клик покажет только этот каталог; шестерёнка откроет его настройки",
+    ),
+    ("catalog: {}", "каталог: {}"),
+    ("the catalog changed", "каталог изменился"),
+    (
+        "catalog “{}”: {} — the DB is untouched",
+        "каталог «{}»: {} — база не тронута",
+    ),
+    ("all catalogs: {} — the DB is untouched", "все каталоги: {} — база не тронута"),
+    (
+        "the selection is cleared: the catalog changed",
+        "выделение снято: каталог изменился",
+    ),
+    (
+        "switch this catalog on again: the rows are back, nothing is read from disk",
+        "снова включить каталог: строки вернутся, с диска ничего не читается",
+    ),
+    (
+        "catalog settings: its box, “Remove from the index” and “Index this catalog”",
+        "настройки каталога: его флажок, «Убрать из индекса» и «Индексировать каталог»",
+    ),
+    ("Connect a catalog…", "Подключить каталог…"),
+    ("Re-index", "Переиндексировать"),
+    (
+        "index this catalog: reads only the new and changed files and writes to the cache",
+        "индексировать каталог: читает только новые и изменившиеся файлы и пишет в кэш",
+    ),
+    (
+        "this catalog was opened from the catalog menu",
+        "этот каталог открыт из меню каталогов",
+    ),
+    (
+        "connect a catalog first: the “+” above the catalog pill, or “Connect a catalog…” in its menu",
+        "сначала подключите каталог: «+» над кнопкой каталога или «Подключить каталог…» в её меню",
+    ),
     (
         "You can index several folders. The box switches a folder off: its files leave every view while the rows, the previews and the files on disk stay. “Add a folder…” offers indexing straight away; “Remove from the index” deletes DB rows only — the files on disk are untouched.",
         "Индексировать можно несколько каталогов. Флажок выключает каталог: его файлы уходят \

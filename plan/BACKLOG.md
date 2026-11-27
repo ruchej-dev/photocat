@@ -1811,7 +1811,7 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 **Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 (done 2026-11-27) a warning
 mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 (done 2026-11-27) the
 Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the face settings move to the People screen; M26.6 (done 2026-11-27) the layout survives a narrow window;
-M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
+M26.7 (done 2026-11-27) the catalog block after `photocat_1`: the pill, its dropdown and the scope; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
 together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
@@ -1855,7 +1855,7 @@ grid and the counters; switching it back restores them without a single file rea
 **Files.** `src/app.rs`, `src/db.rs`, `src/i18n.rs`, `src/main.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
 
-**M26.7 — the catalog block after `photocat_1`: one pill with a dropdown, a scope and its settings.**
+**M26.7 — the catalog block after `photocat_1`: one pill with a dropdown, a scope and its settings.** ✅ (done 2026-11-27)
 **Goal.** The left panel's catalog block follows the mock-up instead of a text field and two buttons:
 one pill shows the working catalog, and its dropdown chooses the scope, connects a catalog and opens
 its settings.

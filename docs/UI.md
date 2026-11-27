@@ -154,13 +154,15 @@ the interface rules at the end of the file.
   the row and centred in it, so a pass row or the reminder adds height under the row and the strip
   returns to 32 px when the pass ends. Before M26.4 the well and the pill filled the available
   height, and every pass row the owner's indexing added was kept for good — on Windows the strip
-  reached twice the design. The folder field
-  and "Index / Refresh" live in the left panel: working with the archive is not search. Both
-  carry their tooltip (M25.7): "Start indexing" walks the folders, reads only the new and changed
-  files (path + size + mtime), computes the hash, the date, the dimensions, the sharpness and a
-  320 px preview, gives a video its cover through ffmpeg and writes to the cache only — never to the
-  archive — and can be stopped and resumed; "Refresh" re-reads the database into the window, reads
-  no file and changes nothing, for a change made by the CLI or in another window.
+  reached twice the design. Working with the archive is not search, so it lives in the left panel
+  (M26.7, after `photocat_1`): one catalog pill names the working catalog, and its menu carries the
+  pass. The
+  "Re-index" item keeps the long hint of M25.7 — it walks the folders, reads only the new and
+  changed files (path + size + mtime), computes the hash, the date, the dimensions, the sharpness
+  and a 320 px preview, gives a video its cover through ffmpeg and writes to the cache only — never
+  to the archive — and can be stopped and resumed. "Refresh" moved into the folder list: it
+  re-reads the database into the window, reads no file and changes nothing, for a change made by
+  the CLI or in another window.
 - **The bottom strip is 28 px** (M22.19): a dot and the last fact on the left, then the count of
   files with their volume in the numeric family; on the right the selected file — its name, the
   frame ("6000×4000") and the size, or "N selected · volume".
@@ -207,8 +209,21 @@ the interface rules at the end of the file.
   context of their own. The years are a wrapped cloud of 18 px chips (M25.2): the five newest and
   a "…" for the older ones, "All years" while a pick is on. There is no "Summary" block (M25.5):
   the files and the size live in the status bar, and the two "missing" numbers are the counts of
-  the filter chips. The "Catalog" heading carries a bare "+" that opens the folders dialog (the
-  worded path is the dialog itself).
+  the filter chips. The catalog block is the mock-up's (M26.7): the caps "Working catalog" with a
+  bare "+" that opens the folder picker, then one 40 px pill — a 28 px `folder_special` well, the
+  name in mono 12 (the last path segment, cut with an ellipsis), the facts in mono 10
+  ("86.4 GiB · 7 370 files") and the chevron. A click opens the menu, and it stays open until a
+  click outside, because a hover-only menu is unreachable without a pointer (the mock-up opens it
+  on hover; that is refused): the caps header "Storage catalogs", "All catalogs" with the total and
+  a check, one row per root (its last path segment, the full path in the hint, the count), a rule,
+  "Connect a catalog…" and "Re-index". A row is a **scope**, not a filter of a text field: the grid,
+  the calendar, the photos of an open album, the duplicates, the faces, the trash and every counter
+  show that root alone (an album card still counts the whole album — "Delete the album" acts on all
+  of it), the pill takes its size and count, the chips row adds "catalog: Name ×",
+  and the DB is untouched. A switched-off catalog (M26.1) keeps its row, dimmed with the word "off"
+  and a target to switch it on; its gear opens the folder list on that root, where its box,
+  "Remove from the index" and "Index this catalog" live. The path is typed nowhere any more — only
+  in the folder picker.
 - **The right panel (M22.16, after `photocat_12`):** a 44 px header band on the `card` tone with a
   1 px line under it — the info glyph and "File details" at 12 px strong on the left, the mock-up's
   "×" at the right (a 22 px target, the hint "free up room for the grid and calendar"; the worded
@@ -244,7 +259,9 @@ the interface rules at the end of the file.
   Navigation rows (`All files`, `Albums`, `Calendar`, `People`, `Duplicates & series`, `Integrity`,
   `Trash`), the section list of the dialog and the "Sort" control (a `WordButton` over
   `Popup::menu`) carry the same icons. A `ComboBox` is a select, not a button: the language, the
-  model, the theme and the album parent keep words, as the mock-up's `<select>` does. The colour
+  model, the theme and the album parent keep words, as the mock-up's `<select>` does. The rows of the
+  catalog menu are selects too (M26.7): choosing a catalog is `Button::selectable`, and the folder
+  glyph stands before the name as its mark. The colour
   comes from the theme, so both themes and the disabled state need no second drawing.
 - **Where a button keeps its word alone.** A few kinds of target are too small or too special for
   an icon, and each is checked by `every_button_of_the_window_has_an_icon` in `src/app.rs`:
@@ -379,7 +396,7 @@ a rare one.
 
 | What | Where | Clicks |
 |---|---|---|
-| Folder, "Index", "Refresh" | left panel, the catalog block, each with a tooltip that says what the pass reads and writes (M25.7) | 0 |
+| The working catalog, its scope and the pass | left panel, the catalog pill: a click opens the menu — every catalog, "Connect a catalog…" and "Re-index", whose tooltip says what the pass reads and writes (M25.7); the scope keeps a "×" in the chips row | 1 |
 | Progress and "Stop" | top bar, next to the start | 1 |
 | Search (semantic / by text) | top bar, row 2 | 1 |
 | Six views | left panel, two groups with numbers | 1 |
@@ -400,16 +417,19 @@ a rare one.
 | Models, limits, programs, the tag dictionary | "Settings" in the top bar, sections in the dialog | 1–2 (rare) |
 | The tag filter threshold | left panel, pinned under the filter block, above the tag cloud (M25.6) | 0 |
 
-- **One main action per screen**: "All files" → "Index"/"Find"; "Duplicates" → "Find groups";
+- **One main action per screen**: "All files" → "Re-index" in the catalog menu / "Find";
+  "Duplicates" → "Find groups";
   "Faces" → "Find faces (N)"; "Integrity" → "Compare the copies"; in the "Settings" dialog →
   "Download model" (if not downloaded).
-- **Left panel budget:** the folder block, two navigation groups (7 views), the filter rows
+- **Left panel budget:** the catalog block (the caps heading and the 40 px pill), two navigation
+  groups (7 views), the filter rows
   (path/date, "All / Photos / Videos", the two "missing" chips) and the tag threshold are pinned;
   the tag cloud opens the scrolling part and the years follow it — M25.6 undoes the M22.3 order on
-  purpose, so the slider never leaves the chips it cuts. At 840 px the threshold stands at 621 px
-  and the "Tags" heading at 685.5 px without a scroll (checked by
+  purpose, so the slider never leaves the chips it cuts. At 840 px the threshold stands at 588 px
+  and the "Tags" heading at 652.5 px without a scroll (M26.7: the catalog pill took 33 px less than
+  the old field and its two buttons; checked by
   `app::tests::the_left_panel_pins_the_threshold_above_the_tag_cloud`; on the corpus the years
-  heading lands at 941 px in the owner's 1021 px window, the bottom strip at 812 / 993 px). A new
+  heading lands at 908 px in the owner's 1021 px window, the bottom strip at 812 / 993 px). A new
   function is not added to the panel if it already scrolls when nothing is selected: move it into
   the view screen, into "Settings", or replace an existing one.
 - **A number next to an action** explains the cost before the press: "435 candidates", "still
@@ -480,7 +500,7 @@ for text over a darkened frame, where the background is a photograph.
 
 | Screen | What is on it | Main action |
 |---|---|---|
-| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (a "+" in its heading, the folder field, "Index", "Refresh"), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos", the two toggle chips "No date · N" / "No preview · N" under them), then the pinned "Filter threshold" row — the 0–100% percentile slider with its notes, above the scrolling part; in the scroll: the tag cloud under the caps "Tags" with the count of snapshots after a middle dot ("furniture · 669"), the picked chips in the accent (the filter accumulates, M25.1), the "×" at the right of the heading that resets the set (M25.6 puts the cloud first, the threshold cuts it), then the "Years" cloud (the five newest years as chips, the "…" for the older ones, M25.2), then the model block (the text block moved to the settings, M25.13); above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; the model block keeps the state and "Compute tags" only (M25.6): the model itself is chosen in Settings; "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
+| Grid (`View::Grid`) | the top strip: the mark, one search field (mode switch, query, "Search", "×"), the "Tiles" pill, the state, the details toggle, "Settings"; the left panel, top down: the "Catalog" block (the caps "Working catalog" with a "+", then the pill with its size and count and the storage menu of M26.7), two navigation sections with numbers, the "Filter" section (path/date, "All / Photos / Videos", the two toggle chips "No date · N" / "No preview · N" under them), then the pinned "Filter threshold" row — the 0–100% percentile slider with its notes, above the scrolling part; in the scroll: the tag cloud under the caps "Tags" with the count of snapshots after a middle dot ("furniture · 669"), the picked chips in the accent (the filter accumulates, M25.1), the "×" at the right of the heading that resets the set (M25.6 puts the cloud first, the threshold cuts it), then the "Years" cloud (the five newest years as chips, the "…" for the older ones, M25.2), then the model block (the text block moved to the settings, M25.13); above the grid — one 44 px ribbon: the view title at 18 px with the facts at 12 px in the numeric family on the left, the three cell views, "By months / Flat" and the "Sort" menu on the right, and the filter chips with "×" on a row of their own only while a filter is on; the model block keeps the state and "Compute tags" only (M25.6): the model itself is chosen in Settings; "By months" — the grid in groups ("May 2024 · 132 files · 5.4 GiB") from newest to oldest, "Flat" — one ribbon without headings; three cell views ("Tile" by default, "Rows", "List") in the header; step 10 px, an 8 px rounded tile card with a 22 px caption band, a video comes with a cover frame and a "▶ M:SS" strip; while anything is picked — the floating bar at the bottom edge of the grid with "N selected · size", "Select all (M)" and "Clear selection"; on the right — the details of the selected file; the bottom strip: a dot, the last fact, the counters, and the selected file on the right | find and open |
 | Duplicates (`View::Dupes`) | a threshold slider, "Find groups", the summary "in groups N, marked spare M, X will be freed"; every group is a card of the `card` tone with "#N", the reason at 13 px, the facts in mono 11 and the advice "keep <name> — …", the pictures inside; every tile has a "keep" button, the others are marked "spare" | decide what is spare and export the plan |
 | Calendar (`View::Calendar`) | the tabs "Year/Month/Week/Day", "← … →" (the years step through the archive's years, the months only through months with files, the week and the day one by one), "Today"; the years layer — one card per year of the archive, newest first, with counters, covers, volume and sizes (M25.10); the months layer — 4×3 month cards of the picked year with counters, covers and sizes above the line "12 months of 2024" and the facts of the year; the weeks layer — 4–6 week tiles of the month (M25.11); the days layer — the seven days of the week (M25.11); a double click on a year/month drills down a layer, a single click selects (an accent frame); under every layer — the selected day as a list with the time, the name and the size (a double click on a day ends the drill-down and opens its photos there), and "No date"; an empty year says "No files in this year." and the button "Go to <the nearest month with files>" | find a day and look at its snapshots |
 | Faces (`View::Faces`) | the face model block in the left panel (M26.5, the former "People" section of the settings dialog): the state line "buffalo_l · 182.4 MiB · in place / not downloaded" and the licence "SCRFD and ArcFace (InsightFace buffalo_l): non-commercial research use" at 10 px under it; while the weights are missing or coming — the consent tick, "Download the face model" (the accent button, disabled without the consent, with "the button is disabled: network consent is required"), the progress bar with "face files: N/M" and one "Stop" that ends the transfer (a stopped download says so and can be started again), with the model in place instead one "Check the face model"; then the merge threshold, "Find faces (N)" / "Resume (N)", "Rebuild groups" and the "all together" switch; the right panel with the 44 px band (the face glyph and "Groups") and the list of groups — "All people · N", then every group with the best face of the group as its icon, a "together" tick, its name and photo count; the open group's name at 14 px with its facts in mono 11; the face crops of the group with the date and the score in mono 10, the round tick circle and the head with a slash on every face tile inside a group, "Name the picked people", the name field and "Save the name", the "Photos where everyone is together (N)" title at 14 px; the ribbon has no cell-view switch and no details toggle (M22.26) | name a person, split off strangers and find photos where people are together |
@@ -490,7 +510,7 @@ for text over a darkened frame, where the background is a photograph.
 | Limited features (dialog, `App::limited_modal`) | the title row — the amber `Warning` glyph and "Some features are limited" at 14 px strong — and one line saying that only the work of the missing programs is off; one block per program: its name in mono 12 strong, the state line of "Settings" in mono 10 (the version or the error, the file found, why it is needed), "without it: …" at 11 px; a rule, then "How to install on <system>:" at 12 px strong and the commands in mono 11 on the `field` tone, one line each, with the language-pack note at 11 px in `text_dim`; the download pages, when the system has no package manager here, as plain words under the line "named here only, nothing is opened"; then "photocat installs and downloads nothing itself and opens no browser" and the path to "Settings" at 11 px; two buttons — the accent "Copy the commands" and the neutral "Close"; 560–640 px wide, no field, nothing is installed (M26.2) | an external program is missing: understand what is lost and get the command without a terminal |
 | Trash (`View::Trash`) | the counter and size in mono 11, "Restore all" in the neutral tone, "Empty the trash (N)" in the one `danger` border with confirmation, tiles marked "in trash" and a round 24 px restore target on the tile and in the list row, the word in its hint (M22.27) | return a file or deliberately move it to the OS trash |
 | Integrity (`View::Integrity`) | the "Folder A (archive)", "Folder B (copy)", "Manifest file" fields; the "Show all paths" tick; the "Compare the copies", "Write the manifest" (with an existing file — "Overwrite the manifest" and "Cancel"), "Check against the manifest" buttons; the row "Remind me to check every [N] days" (0 — off), the date and result of the last pass, the report path `verify-last.txt` and "Copy the last report"; the verdict in words, a report in the same format as the CLI, and "Copy the report" | compare a backup or check the archive against the manifest without a terminal |
-| "Folders" (dialog) | a tick box on every path (ticked — shown; cleared — off: the path dimmed and the word "off", with the rows, the previews and the files on disk kept), the count of indexed files, "Remove from the index", "Add a folder…", the built-in folder picker, "Index all" | add several folders without typing paths by hand, and hide one of them from every view |
+| "Folders" (dialog) | a tick box on every path (ticked — shown; cleared — off: the path dimmed and the word "off", with the rows, the previews and the files on disk kept), the count of indexed files, "Index this catalog" (a 20 px target on every row), "Remove from the index", "Add a folder…", the built-in folder picker, "Index all", "Refresh" (re-reads the DB, M25.7) and "Close"; the root the catalog menu was opened on is in the accent (M26.7) | add several folders without typing paths by hand, hide one of them from every view and index one of them alone |
 | Folder picker (dialog) | the current folder in an editable "path to a folder" field with "Go" (Enter works too), the drive buttons on Windows (`C:\`, `D:\`, … from `GetLogicalDrives`) so another disk is one click away, "Up" (absent at a drive root), "Add and index" / "Add without indexing" / "Cancel", and the folders of the current folder (files are not listed), "No subfolders." when there are none; a path that is not a folder says so in the dialog | add a folder from any disk without a system dialog |
 | Full screen (modal) | the header: "Back to the grid", the name at 14 px, the date and the facts (`18.4 MiB · 6000×4000`) in mono 11, "N of M" in the accent and the "×" that closes the screen; the tools row: "Zoom out", the percentage in mono, "Zoom in", "Fit", "1:1", "Rotate", "Text on the photo", "Show faces", "In the system viewer", "Inspector"; the frame with the face chips over it while "Show faces" is on; below it the playback row ⏮ ▶/⏸ ⏭ (on a snapshot ▶ starts the slideshow), "Slideshow", a 3/5/10 s interval; under the frame the series strip of the day; with "Inspector" on — the file card on the right; with a face picked — the panel of its photos there | look at a snapshot in full, look at a detail at a zoom above 100 %, walk the series of the day and come back to the same place |
 | Video in the full screen (modal, the same screen) | a cover frame with a big ▶ button in the centre; after it starts the frame plays in the window, ▶/⏸, "0:12 / 0:22" with seek, the sound sign and a slider, the "no device" label, "Stop the video"; when finished — the next file opens itself | watch a video with sound without leaving the app |
@@ -499,7 +519,8 @@ for text over a darkened frame, where the background is a photograph.
 
 ## States
 
-- Empty DB → one line in the grid: "Type a folder and press "Index"", no empty tiles.
+- Empty DB → one line in the grid: "Add a folder with the “+” of the catalog block, then
+  “Re-index” in its menu.", no empty tiles.
 - An active filter → a chips row appears under the ribbon: "path/date: … ×", "year: … ×" or
   "older than … ×", "tag: … ×" (one per tag), "photos only ×", "no date ×", "no preview ×",
   "by relevance: … ×" and "Reset"; "×" removes only its own filter, the grid does not shift. No
@@ -544,6 +565,10 @@ for text over a darkened frame, where the background is a photograph.
   plan is built, nothing on disk changes.
 - Indexing is running → a progress bar in the top bar, the status "indexing <path>…", the buttons are
   active but a second start is ignored.
+- A catalog is in scope (M26.7) → the pill names it with its size and count, the chips row shows
+  "catalog: Name ×", and the grid, the calendar, an album's photos, the duplicates, the faces, the
+  trash and the counters hold that root alone; the status line says "catalog “Name”: N files, size —
+  the DB is untouched"; "All catalogs" in the menu or the "×" of the chip brings every root back.
 - A folder is switched off (M26.1) → the folder list shows its path dimmed with the word "off" and a
   cleared tick box; its files leave every view (the grid, the calendar, the albums, the duplicates,
   the faces, the trash, the search and the counters) while the rows, the previews and the files on
@@ -575,8 +600,8 @@ for text over a darkened frame, where the background is a photograph.
 - The search mode is switched → the results of the previous query are reset, the status names the
   mode: "semantic search by the content of the snapshots" / "search by the text recognized on the
   snapshots".
-- An empty folder (`items` is empty) → the grid says "Type a folder and press "Index"", no empty
-  tiles; the filter found nothing → "nothing found" and a "Reset the filter" button, the counters
+- An empty folder (`items` is empty) → the grid says "Add a folder with the “+” of the catalog
+  block, then “Re-index” in its menu.", no empty tiles; the filter found nothing → "nothing found" and a "Reset the filter" button, the counters
   stay visible.
 - Nothing is selected → the right panel says "Pick a snapshot in the grid — the date, camera, tags
   and text will appear here"; the grid does not change width when the card appears.
@@ -746,8 +771,8 @@ for text over a darkened frame, where the background is a photograph.
 |---|---|---|
 | Select a file | a click on a tile | arrows in the grid, Home/End, Enter — open |
 | Scroll | the wheel over the grid area | PageUp/PageDown |
-| Start indexing | a button | Ctrl+I |
-| Refresh from the DB | the "Refresh" button | F5 |
+| Start the catalog pass | "Re-index" in the catalog menu | Ctrl+I |
+| Refresh from the DB | "Refresh" in the folder list | F5 |
 | Focus the search | a click on the field | Ctrl+F |
 | Reset search/selection | the "Reset" button; Esc clears the selection; Ctrl+A selects what was found | arrows in the grid, Home/End |
 | The main action | a button | Enter in the field |

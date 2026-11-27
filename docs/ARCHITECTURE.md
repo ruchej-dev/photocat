@@ -115,7 +115,11 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   so the grid, the calendar, the albums, the duplicates, the faces, the trash, the semantic search
   and the counters see one visible set. The rows, the previews and the files on disk stay, and
   switching the folder back on needs no pass. Indexing and the face, tag and text passes skip a
-  switched-off root; `stats` names the switched-off folders with their own counts.
+  switched-off root; `stats` names the switched-off folders with their own counts. The **catalog
+  scope** (M26.7) is not a setting at all: it lives in memory like the other view filters, and
+  `App::reload` drops the rows of the other roots by the same rule, so the grid, the calendar, the
+  duplicates, the faces, the trash, the open album's photos and the counters see one set; the facts
+  of every catalog are read once per `reload`, before the scope filter.
 - `user_tags`: the owner's own tags. They are not mixed with CLIP: the filter checks both sources
   and the card shows them in a separate block. A change of `sha256` does not wipe own tags — that is
   a human decision.
@@ -604,6 +608,7 @@ not with a different labelled set.
 | 2026-11-27 | 1240×840 headless frames, `pixels_per_point` 1.0 / 1.5 / 2.0 (M26.4) | the band of the top strip and its children, after a pass row appears and goes away (`cargo test the_top_strip_is_top_h_at_every_scale_and_never_ratchets`) | the strip is 32.0 px at all three scales, the search well 28 px and the "Tiles" pill 26 px; before the fix the strip was 42 px at rest, and one progress row took it to 100 px for good — the well and the pill filled the available height, so every pass row a run added was kept. With the one row pinned, a pass row only adds height while it runs |
 
 | 2026-11-27 | the real DB, 2232 files, 1240×840 headless frames (M26.6) | the grid's scroll frames, 160 of them (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored grid_scroll_measurement`) | p50 5.51 ms (182 fps), p95 5.64, p99 5.70 — against the 5.72 ms of M25.10, so the ribbon's rows are not paid for: the row is measured before it is drawn, and each measuring pass (`ribbon_title_width`, `ribbon_controls_width` twice) lays a dozen widgets out on an invisible ui that paints nothing |
+| 2026-11-27 | the real DB, 2232 files, 1240×840 headless frames (M26.7) | the grid's scroll frames, 160 of them, with the catalog pill in place of the path field and its two buttons (`… --ignored grid_scroll_measurement`), and the left panel's budget (`… --ignored panel_years_measurement --nocapture`) | p50 5.73 ms (175 fps), p95 6.16, p99 7.27 — inside the 5.51–5.72 ms of M26.6/M25.10, so the pill costs the grid nothing: it lays out two text lines and reads facts collected on `reload`, not on every frame. The pinned part now ends at 627 px (the threshold at y 588, the "Tags" heading at 652.5) — 33 px less than M25.6's 621 / 685.5, because one 40 px pill took the room of a field and two buttons; at the owner's 1021 px window the years land at 908 px instead of 941 |
 Rule: numbers without a corpus and a date do not enter the table.
 
 ## Long passes: cancel and resume

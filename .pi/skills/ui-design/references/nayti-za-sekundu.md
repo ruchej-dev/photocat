@@ -24,7 +24,9 @@ The time to the first correct click in a test is **no more than 1 second** for f
 
 | What | Where | Distance |
 |---|---|---|
-| Folder, "Index", "Refresh" | top bar, row 1 | 0 clicks (always visible) |
+| The working catalog | left panel, the catalog pill (M26.7) | 0 clicks (always visible) |
+| The catalog's scope, another catalog, the pass | the pill's menu: a row is the scope, "Connect a catalog…" and "Re-index" | 1 click |
+| A catalog's own settings (its box, "Index this catalog", "Remove from the index") | the gear of its row in that menu, then the folder list | 2 clicks |
 | Progress and "Stop" | top bar, next to the start | 1 click |
 | Search (semantic / by text) | top bar, row 2 | 0 clicks, 1 — "Find" |
 | Seven views | left panel, right under the heading | 1 click |
@@ -45,7 +47,7 @@ is duplicated **only** through a hotkey, not with a second button.
 
 The left panel is 260 px wide and 840 px high. It fits:
 
-- 1 heading, 7 views, 2 filter rows — **without scrolling**;
+- the catalog block (a caps heading and a 40 px pill), 7 views, 2 filter rows — **without scrolling**;
 - the view context — with scrolling;
 - the counters and the file card — below, with scrolling.
 
@@ -57,7 +59,8 @@ Navigation, a path search and the view switcher never scroll: they are the map o
 
 ## 4. One screen — one main action
 
-- "All files" → "Index" (global) and "Find" (search); everything else is secondary.
+- "All files" → "Re-index" in the catalog menu (global) and "Find" (search); everything else is
+  secondary.
 - "Duplicates and series" → "Find groups".
 - "Calendar" → picking a day.
 - "Faces" → "Find faces (N)"; after the pass — "Save the name" for the selected group.

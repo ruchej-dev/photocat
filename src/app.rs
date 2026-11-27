@@ -532,6 +532,8 @@ struct VideoError {
 struct PickScope {
     view: View,
     query: String,
+    /// The catalog scope (M26.7): another catalog means another set of files.
+    catalog: Option<String>,
     kind: KindFilter,
     tags: Vec<String>,
     year: Option<YearPick>,
@@ -719,10 +721,16 @@ const HEAD_ROW_H: f32 = 24.0;
 /// and the padding its card adds — the 16 px of `dialog_frame` and its 1 px line, both sides.
 const DIALOG_MARGIN: f32 = 48.0;
 const DIALOG_FRAME_PAD: f32 = 34.0;
-/// The part of the left panel that is pinned above its scroll (folder, navigation, the two filter
-/// rows and the threshold). Below it the whole panel scrolls, so a short window never clips it
-/// (M26.6): the threshold's block ends at 660 px on the corpus (M25.6).
+/// The part of the left panel that is pinned above its scroll (the catalog pill, navigation, the two
+/// filter rows and the threshold). Below it the whole panel scrolls, so a short window never clips
+/// it (M26.6): the threshold's block ends at 627 px on the corpus (M26.7, the pill took 33 px less
+/// than the old field and its two buttons).
 const LEFT_PIN_H: f32 = 670.0;
+/// The catalog pill of the left panel (M26.7, after `photocat_1`): the 28 px icon well in the
+/// mock-up's `p-2` — 6 px of air keeps it on the 4 px grid.
+const CATALOG_WELL: f32 = 28.0;
+const CATALOG_PAD: f32 = 6.0;
+const CATALOG_H: f32 = CATALOG_WELL + 2.0 * CATALOG_PAD;
 /// The gap inside the calendar grids: between the month cards of the year layer and between the
 /// day cells of the month and week layers (the mock-up's `gap-1.5` / `gap-2`).
 const CAL_GAP: f32 = 6.0;
@@ -1602,6 +1610,8 @@ fn toggle_chip(
 /// A snapshot of the active filters for the row of chips.
 struct Chips {
     query: String,
+    /// The catalog scope as a chip ("catalog: Name"), M26.7.
+    catalog: Option<String>,
     tags: Vec<String>,
     /// The year filter as a chip ("year: 2019" or "older than 2020"), M25.2.
     year: Option<String>,
@@ -1625,6 +1635,7 @@ impl Chips {
     /// (M22.19 — the row is drawn only while a filter is on).
     fn any(&self) -> bool {
         !self.query.is_empty()
+            || self.catalog.is_some()
             || !self.tags.is_empty()
             || self.year.is_some()
             || self.no_date
@@ -1639,6 +1650,8 @@ impl Chips {
 #[derive(Default, Clone, Copy)]
 struct FilterClear {
     query: bool,
+    /// The catalog scope (M26.7): "×" shows every catalog again.
+    catalog: bool,
     /// The index of the tag whose chip was clicked: one "×" removes exactly that tag (M25.1).
     tag_at: Option<usize>,
     /// "Reset" or a year-like reset: the whole tag filter goes.
@@ -1656,6 +1669,157 @@ struct FilterClear {
     pick_all: bool,
     /// "Clear the selection" — an empty selection, as on Esc.
     clear_pick: bool,
+}
+
+/// The name of a catalog: its last path segment, the whole path when there is none (`/`, `C:\\`).
+fn catalog_name(root: &str) -> String {
+    Path::new(root)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| root.to_string())
+}
+
+/// What a catalog holds: "86.4 GiB · 7 370 files" — the second line of the catalog pill and of a
+/// row in its menu (M26.7). The unit and the plural follow the interface language.
+fn catalog_facts_line(lang: Lang, files: usize, bytes: i64) -> String {
+    format!(
+        "{} · {}",
+        db::human_in(lang, bytes),
+        i18n::count(lang, files, "file")
+    )
+}
+
+/// What a press in the catalog menu asks for (M26.7). The menu only reads the state; the actions
+/// are applied by `App::catalog_block` after it is drawn.
+#[derive(Default)]
+struct CatalogAction {
+    /// The scope to set: another root, or "All catalogs" (`Some(None)`).
+    pick: Option<Option<String>>,
+    /// Open the "Folders" dialog on this root.
+    focus: Option<String>,
+    /// Switch a catalog back on from the menu.
+    switched: Option<(String, bool)>,
+    connect: bool,
+    reindex: bool,
+}
+
+impl CatalogAction {
+    /// Whether the menu asked for anything: then it closes, as a menu does after a choice.
+    fn any(&self) -> bool {
+        self.pick.is_some()
+            || self.focus.is_some()
+            || self.switched.is_some()
+            || self.connect
+            || self.reindex
+    }
+}
+
+/// What one row of the catalog menu reported.
+#[derive(Default)]
+struct CatalogRow {
+    clicked: bool,
+    /// The gear: open the "Folders" dialog on this root.
+    settings: Option<String>,
+    /// A switched-off catalog's "switch it on" target.
+    switched_on: Option<String>,
+}
+
+/// What one row of the catalog menu says (M26.7).
+struct CatalogRowInfo<'a> {
+    /// The last path segment, or "All catalogs".
+    name: String,
+    /// "86.4 GiB · 7 370 files", or the word "off".
+    facts: String,
+    /// A switched-off catalog: dimmed, with a way back on.
+    off: bool,
+    /// `None` for "All catalogs": it has no settings and no switch.
+    root: Option<&'a str>,
+}
+
+/// One row of the catalog menu (M26.7): the check of the scope, the folder glyph, the name, the
+/// count and — for a catalog — its settings and, while it is switched off, the way back on. The
+/// name is its own target, so the count and the icons never take a click meant for the scope.
+fn catalog_row(
+    ui: &mut egui::Ui,
+    selected: bool,
+    info: &CatalogRowInfo,
+    hint: &str,
+    lang: Lang,
+) -> CatalogRow {
+    let th = theme(ui);
+    let mut out = CatalogRow::default();
+    ui.horizontal(|ui| {
+        if selected {
+            icon_mark_color(ui, Icon::Check, 14.0, th.accent);
+        } else {
+            ui.add_space(14.0);
+        }
+        icon_mark_color(
+            ui,
+            Icon::FolderSpecial,
+            14.0,
+            if info.off { th.text_dim } else { th.text_med },
+        );
+        // The count keeps its room on the right; the name takes what the icons leave.
+        let facts_w = mono_width(ui, &info.facts, 10.0);
+        let icons = if info.root.is_some() {
+            1.0 + if info.off { 1.0 } else { 0.0 }
+        } else {
+            0.0
+        };
+        let room = (ui.available_width() - facts_w - 8.0 - icons * 24.0).max(40.0);
+        let color = if info.off { th.text_dim } else { th.text_med };
+        let text = egui::RichText::new(shorten(&info.name, 18))
+            .monospace()
+            .size(11.0)
+            .color(color);
+        // A catalog row is a select, not an action button: it chooses the scope and carries the
+        // folder glyph as its mark, like the `<select>` of the mock-up (docs/UI.md § Icons).
+        let resp = ui
+            .add_sized([room, 22.0], egui::Button::selectable(selected, text))
+            .on_hover_text(hint);
+        #[cfg(test)]
+        tests::note_target(
+            &format!("catalog row: {}", info.name),
+            resp.rect.intersect(ui.clip_rect()),
+        );
+        if resp.clicked() {
+            out.clicked = true;
+        }
+        ui.label(num(ui, &info.facts, 10.0).color(th.text_dim));
+        if let Some(root) = info.root {
+            if info.off
+                && icon_button(
+                    ui,
+                    Icon::CheckCircle,
+                    20.0,
+                    t(
+                        lang,
+                        "switch this catalog on again: the rows are back, nothing is read from disk",
+                    ),
+                )
+                .clicked()
+            {
+                out.switched_on = Some(root.to_string());
+            }
+            if icon_button(
+                ui,
+                Icon::Settings,
+                20.0,
+                t(
+                    lang,
+                    "catalog settings: its box, “Remove from the index” and “Index this catalog”",
+                ),
+            )
+            .clicked()
+            {
+                out.settings = Some(root.to_string());
+            }
+        }
+    });
+    out
 }
 
 /// A short caption for a chip: a long path does not blow up the filter row.
@@ -1679,6 +1843,12 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
             let text = format!("{} {}", t(lang, "path/date:"), shorten(&chips.query, 24));
             if filter_chip(ui, &text, lang) {
                 clear.query = true;
+            }
+        }
+        if let Some(catalog) = &chips.catalog {
+            let text = i18n::fill(lang, "catalog: {}", &[shorten(catalog, 22)]);
+            if filter_chip(ui, &text, lang) {
+                clear.catalog = true;
             }
         }
         if let Some(year) = &chips.year
@@ -1722,6 +1892,7 @@ fn draw_filter_chips(ui: &mut egui::Ui, chips: &Chips) -> FilterClear {
         {
             clear = FilterClear {
                 query: true,
+                catalog: true,
                 tags: true,
                 year: true,
                 no_date: true,
@@ -2626,7 +2797,17 @@ struct App {
     view: View,
     groups: Vec<Group>,
     max_dist: u32,
-    path_input: String,
+    /// The catalog scope of the window (M26.7): the one root every view shows, or `None` for the
+    /// whole visible index. It lives in memory like the other view filters and is never saved.
+    catalog_scope: Option<String>,
+    /// What each catalog holds in the visible index: `(root, files, bytes)`. Read on `reload`,
+    /// before the scope filter, so the pill and the menu can name every catalog.
+    catalog_facts: Vec<(String, usize, i64)>,
+    /// The whole visible index, the sum the "All catalogs" row and the pill stand on.
+    catalog_visible: (usize, i64),
+    /// The root the "Folders" dialog was opened for from the catalog menu (M26.7): it is marked
+    /// in the list and "Index this catalog" acts on it.
+    roots_focus: Option<String>,
     query: String,
     kind_filter: KindFilter,
     /// The year filter (M25.2): independent of the path/date field, so a typed word survives a
@@ -3060,6 +3241,7 @@ impl App {
             pick_scope: PickScope {
                 view: View::Grid,
                 query: String::new(),
+                catalog: None,
                 kind: KindFilter::All,
                 tags: Vec::new(),
                 year: None,
@@ -3074,7 +3256,10 @@ impl App {
             view: View::Grid,
             groups: Vec::new(),
             max_dist: 6,
-            path_input: String::new(),
+            catalog_scope: None,
+            catalog_facts: Vec::new(),
+            catalog_visible: (0, 0),
+            roots_focus: None,
             query: String::new(),
             kind_filter: KindFilter::All,
             year_filter: None,
@@ -3219,13 +3404,45 @@ impl App {
                 .filter(|r| settings.path_hidden(&r.path))
                 .map(|r| r.id)
                 .collect();
-            let rows: Vec<db::FileRow> = all_rows
+            let visible: Vec<db::FileRow> = all_rows
                 .into_iter()
                 .filter(|r| !hidden_ids.contains(&r.id))
                 .collect();
+            // The catalog scope of the window (M26.7) is a filter like the others: it lives in
+            // memory and drops the rows of the other roots before they reach `items`, so the grid,
+            // the calendar, the trash, the faces and every counter see one set. The facts of every
+            // catalog are read here, before the scope, so the pill and its menu can name them all.
+            self.catalog_visible = (
+                visible.len(),
+                visible.iter().map(|r| r.size).sum::<i64>(),
+            );
+            self.catalog_facts = settings
+                .roots
+                .iter()
+                .map(|root| {
+                    let (n, b) = visible
+                        .iter()
+                        .filter(|r| db::under_root(&r.path, root))
+                        .fold((0usize, 0i64), |(n, b), r| (n + 1, b + r.size));
+                    (root.clone(), n, b)
+                })
+                .collect();
+            if let Some(scope) = &self.catalog_scope
+                && !settings.roots.iter().any(|r| r == scope)
+            {
+                self.catalog_scope = None;
+            }
+            let in_scope = |path: &str| match &self.catalog_scope {
+                None => true,
+                Some(scope) => db::under_root(path, scope),
+            };
+            let rows: Vec<db::FileRow> = visible
+                .into_iter()
+                .filter(|r| in_scope(&r.path))
+                .collect();
             let trashed: Vec<db::FileRow> = db::load_trashed(&c)?
                 .into_iter()
-                .filter(|r| !settings.path_hidden(&r.path))
+                .filter(|r| !settings.path_hidden(&r.path) && in_scope(&r.path))
                 .collect();
             let mut tags = db::load_tags(&c, &source)?;
             let mut user_tags = db::load_user_tags(&c)?;
@@ -3248,7 +3465,7 @@ impl App {
             };
             let face_views: Vec<db::FaceView> = db::load_face_views(&c, None)?
                 .into_iter()
-                .filter(|v| !settings.path_hidden(&v.path))
+                .filter(|v| !settings.path_hidden(&v.path) && in_scope(&v.path))
                 .collect();
             let visible_clusters: std::collections::HashSet<i64> =
                 face_views.iter().filter_map(|v| v.cluster_id).collect();
@@ -3328,11 +3545,6 @@ impl App {
                 self.max_dist = self.settings.max_dist;
                 self.tile_size = self.settings.tile_size.clamp(100.0, 260.0);
                 self.roots = self.settings.roots.clone();
-                if self.path_input.trim().is_empty()
-                    && let Some(first) = self.roots.first()
-                {
-                    self.path_input = first.clone();
-                }
                 // The "Integrity" screen knows the archive and the place for the manifest by default:
                 // one press instead of three fields typed by hand. If the owner has already configured
                 // a reminder (M10) — take exactly its folder and manifest.
@@ -3467,6 +3679,15 @@ impl App {
     }
 
     fn set_album_rows(&mut self, rows: Vec<FileRow>) {
+        // The catalog scope reaches the open album too (M26.7): its photos come from the DB, not
+        // from `items`, so the same filter is applied here.
+        let rows: Vec<FileRow> = match &self.catalog_scope {
+            None => rows,
+            Some(scope) => rows
+                .into_iter()
+                .filter(|r| db::under_root(&r.path, scope))
+                .collect(),
+        };
         self.album_trashed = rows.iter().filter(|r| r.trashed_at.is_some()).count();
         self.album_files = rows
             .into_iter()
@@ -4696,6 +4917,8 @@ impl App {
         let mut close = false;
         let mut add = false;
         let mut index_all = false;
+        let mut index_one: Option<String> = None;
+        let mut refresh = false;
         let mut remove: Option<String> = None;
         // A ticked box means the folder is shown (M26.1): clearing it hides the folder from every
         // view — never removes a row and never touches a file on disk.
@@ -4748,11 +4971,22 @@ impl App {
                             {
                                 toggle = Some((root.clone(), on));
                             }
+                            // The catalog the menu sent here is marked: the owner sees which row
+                            // the gear of the catalog pill meant (M26.7).
+                            let focused = self.roots_focus.as_deref() == Some(root.as_str());
                             let mut name = egui::RichText::new(root);
-                            if !shown {
+                            if focused {
+                                name = name.color(accent(ui)).strong();
+                            } else if !shown {
                                 name = name.color(dim(ui));
                             }
-                            ui.label(name);
+                            let label = ui.label(name);
+                            if focused {
+                                label.on_hover_text(t(
+                                    lang,
+                                    "this catalog was opened from the catalog menu",
+                                ));
+                            }
                             if !shown {
                                 ui.label(
                                     egui::RichText::new(t(lang, "off"))
@@ -4772,6 +5006,19 @@ impl App {
                                         .clicked()
                                     {
                                         remove = Some(root.clone());
+                                    }
+                                    if icon_button(
+                                        ui,
+                                        Icon::Sync,
+                                        20.0,
+                                        t(
+                                            lang,
+                                            "index this catalog: reads only the new and changed files and writes to the cache",
+                                        ),
+                                    )
+                                    .clicked()
+                                    {
+                                        index_one = Some(root.clone());
                                     }
                                     let n = counts.get(i).copied().unwrap_or(0);
                                     ui.label(
@@ -4795,6 +5042,14 @@ impl App {
                 {
                     index_all = true;
                 }
+                // Re-read the DB without walking a folder (M25.7): the folder list owns the
+                // archive, so the button lives here now that the left panel has the catalog menu.
+                if word_button(ui, Icon::Refresh, t(lang, "Refresh"))
+                    .on_hover_text(t(lang, REFRESH_HINT))
+                    .clicked()
+                {
+                    refresh = true;
+                }
                 if word_button(ui, Icon::Close, t(lang, "Close")).clicked() {
                     close = true;
                 }
@@ -4805,19 +5060,35 @@ impl App {
         }
         if close {
             self.roots_open = false;
+            self.roots_focus = None;
+        }
+        if refresh {
+            self.reload();
+        }
+        if let Some(root) = index_one {
+            self.roots_open = false;
+            self.roots_focus = None;
+            self.index_roots(vec![root]);
         }
         if add {
             self.roots_open = false;
+            self.roots_focus = None;
             self.picker_open = true;
             self.refresh_picker();
         }
         if index_all {
             self.roots_open = false;
+            self.roots_focus = None;
             self.start_index();
         }
         if let Some((root, on)) = toggle {
             self.settings.set_root_off(&root, !on);
             self.save_settings();
+            // Switching off the catalog in scope clears the scope: an empty window behind a switch
+            // that is about showing, not deleting, would read as a bug (M26.7).
+            if !on && self.catalog_scope.as_deref() == Some(root.as_str()) {
+                self.catalog_scope = None;
+            }
             self.reload();
             let lang = self.settings.lang;
             self.status = if on {
@@ -5022,14 +5293,15 @@ impl App {
             if !self.roots.iter().any(|r| r == &path) {
                 self.roots.push(path.clone());
                 self.settings.roots = self.roots.clone();
-                self.path_input = path.clone();
                 self.refresh_root_counts();
                 self.save_settings();
                 self.status = format!("{}: {path}", t(lang, "folder added"));
             }
             self.picker_open = false;
             if add_and_index {
-                self.start_index();
+                // Only the catalog that was just connected: the others are not walked again
+                // (M26.7; the skip rule would make that pass cheap, but it is still a pass).
+                self.index_roots(vec![path]);
             }
         }
     }
@@ -6637,6 +6909,12 @@ impl App {
 
     fn reset_filters(&mut self) {
         let lang = self.settings.lang;
+        // The catalog scope is a filter too (M26.7): "Reset" brings every catalog back, and the
+        // rows of the other roots return with it.
+        if self.catalog_scope.is_some() {
+            self.catalog_scope = None;
+            self.reload();
+        }
         self.query.clear();
         self.kind_filter = KindFilter::All;
         self.tag_filters.clear();
@@ -7173,6 +7451,7 @@ impl App {
         });
         Chips {
             query: self.query.trim().to_string(),
+            catalog: self.catalog_scope.as_deref().map(catalog_name),
             tags: self.tag_filters.clone(),
             year,
             no_date: self.only_no_date,
@@ -7221,51 +7500,29 @@ impl App {
         short: bool,
     ) {
         let lang = self.settings.lang;
-        // The folder and "Start indexing" are work with the archive, not a search: they live here, while
-        // the top bar stays a single 32 px row (mock-up: working folder block).
+        // The catalog block of the mock-up (M26.7): the working catalog is one pill and its menu —
+        // the field with the path and the "Index"/"Refresh" buttons left the panel. Work with the
+        // archive is not a search, and the top bar stays a single 32 px row.
         ui.add_space(2.0);
-        // The mock-up's catalog block: the caps heading with a bare "+" on the right — the way
-        // to several folders and to dropping one from the index (the worded path is the dialog).
         ui.horizontal(|ui| {
-            caps_label(ui, t(lang, "Folder"));
+            caps_label(ui, t(lang, "Working catalog"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(
                     ui,
                     Icon::Add,
                     20.0,
-                    t(lang, "add several folders, drop a folder from the index"),
+                    t(lang, "connect a catalog: the folder picker"),
                 )
                 .clicked()
                 {
-                    self.roots_open = true;
+                    self.roots_focus = None;
+                    self.picker_open = true;
+                    self.refresh_picker();
                 }
             });
         });
         ui.add_space(2.0);
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut self.path_input)
-                .hint_text(t(lang, "path to a folder; several — with the “+” button"))
-                .desired_width(f32::INFINITY),
-        );
-        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        ui.add_space(4.0);
-        let index = WordButton::primary(Icon::Sync, t(lang, "Start indexing"));
-        ui.horizontal(|ui| {
-            if ui
-                .add(index)
-                .on_hover_text(t(lang, INDEX_HINT))
-                .clicked()
-                || enter
-            {
-                self.start_index();
-            }
-            if word_button(ui, Icon::Refresh, t(lang, "Refresh"))
-                .on_hover_text(t(lang, REFRESH_HINT))
-                .clicked()
-            {
-                self.reload();
-            }
-        });
+        self.catalog_block(ui);
         ui.add_space(4.0);
         hairline(ui);
 
@@ -7437,6 +7694,275 @@ impl App {
                     self.left_panel_scrolled(ui, show_card, show_faces, &tag_counts)
                 });
         }
+    }
+
+    /// The catalog pill and its menu (M26.7, after `photocat_1`): one pill names the working
+    /// catalog and shows what it holds; a click opens the menu of the storage — every catalog, the
+    /// way to connect one and "Re-index". A click outside closes it, so the menu is reachable
+    /// without a pointer hovering in the right place.
+    fn catalog_block(&mut self, ui: &mut egui::Ui) {
+        let th = theme(ui);
+        let lang = self.settings.lang;
+        let name = match &self.catalog_scope {
+            Some(root) => catalog_name(root),
+            None => t(lang, "All catalogs").to_string(),
+        };
+        let (files, bytes) = self.catalog_facts_for(self.catalog_scope.as_deref());
+        let facts = catalog_facts_line(lang, files, bytes);
+        let width = ui.available_width();
+        let (rect, resp) =
+            ui.allocate_exact_size(egui::vec2(width, CATALOG_H), egui::Sense::click());
+        #[cfg(test)]
+        tests::note_target(
+            &i18n::fill(lang, "catalog: {}", std::slice::from_ref(&name)),
+            rect.intersect(ui.clip_rect()),
+        );
+        let hint = match &self.catalog_scope {
+            Some(root) => i18n::fill(
+                lang,
+                "the working catalog: {} — a click opens the menu of the storage",
+                std::slice::from_ref(root),
+            ),
+            None => t(
+                lang,
+                "the whole visible index — a click opens the menu of the storage",
+            )
+            .to_string(),
+        };
+        let resp = resp
+            .on_hover_text(hint)
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if ui.is_rect_visible(rect) {
+            let (fill, border) = if resp.hovered() {
+                (th.field, th.border_strong)
+            } else {
+                (th.card, th.border)
+            };
+            let radius = egui::CornerRadius::same(RADIUS_CARD as u8);
+            ui.painter().rect_filled(rect, radius, fill);
+            ui.painter().rect_stroke(
+                rect,
+                radius,
+                egui::Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            );
+            // The 28 px icon well: `folder_special` in the accent, as in the mock-up.
+            let well = egui::Rect::from_min_size(
+                rect.left_top() + egui::vec2(CATALOG_PAD, CATALOG_PAD),
+                egui::vec2(CATALOG_WELL, CATALOG_WELL),
+            );
+            let well_radius = egui::CornerRadius::same(RADIUS_CTRL as u8);
+            // The well is a step below the pill's own tone, so it stays visible while the pill
+            // lightens under the pointer.
+            ui.painter().rect_filled(well, well_radius, th.panel);
+            ui.painter().rect_stroke(
+                well,
+                well_radius,
+                egui::Stroke::new(1.0, th.border),
+                egui::StrokeKind::Inside,
+            );
+            paint_icon(ui.painter(), well.center(), 7.0, Icon::FolderSpecial, th.accent);
+            let text_x = well.right() + 8.0;
+            let chevron = egui::pos2(rect.right() - CATALOG_PAD - 7.0, rect.center().y);
+            let max_w = (chevron.x - 8.0 - text_x).max(10.0);
+            let name_line = caption_name(ui, &name, egui::FontId::monospace(12.0), th.text, max_w);
+            let facts_line =
+                caption_name(ui, &facts, egui::FontId::monospace(10.0), th.text_dim, max_w);
+            let top = rect.center().y - 14.0;
+            ui.painter()
+                .galley(egui::pos2(text_x, top), name_line, th.text);
+            ui.painter()
+                .galley(egui::pos2(text_x, top + 15.0), facts_line, th.text_dim);
+            paint_icon(ui.painter(), chevron, 5.0, Icon::ArrowDown, th.text_med);
+        }
+        let action = egui::Popup::menu(&resp)
+            .width(width)
+            .show(|ui| self.catalog_menu(ui))
+            .map(|r| r.inner)
+            .unwrap_or_default();
+        if action.any() {
+            // A chosen row closes the menu: it is a choice, not a panel to leave open.
+            egui::Popup::close_all(ui.ctx());
+        }
+        if let Some(scope) = action.pick {
+            self.set_catalog_scope(scope);
+        }
+        if let Some(root) = action.focus {
+            self.roots_focus = Some(root);
+            self.roots_open = true;
+        }
+        if let Some((root, on)) = action.switched {
+            self.switch_root(&root, on);
+        }
+        if action.connect {
+            self.roots_focus = None;
+            self.picker_open = true;
+            self.refresh_picker();
+        }
+        if action.reindex {
+            self.start_index();
+        }
+    }
+
+    /// The menu of the catalog pill: the header, "All catalogs" with the total, one row per root
+    /// with its count, a divider, "Connect a catalog…" and "Re-index" (M26.7). Every root row also
+    /// carries its settings: the gear opens the "Folders" dialog on that root, and a switched-off
+    /// catalog is turned on right here. It reads the state and returns what was pressed — the
+    /// actions are applied by `catalog_block`, after the menu is drawn.
+    fn catalog_menu(&self, ui: &mut egui::Ui) -> CatalogAction {
+        let lang = self.settings.lang;
+        let mut action = CatalogAction::default();
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        ui.add_space(2.0);
+        caps_label(ui, t(lang, "Storage catalogs"));
+        ui.add_space(2.0);
+        hairline(ui);
+        ui.add_space(2.0);
+        let (files, bytes) = self.catalog_visible;
+        let all_facts = catalog_facts_line(lang, files, bytes);
+        let hint = i18n::fill(
+            lang,
+            "the whole visible index: {} — drop the scope",
+            std::slice::from_ref(&all_facts),
+        );
+        let all = CatalogRowInfo {
+            name: t(lang, "All catalogs").to_string(),
+            facts: all_facts.clone(),
+            off: false,
+            root: None,
+        };
+        if catalog_row(ui, self.catalog_scope.is_none(), &all, &hint, lang).clicked {
+            action.pick = Some(None);
+        }
+        for (root, files, bytes) in &self.catalog_facts {
+            let off = self.settings.root_off(root);
+            let facts = if off {
+                t(lang, "off").to_string()
+            } else {
+                catalog_facts_line(lang, *files, *bytes)
+            };
+            let mut hint = format!("{} · {}", root, facts);
+            if !Path::new(root).is_dir() {
+                hint.push_str(&i18n::fill(
+                    lang,
+                    " · this folder is not on disk: the rows stay until the index is cleaned",
+                    &[],
+                ));
+            }
+            hint.push_str(&i18n::fill(
+                lang,
+                " · a click shows this catalog alone; the gear opens its settings",
+                &[],
+            ));
+            let info = CatalogRowInfo {
+                name: catalog_name(root),
+                facts: facts.clone(),
+                off,
+                root: Some(root),
+            };
+            let row = catalog_row(
+                ui,
+                self.catalog_scope.as_deref() == Some(root.as_str()),
+                &info,
+                &hint,
+                lang,
+            );
+            if row.clicked {
+                action.pick = Some(Some(root.clone()));
+            }
+            if let Some(root) = row.settings {
+                action.focus = Some(root);
+            }
+            if let Some(root) = row.switched_on {
+                action.switched = Some((root, true));
+            }
+        }
+        ui.add_space(2.0);
+        hairline(ui);
+        ui.add_space(2.0);
+        if word_button(ui, Icon::CreateNewFolder, t(lang, "Connect a catalog…")).clicked() {
+            action.connect = true;
+        }
+        if word_button(ui, Icon::Sync, t(lang, "Re-index"))
+            .on_hover_text(t(lang, INDEX_HINT))
+            .clicked()
+        {
+            action.reindex = true;
+        }
+        action
+    }
+
+    /// The facts of one catalog or of the whole visible index: "86.4 GiB · 7 370 files" — the
+    /// second line of the pill and of every row of its menu (M26.7).
+    fn catalog_facts_for(&self, scope: Option<&str>) -> (usize, i64) {
+        match scope {
+            None => self.catalog_visible,
+            Some(root) => self
+                .catalog_facts
+                .iter()
+                .find(|(r, _, _)| r == root)
+                .map(|(_, n, b)| (*n, *b))
+                .unwrap_or((0, 0)),
+        }
+    }
+
+    /// A choice in the catalog menu (M26.7): the scope is a filter of the window, not a change of
+    /// the DB. The rows of the other roots leave the grid, the calendar, the trash, the faces and
+    /// every counter; a selection that no longer fits is cleared with the reason in the status.
+    fn set_catalog_scope(&mut self, scope: Option<String>) {
+        let scope = scope.filter(|s| self.roots.iter().any(|r| r == s));
+        if self.catalog_scope == scope {
+            return;
+        }
+        let had_pick = !self.picked.is_empty();
+        self.catalog_scope = scope;
+        self.reload();
+        let lang = self.settings.lang;
+        let (files, bytes) = self.catalog_facts_for(self.catalog_scope.as_deref());
+        let facts = catalog_facts_line(lang, files, bytes);
+        self.status = match &self.catalog_scope {
+            Some(root) => i18n::fill(
+                lang,
+                "catalog “{}”: {} — the DB is untouched",
+                &[catalog_name(root), facts],
+            ),
+            None => i18n::fill(lang, "all catalogs: {} — the DB is untouched", &[facts]),
+        };
+        if had_pick {
+            self.picked.clear();
+            self.pick_anchor = None;
+            let reason = t(lang, "the selection is cleared: the catalog changed");
+            self.status
+                .push_str(&i18n::fill(lang, " · {}", &[reason.to_string()]));
+        }
+        self.pick_scope = self.pick_scope_now();
+    }
+
+    /// Switch a catalog on or off from the menu (M26.1, M26.7): the same setting the folder list's
+    /// box writes. Switching off the catalog that is in scope clears the scope — an empty scope
+    /// would hide the whole window behind a switch that is about showing, not deleting.
+    fn switch_root(&mut self, root: &str, on: bool) {
+        let lang = self.settings.lang;
+        self.settings.set_root_off(root, !on);
+        self.save_settings();
+        if !on && self.catalog_scope.as_deref() == Some(root) {
+            self.catalog_scope = None;
+        }
+        self.reload();
+        let lang = if on { lang } else { self.settings.lang };
+        self.status = if on {
+            i18n::fill(
+                lang,
+                "{} is switched on again: the rows are back, nothing was read from disk",
+                &[root.to_string()],
+            )
+        } else {
+            i18n::fill(
+                lang,
+                "{} is switched off: its files are hidden from every view, the rows stay",
+                &[root.to_string()],
+            )
+        };
     }
 
     /// The scrolling part of the left panel: the tag cloud opens it, the years, the controls of the
@@ -10779,6 +11305,7 @@ impl App {
         PickScope {
             view: self.view,
             query: self.query.trim().to_lowercase(),
+            catalog: self.catalog_scope.clone(),
             kind: self.kind_filter,
             tags: self.tag_filters.clone(),
             year: self.year_filter.clone(),
@@ -10802,6 +11329,8 @@ impl App {
         }
         let reason = if now.view != self.pick_scope.view {
             t(lang, "the view changed")
+        } else if now.catalog != self.pick_scope.catalog {
+            t(lang, "the catalog changed")
         } else if now.query != self.pick_scope.query {
             t(lang, "the folder and date filter changed")
         } else if now.kind != self.pick_scope.kind {
@@ -11404,15 +11933,22 @@ impl App {
     }
 
     fn start_index(&mut self) {
+        let roots = self.roots.clone();
+        self.index_roots(roots);
+    }
+
+    /// Index exactly these catalogs (M26.7): "Re-index" of the catalog menu passes every root and
+    /// "Index this catalog" of the folder list passes one. Paths are typed nowhere any more — the
+    /// picker and the folder list own them.
+    fn index_roots(&mut self, roots: Vec<String>) {
         let lang = self.settings.lang;
-        let mut roots: Vec<PathBuf> = self.roots.iter().map(PathBuf::from).collect();
-        let typed = self.path_input.trim();
-        if !typed.is_empty() && !roots.iter().any(|r| r == Path::new(typed)) {
-            roots.push(PathBuf::from(typed));
-        }
+        let mut roots: Vec<PathBuf> = roots.into_iter().map(PathBuf::from).collect();
         if roots.is_empty() {
-            self.status =
-                t(lang, "give a folder in the top bar or add one with the “Folders” button").into();
+            self.status = t(
+                lang,
+                "connect a catalog first: the “+” above the catalog pill, or “Connect a catalog…” in its menu",
+            )
+            .into();
             return;
         }
         // A switched-off folder is skipped: no new rows, and switching it back on needs no pass
@@ -14709,7 +15245,7 @@ impl eframe::App for App {
                     ui.add_space(12.0);
                     ui.label(t(
                         lang,
-                        "Add a folder with the “+” button or type a path above, then press “Index”.",
+                        "Add a folder with the “+” of the catalog block, then “Re-index” in its menu.",
                     ));
                     return;
                 }
@@ -16364,6 +16900,9 @@ impl eframe::App for App {
         // A chip removes exactly its own filter; the grid is recomputed on the next frame.
         if clear_chips.query {
             self.query.clear();
+        }
+        if clear_chips.catalog {
+            self.set_catalog_scope(None);
         }
         if let Some(i) = clear_chips.tag_at
             && i < self.tag_filters.len()
@@ -19845,6 +20384,207 @@ mod tests {
         );
         app.roots_open = false;
         let _ = id_trashed;
+    }
+
+    /// M26.7: the catalog block is one pill and its menu. A row of the menu is a scope, not a text
+    /// filter: the grid, the trash and every counter see only that root, the chips row names it,
+    /// and the DB is untouched. The menu lists every root with its count, keeps a switched-off
+    /// catalog with the word "off" and a way back on, and its gear opens the folder list on that
+    /// root. The old path field and the "Index"/"Refresh" buttons left the panel for good.
+    #[test]
+    fn a_catalog_scopes_every_view_and_the_menu_lists_the_roots() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let db_path = std::env::temp_dir().join(format!(
+            "photocat-catalog-scope-{}-{stamp}.db",
+            std::process::id()
+        ));
+        let root_a = format!("/tmp/photocat-catalog-a-{stamp}");
+        let root_b = format!("/tmp/photocat-catalog-b-{stamp}");
+        {
+            let conn = db::open(&db_path).expect("a temporary DB");
+            for (path, trashed) in [
+                (format!("{root_a}/a.jpg"), false),
+                (format!("{root_b}/b1.jpg"), false),
+                (format!("{root_b}/b2.jpg"), false),
+                (format!("{root_b}/gone.jpg"), true),
+            ] {
+                let mut row = file_row(0, "image", "photo.jpg");
+                row.path = path.clone();
+                db::insert(&conn, &row).expect("a file row");
+                if trashed {
+                    conn.execute("UPDATE files SET trashed_at=1700000000 WHERE path=?1", [&path])
+                        .expect("the trash mark");
+                }
+            }
+            let mut settings = db::load_settings(&conn);
+            settings.roots = vec![root_a.clone(), root_b.clone()];
+            db::save_settings(&conn, &settings).expect("the settings");
+        }
+
+        let mut app = App::new(db_path.clone());
+        app.settings.lang = i18n::Lang::En;
+        app.reload();
+        assert_eq!(app.items.len(), 3, "three photos are in the visible index");
+        assert_eq!(app.trash_items.len(), 1);
+        assert_eq!(app.catalog_visible.0, 3);
+        assert_eq!(app.catalog_facts.len(), 2, "every catalog has a fact");
+        let name_a = super::catalog_name(&root_a);
+        let name_b = super::catalog_name(&root_b);
+
+        let ctx = egui::Context::default();
+        let size = egui::vec2(1240.0, 840.0);
+        // The pill names the whole visible index; the old field and its two buttons are gone.
+        let words = clipped_words_at(&mut app, &ctx, size);
+        assert!(
+            words.iter().any(|(t, _)| t == "WORKING CATALOG"),
+            "the block has no heading: {words:?}"
+        );
+        assert!(
+            words.iter().any(|(t, _)| t == "All catalogs"),
+            "the pill does not name the whole index: {words:?}"
+        );
+        assert!(
+            words.iter().any(|(t, _)| t.contains("3 files")),
+            "the pill does not count the files: {words:?}"
+        );
+        for gone in ["Start indexing", "Refresh", "path to a folder"] {
+            assert!(
+                !words.iter().any(|(t, _)| t == gone),
+                "the panel still draws “{gone}”: {words:?}"
+            );
+        }
+
+        // A click on the pill opens the menu: every catalog by its last segment, the actions below.
+        let pill = |app: &mut App| {
+            targets_at(app, &ctx, size)
+                .into_iter()
+                .find(|(t, _)| t.starts_with("catalog: "))
+                .map(|(_, r)| r.center())
+                .expect("the catalog pill is a target")
+        };
+        let at = pill(&mut app);
+        click_at(&mut app, &ctx, at);
+        let menu = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        for want in [
+            "STORAGE CATALOGS",
+            "All catalogs",
+            "Connect a catalog…",
+            "Re-index",
+        ] {
+            assert!(
+                menu.iter().any(|t| t == want),
+                "missing “{want}” in the catalog menu: {menu:?}"
+            );
+        }
+        for name in [&name_a, &name_b] {
+            let cut = super::shorten(name, 18);
+            assert!(
+                menu.iter().any(|t| t == &cut),
+                "the catalog “{cut}” has no row: {menu:?}"
+            );
+        }
+        // Nothing of the menu leaves the window.
+        let win = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        for (text, r) in clipped_words_at(&mut app, &ctx, size) {
+            assert!(
+                win.contains_rect(r),
+                "the menu paints “{text}” outside the window: {r:?}"
+            );
+        }
+
+        // A click on a row is a scope: only that root stays, the trash follows it, nothing is lost.
+        let row = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t == &format!("catalog row: {name_a}"))
+            .map(|(_, r)| r.center())
+            .expect("the catalog row is a target");
+        click_at(&mut app, &ctx, row);
+        assert_eq!(
+            app.catalog_scope.as_deref(),
+            Some(root_a.as_str()),
+            "the row did not set the scope"
+        );
+        assert_eq!(app.items.len(), 1, "only the files of the scope are in the grid");
+        assert!(app.items.iter().all(|r| r.path.starts_with(&root_a)));
+        assert!(app.trash_items.is_empty(), "the trash of another catalog stays hidden");
+        assert_eq!(
+            app.chips_snapshot().catalog.as_deref(),
+            Some(name_a.as_str()),
+            "the chips row does not name the catalog"
+        );
+        assert!(
+            app.status.contains(&name_a),
+            "the status does not name the catalog: {}",
+            app.status
+        );
+        {
+            let conn = db::open(&db_path).expect("the DB is still there");
+            let files: i64 = conn
+                .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+                .expect("a count");
+            assert_eq!(files, 4, "a scope deleted rows");
+        }
+
+        // "All catalogs" brings every root back.
+        let at = pill(&mut app);
+        click_at(&mut app, &ctx, at);
+        let all = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t == "catalog row: All catalogs")
+            .map(|(_, r)| r.center())
+            .expect("the “All catalogs” row is a target");
+        click_at(&mut app, &ctx, all);
+        assert!(app.catalog_scope.is_none(), "“All catalogs” did not drop the scope");
+        assert_eq!(app.items.len(), 3);
+        assert_eq!(app.trash_items.len(), 1);
+
+        // A switched-off catalog keeps its row, says "off" and is switched on right in the menu.
+        app.settings.set_root_off(&root_a, true);
+        app.save_settings();
+        app.reload();
+        assert_eq!(app.items.len(), 2, "the switched-off root is hidden");
+        let at = pill(&mut app);
+        click_at(&mut app, &ctx, at);
+        let menu = window_frame_at(&mut app, &ctx, Vec::new(), size);
+        assert!(
+            menu.iter().any(|t| t == "off"),
+            "the menu does not say that a catalog is off: {menu:?}"
+        );
+        let on = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t.starts_with("switch this catalog on again"))
+            .map(|(_, r)| r.center())
+            .expect("the switched-off catalog has no way back on");
+        click_at(&mut app, &ctx, on);
+        assert!(
+            !app.settings.root_off(&root_a),
+            "the catalog was not switched on from the menu"
+        );
+        assert_eq!(app.items.len(), 3, "the rows of the switched-on root did not come back");
+
+        // The gear opens the folder list on that catalog: its box, "Index this catalog", "Refresh".
+        let at = pill(&mut app);
+        click_at(&mut app, &ctx, at);
+        let gear = targets_at(&mut app, &ctx, size)
+            .into_iter()
+            .find(|(t, _)| t.starts_with("catalog settings"))
+            .map(|(_, r)| r.center())
+            .expect("no gear in the catalog menu");
+        click_at(&mut app, &ctx, gear);
+        assert!(app.roots_open, "the gear did not open the folder list");
+        assert_eq!(app.roots_focus.as_deref(), Some(root_a.as_str()));
+        let dialog = modal_frame(&mut app, &ctx, App::roots_modal);
+        for want in ["Archive folders", "Index all", "Refresh", "Close"] {
+            assert!(
+                dialog.iter().any(|t| t == want),
+                "missing “{want}” in the folder list: {dialog:?}"
+            );
+        }
+        app.roots_open = false;
+        app.roots_focus = None;
     }
 
     /// M21.5: the confirmation of cleaning the cache and the index is translated — all three variants.
@@ -25746,8 +26486,8 @@ mod tests {
         let mut clock = 0.0;
         let top = scrolled_panel_at(&mut app, &ctx, &mut clock, 0.0, short);
         assert!(
-            top.iter().any(|(text, _)| text == "FOLDER"),
-            "the folder block is not drawn at 700×600: {top:?}"
+            top.iter().any(|(text, _)| text == "WORKING CATALOG"),
+            "the catalog block is not drawn at 700×600: {top:?}"
         );
         let down = scrolled_panel_at(&mut app, &ctx, &mut clock, 1.0, short);
         let words: Vec<&String> = down.iter().map(|(text, _)| text).collect();
@@ -25757,7 +26497,7 @@ mod tests {
             "the filter chips of the left panel are unreachable at 700×600: {down:?}"
         );
         assert!(
-            !words.iter().any(|t| *t == "FOLDER"),
+            !words.iter().any(|t| *t == "WORKING CATALOG"),
             "the panel did not scroll as a whole at 700×600: {down:?}"
         );
 
