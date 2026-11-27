@@ -2686,6 +2686,10 @@ struct App {
     tools_missing: Vec<tools::Tool>,
     /// The info dialog of that warning mark (M26.2). It closes by itself when every program starts.
     limited_open: bool,
+    /// "Find the programs" (M26.3) runs off the UI thread: every candidate is started to learn its
+    /// version. The button is disabled while the receiver is here, and the last report stays.
+    tool_search_rx: Option<mpsc::Receiver<tools::Search>>,
+    tool_search: Option<tools::Search>,
     /// The "Settings" dialog: whether it is open and which section is shown.
     settings_open: bool,
     settings_tab: SettingsTab,
@@ -2887,6 +2891,8 @@ impl App {
             tool_states: vec![String::new(); tools::ALL.len()],
             tools_missing: Vec::new(),
             limited_open: false,
+            tool_search_rx: None,
+            tool_search: None,
             settings_open: false,
             settings_tab: SettingsTab::Interface,
             details_open: true,
@@ -5220,10 +5226,9 @@ impl App {
             return;
         }
         let lang = self.settings.lang;
-        let installer = tools::installer();
         let missing = self.tools_missing.clone();
         let states = self.tool_states.clone();
-        let commands = installer.commands();
+        let commands = tools::installer().commands();
         let mut close = false;
         let mut copy = false;
         let modal = egui::Modal::new(egui::Id::unique("photocat-limited")).frame(dialog_frame(ctx));
@@ -5273,49 +5278,8 @@ impl App {
                 );
                 ui.add_space(6.0);
             }
-            hairline(ui);
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(i18n::fill(
-                    lang,
-                    "How to install on {}:",
-                    &[installer.system().to_string()],
-                ))
-                .size(12.0)
-                .strong(),
-            );
-            if !commands.is_empty() {
-                let th = theme(ui);
-                egui::Frame::new()
-                    .fill(th.field)
-                    .corner_radius(egui::CornerRadius::same(4))
-                    .inner_margin(egui::Margin::symmetric(8, 6))
-                    .show(ui, |ui| {
-                        for command in commands {
-                            ui.add(
-                                egui::Label::new(num(ui, *command, 11.0).color(th.text)).wrap(),
-                            );
-                        }
-                    });
-                let note = installer.note(lang);
-                if !note.is_empty() {
-                    ui.label(egui::RichText::new(note).size(11.0).color(dim(ui)));
-                }
-            }
-            let pages = installer.pages();
-            if !pages.is_empty() {
-                ui.label(
-                    egui::RichText::new(t(
-                        lang,
-                        "The pages the programs come from — named here only, nothing is opened:",
-                    ))
-                    .size(11.0)
-                    .color(dim(ui)),
-                );
-                for page in pages {
-                    ui.label(num(ui, *page, 11.0).color(dim(ui)));
-                }
-            }
+            ui.add_space(6.0);
+            self.install_hint(ui);
             ui.add_space(6.0);
             ui.add(
                 egui::Label::new(
@@ -5332,7 +5296,7 @@ impl App {
                 egui::Label::new(
                     egui::RichText::new(t(
                         lang,
-                        "After installing, set the path in “Settings → External programs” (“Text on photos” for tesseract) — or leave the field empty, and photocat finds the program in PATH.",
+                        "After installing, press “Find the programs” in “Settings → External programs” (“Text on photos” for tesseract) — or leave the field empty, and photocat finds the program in PATH.",
                     ))
                     .size(11.0)
                     .color(dim(ui)),
@@ -5362,6 +5326,55 @@ impl App {
         if copy {
             ctx.copy_text(commands.join("\n"));
             self.status = t(lang, "the commands are copied to the clipboard").into();
+        }
+    }
+
+    /// The install block (M26.2, reused by the report of M26.3): the heading with the system, the
+    /// commands on the `field` tone, the language-pack note, and the pages when the system has no
+    /// package manager. Nothing is installed and nothing is opened: the words are for the owner's
+    /// terminal.
+    fn install_hint(&self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        let installer = tools::installer();
+        let commands = installer.commands();
+        ui.label(
+            egui::RichText::new(i18n::fill(
+                lang,
+                "How to install on {}:",
+                &[installer.system().to_string()],
+            ))
+            .size(12.0)
+            .strong(),
+        );
+        if !commands.is_empty() {
+            let th = theme(ui);
+            egui::Frame::new()
+                .fill(th.field)
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+                    for command in commands {
+                        ui.add(egui::Label::new(num(ui, *command, 11.0).color(th.text)).wrap());
+                    }
+                });
+            let note = installer.note(lang);
+            if !note.is_empty() {
+                ui.label(egui::RichText::new(note).size(11.0).color(dim(ui)));
+            }
+        }
+        let pages = installer.pages();
+        if !pages.is_empty() {
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "The pages the programs come from — named here only, nothing is opened:",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
+            );
+            for page in pages {
+                ui.label(num(ui, *page, 11.0).color(dim(ui)));
+            }
         }
     }
 
@@ -6421,6 +6434,8 @@ impl App {
         for tool in [tools::Tool::Ffmpeg, tools::Tool::Ffprobe] {
             self.tool_row(ui, tool);
         }
+        self.find_tools_row(ui);
+        ui.add_space(6.0);
         if ui
             .add(WordButton::new(
                 Icon::CheckCircle,
@@ -7862,6 +7877,8 @@ impl App {
         );
         ui.add_space(8.0);
         self.tool_row(ui, tools::Tool::Tesseract);
+        self.find_tools_row(ui);
+        ui.add_space(6.0);
         if ui
             .add(WordButton::new(
                 Icon::CheckCircle,
@@ -10259,6 +10276,129 @@ impl App {
         };
     }
 
+    /// "Find the programs" (M26.3): one press instead of typing paths. The search and the version
+    /// launches run off the UI thread, because each candidate is a started process; nothing is
+    /// installed or downloaded, and a missing program does not stop the others.
+    fn start_find_tools(&mut self) {
+        if self.tool_search_rx.is_some() {
+            return;
+        }
+        let lang = self.settings.lang;
+        self.status = t(lang, "looking for the programs…").into();
+        let input = self.tools_input.clone();
+        let (tx, rx) = mpsc::channel();
+        self.tool_search_rx = Some(rx);
+        std::thread::spawn(move || {
+            let _ = tx.send(tools::find_all(&input));
+        });
+    }
+
+    /// The outcome of the search: the paths are saved and checked as "Check and save" saves them,
+    /// so the found programs work in the same frame. The per-program report stays for the pane, and
+    /// the warning mark of the status bar follows the same verdict.
+    fn apply_tool_search(&mut self, found: tools::Search) {
+        let lang = self.settings.lang;
+        self.tools_input = found.tools.clone();
+        self.settings.tools = found.tools.clone();
+        self.save_settings();
+        self.tesseract = found.rows.iter().find_map(|row| match row {
+            tools::Found::Works {
+                tool: Tool::Tesseract,
+                version,
+                ..
+            } => Some(version.clone()),
+            _ => None,
+        });
+        self.refresh_tool_states();
+        let missing = found.missing();
+        self.status = if missing.is_empty() {
+            i18n::fill(
+                lang,
+                "the programs are found: {} of {}",
+                &[found.works().to_string(), found.rows.len().to_string()],
+            )
+        } else {
+            i18n::fill(lang, "not found: {}", &[missing.join(", ")])
+        };
+        self.tool_search = Some(found);
+    }
+
+    /// The "Find the programs" button with the report of the last press (M26.3). Shared by
+    /// "External programs" and "Text on photos": one search covers all three programs.
+    fn find_tools_row(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.lang;
+        let running = self.tool_search_rx.is_some();
+        let pressed = ui
+            .add_enabled(
+                !running,
+                WordButton::new(Icon::Search, t(lang, "Find the programs")),
+            )
+            .on_hover_text(t(
+                lang,
+                "looks in PATH and in the usual places of the system; an empty field is filled, a path you set is checked and never overwritten",
+            ))
+            .clicked();
+        if pressed {
+            self.start_find_tools();
+        }
+        let Some(found) = self.tool_search.clone() else {
+            return;
+        };
+        if running {
+            return;
+        }
+        ui.add_space(4.0);
+        for row in &found.rows {
+            let (text, ok) = match row {
+                tools::Found::Works { tool, version, path } => (
+                    i18n::fill(
+                        lang,
+                        "found {} {} at {}",
+                        &[
+                            tool.name().to_string(),
+                            version_number(version, *tool),
+                            path.display().to_string(),
+                        ],
+                    ),
+                    true,
+                ),
+                tools::Found::Broken { tool, path, error } => (
+                    i18n::fill(
+                        lang,
+                        "found {} at {}, but it does not start: {}",
+                        &[
+                            tool.name().to_string(),
+                            path.display().to_string(),
+                            error.clone(),
+                        ],
+                    ),
+                    false,
+                ),
+                tools::Found::Missing { tool } => (
+                    i18n::fill(lang, "not found: {}", &[tool.name().to_string()]),
+                    false,
+                ),
+            };
+            let colour = if ok { dim(ui) } else { theme(ui).danger };
+            ui.add(egui::Label::new(egui::RichText::new(text).size(11.0).color(colour)).wrap());
+        }
+        if found.works() == found.rows.len() {
+            return;
+        }
+        // Nothing is installed by the app: the command of the running system is named, the same
+        // lines the warning dialog of M26.2 shows, and the press repeats after the install.
+        ui.add_space(4.0);
+        self.install_hint(ui);
+        ui.label(
+            egui::RichText::new(t(
+                lang,
+                "press “Find the programs” again after installing",
+            ))
+            .size(11.0)
+            .color(dim(ui)),
+        );
+    }
+
     fn start_download(&mut self) {
         let lang = self.settings.lang;
         if self.download_rx.is_some() || !self.download_consent {
@@ -11295,6 +11435,15 @@ fn short_version(line: &str) -> String {
         .take(3)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The version alone, for the report of "Find the programs" (M26.3): the first line of the
+/// program's report without its own name and the word "version" — `ffmpeg version 6.1.2
+/// Copyright …` becomes `6.1.2` and `tesseract 5.3.4-1` becomes `5.3.4-1`.
+fn version_number(line: &str, tool: tools::Tool) -> String {
+    let short = short_version(line);
+    let rest = short.strip_prefix(tool.name()).unwrap_or(&short).trim();
+    rest.strip_prefix("version").unwrap_or(rest).trim().to_string()
 }
 
 /// A weight percentile over a descending distribution: the share of photos with a lower weight.
@@ -13754,6 +13903,21 @@ impl eframe::App for App {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.ocr_rx = None;
                     self.ocr_progress = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.tool_search_rx {
+            match rx.try_recv() {
+                Ok(found) => {
+                    self.tool_search_rx = None;
+                    self.apply_tool_search(found);
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.tool_search_rx = None;
                 }
             }
         }
@@ -22642,6 +22806,90 @@ mod tests {
         assert!(app.tools_missing.is_empty(), "the program is still missing");
         assert!(mark(&mut app).is_none(), "the mark survives the repair");
         assert!(!app.limited_open, "the dialog survives the repair");
+    }
+
+    /// M26.3: one press of "Find the programs" instead of typing paths. The button is in both panes
+    /// of the settings, the report names every program — with its version, or that the file does
+    /// not start, or that nothing was found — and a missing one brings the command of the running
+    /// system and the promise of a second press. Nothing is installed and nothing is downloaded.
+    #[test]
+    fn the_find_programs_button_reports_every_program() {
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-find-programs.db"));
+        app.settings.lang = i18n::Lang::En;
+        app.refresh_tool_states();
+        let ctx = egui::Context::default();
+        for (name, tab) in [
+            ("External programs", SettingsTab::Tools),
+            ("Text on photos", SettingsTab::Text),
+        ] {
+            let texts = settings_frame(&mut app, &ctx, tab);
+            assert!(
+                texts.iter().any(|text| text == "Find the programs"),
+                "the button is missing in {name}: {texts:?}"
+            );
+        }
+        // A press that found two programs and lost one: the report is one line per program.
+        let mut paths = app.tools_input.clone();
+        paths.ffmpeg = "/usr/bin/ffmpeg".into();
+        paths.ffprobe = "/usr/bin/ffprobe".into();
+        app.apply_tool_search(tools::Search {
+            tools: paths,
+            rows: vec![
+                tools::Found::Works {
+                    tool: tools::Tool::Ffmpeg,
+                    version: "ffmpeg version 6.1.2 Copyright (c) 2000-2023".into(),
+                    path: std::path::PathBuf::from("/usr/bin/ffmpeg"),
+                },
+                tools::Found::Missing {
+                    tool: tools::Tool::Ffprobe,
+                },
+                tools::Found::Broken {
+                    tool: tools::Tool::Tesseract,
+                    path: std::path::PathBuf::from("/opt/ocr/bin/tesseract"),
+                    error: "tesseract: exit code 1".into(),
+                },
+            ],
+        });
+        assert_eq!(app.tools_input.ffmpeg, "/usr/bin/ffmpeg");
+        assert_eq!(app.tools_input.ffprobe, "/usr/bin/ffprobe");
+        let texts = settings_frame(&mut app, &ctx, SettingsTab::Tools);
+        for want in [
+            "found ffmpeg 6.1.2 at /usr/bin/ffmpeg",
+            "not found: ffprobe",
+            "found tesseract at /opt/ocr/bin/tesseract, but it does not start: tesseract: exit code 1",
+            "press “Find the programs” again after installing",
+        ] {
+            assert!(
+                texts.iter().any(|text| text == want),
+                "missing “{want}”: {texts:?}"
+            );
+        }
+        // The package for the running system, the same lines the warning dialog of M26.2 shows.
+        let installer = tools::installer();
+        let heading = format!("How to install on {}:", installer.system());
+        assert!(
+            texts.iter().any(|text| text == &heading),
+            "missing “{heading}”: {texts:?}"
+        );
+        for command in installer.commands() {
+            assert!(
+                texts.iter().any(|text| text == command),
+                "the report hides “{command}”: {texts:?}"
+            );
+        }
+        // The same report in the second language: the rows and the system's own command.
+        app.settings.lang = i18n::Lang::Ru;
+        let texts = settings_frame(&mut app, &ctx, SettingsTab::Tools);
+        assert!(
+            texts.iter().any(|text| text == "не найдено: ffprobe"),
+            "the report is not translated: {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|text| text == "после установки нажмите «Найти программы» ещё раз"),
+            "the second press is not promised in Russian: {texts:?}"
+        );
     }
 
     /// M25.8: the state pill left the top strip and the search field took its former width — the

@@ -1809,7 +1809,7 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 элементы в центральной части наезжают друг на друга".
 
 **Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 (done 2026-11-27) a warning
-mark for a limited feature and its info dialog; M26.3 "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
+mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 the Windows top strip is too tall;
 M26.5 the face settings move to the People screen; M26.6 the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
@@ -1946,15 +1946,15 @@ probe `doctor` uses, so a frame starts no process, and the status bar draws the 
 per program with its state line and what is lost, "How to install on <system>:" with the command on
 the `field` tone, the note, the pages as plain words, the line that the app installs and downloads
 nothing and opens no browser, where the path goes in "Settings", the accent "Copy the commands" and
-"Close". The mark and the dialog disappear in the same frame the program starts. The "Find the
-programs" sentence of criterion 2 arrives with M26.3, when the button exists: the dialog points at
-the path fields today, which is the truth on this build. Measured: `cargo test` 337 passed (the new
+"Close". The mark and the dialog disappear in the same frame the program starts. Criterion 2's
+"Find the programs" sentence arrived with M26.3: the dialog now sends the owner to that button (and
+keeps the honest fallback — an empty field is a `PATH` lookup). Measured: `cargo test` 337 passed (the new
 `a_missing_program_leaves_a_warning_mark_and_its_dialog` with a broken tesseract path and the
 `tools::the_install_lines_follow_the_running_system` unit test), `cargo test --test
 source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks, `rust-analyzer
 diagnostics` 0 errors; the dialog is 674×333 px at 1240×840 and its card stays inside the frame.
 
-**M26.3 — "Find the programs": one press instead of typing paths.**
+**M26.3 — "Find the programs": one press instead of typing paths.** ✅ (done 2026-11-27)
 **Goal.** The owner does not need to know where the system keeps `ffmpeg` and `tesseract`.
 
 **Acceptance criteria.**
@@ -1979,6 +1979,31 @@ the versions; a set field is not overwritten; a missing one is named with the pa
 network call.
 
 **Files.** `src/app.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`.
+
+**Done.** The search lives in `tools.rs`, where a test can drive it:
+`Tools::candidates` names the order (a set field alone — an explicit path is never overwritten —
+then `PATH`, then `tools::standard_places()`: `%ProgramFiles%\ffmpeg\bin`,
+`%ProgramFiles%\tesseract-ocr`, `%LOCALAPPDATA%\Programs`,
+`%LOCALAPPDATA%\Microsoft\WinGet\Links`, the scoop and chocolatey shims; `/usr/bin`,
+`/usr/local/bin`, `/opt/*/bin`; Homebrew), `find_all_in` starts the first candidate that is a file
+with the same `version()` check "Check and save" runs and writes only a program that starts, and
+`find_all` feeds it the real `PATH` and the system's places. `App::start_find_tools` runs it in a
+background thread — three launches cost 107 ms on this machine, so the press never blocks a frame —
+and the `Search` button is disabled while the receiver lives (criterion 4). `App::apply_tool_search`
+saves the filled paths, refreshes the state lines and the warning mark, and keeps the report;
+`App::find_tools_row` draws the button and the report in both panes: one line per program ("found
+ffmpeg 6.1.2 at /usr/bin/ffmpeg", "found tesseract at … but it does not start: …", "not found:
+tesseract"), and when something is missing the `App::install_hint` block of M26.2 (the command of the
+running system, the language-pack note, the pages) plus "press “Find the programs” again after
+installing". The warning dialog of M26.2 reuses that block and now points at the button. Nothing is
+installed, downloaded or opened. Measured: `cargo test` 340 passed (the new
+`tools::the_candidates_keep_the_order_of_field_path_and_standard_places`,
+`tools::the_search_fills_an_empty_field_and_keeps_the_set_one` with a temporary folder and a fake
+shell script, and `app::the_find_programs_button_reports_every_program` in both languages),
+`cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
+`rust-analyzer diagnostics` 0 errors; `find_all` on this machine: 106.7 ms, 3 of 3 start, all three
+found in `PATH` (`ffmpeg` 9.0.2, `tesseract` 5.5.4). The real window is the owner's review — the
+headless frame test covers both panes.
 
 **M26.4 — the Windows top strip is as tall as the design says.**
 **Goal.** The strip is exactly `TOP_H` (32 logical px) with its bottom line at any Windows scaling;

@@ -28,6 +28,22 @@ impl Tool {
         }
     }
 
+    /// The file name the program has in a folder: on Windows with its `.exe`.
+    pub fn file_name(self) -> &'static str {
+        #[cfg(windows)]
+        {
+            match self {
+                Tool::Ffmpeg => "ffmpeg.exe",
+                Tool::Ffprobe => "ffprobe.exe",
+                Tool::Tesseract => "tesseract.exe",
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            self.name()
+        }
+    }
+
     /// The arguments after which the program prints its version and exits.
     pub fn version_args(self) -> &'static [&'static str] {
         match self {
@@ -287,6 +303,27 @@ impl Tools {
         search_path(program)
     }
 
+    /// The places the program may lie in, in the order of M26.3: the owner's field, then `PATH`,
+    /// then the standard places of the system. A set field comes alone — an explicit path is never
+    /// overwritten and nothing else is tried for it. A bare name is not a path: it stays a `PATH`
+    /// lookup, exactly as `locate` reads it.
+    pub fn candidates(
+        &self,
+        tool: Tool,
+        path_dirs: &[PathBuf],
+        standard: &[PathBuf],
+    ) -> Vec<PathBuf> {
+        let custom = self.get(tool).trim();
+        if Path::new(custom).components().count() > 1 {
+            return vec![PathBuf::from(custom)];
+        }
+        path_dirs
+            .iter()
+            .chain(standard.iter())
+            .map(|dir| dir.join(tool.file_name()))
+            .collect()
+    }
+
     /// A command with the console window suppressed on Windows (ADR 0019, item 3).
     pub fn command(&self, tool: Tool) -> Command {
         #[allow(unused_mut)]
@@ -333,6 +370,173 @@ impl Tools {
     pub fn probe(&self, tool: Tool) -> Option<String> {
         self.version(tool).ok()
     }
+}
+
+/// The folders of `PATH`: an unset variable gives an empty list, and the standard places are
+/// still searched (M26.3).
+pub fn path_dirs() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default()
+}
+
+/// The places the programs usually lie in besides `PATH` (M26.3). A variable that is not set and a
+/// folder that cannot be read add nothing: the list is a hint, not a promise.
+///
+/// Windows: `%ProgramFiles%\ffmpeg\bin`, `%ProgramFiles%\tesseract-ocr`,
+/// `%LOCALAPPDATA%\Programs`, `%LOCALAPPDATA%\Microsoft\WinGet\Links`, the scoop and chocolatey
+/// shims. Linux: `/usr/bin`, `/usr/local/bin`, `/opt/*/bin`. macOS: `/opt/homebrew/bin`,
+/// `/usr/local/bin`.
+pub fn standard_places() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    #[cfg(windows)]
+    {
+        let var = |key: &str| std::env::var_os(key).map(PathBuf::from);
+        if let Some(programs) = var("ProgramFiles") {
+            out.push(programs.join("ffmpeg").join("bin"));
+            out.push(programs.join("tesseract-ocr"));
+        }
+        if let Some(local) = var("LOCALAPPDATA") {
+            out.push(local.join("Programs"));
+            out.push(local.join("Microsoft").join("WinGet").join("Links"));
+        }
+        if let Some(home) = var("USERPROFILE") {
+            out.push(home.join("scoop").join("shims"));
+        }
+        if let Some(programs) = var("ProgramData") {
+            out.push(programs.join("chocolatey").join("bin"));
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        out.push(PathBuf::from("/usr/bin"));
+        out.push(PathBuf::from("/usr/local/bin"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // A portable build has a folder of its own under /opt with its programs in its bin.
+        let mut bins: Vec<PathBuf> = std::fs::read_dir("/opt")
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.path().join("bin"))
+                    .filter(|dir| dir.is_dir())
+                    .collect()
+            })
+            .unwrap_or_default();
+        bins.sort();
+        out.extend(bins);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        out.push(PathBuf::from("/opt/homebrew/bin"));
+        out.push(PathBuf::from("/usr/local/bin"));
+    }
+    out
+}
+
+/// What "Find the programs" found for one program (M26.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Found {
+    /// The file is there and starts: the version line and the file that was run.
+    Works {
+        tool: Tool,
+        version: String,
+        path: PathBuf,
+    },
+    /// The file is there but does not start (another build, a missing library).
+    Broken {
+        tool: Tool,
+        path: PathBuf,
+        error: String,
+    },
+    /// The field, `PATH` and the standard places have no such program.
+    Missing { tool: Tool },
+}
+
+impl Found {
+    pub fn tool(&self) -> Tool {
+        match self {
+            Found::Works { tool, .. } | Found::Broken { tool, .. } | Found::Missing { tool } => *tool,
+        }
+    }
+
+    /// The program starts and its version is known.
+    pub fn works(&self) -> bool {
+        matches!(self, Found::Works { .. })
+    }
+}
+
+/// One press of "Find the programs": the paths to save and one row per program of `ALL`.
+#[derive(Debug, Clone)]
+pub struct Search {
+    /// The paths to save: a program that starts gets its file, an empty field of a program that was
+    /// not found stays empty, and an explicit path is never overwritten.
+    pub tools: Tools,
+    pub rows: Vec<Found>,
+}
+
+impl Search {
+    /// How many programs start.
+    pub fn works(&self) -> usize {
+        self.rows.iter().filter(|row| row.works()).count()
+    }
+
+    /// The names of the programs that are not usable, in the order of `ALL`.
+    pub fn missing(&self) -> Vec<&'static str> {
+        self.rows
+            .iter()
+            .filter(|row| !row.works())
+            .map(|row| row.tool().name())
+            .collect()
+    }
+}
+
+/// Look for every program (M26.3), in the order of `Tools::candidates`. Each file that is found is
+/// started exactly as "Check and save the programs" starts it; a program that does not start does
+/// not stop the others. Nothing is installed and nothing is downloaded.
+pub fn find_all(current: &Tools) -> Search {
+    find_all_in(current, &path_dirs(), &standard_places())
+}
+
+/// The search over given folders — the form a test can drive without touching the real `PATH`.
+pub fn find_all_in(current: &Tools, path_dirs: &[PathBuf], standard: &[PathBuf]) -> Search {
+    let mut tools = current.clone();
+    let mut rows = Vec::with_capacity(ALL.len());
+    for tool in ALL {
+        let file = match current
+            .candidates(tool, path_dirs, standard)
+            .into_iter()
+            .find(|candidate| candidate.is_file())
+        {
+            Some(file) => file,
+            None => {
+                rows.push(Found::Missing { tool });
+                continue;
+            }
+        };
+        let path = file.to_string_lossy().into_owned();
+        let mut probe = current.clone();
+        *probe.get_mut(tool) = path.clone();
+        match probe.version(tool) {
+            Ok(version) => {
+                if !current.configured(tool) {
+                    *tools.get_mut(tool) = path;
+                }
+                rows.push(Found::Works {
+                    tool,
+                    version,
+                    path: file,
+                });
+            }
+            Err(e) => rows.push(Found::Broken {
+                tool,
+                path: file,
+                error: format!("{e:#}"),
+            }),
+        }
+    }
+    Search { tools, rows }
 }
 
 /// A lookup of the program name in `PATH`. Explicit paths never get here.
@@ -439,6 +643,147 @@ mod tests {
         assert_eq!(Installer::Pacman.system(), "Arch Linux");
         assert!(Installer::Windows.note(Lang::En).contains("language packs"));
         assert!(Installer::Windows.note(Lang::Ru).contains("языковые пакеты"));
+    }
+
+    /// M26.3: the candidate list has a fixed order — the field, `PATH`, the standard places — and
+    /// the standard places of the running system are not empty.
+    #[test]
+    fn the_candidates_keep_the_order_of_field_path_and_standard_places() {
+        let path = vec![
+            PathBuf::from("/fake/path/one"),
+            PathBuf::from("/fake/path/two"),
+        ];
+        let standard = vec![PathBuf::from("/fake/standard")];
+        let empty = Tools::default();
+        assert_eq!(
+            empty.candidates(Tool::Ffmpeg, &path, &standard),
+            vec![
+                PathBuf::from("/fake/path/one").join(Tool::Ffmpeg.file_name()),
+                PathBuf::from("/fake/path/two").join(Tool::Ffmpeg.file_name()),
+                PathBuf::from("/fake/standard").join(Tool::Ffmpeg.file_name()),
+            ],
+            "the order of the search is not field, PATH, standard places"
+        );
+        // A set field comes alone: the owner named the file, so nothing else is tried.
+        let set = Tools {
+            tesseract: "/opt/ocr/bin/tesseract".into(),
+            ..Tools::default()
+        };
+        assert_eq!(
+            set.candidates(Tool::Tesseract, &path, &standard),
+            vec![PathBuf::from("/opt/ocr/bin/tesseract")]
+        );
+        // A bare name is not a path: it stays a `PATH` lookup, exactly as an empty field.
+        let name = Tools {
+            ffmpeg: "ffmpeg".into(),
+            ..Tools::default()
+        };
+        assert_eq!(name.candidates(Tool::Ffmpeg, &path, &standard).len(), 3);
+        // Every system has at least one standard place; Linux names its own.
+        let places = standard_places();
+        assert!(!places.is_empty(), "no standard place on this system");
+        if cfg!(target_os = "linux") {
+            assert!(
+                places.contains(&PathBuf::from("/usr/bin")),
+                "Linux does not search /usr/bin: {places:?}"
+            );
+        }
+    }
+
+    /// M26.3: an empty field is filled from `PATH` first and from the standard places second; a
+    /// field the owner set is checked and never overwritten, even when it does not exist. The fake
+    /// program is a shell script: it only has to print a version.
+    #[cfg(unix)]
+    #[test]
+    fn the_search_fills_an_empty_field_and_keeps_the_set_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "photocat-tools-find-{}-{stamp}",
+            std::process::id()
+        ));
+        let path_bin = root.join("path");
+        let standard_bin = root.join("standard");
+        std::fs::create_dir_all(&path_bin).expect("the test folder");
+        std::fs::create_dir_all(&standard_bin).expect("the test folder");
+        let script = |folder: &Path, version: &str| {
+            let file = folder.join(Tool::Ffmpeg.file_name());
+            std::fs::write(&file, format!("#!/bin/sh\necho ffmpeg version {version}\n"))
+                .expect("the fake program");
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))
+                .expect("the executable bit");
+            file
+        };
+        let from_path = script(&path_bin, "6.1-from-path");
+        let from_standard = script(&standard_bin, "6.1-from-standard");
+        // An empty field: `PATH` wins over the standard places, and only the found program is
+        // written — the empty fields of the others stay empty.
+        let found = find_all_in(
+            &Tools::default(),
+            std::slice::from_ref(&path_bin),
+            std::slice::from_ref(&standard_bin),
+        );
+        assert_eq!(found.tools.ffmpeg, from_path.to_string_lossy());
+        assert_eq!(found.tools.ffprobe, "");
+        assert_eq!(found.tools.tesseract, "");
+        assert_eq!(found.works(), 1, "{:?}", found.rows);
+        assert!(found.rows.iter().any(|row| matches!(
+            row,
+            Found::Works { tool: Tool::Ffmpeg, path, .. } if path == &from_path
+        )));
+        assert!(found.missing() == vec!["ffprobe", "tesseract"], "{:?}", found.rows);
+        // The standard places are the second chance when `PATH` has nothing.
+        let found = find_all_in(&Tools::default(), &[], std::slice::from_ref(&standard_bin));
+        assert_eq!(found.tools.ffmpeg, from_standard.to_string_lossy());
+        // An explicit path is checked, never overwritten: the file does not exist, so the program
+        // is missing and the field keeps the owner's text.
+        let set = Tools {
+            ffmpeg: "/nonexistent/photocat-ffmpeg".into(),
+            ..Tools::default()
+        };
+        let found = find_all_in(
+            &set,
+            std::slice::from_ref(&path_bin),
+            std::slice::from_ref(&standard_bin),
+        );
+        assert_eq!(found.tools.ffmpeg, "/nonexistent/photocat-ffmpeg");
+        assert!(
+            found
+                .rows
+                .iter()
+                .any(|row| matches!(row, Found::Missing { tool: Tool::Ffmpeg })),
+            "the set path was not the only candidate: {:?}",
+            found.rows
+        );
+        // A file that is there but does not start is reported, not silently filled.
+        let broken = root.join("broken");
+        std::fs::create_dir_all(&broken).expect("the test folder");
+        let no_exec = broken.join(Tool::Ffmpeg.file_name());
+        std::fs::write(&no_exec, b"not a program").expect("the test file");
+        let found = find_all_in(&Tools::default(), &[broken], &[]);
+        assert_eq!(found.tools.ffmpeg, "", "a broken file was written into the field");
+        assert!(found.rows.iter().any(|row| matches!(row, Found::Broken { tool: Tool::Ffmpeg, .. })));
+    }
+
+    /// M26.3: what one press costs on this machine — the search and the version launches
+    /// (`cargo test --release -- --ignored find_tools_measurement --nocapture`).
+    #[test]
+    #[ignore]
+    fn find_tools_measurement() {
+        let start = std::time::Instant::now();
+        let found = find_all(&Tools::default());
+        println!(
+            "find_all: {:?} — {} of {} start",
+            start.elapsed(),
+            found.works(),
+            found.rows.len()
+        );
+        for row in &found.rows {
+            println!("  {row:?}");
+        }
     }
 
     #[test]

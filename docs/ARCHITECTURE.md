@@ -599,6 +599,7 @@ not with a different labelled set.
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M25.11) | 16 frames of the calendar's weeks layer (the weeks touching May) and 16 of the days layer (Monday–Sunday) after four warm-up frames (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored calendar_measurement --nocapture`) | weeks layer p50 4.44 ms (225 fps), p95 4.58 ms; days layer p50 4.61 ms (217 fps), p95 4.74 ms — the four layers now cost the same 4.4–4.6 ms, well inside the 16.7 ms of a 60 fps frame |
 | 2026-11-26 | the real DB, 2232 files, 1240×840 headless frames (M25.12) | the four calendar layers with the period's photos under the tiles, 16 frames each after four warm-up frames (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored calendar_measurement --nocapture`) | years p50 4.62 ms (216 fps), p95 5.46; months p50 4.83 ms (207 fps), p95 5.16; weeks p50 4.66 ms (214 fps), p95 5.06; days p50 13.66 ms (73 fps), p95 14.82 — the day layer is the heaviest because its period can hold a whole busy day of tiles, and it still stays inside the 16.7 ms of a 60 fps frame; the year layer, the acceptance's case, costs 4.62 ms with all of the year's files below it |
 | 2026-11-26 | the real DB copied to `/tmp` (`roots` = `Фотографии с телефона` + `Pictures/wallpapers`), 2234 files, 21.2 GiB | `settings.roots_off = /home/alx/Pictures/wallpapers`, then `stats` under `lang=ru` and `index` on the switched-off root | the switched-off folder is named with its own count — 4 files, 4.8 MiB — the shown set is 2230 files, 21.2 GiB, the total stays 2234; `index` writes no row and says the folder is switched off, exit code 0; the rows, the tags and the previews of those 4 files are in the DB untouched and the folder comes back by the same switch with no pass |
+| 2026-11-27 | this machine (Arch Linux, `ffmpeg` 9.0.2, `tesseract` 5.5.4 in `/usr/bin`) | `tools::find_all` with empty fields, release (`cargo test --release -- --ignored find_tools_measurement --nocapture`) | 106.7 ms for three programs, 3 of 3 start, all three found in `PATH` on the first candidate; the search of the standard places is not reached and costs nothing |
 
 Rule: numbers without a corpus and a date do not enter the table.
 
@@ -642,6 +643,21 @@ Arch; `apt`/`apt-get` — Debian/Ubuntu), with the official pages named when not
 The command is only copied to the clipboard and the pages are only named: the app installs,
 downloads and opens nothing (AGENTS.md §1), and the mark disappears in the same frame the program
 starts.
+
+**Finding the programs (M26.3).** "Find the programs" in "Settings → External programs" and in
+"Text on photos" looks for all three at once: `Tools::candidates` names the order — a path the owner
+set (it comes alone: an explicit path is checked, never overwritten), then `PATH`, then
+`tools::standard_places()` — `%ProgramFiles%\ffmpeg\bin`, `%ProgramFiles%\tesseract-ocr`,
+`%LOCALAPPDATA%\Programs`, `%LOCALAPPDATA%\Microsoft\WinGet\Links`, the scoop and chocolatey shims on
+Windows; `/usr/bin`, `/usr/local/bin` and `/opt/*/bin` on Linux; `/opt/homebrew/bin` and
+`/usr/local/bin` on macOS. The first candidate that is a file is started with the same `version()`
+check as "Check and save the programs", one program at a time and in a background thread — three
+launches cost 107 ms here, so the press never blocks a frame and the button is disabled while it
+runs. Only a program that starts is written into its field; a missing one does not stop the others.
+The report under the buttons has one line per program ("found ffmpeg 6.1.2 at /usr/bin/ffmpeg",
+"found tesseract at … but it does not start: …", "not found: tesseract") and, when something is
+missing, the same `tools::installer()` command block the warning dialog of M26.2 shows. Nothing is
+installed, downloaded or opened; the press is repeated after the install.
 
 **`doctor`** prints for each program the version, where the path comes from (settings or `PATH`),
 the file it found, why it is needed and what breaks without it; then the tesseract languages against

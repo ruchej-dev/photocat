@@ -1967,11 +1967,30 @@ const PAIRS: &[(&str, &str)] = &[
         "photocat сам ничего не устанавливает и не скачивает и не открывает браузер: скопируйте команду и выполните её в терминале.",
     ),
     (
-        "After installing, set the path in “Settings → External programs” (“Text on photos” for tesseract) — or leave the field empty, and photocat finds the program in PATH.",
-        "После установки задайте путь в «Настройках → Внешние программы» (для tesseract — в «Текст на фото») — или оставьте поле пустым, и photocat найдёт программу в PATH.",
+        "After installing, press “Find the programs” in “Settings → External programs” (“Text on photos” for tesseract) — or leave the field empty, and photocat finds the program in PATH.",
+        "После установки нажмите «Найти программы» в «Настройках → Внешние программы» (для tesseract — в «Текст на фото») — или оставьте поле пустым, и photocat найдёт программу в PATH.",
     ),
     ("Copy the commands", "Скопировать команды"),
     ("the commands are copied to the clipboard", "команды скопированы в буфер обмена"),
+
+    // --- M26.3: "Find the programs" -------------------------------------------
+    ("Find the programs", "Найти программы"),
+    (
+        "looks in PATH and in the usual places of the system; an empty field is filled, a path you set is checked and never overwritten",
+        "ищет в PATH и в обычных местах системы; пустое поле заполняется, заданный путь проверяется и не перезаписывается",
+    ),
+    ("looking for the programs…", "ищу программы…"),
+    ("the programs are found: {} of {}", "программы найдены: {} из {}"),
+    ("found {} {} at {}", "найдено: {} {} — {}"),
+    (
+        "found {} at {}, but it does not start: {}",
+        "найдено: {} — {}, но не запускается: {}",
+    ),
+    ("not found: {}", "не найдено: {}"),
+    (
+        "press “Find the programs” again after installing",
+        "после установки нажмите «Найти программы» ещё раз",
+    ),
 
 ];
 
