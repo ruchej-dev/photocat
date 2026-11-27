@@ -1847,6 +1847,135 @@ fn tuning_row(
     save
 }
 
+/// What the owner pressed in the settings block of the duplicates screen (M26.18). The block is
+/// drawn inside the content panel, where the rows and the groups are already borrowed, so it holds
+/// the threshold and the counted facts and reports the press for the frame to apply.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum DupesPress {
+    #[default]
+    None,
+    /// The threshold was released: the settings file takes the new value, not every frame of a drag.
+    Save,
+    FindGroups,
+    ExportPlan,
+    CopyPlan,
+}
+
+/// The settings of the duplicates screen (M26.18): the threshold, the pass and the plan. They were
+/// the block of the left panel since M21.4; the page that owns the groups owns its settings, and
+/// the left panel stays the map of the application — the rule of M26.14, applied to the second
+/// screen that carried its own drawer.
+struct DupesSettings<'a> {
+    lang: Lang,
+    /// The threshold the screen works at; the settings file takes it on release.
+    threshold: &'a mut u32,
+    /// What the groups hold, counted from the rows the page already borrowed.
+    summary: dupes::Summary,
+    /// Photos without a sharpness value: the "keep" advice of a similar group cannot name the
+    /// better frame for them.
+    missing_sharpness: usize,
+}
+
+impl DupesSettings<'_> {
+    fn draw(&mut self, ui: &mut egui::Ui) -> DupesPress {
+        let lang = self.lang;
+        let mut press = DupesPress::None;
+        block(ui, |ui| {
+            // The threshold is one sentence with its slider: the number sits in the words, so a
+            // drag moves the slider and never re-wraps the line.
+            ui.label(egui::RichText::new(i18n::fill(
+                lang,
+                "Similarity threshold: {} bits out of 64",
+                &[self.threshold.to_string()],
+            )));
+            let r = ui.add(egui::Slider::new(&mut *self.threshold, 0..=16).show_value(false));
+            if r.drag_stopped() || r.lost_focus() {
+                press = DupesPress::Save;
+            }
+            r.on_hover_text(t(
+                lang,
+                "More bits — more similar photos in a group. Exact copies are found at any threshold.",
+            ));
+            // The one action of the screen and the plan, on one wrapping row: the room under them
+            // belongs to the groups (the lesson of M26.16).
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if ui
+                    .add(WordButton::primary(Icon::BurstMode, t(lang, "Find groups")))
+                    .clicked()
+                {
+                    press = DupesPress::FindGroups;
+                }
+                let has_groups = self.summary.groups > 0;
+                if ui
+                    .add_enabled(
+                        has_groups,
+                        WordButton::new(Icon::Download, t(lang, "Export the plan")),
+                    )
+                    .on_hover_text(t(
+                        lang,
+                        "write a CSV into the app cache: group, keep_path, drop_path, reason, \
+                         wasted_bytes; a list to review, not a deletion",
+                    ))
+                    .clicked()
+                {
+                    press = DupesPress::ExportPlan;
+                }
+                if ui
+                    .add_enabled(
+                        has_groups,
+                        WordButton::new(Icon::ContentCopy, t(lang, "Copy the list")),
+                    )
+                    .on_hover_text(t(lang, "the whole CSV plan to the clipboard"))
+                    .clicked()
+                {
+                    press = DupesPress::CopyPlan;
+                }
+            });
+            let summary = i18n::fill(
+                lang,
+                "{} in the groups, {} marked spare, {} will be freed",
+                &[
+                    self.summary.groups.to_string(),
+                    self.summary.marked_drop.to_string(),
+                    db::human_in(lang, self.summary.freed),
+                ],
+            );
+            ui.label(egui::RichText::new(summary).size(11.0).color(dim(ui)));
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "“keep” picks the best frame of the group: it stays, the rest are marked spare. \
+                     No file is deleted; the decision lives in the DB and lands in the plan.",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
+            );
+            ui.label(
+                egui::RichText::new(t(
+                    lang,
+                    "“Export the plan” writes a CSV into the app cache — a report to review, not a deletion.",
+                ))
+                .size(11.0)
+                .color(dim(ui)),
+            );
+            if self.missing_sharpness > 0 {
+                ui.label(
+                    egui::RichText::new(i18n::fill(
+                        lang,
+                        "the sharpness is not computed for {} photos — index the folder",
+                        &[self.missing_sharpness.to_string()],
+                    ))
+                    .size(11.0)
+                    .color(dim(ui)),
+                );
+            }
+        });
+        press
+    }
+}
+
 /// The frame of a dialog (M22.10): the card tone, a 1 px line and the 8 px radius of a card, with
 /// 16 px of air inside. `egui::Modal` defaults to `Frame::popup`, which is the frame of a menu — a
 /// 6 px radius and 6 px of air — so without this a dialog would look like a dropdown.
@@ -8723,12 +8852,11 @@ impl App {
             self.years_block(ui, &years);
             hairline(ui);
         }
-        match self.view {
-            View::Dupes => self.dupes_controls(ui),
-            // The People screen keeps its settings on its page (M26.14); a narrow window keeps the
-            // list of groups here, the wide one draws it in the right panel (M22.26).
-            View::Faces if show_faces => self.face_groups_block(ui),
-            _ => {}
+        // The People screen keeps its settings on its page (M26.14), and the duplicates screen
+        // followed it (M26.18): the panel draws no settings of these screens. A narrow window
+        // keeps the list of face groups here, the wide one draws it in the right panel (M22.26).
+        if self.view == View::Faces && show_faces {
+            self.face_groups_block(ui);
         }
         self.model_block(ui);
         if show_card {
@@ -8820,107 +8948,6 @@ impl App {
         self.year_filter = pick;
         self.semantic_hits = None;
         self.ocr_snippets.clear();
-    }
-
-    /// The context of the "Duplicates and series" view: the threshold, "Find groups", the summary and the plan export.
-    fn dupes_controls(&mut self, ui: &mut egui::Ui) {
-        let lang = self.settings.lang;
-        block(ui, |ui| {
-            ui.label(
-                egui::RichText::new(t(lang, "Duplicates & series"))
-                    .size(11.0)
-                    .color(dim(ui)),
-            );
-            ui.add_space(4.0);
-            let threshold = i18n::fill(lang, "Similarity threshold: {} bits out of 64", &[self.max_dist.to_string()]);
-            ui.label(egui::RichText::new(threshold));
-            let resp = ui.add(egui::Slider::new(&mut self.max_dist, 0..=16));
-            if resp.changed() {
-                self.settings.max_dist = self.max_dist;
-                self.save_settings();
-            }
-            let b = WordButton::primary(Icon::BurstMode, t(lang, "Find groups"));
-            if ui
-                .add(b)
-                .clicked()
-            {
-                let t0 = std::time::Instant::now();
-                self.groups = dupes::find_groups(&self.items, self.max_dist);
-                let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
-                self.status = i18n::fill(lang, "{} groups, {} duplicates, in {} s", &[self.groups.len().to_string(), db::human_in(lang, waste).to_string(), format!("{:.1}", t0.elapsed().as_secs_f32())]);
-            }
-            let sum = dupes::summary(&self.items, &self.groups);
-            let summary = i18n::fill(lang, "{} in the groups, {} marked spare, {} will be freed", &[sum.groups.to_string(), sum.marked_drop.to_string(), db::human_in(lang, sum.freed).to_string()]);
-            ui.label(egui::RichText::new(summary).size(11.0).color(dim(ui)));
-            let has_groups = !self.groups.is_empty();
-            ui.add_space(4.0);
-            if ui
-                .add_enabled(has_groups, WordButton::new(Icon::Download, t(lang, "Export the plan")))
-                .on_hover_text(t(
-                    lang,
-                    "write a CSV into the app cache: group, keep_path, drop_path, reason, wasted_bytes; a list to review, not a deletion",
-                ))
-                .clicked()
-            {
-                let path = db::cache_dir().join("plan.csv");
-                let csv = dupes::plan_csv(&self.items, &self.groups, self.settings.lang);
-                let rows = csv.lines().count().saturating_sub(1);
-                match std::fs::write(&path, &csv) {
-                    Ok(()) => {
-                        self.status = {
-                                i18n::fill(
-                                    lang,
-                                    "the plan is written: {} ({} rows)",
-                                    &[path.display().to_string(), rows.to_string()],
-                                )
-                            }
-                    }
-                    Err(e) => {
-                        self.status = format!("{}: {e}", t(lang, "plan not written"));
-                    }
-                }
-            }
-            if ui
-                .add_enabled(has_groups, WordButton::new(Icon::ContentCopy, t(lang, "Copy the list")))
-                .on_hover_text(t(lang, "the whole CSV plan to the clipboard"))
-                .clicked()
-            {
-                ui.ctx()
-                    .copy_text(dupes::plan_csv(&self.items, &self.groups, self.settings.lang));
-                self.status = t(lang, "plan copied to the clipboard").into();
-            }
-            ui.label(
-                egui::RichText::new(t(
-                    lang,
-                    "“keep” picks the best frame of the group: it stays, the rest are marked spare. No file is deleted; the decision lives in the DB and lands in the plan.",
-                ))
-                .size(11.0)
-                .color(dim(ui)),
-            );
-            ui.label(
-                egui::RichText::new(t(
-                    lang,
-                    "“Export the plan” writes a CSV into the app cache — a report to review, not a deletion.",
-                ))
-                .size(11.0)
-                .color(dim(ui)),
-            );
-            let no_sharp = self
-                .items
-                .iter()
-                .filter(|r| r.kind == "image" && r.sharpness.is_none())
-                .count();
-            if no_sharp > 0 {
-                let note = {
-                        i18n::fill(
-                            lang,
-                            "the sharpness is not computed for {} photos — index the folder",
-                            &[no_sharp.to_string()],
-                        )
-                    };
-                ui.label(egui::RichText::new(note).size(11.0).color(dim(ui)));
-            }
-        });
     }
 
     /// The list of groups as a block: a wide window draws it in the right panel, a narrow one keeps
@@ -15941,6 +15968,8 @@ impl eframe::App for App {
         let mut face_together_toggle = false;
         // What the settings block of the People screen reported this frame (M26.14).
         let mut face_press = FaceSettingsPress::None;
+        // What the settings block of the duplicates screen reported this frame (M26.18).
+        let mut dupes_press = DupesPress::None;
         // The count of the matching sliders is started after the tiles release the borrows
         // (M26.16).
         let mut face_plan_request = false;
@@ -16625,8 +16654,22 @@ impl eframe::App for App {
                 }
             }
             View::Dupes => {
+                // The settings of the screen open its page (M26.18): the threshold, "Find
+                // groups", the summary and the plan stand above the groups they act on, not in
+                // the panel that is the map of the application. The block reports the press,
+                // and the frame applies it once the rows are back in `App`.
+                dupes_press = DupesSettings {
+                    lang,
+                    threshold: &mut self.max_dist,
+                    summary: dupes::summary(&items, &groups),
+                    missing_sharpness: items
+                        .iter()
+                        .filter(|r| r.kind == "image" && r.sharpness.is_none())
+                        .count(),
+                }
+                .draw(ui);
                 if groups.is_empty() {
-                    ui.label(t(lang, "Press “Find groups” on the left."));
+                    ui.label(t(lang, "No groups yet: press “Find groups” above."));
                 }
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -17917,6 +17960,53 @@ impl eframe::App for App {
         // Release the borrows of self.textures/missing before open_viewer/reload.
         #[allow(clippy::drop_non_drop)]
         drop(cells);
+        // The settings of the duplicates screen (M26.18): the rows and the groups are back in
+        // `App`, so the threshold is saved and the pass or the plan runs over them.
+        if dupes_press != DupesPress::None {
+            let lang = self.settings.lang;
+            match dupes_press {
+                DupesPress::None => {}
+                DupesPress::Save => {
+                    self.settings.max_dist = self.max_dist;
+                    self.save_settings();
+                }
+                DupesPress::FindGroups => {
+                    let t0 = std::time::Instant::now();
+                    self.groups = dupes::find_groups(&self.items, self.max_dist);
+                    let waste: i64 = self.groups.iter().map(|g| g.waste).sum();
+                    self.status = i18n::fill(
+                        lang,
+                        "{} groups, {} duplicates, in {} s",
+                        &[
+                            self.groups.len().to_string(),
+                            db::human_in(lang, waste),
+                            format!("{:.1}", t0.elapsed().as_secs_f32()),
+                        ],
+                    );
+                }
+                DupesPress::ExportPlan => {
+                    let path = db::cache_dir().join("plan.csv");
+                    let csv = dupes::plan_csv(&self.items, &self.groups, lang);
+                    let rows = csv.lines().count().saturating_sub(1);
+                    match std::fs::write(&path, &csv) {
+                        Ok(()) => {
+                            self.status = i18n::fill(
+                                lang,
+                                "the plan is written: {} ({} rows)",
+                                &[path.display().to_string(), rows.to_string()],
+                            )
+                        }
+                        Err(e) => {
+                            self.status = format!("{}: {e}", t(lang, "plan not written"));
+                        }
+                    }
+                }
+                DupesPress::CopyPlan => {
+                    ctx.copy_text(dupes::plan_csv(&self.items, &self.groups, lang));
+                    self.status = t(lang, "plan copied to the clipboard").into();
+                }
+            }
+        }
         // The ribbon's copy of the look of the grid reaches the settings once the frame is over.
         if ribbon.changed {
             self.settings.cell_style = ribbon.cell_style;
@@ -20905,6 +20995,101 @@ mod tests {
         );
         assert_palette(&mut app, &ctx, "duplicates", super::DARK);
         assert_palette(&mut app, &ctx, "duplicates", super::LIGHT);
+    }
+
+    /// M26.18: the settings of the duplicates screen live on its page — the threshold, "Find
+    /// groups", the summary and the plan stand right of the 260 px left panel that is the map of
+    /// the application, and the panel draws none of them.
+    #[test]
+    fn the_duplicates_screen_owns_its_settings() {
+        let mut app = App::new(std::path::PathBuf::from(
+            "/tmp/photocat-test-dupes-settings.db",
+        ));
+        let mut a = file_row(1, "image", "a.jpg");
+        let mut b = file_row(2, "image", "b.jpg");
+        a.sha256 = "same".into();
+        b.sha256 = "same".into();
+        app.items = vec![a, b];
+        app.groups = crate::dupes::find_groups(&app.items, 6);
+        app.settings.lang = i18n::Lang::En;
+        app.view = View::Dupes;
+        let ctx = egui::Context::default();
+        let layout = window_layout(&mut app, &ctx, egui::vec2(1240.0, 1400.0));
+        let find = |needle: &str| {
+            layout
+                .iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, p)| *p)
+                .unwrap_or_else(|| panic!("no “{needle}” in the frame: {layout:?}"))
+        };
+        for needle in ["Find groups", "Export the plan", "Copy the list"] {
+            let pos = find(needle);
+            assert!(
+                pos.x >= super::LEFT_W,
+                "“{needle}” still stands in the left panel: {pos:?}"
+            );
+        }
+        let threshold = layout
+            .iter()
+            .find(|(text, _)| text.starts_with("Similarity threshold:"))
+            .map(|(_, p)| *p)
+            .expect("the threshold line is missing");
+        assert!(
+            threshold.x >= super::LEFT_W,
+            "the threshold still stands in the left panel: {threshold:?}"
+        );
+        // The summary and the hint of the screen moved with the block: the panel keeps none of
+        // them, and the group stays below the settings that act on it.
+        for needle in [
+            "1 in the groups, 0 marked spare, 0 B will be freed",
+            "“keep” picks the best frame of the group: it stays, the rest are marked spare. No file is deleted; the decision lives in the DB and lands in the plan.",
+        ] {
+            let pos = find(needle);
+            assert!(
+                pos.x >= super::LEFT_W,
+                "the settings line still stands in the left panel: {pos:?}"
+            );
+        }
+        assert!(
+            find("#1").y > threshold.y,
+            "the group does not follow the settings block: {layout:?}"
+        );
+        // The numbers of the page at 1240×840 (M26.18): the threshold opens the block at 110 px and
+        // the first group follows at 311 px, so the settings take ~200 px above the cards.
+        let layout = window_layout(&mut app, &ctx, egui::vec2(1240.0, 840.0));
+        let at = |needle: &str| {
+            layout
+                .iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, p)| *p)
+                .unwrap_or_else(|| panic!("no “{needle}” in the frame: {layout:?}"))
+        };
+        let threshold = at("Similarity threshold: 6 bits out of 64");
+        assert!(
+            threshold.y >= 100.0 && threshold.y <= 130.0,
+            "the threshold does not open the block: {threshold:?}"
+        );
+        let group = at("#1");
+        assert!(
+            group.y >= 290.0 && group.y <= 330.0,
+            "the group does not start under the settings: {group:?}"
+        );
+        // A 700 px window: the block folds instead of painting past the edge, and the one action
+        // of the screen stays on the page.
+        let narrow = egui::vec2(700.0, 600.0);
+        let win = egui::Rect::from_min_size(egui::Pos2::ZERO, narrow);
+        for (text, rect) in clipped_words_at(&mut app, &ctx, narrow) {
+            assert!(
+                win.contains_rect(rect),
+                "the block paints “{text}” outside a 700×600 window: {rect:?}"
+            );
+        }
+        assert!(
+            clipped_words_at(&mut app, &ctx, narrow)
+                .iter()
+                .any(|(text, r)| text == "Find groups" && r.min.x >= super::LEFT_W),
+            "the main action leaves the page in a narrow window"
+        );
     }
 
     /// M22.9: the faces screen keeps the metrics of a face tile (150×150 + 26) and takes the look

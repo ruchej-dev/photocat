@@ -141,8 +141,10 @@ the interface rules at the end of the file.
   decision mark → a 22 px caption band (`panel` tone, a mono 10 file name on the left, the date in
   `text_dim` on the right) → a 2 px accent selection outline and a square check flag. The list view
   keeps the same words and accent: a row with a 58×40 thumbnail, the name and the date · size.
-- **The top strip is 32 px and one row** (M22.19, after `photocat_1`): the mark (a 20 px
-  photo-library glyph in the accent and "photocat" at 14 px), one search field in the middle (the
+- **The top strip is 32 px and one row** (M22.19, after `photocat_1`): the mark — since M26.20 the
+  **logo itself**, `assets/photocat-mark-24.png` at 24 px, painted in the accent of the theme
+  (`#f59e0b` dark, `#b45309` light: one texture tinted, not a second file and not a drawn glyph) — and
+  "photocat" at 14 px 6 px after it; one search field in the middle (the
   search glyph, the "Semantic / By text" mode switch with its arrow, the query, "Search" in the
   accent and "×"), and the tools on the right — the "Tiles" pill (the grid glyph and a compact
   100–260 px slider, no number: the value is in the hint), the details toggle (a 28 px icon that
@@ -440,7 +442,7 @@ a rare one.
 | Tile size (the "Tiles" pill) | in the top strip, right of the search field (M22.19) | 1 |
 | Cell view (tile / rows / list) | there too, next to the size slider | 1 |
 | Layout and sort | there too: "By months / Flat" and the "Sort" menu | 1 |
-| The main action of the view | left panel, the first group after navigation | 1 |
+| The main action of the view | the page that owns it: “Find groups” on the duplicates page (M26.18), “Find faces (N)” on the People page (M26.14); the grid keeps “Re-index” in the catalog menu | 1 |
 | Totals and counters of the view | in the view title and in the navigation numbers | 0 |
 | File card | right panel | 0 |
 | Models, limits, programs, the tag dictionary | "Settings" in the top bar, sections in the dialog | 1–2 (rare) |
@@ -485,6 +487,7 @@ a rare one.
 | Details row | an 11 px label on the left in a 72 px column, a 12 px value with wrapping | `app.rs::meta_row` |
 | Face tile | 150×150 px + a 26 px caption (the metrics do not change, M22.9); a 112×112 crop aligned by 5 points; two round 24 px icon targets — the empty tick circle at the top left, filled with the accent and a tick when picked, and the head with a slash at the top right, drawn only inside one group (M22.26); under the frame the date in mono 10 `text_med` on the left and the detection score in mono 10 `text_dim` on the right; a picked face and the selected file carry a 2 px accent frame; the tile is a `card` with an 8 px radius | `app.rs::draw_face_cell`, `tile_icon_target` |
 | People page header (M26.16) | three lines and one row of actions: the model state with its target (26 px), the licence at 10 px, the counters at 11 px, the actions at 26 px; the "Tuning" switch opens three 26 px wrapping rows (a 160 px label, a 150 px slider and its number) under them; the group on screen starts at 223 px on a 1240×840 window and takes 124 px more only while the thresholds are open |
+| Duplicates page header (M26.18) | the threshold sentence with its slider under it, one 26 px row of actions, the 11 px summary and two 11 px hints: the block takes ~200 px above the cards — the threshold at 110 px and the first group's "#1" at 311 px on a 1240×840 window; every line wraps, so a 700 px window folds them instead of painting past the edge |
 | Quarantine tile (M26.17) | the face tile of 150×150 px + 26 px; the tick circle at the top left confirms, the crossed head at the top right turns down; the person and the cosine ("Lisa 0.62") in mono 10 on a scrim at the foot of the frame |
 | Duplicates group | one `card_block` per group: the `card` tone, a 1 px `border`, an 8 px radius, 8 px inside; the row "#N" in mono 11 `text_dim`, the reason at 13 px strong, the facts "N files · X spare" in mono 11 at the right edge; the advice at 11 px `text_dim`; the tiles lie on the card tone; no red on this screen | `View::Dupes`, `app.rs::card_block` |
 | Trash | the counter "N files · size" in mono 11 `text_dim`; "Restore all" in the neutral tone; "Empty the trash (N)" with the one `danger` border in the window and no fill; the tiles marked "in trash" with a round 24 px restore target, its word in the hint (M22.27) | `View::Trash` |

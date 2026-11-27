@@ -709,7 +709,10 @@ const PAIRS: &[(&str, &str)] = &[
         "“Export the plan” writes a CSV into the app cache — a report to review, not a deletion.",
         "«Экспорт плана» пишет CSV в кэш приложения — это отчёт для проверки, не удаление.",
     ),
-    ("Press “Find groups” on the left.", "Нажмите «Найти группы» слева."),
+    (
+        "No groups yet: press “Find groups” above.",
+        "Групп ещё нет: нажмите «Найти группы» выше.",
+    ),
     ("decision", "решение"),
     ("advice", "совет"),
     ("decision not saved", "решение не сохранено"),
