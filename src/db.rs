@@ -2,7 +2,7 @@
 
 use crate::i18n::{self, Lang};
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -339,6 +339,68 @@ fn init(c: &Connection) -> Result<()> {
     )?;
     c.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
+}
+
+/// The size of the database file and the pages inside it that no row uses (M26.8). `VACUUM`
+/// gives those pages back to the filesystem; `worth_compacting` is the honest "anything to
+/// reclaim" test — under 1 MiB or under 5 % of the file it is not worth a rebuild.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DbSpace {
+    pub file_bytes: u64,
+    pub free_bytes: u64,
+}
+
+impl DbSpace {
+    pub fn worth_compacting(&self) -> bool {
+        const MIN_FREE_BYTES: u64 = 1024 * 1024;
+        self.free_bytes >= MIN_FREE_BYTES && self.free_bytes * 20 >= self.file_bytes
+    }
+}
+
+/// What a compaction did: the file before and after. A call with nothing to reclaim reports the
+/// same numbers twice and touches nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Compaction {
+    pub before: DbSpace,
+    pub after: DbSpace,
+}
+
+/// Read the file's size and `freelist_count × page_size` without writing anything. A missing file
+/// is an empty database rather than an error: the window asks before the first index.
+pub fn db_space(path: &Path) -> Result<DbSpace> {
+    if !path.exists() {
+        return Ok(DbSpace::default());
+    }
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("cannot read the DB {}", path.display()))?;
+    let free_pages: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+    Ok(DbSpace {
+        file_bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        free_bytes: free_pages.max(0) as u64 * page_size.max(0) as u64,
+    })
+}
+
+/// Rebuild the database in place (M26.8): `VACUUM` writes a fresh file and moves every row in,
+/// so the free pages leave the disk. The archive, the previews, the faces and the models are not
+/// touched. It cannot be stopped once started; a second call with nothing to reclaim is a no-op.
+pub fn vacuum(path: &Path) -> Result<Compaction> {
+    let before = db_space(path)?;
+    if before.free_bytes == 0 || !path.exists() {
+        return Ok(Compaction {
+            before,
+            after: before,
+        });
+    }
+    let conn = Connection::open(path)
+        .with_context(|| format!("cannot open the DB {}", path.display()))?;
+    // The window is told not to read while the pass runs; a CLI or another window may still hold
+    // a reader, so the pass waits for it instead of failing at once.
+    conn.busy_timeout(std::time::Duration::from_secs(30))?;
+    conn.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
+    drop(conn);
+    let after = db_space(path)?;
+    Ok(Compaction { before, after })
 }
 
 /// How the grid shows files: grouped by months or one continuous ribbon (M17).
@@ -3771,4 +3833,101 @@ mod tests {
         );
     }
 
+    /// M26.8: rows that left the database leave free pages, and `vacuum` returns them to the
+    /// filesystem. The rows that stay are intact, and a second call has nothing to do.
+    #[test]
+    fn a_vacuum_gives_the_free_pages_back_and_keeps_every_row() {
+        let path = std::env::temp_dir().join(format!(
+            "photocat-vacuum-{}-{:?}-{:?}.db",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        {
+            let c = open(&path).unwrap();
+            c.execute_batch("CREATE TABLE junk(id INTEGER PRIMARY KEY, data BLOB)")
+                .unwrap();
+            for i in 0..64u8 {
+                c.execute(
+                    "INSERT INTO junk(id, data) VALUES (?1, ?2)",
+                    params![i as i64, vec![i; 64 * 1024]],
+                )
+                .unwrap();
+            }
+            c.execute("DELETE FROM junk WHERE id % 2 = 0", []).unwrap();
+            // The free pages are in the main file before the test looks at them.
+            c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        }
+        let before = db_space(&path).unwrap();
+        assert!(
+            before.free_bytes >= 1024 * 1024,
+            "the deleted rows left no free pages: {before:?}"
+        );
+        assert!(before.worth_compacting(), "nothing to reclaim: {before:?}");
+
+        let compaction = vacuum(&path).unwrap();
+        assert_eq!(compaction.before, before);
+        assert_eq!(
+            compaction.after.free_bytes, 0,
+            "free pages are left after the compaction: {:?}",
+            compaction.after
+        );
+        assert!(
+            compaction.after.file_bytes < before.file_bytes,
+            "the file did not shrink: {} → {}",
+            before.file_bytes,
+            compaction.after.file_bytes
+        );
+        assert!(!compaction.after.worth_compacting());
+
+        let c = open(&path).unwrap();
+        let kept: i64 = c
+            .query_row("SELECT COUNT(*) FROM junk", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 32, "the compaction lost rows");
+        let odd: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM junk WHERE id % 2 = 1 AND length(data) = ?1",
+                params![64 * 1024],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(odd, 32, "the rows that stayed lost their data");
+        drop(c);
+
+        // A second press finds nothing to reclaim and touches nothing.
+        let again = vacuum(&path).unwrap();
+        assert_eq!(again.before, again.after, "a second vacuum is not a no-op");
+    }
+
+    /// The M26.8 measurement on a copy of the real database:
+    /// `PHOTOCAT_BENCH_DB=<copy> cargo test --release -- --ignored a_real_database_gives_its_free_pages_back --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_real_database_gives_its_free_pages_back() {
+        let Ok(path) = std::env::var("PHOTOCAT_BENCH_DB") else {
+            eprintln!("PHOTOCAT_BENCH_DB is not set — the measurement is skipped");
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let started = std::time::Instant::now();
+        let compaction = vacuum(&path).unwrap();
+        let elapsed = started.elapsed().as_secs_f32();
+        let c = open(&path).unwrap();
+        let files: i64 = c
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        println!(
+            "vacuum: {} → {} (free {} → {}), {files} files, {elapsed:.3} s",
+            human(compaction.before.file_bytes as i64),
+            human(compaction.after.file_bytes as i64),
+            human(compaction.before.free_bytes as i64),
+            human(compaction.after.free_bytes as i64),
+        );
+        assert_eq!(compaction.after.free_bytes, 0);
+        assert!(files > 100, "{files} files — that is not the corpus");
+    }
 }

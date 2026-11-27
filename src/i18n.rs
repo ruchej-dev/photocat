@@ -436,8 +436,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("Hide details", "Скрыть сведения"),
     ("Details", "Сведения"),
     (
-        "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export or Integrity; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.",
-        "Точка и слово называют идущий фоновый проход: индексация, CLIP, OCR, лица, корзина, экспорт или проверка целостности; два и больше показывают «N проходов». Их строки прогресса и «Стоп» — в верхней полосе, под полем поиска. Никуда ничего не отправляется.",
+        "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export, Integrity or Compact; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.",
+        "Точка и слово называют идущий фоновый проход: индексация, CLIP, OCR, лица, корзина, экспорт, проверка целостности или сжатие; два и больше показывают «N проходов». Их строки прогресса и «Стоп» — в верхней полосе, под полем поиска. Никуда ничего не отправляется.",
     ),
     ("{} passes", "{} проходов"),
     ("Ready", "Готов к работе"),
@@ -1211,6 +1211,46 @@ const PAIRS: &[(&str, &str)] = &[
     (
         "DB rows: files, tags, OCR, vectors, faces; the originals are intact",
         "строки БД: файлы, теги, OCR, векторы, лица; оригиналы целы",
+    ),
+    // The compaction of the database file (M26.8).
+    ("Database file:", "Файл базы данных:"),
+    ("{}, of which {} is free", "{}, из них свободно {}"),
+    (
+        "the database is not created yet",
+        "база данных ещё не создана",
+    ),
+    ("Compact the database…", "Сжать базу данных…"),
+    ("Compact the database", "Сжать базу данных"),
+    ("Compact the database?", "Сжать базу данных?"),
+    ("Compact", "Сжатие"),
+    (
+        "rebuild the file in place: the free pages that deleted rows left go back to the filesystem; the archive, the previews, the faces and the models are untouched. Free pages are left by “Remove from the index”, a reset of the index, tags and faces wiped after a file changed and deleted album rows",
+        "перестроить файл на месте: свободные страницы, оставшиеся от удалённых строк, вернутся файловой системе; архив, превью, лица и модели не трогаются. Свободные страницы оставляют «Убрать из индекса», сброс индекса, стёртые после изменения файла теги и лица и удалённые строки альбомов",
+    ),
+    ("the database is being rebuilt", "база данных перестраивается"),
+    (
+        "nothing to reclaim — under 1 MiB or under 5 % of the file is free. Free pages are left by “Remove from the index”, a reset of the index, tags and faces wiped after a file changed and deleted album rows",
+        "возвращать нечего — свободно меньше 1 МиБ или меньше 5 % файла. Свободные страницы оставляют «Убрать из индекса», сброс индекса, стёртые после изменения файла теги и лица и удалённые строки альбомов",
+    ),
+    (
+        "The file is rebuilt in place: the free pages that deleted rows left go back to the filesystem. The archive, the previews, the faces and the models are untouched. The app does not read the database while it runs, the pass cannot be stopped once started, and it needs free disk space of about the file's size. It takes seconds for tens of megabytes.",
+        "Файл перестраивается на месте: свободные страницы, оставшиеся от удалённых строк, возвращаются файловой системе. Архив, превью, лица и модели не трогаются. Пока идёт проход, приложение не читает базу; после начала проход нельзя остановить, и ему нужно свободное место примерно с сам файл. На десятках мегабайт это секунды.",
+    ),
+    (
+        "rebuilding the database file…",
+        "перестройка файла базы данных…",
+    ),
+    (
+        "the database is being compacted…",
+        "база данных сжимается…",
+    ),
+    (
+        "database compacted: {} → {}",
+        "база данных сжата: {} → {}",
+    ),
+    (
+        "the database is not compacted: {}",
+        "база данных не сжата: {}",
     ),
     (
         "photocat never writes into the archive folder: only DB rows and previews in the cache. \

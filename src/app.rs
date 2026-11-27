@@ -267,12 +267,14 @@ impl KindFilter {
     }
 }
 
-/// What is cleaned in "Storage": the preview cache, the face crops or the index rows.
+/// What is cleaned in "Storage": the preview cache, the face crops, the index rows, or the free
+/// pages of the database file itself (M26.8).
 #[derive(Clone, Copy, PartialEq)]
 enum StorageAction {
     Thumbs,
     Faces,
     Index,
+    Compact,
 }
 
 /// The calendar gradation: year, month, week and day. A double click goes one layer down,
@@ -697,7 +699,7 @@ const RADIUS_CARD: f32 = 8.0;
 const PATH_DATE_HINT: &str = "The field is literal: a case-insensitive part of the path or of the ISO date — “2024-05” finds May 2024, “vacation” finds a folder or a file with that word. A search by what is on the photo is in the top bar: “Semantic / By text”.";
 /// The hint of the state word in the status bar (M25.8): it names every pass the dot can report and
 /// says where their progress rows live.
-const PASS_HINT: &str = "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export or Integrity; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.";
+const PASS_HINT: &str = "The dot and the word name a running background pass: Indexing, CLIP, OCR, People, Trash, Export, Integrity or Compact; two or more of them show “N passes”. Their progress rows and the Stop button are in the top strip, under the search field. Nothing is sent anywhere.";
 /// The hint of the location row (M25.9): what the file knows and why half of the mock-up's row is
 /// absent. A place name is not in a photograph.
 const LOCATION_HINT: &str = "EXIF carries the coordinates only — a place name is not in the file. A name needs a reverse geocoder: the network is forbidden by §1 of AGENTS.md, and an offline data set is a new dependency and an ADR (docs/DECISIONS.md). The button copies the coordinates.";
@@ -2974,6 +2976,11 @@ struct App {
     /// The used space is counted on a button press, not on every frame.
     storage_usage: Option<storage::Usage>,
     storage_confirm: Option<StorageAction>,
+    /// The free pages inside the database file (M26.8): read once when "Storage" is opened and
+    /// after a cleanup or a compaction. `None` means it has not been read for this visit.
+    db_space: Option<db::DbSpace>,
+    compact_progress: Option<Arc<Progress>>,
+    compact_rx: Option<mpsc::Receiver<Result<db::Compaction>>>,
     status: String,
     /// The theme allowed for the last frame: the palette is rebuilt only when it changes
     /// (a setting or the OS theme), not on every frame.
@@ -3367,6 +3374,9 @@ impl App {
             picker_error: String::new(),
             storage_usage: None,
             storage_confirm: None,
+            db_space: None,
+            compact_progress: None,
+            compact_rx: None,
             status: String::new(),
             theme_key: None,
             scroll: Scroll::default(),
@@ -3376,6 +3386,11 @@ impl App {
     }
 
     fn reload(&mut self) {
+        // While the database is rebuilt the window must not read it (M26.8): `VACUUM` needs the
+        // file to itself. The pass reloads once at its end, so nothing is lost by waiting.
+        if self.compact_rx.is_some() {
+            return;
+        }
         let lang = self.settings.lang;
         self.textures.clear();
         self.missing.clear();
@@ -4898,12 +4913,17 @@ impl App {
                 },
             );
         });
-        self.settings_tab = tab;
+        if self.settings_tab != tab {
+            self.settings_tab = tab;
+            // The facts of the database file are read once per visit to "Storage" (M26.8).
+            self.db_space = None;
+        }
         if close
             || resp.backdrop_response.clicked()
             || ctx.input(|i| i.key_pressed(egui::Key::Escape))
         {
             self.settings_open = false;
+            self.db_space = None;
         }
     }
 
@@ -5337,6 +5357,14 @@ impl App {
                 ),
                 t(lang, "Reset the index"),
             ),
+            StorageAction::Compact => (
+                t(lang, "Compact the database?"),
+                t(
+                    lang,
+                    "The file is rebuilt in place: the free pages that deleted rows left go back to the filesystem. The archive, the previews, the faces and the models are untouched. The app does not read the database while it runs, the pass cannot be stopped once started, and it needs free disk space of about the file's size. It takes seconds for tens of megabytes.",
+                ),
+                t(lang, "Compact the database"),
+            ),
         };
         let mut confirmed = false;
         let mut cancel = false;
@@ -5352,6 +5380,7 @@ impl App {
                 let icon = match action {
                     StorageAction::Index => Icon::Delete,
                     StorageAction::Thumbs | StorageAction::Faces => Icon::Cleaning,
+                    StorageAction::Compact => Icon::Inventory,
                 };
                 let b = WordButton::primary(icon, button);
                 if ui.add(b).clicked() {
@@ -5370,16 +5399,26 @@ impl App {
         }
         if confirmed {
             self.storage_confirm = None;
+            if action == StorageAction::Compact {
+                // A rebuild of the file is a background pass (M26.8): the window stays live and
+                // the top strip shows its row.
+                self.start_compaction();
+                return;
+            }
             let res = match action {
                 StorageAction::Thumbs => storage::clear_thumbs(&self.db_path),
                 StorageAction::Faces => storage::clear_faces(&self.db_path),
                 StorageAction::Index => {
                     storage::reset_index(&self.db_path).map(|()| storage::Cleared::default())
                 }
+                StorageAction::Compact => unreachable!(),
             };
             match res {
                 Ok(c) => {
                     self.storage_usage = None;
+                    // The rows that left the database left free pages behind: the facts of the
+                    // compaction are read again the next time "Storage" is drawn (M26.8).
+                    self.db_space = None;
                     self.selected = None;
                     self.groups.clear();
                     self.reload();
@@ -5395,6 +5434,26 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Rebuild the database file in a background thread (M26.8). The pass cannot be stopped, so
+    /// its progress row has no "Stop"; the window reads nothing from the database until it ends.
+    fn start_compaction(&mut self) {
+        if self.compact_rx.is_some() {
+            return;
+        }
+        let lang = self.settings.lang;
+        let db_path = self.db_path.clone();
+        let progress = Arc::new(Progress::default());
+        progress.set_msg(t(lang, "rebuilding the database file…"));
+        self.compact_progress = Some(progress);
+        let (tx, rx) = mpsc::channel();
+        self.compact_rx = Some(rx);
+        self.storage_usage = None;
+        self.status = t(lang, "the database is being compacted…").into();
+        std::thread::spawn(move || {
+            let _ = tx.send(db::vacuum(&db_path));
+        });
     }
 
     /// The album dialog (M19): the name, the parent choice or the delete confirmation.
@@ -6793,6 +6852,8 @@ impl App {
         ui.add_space(8.0);
         if word_button(ui, Icon::Calculate, t(lang, "Compute the used space")).clicked() {
             self.storage_usage = Some(storage::usage(&self.db_path, &self.settings.models_dir));
+            // The same press refreshes the facts of the file itself (M26.8).
+            self.db_space = None;
         }
         if let Some(u) = &self.storage_usage {
             stat_row(ui, t(lang, "Database:"), &db::human_in(lang, u.db_bytes as i64));
@@ -6800,6 +6861,50 @@ impl App {
             stat_row(ui, t(lang, "Face crops:"), &db::human_in(lang, u.faces_bytes as i64));
             stat_row(ui, t(lang, "Models:"), &db::human_in(lang, u.models_bytes as i64));
             stat_row(ui, t(lang, "Whole cache:"), &db::human_in(lang, u.total_bytes as i64));
+        }
+        ui.add_space(8.0);
+        // M26.8: the free pages inside the file are the facts before the press — the button is
+        // disabled when there is nothing to reclaim, so it never pretends to do work.
+        if self.db_space.is_none() && self.compact_rx.is_none() {
+            self.db_space = db::db_space(&self.db_path).ok();
+        }
+        let space = self.db_space.unwrap_or_default();
+        let facts = if space.file_bytes == 0 {
+            t(lang, "the database is not created yet").to_string()
+        } else {
+            i18n::fill(
+                lang,
+                "{}, of which {} is free",
+                &[
+                    db::human_in(lang, space.file_bytes as i64),
+                    db::human_in(lang, space.free_bytes as i64),
+                ],
+            )
+        };
+        stat_row(ui, t(lang, "Database file:"), &facts);
+        let can_compact = space.worth_compacting() && self.compact_rx.is_none();
+        let hint = if can_compact {
+            t(
+                lang,
+                "rebuild the file in place: the free pages that deleted rows left go back to the filesystem; the archive, the previews, the faces and the models are untouched. Free pages are left by “Remove from the index”, a reset of the index, tags and faces wiped after a file changed and deleted album rows",
+            )
+        } else if self.compact_rx.is_some() {
+            t(lang, "the database is being rebuilt")
+        } else {
+            t(
+                lang,
+                "nothing to reclaim — under 1 MiB or under 5 % of the file is free. Free pages are left by “Remove from the index”, a reset of the index, tags and faces wiped after a file changed and deleted album rows",
+            )
+        };
+        if ui
+            .add_enabled(
+                can_compact,
+                WordButton::new(Icon::Inventory, t(lang, "Compact the database…")),
+            )
+            .on_hover_text(hint)
+            .clicked()
+        {
+            self.storage_confirm = Some(StorageAction::Compact);
         }
         ui.add_space(8.0);
         ui.label(
@@ -7050,6 +7155,9 @@ impl App {
         if self.integrity_rx.is_some() {
             out.push(t(lang, "Integrity"));
         }
+        if self.compact_rx.is_some() {
+            out.push(t(lang, "Compact"));
+        }
         out
     }
 
@@ -7263,6 +7371,11 @@ impl App {
                 p.cancel();
             }
         }
+        if let Some(p) = &self.compact_progress {
+            // `VACUUM` cannot be stopped once started (M26.8): the row has no "Stop" target and
+            // says so in the confirmation.
+            progress_row(ui, t(lang, "Compact"), p, false);
+        }
         self.verify_banner(ui);
     }
 
@@ -7350,7 +7463,7 @@ impl App {
         ui.painter()
             .hline(top.x_range(), top.top() + 0.5, egui::Stroke::new(1.0, th.border));
         // The state word (M25.8): a running pass names itself, two or more say "N passes", and the
-        // last status message stays while nothing runs. The hint lists the seven passes and points
+        // last status message stays while nothing runs. The hint lists the eight passes and points
         // at their progress rows in the top strip.
         let state = self.state_word(lang);
         let word = match &state {
@@ -14658,6 +14771,43 @@ impl eframe::App for App {
             }
         }
 
+        if let Some(rx) = &self.compact_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    self.compact_rx = None;
+                    self.compact_progress = None;
+                    match res {
+                        Ok(c) => {
+                            self.db_space = Some(c.after);
+                            self.status = i18n::fill(
+                                lang,
+                                "database compacted: {} → {}",
+                                &[
+                                    db::human_in(lang, c.before.file_bytes as i64),
+                                    db::human_in(lang, c.after.file_bytes as i64),
+                                ],
+                            );
+                            self.reload();
+                        }
+                        Err(e) => {
+                            self.status = i18n::fill(
+                                lang,
+                                "the database is not compacted: {}",
+                                &[e.to_string()],
+                            )
+                        }
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.compact_rx = None;
+                    self.compact_progress = None;
+                }
+            }
+        }
+
         if let Some(rx) = &self.search_rx {
             match rx.try_recv() {
                 Ok(res) => {
@@ -20003,6 +20153,8 @@ mod tests {
             "Compute the used space",
             "Cleaning the cache and the index",
             "Clear the previews…",
+            "Database file:",
+            "Compact the database…",
         ] {
             assert!(
                 storage.iter().any(|t| t == want),
@@ -20587,7 +20739,8 @@ mod tests {
         app.roots_focus = None;
     }
 
-    /// M21.5: the confirmation of cleaning the cache and the index is translated — all three variants.
+    /// M21.5: the confirmation of cleaning the cache and the index is translated — all four
+    /// variants, the compaction of the database file included (M26.8).
     #[test]
     fn english_translates_the_emptying_confirmation() {
         let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-storage-i18n.db"));
@@ -20597,6 +20750,11 @@ mod tests {
             (StorageAction::Thumbs, "Clear the previews?", "Clear the previews"),
             (StorageAction::Faces, "Clear the face crops?", "Clear the faces"),
             (StorageAction::Index, "Reset the index?", "Reset the index"),
+            (
+                StorageAction::Compact,
+                "Compact the database?",
+                "Compact the database",
+            ),
         ] {
             app.storage_confirm = Some(action);
             let texts = modal_frame(&mut app, &ctx, App::storage_modal);
@@ -20606,7 +20764,13 @@ mod tests {
                     "missing “{want}” in the cleanup confirmation: {texts:?}"
                 );
             }
-            for ru in ["Очистить превью?", "Очистить кропы лиц?", "Сбросить индекс?", "Отмена"] {
+            for ru in [
+                "Очистить превью?",
+                "Очистить кропы лиц?",
+                "Сбросить индекс?",
+                "Сжать базу данных?",
+                "Отмена",
+            ] {
                 assert!(
                     !texts.iter().any(|t| t == ru),
                     "the Russian label “{ru}” is left in the confirmation: {texts:?}"
@@ -20615,6 +20779,76 @@ mod tests {
             // The frame is read only: the confirmation is cleared, nothing is deleted.
             app.storage_confirm = None;
         }
+    }
+
+    /// M26.8: the storage pane shows the size of the database file and the free share before the
+    /// press; the button is live only when there is something to reclaim, and the confirmation
+    /// says what is rebuilt and what is untouched.
+    #[test]
+    fn the_storage_pane_offers_the_compaction_with_its_facts() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "photocat-compact-pane-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let c = db::open(&path).unwrap();
+            c.execute_batch("CREATE TABLE junk(id INTEGER PRIMARY KEY, data BLOB)")
+                .unwrap();
+            for i in 0..64u8 {
+                c.execute(
+                    "INSERT INTO junk(id, data) VALUES (?1, ?2)",
+                    rusqlite::params![i as i64, vec![i; 64 * 1024]],
+                )
+                .unwrap();
+            }
+            c.execute("DELETE FROM junk WHERE id % 2 = 0", []).unwrap();
+            c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        }
+        let mut app = App::new(path.clone());
+        app.settings.lang = i18n::Lang::En;
+        app.db_space = None;
+        let ctx = egui::Context::default();
+        let texts = settings_frame(&mut app, &ctx, SettingsTab::Storage);
+        for want in ["Database file:", "Compact the database…"] {
+            assert!(
+                texts.iter().any(|t| t == want),
+                "missing “{want}” in the storage pane: {texts:?}"
+            );
+        }
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("of which") && t.contains("is free")),
+            "the pane does not name the free share: {texts:?}"
+        );
+        let space = app.db_space.expect("the pane read the file's facts");
+        assert!(
+            space.worth_compacting(),
+            "the compaction is offered with nothing to reclaim: {space:?}"
+        );
+
+        // The confirmation says what is rebuilt, what is untouched and that it cannot be stopped.
+        app.storage_confirm = Some(StorageAction::Compact);
+        let modal = modal_frame(&mut app, &ctx, App::storage_modal);
+        assert!(
+            modal.iter().any(|t| t.contains("cannot be stopped")),
+            "the confirmation does not promise a stoppable pass: {modal:?}"
+        );
+        app.storage_confirm = None;
+
+        // After the pass the button has nothing to do: a second press is a no-op.
+        db::vacuum(&path).unwrap();
+        app.db_space = None;
+        settings_frame(&mut app, &ctx, SettingsTab::Storage);
+        let space = app.db_space.expect("the pane read the file's facts again");
+        assert!(
+            !space.worth_compacting(),
+            "the compaction is still offered after the pass: {space:?}"
+        );
     }
 
     #[test]

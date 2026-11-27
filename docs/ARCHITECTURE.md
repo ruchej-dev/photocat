@@ -160,6 +160,17 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
   moment of the computation. If `files.sha256` changes, the trigger
   `invalidate_clip_after_sha_change` deletes the vectors and CLIP tags of that file; other tags are
   untouched.
+- **The file does not shrink by itself (M26.8).** Rows that leave the database — a catalog removed
+  from the index, the index reset, tags and faces wiped after a file changed, deleted album rows —
+  leave their pages in SQLite's freelist; the file keeps its size. `Settings → Storage` shows the
+  facts (`db::db_space`: the file's bytes and `freelist_count × page_size`) and offers
+  `db::vacuum`, which is SQLite's `VACUUM`: a fresh file in place, every row moved in, the free
+  pages given back to the filesystem. It is live only while at least 1 MiB **and** 5 % of the file
+  is free (`DbSpace::worth_compacting`), so a second press is a no-op. The pass runs off the UI
+  thread with a "Compact" progress row that has no "Stop" — `VACUUM` cannot be interrupted — and
+  `App::reload` waits for it, so the window reads nothing while the file is rebuilt. The archive,
+  the previews, the faces and the models are untouched; it needs free disk space of about the
+  file's size and takes seconds for tens of megabytes.
 - `tags.score`: the cosine "photo ↔ prompt". One weight is stored per enabled dictionary tag; only
   the first tag is considered confident, if it is ≥ 0.22 (`settings.tag_show`) and leads the second
   by 0.01 (`settings.tag_margin`, `embed::confident_tag`). This is about the card, OCR and `{tag}` in
@@ -609,6 +620,7 @@ not with a different labelled set.
 
 | 2026-11-27 | the real DB, 2232 files, 1240×840 headless frames (M26.6) | the grid's scroll frames, 160 of them (`PHOTOCAT_BENCH_DB=<db> cargo test --release -- --ignored grid_scroll_measurement`) | p50 5.51 ms (182 fps), p95 5.64, p99 5.70 — against the 5.72 ms of M25.10, so the ribbon's rows are not paid for: the row is measured before it is drawn, and each measuring pass (`ribbon_title_width`, `ribbon_controls_width` twice) lays a dozen widgets out on an invisible ui that paints nothing |
 | 2026-11-27 | the real DB, 2232 files, 1240×840 headless frames (M26.7) | the grid's scroll frames, 160 of them, with the catalog pill in place of the path field and its two buttons (`… --ignored grid_scroll_measurement`), and the left panel's budget (`… --ignored panel_years_measurement --nocapture`) | p50 5.73 ms (175 fps), p95 6.16, p99 7.27 — inside the 5.51–5.72 ms of M26.6/M25.10, so the pill costs the grid nothing: it lays out two text lines and reads facts collected on `reload`, not on every frame. The pinned part now ends at 627 px (the threshold at y 588, the "Tags" heading at 652.5) — 33 px less than M25.6's 621 / 685.5, because one 40 px pill took the room of a field and two buttons; at the owner's 1021 px window the years land at 908 px instead of 941 |
+| 2026-11-27 | a copy of the real DB in `/tmp`, 2234 files, 31 206 tags, 2498 faces, 435 OCR rows (M26.8) | `db::db_space` then `db::vacuum`, release (`PHOTOCAT_BENCH_DB=<copy> cargo test --release -- --ignored a_real_database_gives_its_free_pages_back --nocapture`) | 29.4 MiB → 25.9 MiB (30 793 728 → 27 140 096 B): 3.0 MiB of free pages (774 of 7518) given back in 0.086 s; `freelist_count` 0 afterwards, the rows intact — 2234 files, 31 206 tags, 2498 faces, 435 OCR rows, 2 albums, `PRAGMA integrity_check` ok; a second call reports the same numbers twice and touches nothing |
 Rule: numbers without a corpus and a date do not enter the table.
 
 ## Long passes: cancel and resume
