@@ -1444,3 +1444,108 @@ of the outside of the window only. A screenshot of the app must not depend on a 
 **Forbids:** pulling the logo into a widget, a background or a decal (that would be the first image in
 the interface, and the scaling tests of `docs/UI.md` would stop meaning anything); an SVG- or
 font-based mark that needs a new renderer; a network fetch for the icon.
+## 0053. The workspace: six crates and a module budget, so that no file is the program (proposed)
+
+**Status: proposed for the owner (M27, 2026-11-27).** No code is moved yet. This is the target the
+tasks of M27 walk to, and the reason each of them exists.
+
+**The facts (measured 2026-11-27).** `src/` is 51 859 lines in 17 files. `app.rs` alone is 28 650 —
+18 309 of production and 10 344 of tests; the `impl eframe::App for App` block is 13 279 lines with a
+single `ui()` of 2 955 lines inside it, `impl App` another 9 025 with `index_roots` at 860 and
+`viewer_modal` at 859. `db.rs` 4 753, `i18n.rs` 2 594, `embed.rs` 2 386, `main.rs` 2 179 (17
+subcommands in one `match`), `organize.rs` 2 005, `player.rs` 1 808, `faces.rs` 1 613, `verify.rs`
+1 428. A reader looking for the duplicates screen scrolls through the whole file to find it, and the
+compiler cannot say a word about the layer map: today it is a `grep` in `check.sh`.
+
+**Decision.** Two moves, in that order.
+
+1. **Modules first.** Every god file becomes a folder of files that each own one thing: one screen,
+   one pass, one dialogue, one report. `app.rs` → `ui/` with `theme`, `icon`, `widgets`, `text`,
+   `frame`, `shell/`, `screens/`, `dialogs/`, `actions/`; `main.rs` → `cli/` with one file per
+   subcommand and one `report.rs`; `db.rs` → `db/` by subject with `schema.rs` alone; the L2 modules
+   the same way (`organize/{plan,apply,export}`, `player/{demux,decode,audio,present}`,
+   `embed/{model,download,tags,search,kmeans}`, `faces/{detect,align,embed,clusters,matches}`).
+2. **Crates second,** once the files are the right size, so that the layer map is a compile error and
+   not a convention:
+
+   | Crate | Holds | May depend on |
+   |---|---|---|
+   | `photocat-core` | `derive`, `tools`, `i18n` | nothing of ours |
+   | `photocat-data` | `db`, `storage` | core |
+   | `photocat-engine` | `index`, `dupes`, `organize`, `verify`, `eval` | core, data |
+   | `photocat-ml` | `embed`, `faces`, `ocr` | core, data (`ort`, `tokenizers` live here alone) |
+   | `photocat-player` | `player` | core (the `rff-*` decoders and `cpal` live here alone) |
+   | `photocat-ui` | `ui/**` | every crate below, `egui`/`eframe` |
+   | `photocat-cli` | `cli/**` | every crate below, no `egui` |
+   | `photocat` | `main.rs`: the binary that wires the CLI and the GUI | all |
+
+**A module budget, enforced like `PENDING`.** A file of production code holds at most 700 lines, an
+`impl` block 800, a function 200; a module owns one screen or one pass, never two unrelated ones.
+`check.sh` counts the lines and keeps a `BUDGET_EXEMPT` list of today's offenders with their numbers;
+the list only shrinks, and an entry whose file is now under the budget fails the check — the same
+mechanism `tests/source_language.rs` already uses for Russian. The budget is a limit, not a style:
+it is what stops the next 28 000-line file from appearing one screen at a time.
+
+**Why crates and not only modules.** The layer map, the "core knows nothing about egui" rule and the
+"no second HTTP client" rule are checked today by matching text in `check.sh`; a crate boundary makes
+them the compiler's business (`use photocat_ui` simply does not exist in `photocat-data`). It also
+cuts the edit-compile loop: a change in a screen no longer recompiles the CLIP model, the player and
+the DB layer, and the heavy dependency trees (`ort`, `rff-*`) sit in their own crates and are built
+once.
+
+**What it costs and what we would do without it.** The move touches every path in the repository,
+breaks `plan/` references and the skill's table, and moves tests away from the code they test (the
+frame harness `window_frame`/`dialog_parts` moves into `ui/tests/`). Cargo builds a workspace in
+parallel, so the total build time should not grow; the numbers are measured in M27.8 and written to
+`docs/ARCHITECTURE.md`. Without it the program stays one crate with a 28 650-line file, and the
+rules stay greppable conventions that a tired evening can ignore.
+
+**Forbids:** a crate that depends on a higher one (no exceptions, no `dev-dependency` loophole);
+a `utils`/`common`/`misc` crate; a module that owns two screens; a new file over the budget; an
+exemption that grows; a "big bang" rewrite — every step keeps `cargo test`, `clippy`, `check.sh`,
+`source_language` and the GUI smoke green, and the behaviour identical (the tests are not touched
+beyond their `use` lines).
+
+## 0054. Product builds: one script per system, a `.deb` assembled without `dpkg`, a PKGBUILD, a zip, a bundle (proposed)
+
+**Status: proposed for the owner (M28, 2026-11-27).** Today the product is built by hand: a release
+binary from `cargo build --release`, and the Windows folder assembled once by hand with `cargo xwin`
+(ADR 0050) into `~/rdp-share/photocat`. The repository holds no recipe for either, and no recipe at
+all for Linux packages or for macOS.
+
+**Decision.** Four recipes, one entry point, and a document that says what each one needs:
+
+| System | What comes out | How |
+|---|---|---|
+| Linux | `photocat_<version>_<arch>.deb` and an installed tree for Arch | `.deb` assembled by a script from `tar` + `ar` (no `dpkg` on an Arch host); Arch gets a `PKGBUILD` that does `make`-equivalent via `cargo build --release --frozen` |
+| Windows | `photocat-<version>-windows-x64.zip`: `photocat.exe`, the four VC++ runtime DLLs, `DirectML.dll`, `NOTICE`, a launcher that sets `PHOTOCAT_CACHE` | `cargo xwin build --release` on the Linux machine (ADR 0050) |
+| macOS | `photocat-<version>.dmg` with `photocat.app` inside | `cargo build --release` + `iconutil`/`sips` + `Info.plist`, **on a Mac** — no cross-compilation is promised |
+| any | the same three file names from one command | `scripts/build-product.sh --target linux|windows|macos` |
+
+**Why a `.deb` by hand instead of `cargo-deb`.** A `.deb` is `debian-binary`, `control.tar.gz`,
+`data.tar.gz` in an `ar` archive — thirty lines of a script and no new toolchain on the build machine.
+`cargo-deb` would add a build dependency to be downloaded, and `dpkg-deb` is not installed on Arch
+(the machine the owner builds on). The script's own check unpacks what it wrote, so a malformed
+package fails there and not on the user's machine.
+
+**Why a `PKGBUILD` and not just a tarball.** Arch is the owner's system: a `PKGBUILD` gives
+`makepkg -si` an install, a `.desktop` file, the icons in `/usr/share/icons/hicolor/<size>/apps` and
+a package that `pacman -R` can remove cleanly. It builds from the same source tree with
+`--frozen`, so the network is not touched during the build.
+
+**What every package carries.** The binary; `LICENSE`, `NOTICE` (Apache-2.0, and the assets line of
+ADR 0052); the `.desktop` entry with `Icon=photocat`; the icons `32/64/128/256` from `assets/`
+(ADR 0052 — on Wayland the window icon comes from this file, not from the client); a man page for the
+CLI; and no models, no `ffmpeg`, no `tesseract` — those are downloaded or installed by the owner
+(ADR 0047), and `doctor` says so.
+
+**What it costs and what we would do without it.** Three scripts, one `PKGBUILD`, one man page, one
+`.desktop`, one document — and a macOS recipe that cannot be run here, so it is written and left to
+the first person with a Mac. Without it every release is a hand-assembled folder: fine for the owner
+who built it, unusable for anyone else, and a way to ship a binary without its `NOTICE`.
+
+**Forbids:** a package that bundles model weights; a build step that downloads on its own (a
+`pkgver()` that hits the network is fine only where makepkg expects it); two spellings of the version
+(it is read from `Cargo.toml`); an install path outside the system prefix (`/usr/bin/photocat`,
+`/usr/share/…/photocat`, `~/.cache/photocat` at runtime); a macOS recipe that claims to work from
+Linux.

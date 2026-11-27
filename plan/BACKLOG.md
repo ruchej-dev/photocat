@@ -2769,3 +2769,301 @@ numbers in `plan/STATUS.md` when a measurement changes.
 
 **Files.** `src/app.rs`, `src/db.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`, `plan/`.
+---
+
+## M27 — the architecture: modules that can be found, then crates that hold the line (planned 2026-11-27)
+
+**Goal.** `src/` stops being one crate with a 28 650-line file. Every file owns one thing — a screen, a
+pass, a dialogue, a report — and the layer map becomes a compile error instead of a `grep` in
+`check.sh`. ADR 0053 holds the target and the numbers it was measured from.
+
+**Source.** The owner's message of 2026-11-27: "рефактор приложения архитектурно. Не должно быть
+божественных модулей и больших файлов. Декомпозировать модули. Использовать архитектурные решения.
+Если надо делать крейты."
+
+**The numbers the milestone starts from (2026-11-27).** `src/` 51 859 lines in 17 files; `app.rs`
+28 650 (18 309 production + 10 344 tests), `impl eframe::App for App` 13 279 with one `ui()` of
+2 955 lines, `impl App` 9 025 with `index_roots` 860 and `viewer_modal` 859; `db.rs` 4 753, `i18n.rs`
+2 594, `embed.rs` 2 386, `main.rs` 2 179 (17 subcommands in one `match`), `organize.rs` 2 005,
+`player.rs` 1 808, `faces.rs` 1 613, `verify.rs` 1 428.
+
+**Order.** Modules first (M27.1–M27.6), crates second (M27.7), the closing measurement last (M27.8).
+Every step is a change that compiles, passes the tests and draws the same window: no step rewrites a
+feature, and the test bodies are not touched beyond their `use` lines.
+
+**M27.1 — the inventory, the module budget and the map.**
+**Goal.** Agree on the target before moving code: the crate map, the module tree, the budget and a
+check that counts.
+**Acceptance criteria.**
+1. `docs/ARCHITECTURE.md` gains § "Modules and crates": the table of ADR 0053, the module tree of
+   `ui/`, `cli/`, `db/` and the L2 folders, and the numbers above.
+2. The budget is written down as a rule: production code ≤ 700 lines per file, ≤ 800 per `impl`
+   block, ≤ 200 per function; a module = one screen or one pass.
+3. `check.sh` counts and prints the offenders, and keeps them in a `BUDGET_EXEMPT` list with their
+   current line counts — the list only shrinks, and an entry whose file is now under the budget fails
+   the check (the `PENDING` mechanism of `tests/source_language.rs`).
+4. `AGENTS.md` §3 names the budget next to the layer table, and the `enforce-architecture` skill says
+   how to check it.
+**Files.** `docs/ARCHITECTURE.md` + `.ru.md`, `AGENTS.md` + `.ru.md`,
+`.pi/skills/enforce-architecture/**`, `plan/STATUS.md`.
+
+**M27.2 — `main.rs` becomes `cli/`: one file per subcommand.**
+**Goal.** A subcommand is found by its name, in its own file.
+**Acceptance criteria.**
+1. `src/main.rs` keeps the parsing (`Args`, the dispatch) and nothing else; every subcommand moves to
+   `src/cli/<name>.rs` with its own `run(…)`, and the report sentences that use `i18n::fill` go to
+   `src/cli/report.rs`.
+2. `play` moves with the player, not with the reports: it is the headless entry of the same code.
+3. No file in `cli/` exceeds the budget; `main.rs` itself under 300 lines.
+4. `photocat --help`, every subcommand's output and every exit code are byte-identical before and
+   after: the check is a saved dump of `--help` and of each command's empty-archive output.
+**Files.** `src/main.rs` → `src/cli/**`, `src/i18n.rs` (nothing new), `plan/STATUS.md`.
+
+**M27.3 — `db.rs` becomes `db/` by subject, the schema in one place.**
+**Goal.** `open`/`init`/the schema are read in one file; a query is found by its subject.
+**Acceptance criteria.**
+1. `src/db/` with `schema.rs` (the `CREATE TABLE`/`ALTER` statements, `SCHEMA_VERSION`, `init`,
+   `open`), `settings.rs`, `files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs`.
+2. The schema statements live in `schema.rs` only; a table's `INSERT`/`SELECT` live in its subject
+   file; `settings` and `user_tags` keep their rules (rebuild never loses them).
+3. No file over the budget; `db/mod.rs` holds the re-exports and the connection type only.
+4. The upgrade path is unchanged: a copy of the real 2230-file DB opens at schema 10 with no write,
+   and `db::open` still writes nothing while the version matches — proven by the existing tests plus
+   a saved `sqlite3 .schema` dump that is identical before and after.
+**Files.** `src/db.rs` → `src/db/**`, `docs/ARCHITECTURE.md` § DB schema (paths only).
+
+**M27.4 — `i18n.rs` becomes `i18n/`: the table split by area, one test for the whole table.**
+**Goal.** 2 594 lines of pairs stop being one wall: the words of a screen are next to the screen's
+name in the index, and a missing translation is found by a test, not by a user.
+**Acceptance criteria.**
+1. `src/i18n/` with `lang.rs` (`Lang`, `t`, `fill`, `count`, `ensure_lang`), `table.rs` (the ordered
+   list of the area tables), `terms/` with one file per area (`shell`, `grid`, `inspector`, `dupes`,
+   `faces`, `albums`, `calendar`, `settings`, `reports`, `dialogs`).
+2. `t()` keeps one signature and one lookup; the table is still a `&[(&str, &str)]` and the tests that
+   check the Russian column still pass unchanged.
+3. A new test fails on a duplicate source string across the area tables and on an empty translation.
+4. Every string in the window is still translated: a headless frame of three screens in both
+   languages prints the same words as before the move.
+**Files.** `src/i18n.rs` → `src/i18n/**`, `plan/I18N.md` (the paths of the table), `AGENTS.md` §6.
+
+**M27.5 — the L2 modules become folders: `organize/`, `player/`, `embed/`, `faces/`, `verify/`.**
+**Goal.** Each pass is read in pieces: a plan, an apply, a decode, a download — not one 2 000-line
+file.
+**Acceptance criteria.**
+1. `organize/` → `plan`, `apply`, `export`; `player/` → `demux`, `decode`, `audio`, `present`;
+   `embed/` → `model`, `download`, `tags`, `search`, `kmeans`; `faces/` → `detect`, `align`, `embed`,
+   `clusters`, `matches`; `verify/` → `compare`, `manifest`.
+2. The public surface of each module does not change for its callers (`main.rs`, `app.rs`): the moves
+   are `pub use` re-exports, and no call site is rewritten in this task.
+3. The archive stays untouched and the rules of `check.sh` stay green: no `remove_file`, no `rename`,
+   one HTTP client in `embed/download`.
+4. The passes measure the same on the corpus as before the move (a spot check: `dupes` group count,
+   `organize` dry-run plan, `play --decode-only` fps on the same file).
+**Files.** `src/organize.rs`, `src/player.rs`, `src/embed.rs`, `src/faces.rs`, `src/verify.rs` →
+folders, `docs/ARCHITECTURE.md` (the paths in the flow sections).
+
+**M27.6 — `app.rs` becomes `ui/`: a screen per file (six steps, one per pair of screens).**
+**Goal.** The god file of the program is gone: the top strip, the left panel, the grid, the card, the
+viewer, the dialogs, the settings and each screen are found by their names.
+**Acceptance criteria.**
+1. `src/ui/` with `theme.rs` (palette, spacing, radii, the scroll profile, `dim`, `apply_theme`),
+   `icon.rs` (the drawn geometry: `Icon`, `paint_icon`, `WordButton`, the button helpers),
+   `widgets.rs` (chip, tile, card, pill, switch, slider row, banner, empty state),
+   `text.rs` (`t` wrappers, caps headings, mono numbers), `frame.rs` (metrics, breakpoints, the
+   `Cells` borrow pattern), `app.rs` (`App`, the state, `eframe::App` as a router of one call per
+   screen), `shell/` (`top_strip`, `left_panel`, `ribbon`, `status_bar`, `selection_bar`),
+   `screens/` (`grid`, `cards` — `draw_cell`/`draw_list`/the album and face cells, `inspector`,
+   `dupes`, `faces`, `albums`, `calendar`, `trash`, `integrity`, `viewer`), `dialogs/` (`settings/*`,
+   `roots`, `export`, `album`, `limited`), `actions/` (`reload`, `index_roots`, `save_settings`, the
+   pass pump).
+2. The six moves are separate commits inside the task, in this order: widgets/theme/icons (no
+   screen touched), shell, grid + cards, inspector + viewer, the screens, the dialogs + settings.
+   After each move the window is identical: the frame tests (`window_frame`, `dialog_parts`) pass
+   without edits and the y-metrics of `docs/UI.md` are unchanged.
+3. `app.rs` ends under the budget and no `screens/*.rs` exceeds it; the `impl eframe::App` block is a
+   router of about 50 lines.
+4. The tests move next to what they check: the harness (`window_frame`, `dialog_parts`,
+   `strict_overlap`, the frame helpers) into `ui/tests/`, and each screen's tests into its own file;
+   the test count is identical (364 + 3 at the start of the task).
+**Files.** `src/app.rs` → `src/ui/**`, `docs/UI.md` (the "where it lives" column), `plan/STATUS.md`.
+
+**M27.7 — the workspace: seven crates that make the layer map a compile error.**
+**Goal.** The rules of `AGENTS.md` §3 stop being conventions: a crate cannot see what it must not.
+**Acceptance criteria.**
+1. `Cargo.toml` becomes a virtual workspace manifest; `crates/photocat-{core,data,engine,ml,player,
+   ui,cli}` and `crates/photocat` (the binary) exist with the dependencies of ADR 0053's table —
+   nothing more, nothing less.
+2. `cargo build --release` produces one binary with the same behaviour; `cargo tree -e normal` shows
+   no upward edge; `ort`/`tokenizers` appear only in `photocat-ml`, `rff-*`/`cpal` only in
+   `photocat-player`, `egui`/`eframe` only in `photocat-ui`.
+3. `check.sh` shrinks to what the compiler cannot see: the archive rules (no `remove_file`, no
+   `rename`), the one HTTP client and its modules, the English rule, the budget, and the
+   dependency-in-DECISIONS rule. The layer and `egui` checks become "the crate cannot" and are
+   replaced by a `cargo tree` assertion.
+4. `tests/source_language.rs` walks `crates/*/src` instead of `src/`, and keeps failing on the same
+   things.
+5. The Windows build of ADR 0050 still links: `cargo xwin build --release` for
+   `x86_64-pc-windows-msvc` produces the exe of the same size (±2 %).
+**Files.** `Cargo.toml`, `crates/**`, `tests/source_language.rs`, `check.sh`, `AGENTS.md` §3 +
+`.ru.md`, `docs/ARCHITECTURE.md`, `.pi/skills/enforce-architecture/**`.
+
+**M27.8 — the closing measurement and the documents that stop lying.**
+**Goal.** The numbers of the milestone are in the record, and no document names a file that moved.
+**Acceptance criteria.**
+1. `docs/ARCHITECTURE.md` § "Measurements" gains a dated row: lines per file (before/after), the
+   biggest file, the crate count, `cargo build --release` from scratch and incremental
+   (`touch crates/photocat-ui/src/screens/grid.rs`), `cargo test` wall time, and the counts of
+   `check.sh`.
+2. `AGENTS.md` §3 table, `plan/I18N.md`, `docs/UI.md`, `docs/DECISIONS.md` cross-references and the
+   four skills name the new paths; a `grep -rn "src/app.rs" docs/ plan/ AGENTS.md` finds nothing.
+3. `plan/STATUS.md` closes M27 with the numbers; the `BUDGET_EXEMPT` list is empty or holds only the
+   files the owner agreed to leave.
+**Files.** `docs/ARCHITECTURE.md` + `.ru.md`, `plan/STATUS.md` + `.ru.md`, `plan/I18N.md`,
+`AGENTS.md` + `.ru.md`, `.pi/skills/**`.
+
+**Not doing.** A behaviour change of any kind (no screen is redesigned while it moves); a rename of
+the public vocabulary (`App`, `FileRow`, `Settings`, `View`); an async runtime; a plugin system; a
+`utils` crate; rewriting the tests to a new framework; moving the CLI to `clap` (the hand-written
+parser stays, it is not what hurts).
+
+**Checks for every task of M27.** `cargo test`, `cargo clippy --all-targets`,
+`cargo test --test source_language`, `bash .pi/skills/enforce-architecture/scripts/check.sh`,
+`rust-analyzer diagnostics .`, a headless frame of the changed screen at 1240×840 and 700×600, the
+test count unchanged, and the numbers in `plan/STATUS.md`.
+
+**Files.** `Cargo.toml`, `src/**` → `crates/**`, `tests/`, `check.sh`, `docs/ARCHITECTURE.md`,
+`docs/UI.md`, `AGENTS.md`, `.pi/skills/**`, `plan/`.
+
+---
+
+## M28 — product builds: Linux, Windows, macOS, and packages that install (planned 2026-11-27)
+
+**Goal.** The product leaves the machine of its author. One command per system produces the artefact
+a person can install: a `.deb` on Debian/Ubuntu, a `PKGBUILD` on Arch, a zip on Windows, a `.dmg` on
+macOS — each with the licence, the `NOTICE`, the `.desktop` entry, the icons and a man page. ADR 0054
+holds the decision.
+
+**Source.** The owner's message of 2026-11-27: "Добавить сценарии для сборки продукта под linux,
+windows, mac os. Для linux deb пакеты и для archlinux."
+
+**What exists today.** A release binary from `cargo build --release`; the Windows folder assembled
+once by hand with `cargo xwin` (ADR 0050) in `~/rdp-share/photocat`; no `scripts/` directory, no
+`packaging/`, no `.desktop`, no man page, no macOS recipe. The icons for all of it were added in
+M26.19 (`assets/photocat-icon-{32,64,128,256}.png`).
+
+**M28.1 — the skeleton: `packaging/`, `docs/BUILD.md`, the version from `Cargo.toml`.**
+**Goal.** One place where a package lives, and one document that names what each system needs.
+**Acceptance criteria.**
+1. `packaging/` holds `photocat.desktop` (`Icon=photocat`, `Exec=photocat gui`,
+   `Categories=Graphics;Photography;Viewer;`, `MimeType=image/*;video/*;`), `photocat.1` (the man
+   page of the CLI, the 17 subcommands of `--help`), and the shared metadata
+   (`packaging/common.sh`: the version read from `Cargo.toml`, the arch names, the staging tree).
+2. `docs/BUILD.md` (+ `.ru.md`) states the matrix: what builds where, which tool each recipe needs
+   (`cargo`, `tar`, `ar`, `makepkg`, `cargo xwin`, `iconutil`/`sips`), and what is deliberately not
+   bundled (models, `ffmpeg`, `tesseract` — ADR 0047).
+3. The staging tree of a package is reproducible: the same source makes the same list of files, and
+   the list is printed by the script.
+**Files.** `packaging/**`, `docs/BUILD.md` + `.ru.md`, `README.md` + `.ru.md` (a "Build a package"
+line), `CHANGELOG.md` + `CHANGELOG.ru.md`.
+
+**M28.2 — Linux: `photocat_<version>_<arch>.deb`, assembled without `dpkg`.**
+**Goal.** `sudo dpkg -i` / `sudo apt install ./photocat_….deb` works on a clean Debian/Ubuntu.
+**Acceptance criteria.**
+1. `scripts/package-deb.sh` builds the archive from `debian-binary` + `control.tar.gz` +
+   `data.tar.gz` with `ar` and `tar` only; the version and architecture come from `common.sh`; the
+   control file carries `Depends:` on nothing (the binary is static enough) and `Recommends: ffmpeg,
+   tesseract-ocr`.
+2. The payload: `/usr/bin/photocat`, `/usr/share/applications/photocat.desktop`,
+   `/usr/share/icons/hicolor/{32x32,64x64,128x128,256x256}/apps/photocat.png`,
+   `/usr/share/man/man1/photocat.1.gz`, `/usr/share/doc/photocat/{LICENSE,NOTICE,CHANGELOG.md}`.
+3. The script verifies its own output: `ar t` lists exactly three members, the data tree is
+   unpacked to a temporary directory and compared against the expected list; a missing file fails
+   the build.
+4. Installed on a clean container or VM: `photocat --version`, `photocat doctor` and `photocat gui`
+   open from the application menu with the icon; `dpkg -r photocat` removes everything it installed
+   and touches no cache.
+**Files.** `scripts/package-deb.sh`, `packaging/**`, `docs/BUILD.md`.
+
+**M28.3 — Arch Linux: a `PKGBUILD` that builds from the source tree.**
+**Goal.** `makepkg -si` on the owner's machine installs photocat as a package, and `pacman -R` takes
+it away.
+**Acceptance criteria.**
+1. `packaging/arch/PKGBUILD`: `pkgname=photocat`, `pkgver` from `Cargo.toml`,
+   `arch=('x86_64' 'aarch64')`, `license=('Apache-2.0')`, `depends=()` (no hard dependency),
+   `optdepends=('ffmpeg' 'tesseract' 'tesseract-data-rus' 'tesseract-data-eng')`,
+   `makedepends=('cargo' 'rust')`; `build()` runs `cargo build --release --frozen`;
+   `package()` installs the same payload as the `.deb` plus `gtk-update-icon-cache` hooks in
+   `photocat.install`.
+2. The build is `--frozen` (the network is not read) and uses the workspace of M27 as it stands.
+3. On a fresh clone: `makepkg -si` succeeds, `pacman -Ql photocat` lists the expected files,
+   `photocat gui` starts from the menu, `pacman -Rns photocat` removes the package and leaves
+   `~/.cache/photocat` alone.
+4. A `--nocheck` note in `docs/BUILD.md` says what the tests would need (a corpus, models) and why
+   the package does not run them.
+**Files.** `packaging/arch/{PKGBUILD,photocat.install}`, `docs/BUILD.md`.
+
+**M28.4 — Windows: a zip with the exe, its runtime, its icon and its launcher.**
+**Goal.** The folder of ADR 0050 becomes a file that people can download, unpack and run.
+**Acceptance criteria.**
+1. `scripts/package-windows.sh` runs `cargo xwin build --release` for `x86_64-pc-windows-msvc` and
+   assembles `photocat-<version>-windows-x64/`: `photocat.exe`, the four VC++ runtime DLLs, their
+   licence, `DirectML.dll`, `LICENSE`, `NOTICE`, `README.txt` (two lines: how to start, where the data
+   goes), `photocat-start.cmd` (sets `PHOTOCAT_CACHE=%~dp0data` and runs the exe — ADR 0050), and
+   `photocat.ico` built from `assets/photocat-icon-256.png` (`256/128/64/48/32/16`), with the icon
+   linked into the exe through a `packaging/windows/photocat.rc` + `winres`/`embed-resource`
+   (a build-time dependency, recorded in ADR 0053/0054's dependency rows).
+2. The zip's contents are listed and hashed by the script (`sha256sum` next to it), and the folder is
+   proven to run under Wine on the Linux machine: `photocat --version` prints the version.
+3. `DirectML.dll` and the runtime DLLs come from the paths recorded in ADR 0050, checked by the
+   script; a missing one fails the build instead of shipping a broken folder.
+**Files.** `scripts/package-windows.sh`, `packaging/windows/**`, `docs/BUILD.md`, `.gitignore` (the
+build tree is not committed).
+
+**M28.5 — macOS: a `photocat.app` bundle and a `.dmg`, built on a Mac.**
+**Goal.** On a Mac, `open photocat.app` starts the program with the mark in the dock.
+**Acceptance criteria.**
+1. `scripts/package-macos.sh` builds `cargo build --release` for the host arch (and `--target
+   aarch64-apple-darwin` / `x86_64-apple-darwin` for the other), makes `photocat.app/Contents/
+   {MacOS/photocat,Resources/photocat.icns,Info.plist}` and packs it into `photocat-<version>-<arch>.dmg`
+   with `hdiutil`.
+2. `Info.plist` carries `CFBundleName`, `CFBundleIdentifier=dev.ruchej.photocat`,
+   `CFBundleShortVersionString` from `Cargo.toml`, `LSMinimumSystemVersion`, `NSHighResolutionCapable`,
+   `CFBundleDocumentTypes` for `public.image`/`public.movie`, and `CFBundleIconFile=photocat.icns`.
+3. `photocat.icns` is made by the script from `assets/photocat-icon-*` with `iconutil` (a `.iconset`
+   with 16…512 @1x/@2x — the 16 px slot is generated from the 32 px file; `assets/README.md` says why
+   a true 16 px file does not exist yet).
+4. The script refuses to run on a non-macOS host with a one-line message, and `docs/BUILD.md` says
+   plainly that this recipe is written and untested here until a Mac is available. The owner's
+   acceptance is a first successful run on a Mac.
+**Files.** `scripts/package-macos.sh`, `packaging/macos/Info.plist`, `docs/BUILD.md`.
+
+**M28.6 — one entry point and the release notes.**
+**Goal.** `scripts/build-product.sh --target linux|windows|macos` is the only command a release needs.
+**Acceptance criteria.**
+1. The script runs the checks first (`cargo test`, `source_language`, `check.sh`), then the build for
+   the target, then the packager; `--out DIR` collects the artefacts with stable names; `--skip-tests`
+   exists and says in the output that it skipped them.
+2. A `scripts/product-version.sh` (or a function in `common.sh`) is the one place the version is read;
+   the `.deb`, the `PKGBUILD`, the zip, the `.app` and `photocat --version` all print the same string.
+3. `docs/BUILD.md` has the matrix table with the exact command per system, what each artefact is
+   called, and where the first run's data goes on that system.
+4. One line per artefact in `CHANGELOG.md` + `CHANGELOG.ru.md` under `[Unreleased]` — `Added` — and a
+   `plan/STATUS.md` entry with the sizes of the artefacts and the time each recipe takes.
+**Files.** `scripts/**`, `docs/BUILD.md` + `.ru.md`, `CHANGELOG.md` + `.ru.md`, `plan/STATUS.md`.
+
+**Not doing.** CI on a hosted runner (the repository is pushed to GitHub but no workflow is set up
+and no secrets are agreed: a hosted macOS runner is a later decision, and M28.5 is written to work
+locally); a hosted binary repository; an AppImage, Flatpak or Snap; a Windows MSI/NSIS installer
+(a zip and a `.cmd` are honest for a portable folder); a `.deb` for `arm64` (the machine is `amd64`;
+the script takes `--arch` and the recipe is the same); bundling models, `ffmpeg` or `tesseract`;
+signing or notarizing anything (no certificate, and it would be a decision of its own).
+
+**Checks for every task of M28.** The artefact is built from a clean clone (`git clone` into `/tmp`,
+`cargo build --release --frozen`), installed or unpacked on a clean system or container, started
+once, and removed again; `photocat doctor`, `photocat --version` and the window are the smoke; the
+archive and the cache of the owner are never touched; `packaging/` files are checked by
+`packaging/check.sh` (`desktop-file-validate` when present, the icon sizes, the man page render via
+`man --warnings`).
+
+**Files.** `packaging/**`, `scripts/**`, `docs/BUILD.md` + `.ru.md`, `CHANGELOG.md` +
+`CHANGELOG.ru.md`, `plan/STATUS.md`, `plan/BACKLOG.md`, `NOTICE`.

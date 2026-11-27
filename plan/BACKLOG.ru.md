@@ -2332,3 +2332,233 @@ M28).
 
 **Файлы.** `src/app.rs`, `src/db.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.ru.md`,
 `docs/ARCHITECTURE.ru.md`, `plan/`.
+---
+
+## M27 — архитектура: модули, которые можно найти, затем крейты, которые держат границу (план 2026-11-27)
+
+**Цель.** `src/` перестаёт быть одним крейтом с файлом на 28 650 строк. Каждый файл владеет одним —
+экраном, проходом, диалогом, отчётом, — а карта слоёв становится ошибкой компиляции вместо `grep` в
+`check.sh`. Цель и числа, с которых начинали, — в ADR 0053.
+
+**Источник.** Сообщение владельца 2026-11-27: «рефактор приложения архитектурно. Не должно быть
+божественных модулей и больших файлов. Декомпозировать модули. Использовать архитектурные решения.
+Если надо делать крейты.»
+
+**Числа на старте (2026-11-27).** `src/` — 51 859 строк в 17 файлах; `app.rs` 28 650 (18 309
+продакшена + 10 344 тестов), `impl eframe::App for App` 13 279 с одним `ui()` на 2 955 строк,
+`impl App` 9 025, где `index_roots` 860 и `viewer_modal` 859; `db.rs` 4 753, `i18n.rs` 2 594,
+`embed.rs` 2 386, `main.rs` 2 179 (17 подкоманд в одном `match`), `organize.rs` 2 005, `player.rs`
+1 808, `faces.rs` 1 613, `verify.rs` 1 428.
+
+**Порядок.** Сначала модули (M27.1–M27.6), затем крейты (M27.7), последним — замер (M27.8). Каждый шаг
+компилируется, проходит тесты и рисует то же окно: ни один шаг не переписывает функцию, тела тестов
+не трогаются, кроме их строк `use`.
+
+**M27.1 — опись, бюджет модуля и карта.**
+1. `docs/ARCHITECTURE.md` получает § «Модули и крейты»: таблицу из ADR 0053, дерево `ui/`, `cli/`,
+   `db/` и папок L2, числа выше.
+2. Бюджет записан как правило: продакшен ≤ 700 строк на файл, ≤ 800 на блок `impl`, ≤ 200 на
+   функцию; модуль = один экран или один проход.
+3. `check.sh` считает и печатает нарушителей и держит их в списке `BUDGET_EXEMPT` с их числами;
+   список только сокращается, а запись, чей файл уже в бюджете, роняет проверку (механизм `PENDING`
+   из `tests/source_language.rs`).
+4. `AGENTS.md` §3 называет бюджет рядом с таблицей слоёв, скилл `enforce-architecture` говорит, как
+   его проверять.
+
+**M27.2 — `main.rs` становится `cli/`: файл на подкоманду.**
+1. `src/main.rs` держит только разбор аргументов и диспетчеризацию; подкоманды уходят в
+   `src/cli/<name>.rs` со своим `run(…)`, фразы отчётов на `i18n::fill` — в `src/cli/report.rs`.
+2. `play` уходит с плеером, а не с отчётами: это headless-вход того же кода.
+3. Ни один файл `cli/` не выходит за бюджет; сам `main.rs` — меньше 300 строк.
+4. `--help`, вывод каждой подкоманды и коды возврата побайтово те же: проверка — сохранённый дамп
+   `--help` и вывода команд на пустом архиве.
+
+**M27.3 — `db.rs` становится `db/` по темам, схема в одном месте.**
+1. `src/db/` с `schema.rs` (`CREATE TABLE`/`ALTER`, `SCHEMA_VERSION`, `init`, `open`), `settings.rs`,
+   `files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs`.
+2. Операторы схемы живут только в `schema.rs`; `INSERT`/`SELECT` таблицы — в её файле; правила
+   `settings` и `user_tags` те же (пересборка их не теряет).
+3. Ни один файл не сверх бюджета; `db/mod.rs` держит только реэкспорты и тип соединения.
+4. Путь обновления не изменился: копия реальной БД на 2230 файлов открывается на схеме 10 без
+   записи, `db::open` по-прежнему ничего не пишет, пока версия совпадает — доказано существующими
+   тестами и сохранённым дампом `sqlite3 .schema`, одинаковым до и после.
+
+**M27.4 — `i18n.rs` становится `i18n/`: таблица по областям, один тест на всю таблицу.**
+1. `src/i18n/` с `lang.rs` (`Lang`, `t`, `fill`, `count`, `ensure_lang`), `table.rs` (упорядоченный
+   список таблиц областей), `terms/` — файл на область (`shell`, `grid`, `inspector`, `dupes`,
+   `faces`, `albums`, `calendar`, `settings`, `reports`, `dialogs`).
+2. `t()` сохраняет подпись и поиск; таблица остаётся `&[(&str, &str)]`, тесты русской колонки
+   проходят без правок.
+3. Новый тест падает на повторе исходной строки между областями и на пустом переводе.
+4. Всё в окне по-прежнему переведено: безголовый кадр трёх экранов на двух языках печатает те же
+   слова, что до переезда.
+
+**M27.5 — модули L2 становятся папками: `organize/`, `player/`, `embed/`, `faces/`, `verify/`.**
+1. `organize/` → `plan`, `apply`, `export`; `player/` → `demux`, `decode`, `audio`, `present`;
+   `embed/` → `model`, `download`, `tags`, `search`, `kmeans`; `faces/` → `detect`, `align`, `embed`,
+   `clusters`, `matches`; `verify/` → `compare`, `manifest`.
+2. Публичная поверхность модуля для вызывающих (`main.rs`, `app.rs`) не меняется: переезд — это
+   реэкспорты `pub use`, ни одно место вызова в этой задаче не переписывается.
+3. Архив не тронут, правила `check.sh` зелёные: ни `remove_file`, ни `rename`, один HTTP-клиент в
+   `embed/download`.
+4. Проходы меряются так же, как до переезда (точечная проверка: число групп `dupes`, план
+   `organize` в сухом прогоне, fps `play --decode-only` на том же файле).
+
+**M27.6 — `app.rs` становится `ui/`: экран на файл (шесть шагов, по паре экранов).**
+1. `src/ui/` с `theme.rs` (палитра, отступы, радиусы, профиль прокрутки, `dim`, `apply_theme`),
+   `icon.rs` (нарисованная геометрия: `Icon`, `paint_icon`, `WordButton`, хелперы кнопок),
+   `widgets.rs` (чип, плитка, карточка, пилюля, переключатель, строка ползунка, баннер, пустое
+   состояние), `text.rs` (обёртки `t`, заголовки капсом, числа моно), `frame.rs` (метрики, точки
+   перелома, схема заимствований `Cells`), `app.rs` (`App`, состояние, `eframe::App` как роутер из
+   одного вызова на экран), `shell/` (`top_strip`, `left_panel`, `ribbon`, `status_bar`,
+   `selection_bar`), `screens/` (`grid`, `cards` — `draw_cell`/`draw_list`/ячейки альбомов и лиц,
+   `inspector`, `dupes`, `faces`, `albums`, `calendar`, `trash`, `integrity`, `viewer`), `dialogs/`
+   (`settings/*`, `roots`, `export`, `album`, `limited`), `actions/` (`reload`, `index_roots`,
+   `save_settings`, насос проходов).
+2. Шесть переездов — отдельные коммиты внутри задачи, в этом порядке: виджеты/тема/иконки (ни один
+   экран не тронут), оболочка, сетка + ячейки, карточка + просмотрщик, экраны, диалоги + настройки.
+   После каждого окно идентично: каркасные тесты (`window_frame`, `dialog_parts`) проходят без
+   правок, y-метрики `docs/UI.md` не меняются.
+3. `app.rs` заканчивает в бюджете, ни один `screens/*.rs` его не превышает; блок
+   `impl eframe::App` — роутер примерно на 50 строк.
+4. Тесты переезжают к тому, что проверяют: каркас (`window_frame`, `dialog_parts`, `strict_overlap`,
+   хелперы кадра) — в `ui/tests/`, тесты каждого экрана — в его файл; число тестов то же
+   (364 + 3 на старте задачи).
+
+**M27.7 — воркспейс: семь крейтов, которые делают карту слоёв ошибкой компиляции.**
+1. `Cargo.toml` становится виртуальным манифестом воркспейса; появляются
+   `crates/photocat-{core,data,engine,ml,player,ui,cli}` и `crates/photocat` (бинарник) с
+   зависимостями из таблицы ADR 0053 — ни больше, ни меньше.
+2. `cargo build --release` даёт один бинарник с тем же поведением; `cargo tree -e normal` не знает
+   восходящих рёбер; `ort`/`tokenizers` есть только в `photocat-ml`, `rff-*`/`cpal` — только в
+   `photocat-player`, `egui`/`eframe` — только в `photocat-ui`.
+3. `check.sh` сокращается до того, чего компилятор не видит: правила архива (ни `remove_file`, ни
+   `rename`), один HTTP-клиент и его модули, английский язык, бюджет и правило «зависимость в
+   DECISIONS». Проверки слоёв и `egui` становятся проверкой `cargo tree`.
+4. `tests/source_language.rs` обходит `crates/*/src` вместо `src/` и падает на том же, на чём падал.
+5. Сборка Windows из ADR 0050 по-прежнему линкуется: `cargo xwin build --release` для
+   `x86_64-pc-windows-msvc` даёт exe того же размера (±2 %).
+
+**M27.8 — закрывающий замер и документы, которые перестают врать.**
+1. `docs/ARCHITECTURE.md` § «Измерения» получает строку с датой: строки на файл (до/после), самый
+   большой файл, число крейтов, `cargo build --release` с нуля и инкрементально (`touch
+   crates/photocat-ui/src/screens/grid.rs`), время `cargo test`, счётчики `check.sh`.
+2. `AGENTS.md` §3, `plan/I18N.md`, `docs/UI.md`, перекрёстные ссылки `docs/DECISIONS.md` и четыре
+   скилла называют новые пути; `grep -rn "src/app.rs" docs/ plan/ AGENTS.md` не находит ничего.
+3. `plan/STATUS.md` закрывает M27 с числами; список `BUDGET_EXEMPT` пуст или держит только то, что
+   владелец согласился оставить.
+
+**Чего не делать.** Менять поведение (ни один экран не перерисовывается во время переезда);
+переименовывать публичный словарь (`App`, `FileRow`, `Settings`, `View`); асинхронный рантайм;
+систему плагинов; крейт `utils`; переписывать тесты на новый фреймворк; переводить CLI на `clap`
+(рукописный разбор остаётся, болит не он).
+
+**Проверки для каждой задачи M27.** `cargo test`, `cargo clippy --all-targets`,
+`cargo test --test source_language`, `bash .pi/skills/enforce-architecture/scripts/check.sh`,
+`rust-analyzer diagnostics .`, безголовый кадр изменённого экрана 1240×840 и 700×600, неизменное
+число тестов и числа в `plan/STATUS.md`.
+
+---
+
+## M28 — сборка продукта: Linux, Windows, macOS и пакеты, которые ставятся (план 2026-11-27)
+
+**Цель.** Продукт уезжает с машины автора. Одна команда на систему даёт артефакт, который человек
+может установить: `.deb` в Debian/Ubuntu, `PKGBUILD` в Arch, zip в Windows, `.dmg` в macOS — каждый с
+лицензией, `NOTICE`, `.desktop`, иконками и man-страницей. Решение — в ADR 0054.
+
+**Источник.** Сообщение владельца 2026-11-27: «Добавить сценарии для сборки продукта под linux,
+windows, mac os. Для linux deb пакеты и для archlinux.»
+
+**Что есть сегодня.** Релизный бинарник из `cargo build --release`; папка Windows, один раз собранная
+руками через `cargo xwin` (ADR 0050) в `~/rdp-share/photocat`; ни `scripts/`, ни `packaging/`, ни
+`.desktop`, ни man-страницы, ни рецепта macOS. Иконки для всего этого добавила M26.19
+(`assets/photocat-icon-{32,64,128,256}.png`).
+
+**M28.1 — скелет: `packaging/`, `docs/BUILD.md`, версия из `Cargo.toml`.**
+1. `packaging/` держит `photocat.desktop` (`Icon=photocat`, `Exec=photocat gui`,
+   `Categories=Graphics;Photography;Viewer;`, `MimeType=image/*;video/*;`), `photocat.1` (man-страница
+   CLI, 17 подкоманд из `--help`) и общие метаданные (`packaging/common.sh`: версия из `Cargo.toml`,
+   имена архитектур, дерево сборки).
+2. `docs/BUILD.md` (+ `.ru.md`) фиксирует матрицу: что где собирается, какой инструмент нужен
+   каждому рецепту (`cargo`, `tar`, `ar`, `makepkg`, `cargo xwin`, `iconutil`/`sips`) и что
+   намеренно не вкладывается (модели, `ffmpeg`, `tesseract` — ADR 0047).
+3. Дерево пакета воспроизводимо: тот же исходник даёт тот же список файлов, и скрипт его печатает.
+
+**M28.2 — Linux: `photocat_<version>_<arch>.deb`, собранный без `dpkg`.**
+1. `scripts/package-deb.sh` собирает архив из `debian-binary` + `control.tar.gz` + `data.tar.gz`
+   только `ar` и `tar`; версия и архитектура из `common.sh`; `Depends:` пуст (бинарник достаточно
+   статичен), `Recommends: ffmpeg, tesseract-ocr`.
+2. Содержимое: `/usr/bin/photocat`, `/usr/share/applications/photocat.desktop`,
+   `/usr/share/icons/hicolor/{32x32,64x64,128x128,256x256}/apps/photocat.png`,
+   `/usr/share/man/man1/photocat.1.gz`, `/usr/share/doc/photocat/{LICENSE,NOTICE,CHANGELOG.md}`.
+3. Скрипт проверяет свой вывод: `ar t` даёт ровно три члена, дерево данных распаковывается во
+   временный каталог и сверяется с ожидаемым списком; пропавший файл роняет сборку.
+4. Установка в чистый контейнер или ВМ: `photocat --version`, `photocat doctor` и `photocat gui`
+   запускаются из меню приложений со своей иконкой; `dpkg -r photocat` убирает всё поставленное и не
+   трогает кэш.
+
+**M28.3 — Arch Linux: `PKGBUILD`, который собирает из дерева исходников.**
+1. `packaging/arch/PKGBUILD`: `pkgname=photocat`, `pkgver` из `Cargo.toml`,
+   `arch=('x86_64' 'aarch64')`, `license=('Apache-2.0')`, `depends=()`, `optdepends=('ffmpeg'
+   'tesseract' 'tesseract-data-rus' 'tesseract-data-eng')`, `makedepends=('cargo' 'rust')`;
+   `build()` — `cargo build --release --frozen`; `package()` — то же содержимое, что в `.deb`, плюс
+   хуки `gtk-update-icon-cache` в `photocat.install`.
+2. Сборка `--frozen` (сеть не читается), на воркспейсе M27 в его тогдашнем виде.
+3. С чистого клона: `makepkg -si` проходит, `pacman -Ql photocat` даёт ожидаемые файлы, `photocat
+   gui` стартует из меню, `pacman -Rns photocat` убирает пакет и оставляет `~/.cache/photocat`.
+4. Замечание `--nocheck` в `docs/BUILD.md` говорит, что нужно тестам (корпус, модели) и почему
+   пакет их не запускает.
+
+**M28.4 — Windows: zip с exe, рантаймом, иконкой и лаунчером.**
+1. `scripts/package-windows.sh` запускает `cargo xwin build --release` для
+   `x86_64-pc-windows-msvc` и собирает `photocat-<version>-windows-x64/`: `photocat.exe`, четыре DLL
+   рантайма VC++, их лицензию, `DirectML.dll`, `LICENSE`, `NOTICE`, `README.txt` (две строки: как
+   запустить и где данные), `photocat-start.cmd` (ставит `PHOTOCAT_CACHE=%~dp0data` и запускает exe —
+   ADR 0050) и `photocat.ico` из `assets/photocat-icon-256.png`
+   (`256/128/64/48/32/16`), вшитый в exe через `packaging/windows/photocat.rc` +
+   `winres`/`embed-resource` (зависимость времени сборки, записанная в строке зависимостей
+   ADR 0053/0054).
+2. Скрипт печатает список файлов и `sha256sum` рядом с zip; папка проверена под Wine на
+   Linux-машине: `photocat --version` печатает версию.
+3. `DirectML.dll` и DLL рантайма берутся по путям, записанным в ADR 0050, и проверяются скриптом;
+   отсутствующая роняет сборку вместо отправки кривой папки.
+
+**M28.5 — macOS: бандл `photocat.app` и `.dmg`, собранные на Mac.**
+1. `scripts/package-macos.sh` собирает `cargo build --release` под архитектуру хоста (и
+   `--target aarch64-apple-darwin` / `x86_64-apple-darwin` для другой), делает
+   `photocat.app/Contents/{MacOS/photocat,Resources/photocat.icns,Info.plist}` и упаковывает в
+   `photocat-<version>-<arch>.dmg` через `hdiutil`.
+2. `Info.plist` несёт `CFBundleName`, `CFBundleIdentifier=dev.ruchej.photocat`,
+   `CFBundleShortVersionString` из `Cargo.toml`, `LSMinimumSystemVersion`, `NSHighResolutionCapable`,
+   `CFBundleDocumentTypes` для `public.image`/`public.movie` и `CFBundleIconFile=photocat.icns`.
+3. `photocat.icns` делает скрипт из `assets/photocat-icon-*` через `iconutil` (набор `.iconset`
+   16…512 @1x/@2x — слот 16 px генерируется из файла 32 px; `assets/README.md` говорит, почему
+   настоящего файла 16 px пока нет).
+4. На не-macOS хосте скрипт отказывается работать одной строкой, а `docs/BUILD.md` прямо говорит,
+   что рецепт написан и здесь не проверен до появления Mac. Приёмка владельца — первый успешный
+   запуск на Mac.
+
+**M28.6 — одна точка входа и заметки о релизе.**
+1. `scripts/build-product.sh --target linux|windows|macos` — единственная команда, нужная релизу:
+   сначала проверки (`cargo test`, `source_language`, `check.sh`), потом сборка под цель, потом
+   упаковщик; `--out DIR` собирает артефакты с устойчивыми именами; `--skip-tests` существует и
+   говорит в выводе, что пропустил проверки.
+2. Один источник версии (`common.sh` или `scripts/product-version.sh`): `.deb`, `PKGBUILD`, zip,
+   `.app` и `photocat --version` печатают одну и ту же строку.
+3. `docs/BUILD.md` содержит таблицу матрицы с точной командой на систему, именами артефактов и тем,
+   куда на этой системе попадают данные при первом запуске.
+4. По строке на артефакт в `CHANGELOG.md` + `CHANGELOG.ru.md` в `[Unreleased]` — `Added` — и запись
+   в `plan/STATUS.md` с размерами артефактов и временем каждого рецепта.
+
+**Чего не делать.** CI на хостинговом раннере (репозиторий выложен на GitHub, но workflow не заведён
+и секреты не согласованы: macOS-раннер — отдельное решение, M28.5 написан так, чтобы работать
+локально); хостинговый репозиторий бинарников; AppImage, Flatpak или Snap; установщик MSI/NSIS в
+Windows (zip и `.cmd` честны для переносимой папки); `.deb` для `arm64` (машина `amd64`, скрипт
+принимает `--arch`, рецепт тот же); вложение моделей, `ffmpeg` и `tesseract`; подпись и нотаризацию
+(сертификата нет, и это отдельное решение).
+
+**Проверки для каждой задачи M28.** Артефакт собран из чистого клона (`git clone` в `/tmp`,
+`cargo build --release --frozen`), поставлен или распакован на чистой системе или в контейнере,
+запущен один раз и убран; дым — `photocat doctor`, `photocat --version` и окно; архив и кэш
+владельца не тронуты; файлы `packaging/` проверяет `packaging/check.sh` (`desktop-file-validate`,
+если есть, размеры иконок, рендер man через `man --warnings`).

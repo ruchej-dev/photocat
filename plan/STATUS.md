@@ -14,6 +14,10 @@ Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 embedded in the binary and handed to the window as its icon, ADR 0052; no new dependency,
 +46 KiB to the 90 MB binary, the icon decodes in a test and the window lives to the smoke
 timeout).
+→ planned:M27 (the architecture: modules first, then seven crates — `ui/`, `cli/`, `db/` and the L2
+folders, a module budget in `check.sh` that only shrinks, ADR 0053) and M28 (product builds: a `.deb`
+assembled without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
+`scripts/build-product.sh` — ADR 0054). Both milestones are tasks, not code: nothing is moved yet.
 
 ## Where we are
 
