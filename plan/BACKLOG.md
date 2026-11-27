@@ -2780,6 +2780,29 @@ mark keeps its holes through a `<mask>` — without it a cut-out would be a soli
 is how the first attempt looked. The 24 px drawing is under a pixel per line, so its render gets a
 `0.25`-unit stroke. `cargo test` 366 passed + `source_language` 3, `clippy`, `check.sh` 55,
 `rust-analyzer` clean; the screenshot of the running window shows the new mark in the strip.
+**M26.22 — the new lockup, cleaned, and framed at the size it is shown.** ✅ (done 2026-11-27)
+**Source.** The owner's message of 2026-11-27 with `photocat-lockup2.svg`: "Почисти svg от лишнего.
+Касаемо размеров. На github картинка 800 шириной, а основное поле 838 от чего картинка сдвинут влево."
+**Acceptance criteria.**
+1. The file is the owner's geometry verbatim (transforms included) and nothing else: no Inkscape or
+   Sodipodi namespace, no `namedview`, no `metadata`, no unused ids, no stale comments.
+2. The colours stay CSS variables; the defaults are the palette's (`#f59e0b`/`#e7e8ee`/`#222327` dark,
+   `#b45309`/`#0f172a`/`#f1f5f9` light).
+3. The canvas is 800×220 — the width the README shows — and the ink (758.4×182.3) is framed with equal
+   air, 20.8 to each side and 18.85 above and below, so nothing looks shifted.
+4. `assets/render.sh` passes the width only for the lockup, and the two PNGs come out 800×220.
+5. The old lockup and its rasters are replaced; `assets/README.md`, the READMEs and the changelog say
+   what the sizes are.
+**Files.** `assets/photocat-lockup.svg`, `assets/render.sh`, `assets/photocat-lockup{,-light}.png`,
+`assets/README.md`, `plan/STATUS.md`, `CHANGELOG.md`, `CHANGELOG.ru.md`.
+**Done (2026-11-27).** 9.9 KiB of clean SVG against the 12.0 KiB export. The export had 17
+`style="fill:#000000"` attributes that overrode the variables (everything rendered black), the band
+still at the old cropped geometry (376×108 over a 838×230 viewBox — the strip ended mid-word) and the
+tool's amber `#e08607`. The viewBox moved from `64 192 838 230` to `76.7 196.15 800 220`: the ink is
+where it was, only the frame around it changed. Measured air at 800 px: 21 / 20 left and right, 19 / 18
+top and bottom. `render.sh` 1.4 s; `cargo test` 366 + 3, `clippy`, `check.sh` 55, `rust-analyzer` clean.
+**Not doing.** Cropping the ink; a second file per theme; an image of the lockup inside the window.
+
 **Not doing.** A 16 px render (a filled silhouette is a new drawing); an SVG renderer inside the
 binary (a dependency for a file that never changes); editing a PNG by hand; a second colour scheme
 per file.

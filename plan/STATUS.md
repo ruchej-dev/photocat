@@ -4347,3 +4347,38 @@ top strip.
 of the lockup), `docs/DECISIONS.md` + `.ru.md` ADR 0052 (SVG as the source, PNGs committed, no SVG
 parser in the binary), `docs/UI.md` + `.ru.md` (the strip's file), `README.md` + `.ru.md` (`<picture>`),
 `plan/BACKLOG.md` § M26.21, `CHANGELOG.md` + `CHANGELOG.ru.md`.
+
+## M26.22 — the new lockup: cleaned, and framed at the size it is shown (2026-11-27)
+
+The owner redrew the lockup and put it in `assets/photocat-lockup2.svg` (an Inkscape export, 12.0 KiB).
+Three things were wrong with it, and one with the frame around it.
+
+**The export overrode its own variables.** Every element carried `style="fill:#000000"` (17 of them):
+an inline style beats the `fill` attribute, so the file rendered as a black silhouette — the first
+attempt looked like a blob on a band. The styles are gone; the groups and the variables decide.
+
+**The band was from the previous crop.** It still had `width="376" height="108"` while the viewBox was
+838×230, so the strip ended in the middle of the word. It is 800×220 now, the whole canvas.
+
+**The ink was in the tool's amber** (`#e08607`) in the `<style>` defaults — now the palette's
+`#f59e0b`, with `#b45309` for the light theme.
+
+**The frame.** The owner's complaint: "На github картинка 800 шириной, а основное поле 838 от чего
+картинка сдвинут влево." The drawing was framed 838×230 with 33.5 of air on the left and 46.1 on the
+right, and the README shows the PNG at 800 — a downscale of a frame that was already off-centre. The
+viewBox is now `76.7 196.15 800 220`: **the canvas is the size GitHub shows it at**, and the ink
+(758.4×182.3 — measured, not guessed) sits with equal air, 20.8 to each side and 18.85 above and
+below. Nothing was cropped: the transforms are the owner's to the digit, only the frame moved.
+`render.sh` passes the width alone for the lockup, so a width and a height that disagree with the
+viewBox can never stretch it again (that was a trap in the script, not in the file).
+
+Cleaning: the new file is 9.9 KiB of readable XML against the 12.0 KiB export — no Inkscape or Sodipodi
+namespaces, no `namedview`, no `metadata`, no unused ids, one comment block explaining the variables
+and the frame. The mask, the mark and the eight word paths are the owner's.
+
+Measured: both renders 800×220, air 21/20 left and right and 19/18 above and below at that size;
+`render.sh` 1.4 s for all eight files; `cargo test` 366 passed + `source_language` 3,
+`clippy --all-targets` clean, `check.sh` 55, `rust-analyzer diagnostics` no errors.
+
+**Documents.** `assets/README.md` (the lockup row: 800×220, the measured ink, the width-only rule),
+`plan/BACKLOG.md` § M26.22, `CHANGELOG.md` + `CHANGELOG.ru.md`.

@@ -10,7 +10,7 @@ same Apache-2.0 as the code.
 | File | What it is |
 |---|---|
 | `photocat-mark.svg` | the mark, 32×32 units, **the source of every raster below** |
-| `photocat-lockup.svg` | the mark and the word side by side, cropped to the ink |
+| `photocat-lockup.svg` | the mark and the word side by side — native 800×220, the ink (758.4×182.3) framed with equal air on all four sides |
 
 Both are the owner's drawings, kept verbatim: the paths were not redrawn, only re-wrapped. The colours
 are CSS variables, so one file serves both themes:
@@ -46,11 +46,14 @@ build time: the binary embeds exactly two files, and a compositor or a package r
 | `photocat-mark-48.png` | 48×48 | white on transparency, a hair of stroke (`0.25`) because a 1.2-unit line is 0.9 px at the size it is drawn | the top bar: embedded, drawn at 24 logical px (`BRAND_MARK`) and **tinted** with the accent of the theme, so one file is right in both themes |
 | `photocat-icon-32.png` … `-256.png` | 32, 64, 128, 256 | amber on the plate | the window icon (the 256 px one is embedded) and `hicolor/<size>/apps` of a package — the plate keeps the mark visible on a light desktop |
 | `photocat-1024.png` | 1024×1024 | amber on the plate | a store page, a press kit, a print |
-| `photocat-lockup.png` | 800×230 | dark band, light word | the README in a dark theme |
-| `photocat-lockup-light.png` | 800×230 | light band, dark word | the README in a light theme |
+| `photocat-lockup.png` | 800×220 | dark band, light word | the README in a dark theme |
+| `photocat-lockup-light.png` | 800×220 | light band, dark word | the README in a light theme |
 
 The two lockups are chosen by the reader's theme with `<picture>` + `prefers-color-scheme`, so a
-single README is legible on GitHub's dark and light pages.
+single README is legible on GitHub's dark and light pages. Their canvas *is* the size the README shows
+them at (800 px), so nothing is downscaled and the air around the ink stays equal: 21 px left and
+right, 19 px above and below. `render.sh` passes the width only — a width and a height that disagree
+with the viewBox stretch the drawing, which is how the first lockup ended up cropped and off-centre.
 
 ## Changing something
 

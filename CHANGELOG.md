@@ -27,6 +27,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
 - The mark and the lockup as SVG with the colours in CSS variables (`photocat-mark`,
   `photocat-paper`, `photocat-word`, `photocat-band`), rendered into every PNG by `assets/render.sh`,
   and the README picks the lockup that matches the reader's theme [M26.21].
+- The lockup is the owner's new layout: the app's own mark beside the word, 800×220 — the size the
+  README shows it at — with the ink framed by equal air and no cropping [M26.22].
 
 ### Changed
 
