@@ -1816,7 +1816,7 @@ space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, ta
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
 together; M26.11 a named person is recognized in every catalog; M26.12 (done 2026-11-26) the
 built-in player is the only player — a codec out of scope is an explicit offer, never an automatic
-separate window.
+separate window; M26.13 the settings dialog keeps one size and its layout in every section.
 
 **M26.1 — an archive folder can be switched off without losing its rows.** ✅ (done 2026-11-26)
 **Goal.** The owner hides a folder from the window — its photos stay indexed and on disk, and come
@@ -2258,6 +2258,60 @@ shows the reason and waits for a press; nothing opens by itself; the measured nu
 
 **Files.** `src/app.rs`, `src/player.rs`, `src/tools.rs`, `src/i18n.rs`, `docs/UI.md`,
 `docs/ARCHITECTURE.md`.
+
+**M26.13 — the settings dialog keeps one size in every section, and every section keeps its layout.**
+**Goal.** The owner switches a section and the dialog stays the rectangle he was looking at: the
+frame, the section list, the footer and "Close" do not move, and nothing jumps under the pointer.
+Every section is walked once and its components are checked against the pane they live in.
+
+**Source.** The owner's message of 2026-11-26: "окно с настройками сделать стабильным по размеру,
+чтобы не прыгало при смене раздела; проверить вёрстку компонентов окна настроек на всех разделах".
+
+**What happens today (measured 2026-11-26, the test corpus, 1240×840).** The dialog asks for
+760×620 of content (`ui.set_min_size`) and its frame comes out 794×654 — the same in seven of the
+eight sections. In "Tags" the frame is 966×654: the action row of the tag dictionary ("Add to the
+dictionary", "Recompute tags", "Export JSON", "Import JSON", "Restore the defaults") is one
+`ui.horizontal` of 716.1 px inside the 520 px column, a horizontal row does not wrap, and its width
+propagates through the pane up to the frame — the dialog widens by 172 px and shifts 86 px to the
+left. The pane itself is 1850 px tall there, so the vertical overflow already scrolls as it should;
+the width is what is unpinned.
+
+**Acceptance criteria.**
+1. First the measurement, then the fix: all eight sections in both languages at 1240×840 and at the
+   narrow sizes of M26.6 (900×700, 700×600) are rendered and every section whose content asks for
+   more than its pane is named with the row that does it; the table goes to `plan/STATUS.md`.
+2. The dialog's outer rectangle is identical (±0.5 px) in every section and in every state of a
+   section (a long path, a long tag label or prompt, twenty dictionary rows, a missing model):
+   760×620 of content plus the frame margins, or the window minus the margins when the window is
+   smaller (M26.6). Nothing a section holds may change the frame.
+3. A row wider than the 520 px column wraps or takes a box of its own instead of widening the pane:
+   the tag dictionary's action row is the known case (716 px) and is laid out as a wrapped row or a
+   grid. The pane has a vertical scroll only — no horizontal scrollbar, no widget painted past the
+   pane's right edge, no "Close" pushed off the footer.
+4. A vertical overflow scrolls inside the pane while the pane's height, the section list and the
+   footer stay in place; the scroll offset belongs to the section, and a switch starts the new
+   section at its top.
+5. Every component of every pane is checked against the frame: no label runs under the scroll bar,
+   a field is not narrower than its content needs (a path ≥120 px, the model name truncated with its
+   hint), a wrapping row does not break the 26 px line height, a checkbox keeps its word on one line,
+   a long hint wraps instead of being cut. Both languages are checked — the Russian words are longer.
+6. Tests: a headless test renders all eight sections twice (the modal fades in) and asserts the same
+   frame rect and the same "Close" position across the sections at 1240×840, 900×700 and 700×600; a
+   test asserts that no widget rect crosses the pane's right edge (the bounds helpers of M26.6 are
+   reused); a section with a 40-character tag label and a 500-character prompt keeps the frame's
+   size.
+7. `docs/UI.md` § Metrics (the "Settings dialog" row) states the fixed size, the pane's own
+   vertical scroll and the "no row widens the pane" rule; `plan/STATUS.md` carries the measurement
+   per section before and after; `plan/I18N.md` is checked for the changed labels.
+
+**Acceptance.** Switching sections never moves or resizes the frame; the table "eight sections ×
+two languages × three window sizes" has one size per window size; the Tags action row fits its
+column; a headless frame of "Tags" at 1240×840 in both languages.
+
+**Files.** `src/app.rs`, `docs/UI.md`, `plan/STATUS.md`, `plan/I18N.md`.
+
+**Not doing.** A resizable or draggable dialog; animating the size change; restructuring a section
+beyond the rows that overflow (the dialog stays as wide as it is today in seven sections).
 
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
