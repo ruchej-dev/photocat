@@ -687,6 +687,11 @@ const PILL_H: f32 = 26.0;
 const SEARCH_MAX_W: f32 = 646.0;
 /// The "Tiles" slider of the top bar: the mock-up's compact pill, not the whole panel width.
 const TILE_SLIDER_W: f32 = 84.0;
+/// The mark at the left of the top bar (M26.20): the logo itself, 24 px — the size the strokes of
+/// `assets/photocat-mark-24.png` were tuned for. It was 20 px of a drawn glyph before.
+const BRAND_MARK: f32 = 24.0;
+/// The air between the mark and the word `photocat` beside it.
+const BRAND_GAP: f32 = 6.0;
 /// The row of the content panel above the grid: the mock-up's `h-11`.
 const RIBBON_H: f32 = 44.0;
 /// The mock-up radii (Tailwind in the drawn screens): `rounded` = 4 — buttons, chips,
@@ -3215,6 +3220,24 @@ fn first_lang(db_path: &Path) -> i18n::Lang {
         .unwrap_or_default()
 }
 
+/// The mark of the window (M26.19): the cat-aperture logo from `assets/`, 256 px and flat — the
+/// strokes alone on transparency, without the plate and the glow of the 1024 px original, so a light
+/// desktop sees the mark and not a dark tile around it. A compositor asks for one size and stretches
+/// it, so one square is enough; a PNG decoder is already here for the previews, and a missing or
+/// broken asset costs the icon, not the window.
+fn window_icon() -> Option<egui::IconData> {
+    const PNG: &[u8] = include_bytes!("../assets/photocat-icon-256.png");
+    let img = image::load_from_memory_with_format(PNG, image::ImageFormat::Png)
+        .ok()?
+        .to_rgba8();
+    let (width, height) = img.dimensions();
+    Some(egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    })
+}
+
 pub fn run(explicit: Option<PathBuf>) -> Result<()> {
     // The binary is a console program, because the CLI needs its console; the window does not, and
     // on Windows the console window would sit next to it (ADR 0050).
@@ -3234,13 +3257,17 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
     // storage pane counts the folder instead of a missing path.
     let _ = std::fs::create_dir_all(db::cache_dir().join("thumbs"));
     let lang = first_lang(&db_path);
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1240.0, 840.0])
+        // The smallest window the layout is checked in (M26.6): below it the left panel turns
+        // into one scroll and the ribbon into two rows, and nothing else can be said about it.
+        .with_min_inner_size([700.0, 600.0])
+        .with_title(t(lang, "photocat — a media archive cataloguer"));
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1240.0, 840.0])
-            // The smallest window the layout is checked in (M26.6): below it the left panel turns
-            // into one scroll and the ribbon into two rows, and nothing else can be said about it.
-            .with_min_inner_size([700.0, 600.0])
-            .with_title(t(lang, "photocat — a media archive cataloguer")),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
@@ -3315,6 +3342,9 @@ struct App {
     textures: HashMap<i64, egui::TextureHandle>,
     missing: HashSet<i64>,
     selected: Option<i64>,
+    /// The logo of the top bar (M26.20): the embedded 24 px mark as a texture, made once and then
+    /// tinted with the accent of the theme. `None` only if the asset is broken.
+    mark_tex: Option<egui::TextureHandle>,
     /// The multi-select of tiles (M18): the marked files. In memory only — empty after a restart.
     picked: BTreeSet<i64>,
     /// The anchor of Shift+click: the file the range is counted from in `App::ordered`.
@@ -3785,6 +3815,7 @@ impl App {
             integrity_overwrite: false,
             verify_due: db::VerifyDue::NoManifest,
             verify_banner_hidden: false,
+            mark_tex: None,
             textures: HashMap::new(),
             missing: HashSet::new(),
             selected: None,
@@ -7780,6 +7811,31 @@ impl App {
     /// mode switch, the query, "Search", "×") and the tools on the right — the tile size, the
     /// details toggle and "Settings" (the state moved into the status bar, M25.8). The folder and "Index" live in
     /// the left panel: they are work with the archive, not a search (M22.19).
+    /// The mark of the top bar: the alpha of the logo, made white so that `tint` decides the colour
+    /// — the dark theme paints it `#f59e0b`, the light one `#b45309`, and a third theme would need no
+    /// new file. The texture is made once and kept in `App`.
+    fn mark_texture(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        if let Some(tex) = &self.mark_tex {
+            return Some(tex.clone());
+        }
+        const PNG: &[u8] = include_bytes!("../assets/photocat-mark-24.png");
+        let img = image::load_from_memory_with_format(PNG, image::ImageFormat::Png)
+            .ok()?
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        let mut rgba = img.into_raw();
+        // A tint multiplies the texture, so the texture is white and the theme owns the colour.
+        for px in rgba.chunks_mut(4) {
+            px[0] = 255;
+            px[1] = 255;
+            px[2] = 255;
+        }
+        let color = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+        let tex = ctx.load_texture("photocat-mark", color, egui::TextureOptions::LINEAR);
+        self.mark_tex = Some(tex.clone());
+        Some(tex)
+    }
+
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.lang;
         let th = theme(ui);
@@ -7792,7 +7848,7 @@ impl App {
 
         // The three sectors are measured, not guessed: whatever the language, the search stays in
         // the middle and the tools keep to the right edge.
-        let brand_w = 20.0 + 8.0 + text_width(ui, "photocat", 14.0);
+        let brand_w = BRAND_MARK + BRAND_GAP + text_width(ui, "photocat", 14.0);
         let settings_w = WordButton::new(Icon::Settings, t(lang, "Settings")).size(ui).0;
         let zoom_w = 8.0 + 14.0 + 6.0 + TILE_SLIDER_W + 8.0;
         // The details toggle has nothing to toggle on the "People" screen: its right panel always
@@ -7808,10 +7864,19 @@ impl App {
             row.min,
             egui::pos2(row.left() + brand_w + 4.0, row.bottom()),
         );
+        // The mark is the logo, not a glyph (M26.20): one texture, painted in the accent of the
+        // theme, so the light theme gets its own `#b45309` without a second file or a second drawing.
+        let mark = self.mark_texture(ui.ctx());
         ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                icon_mark_color(ui, Icon::PhotoLibrary, 20.0, th.accent);
-                ui.add_space(2.0);
+                if let Some(tex) = &mark {
+                    ui.add(
+                        egui::Image::new(tex)
+                            .tint(th.accent)
+                            .fit_to_exact_size(egui::vec2(BRAND_MARK, BRAND_MARK)),
+                    );
+                }
+                ui.add_space(BRAND_GAP);
                 ui.label(egui::RichText::new("photocat").size(14.0).strong());
             });
         });
@@ -13680,7 +13745,8 @@ fn icon_mark_color(ui: &mut egui::Ui, icon: Icon, size: f32, color: egui::Color3
     paint_icon(ui.painter(), rect.center(), size * 0.30, icon, color);
 }
 
-/// The width of a mono word: the selection bar and the status line are built of numbers.
+/// The width of a mono word: the selection bar, the status line and the digits at the right of a
+/// list row ("▶ 1:23", "1920×1080") are built of numbers.
 fn mono_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
     ui.painter()
         .layout_no_wrap(
@@ -13703,6 +13769,32 @@ fn text_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
         )
         .size()
         .x
+}
+
+/// The width of the "keep" target of a duplicate (M26.20): the word plus its padding, never below
+/// the 70 px the tile and the row used to hard-code. The Russian word for "keep" is more than twice
+/// as wide as the English one, and a fixed 70 px box wrapped it onto a second line inside a 20 px
+/// button — the label "floated".
+fn keep_width(ui: &egui::Ui, lang: i18n::Lang) -> f32 {
+    (text_width(ui, t(lang, "keep"), 12.0) + 20.0).max(70.0)
+}
+
+/// The "keep" target itself: its box follows the word, and the word never wraps. `right` and
+/// `center_y` are the edge and the middle it is pinned to, so a tile and a row place the same
+/// button without knowing its size.
+fn keep_button(ui: &mut egui::Ui, lang: i18n::Lang, right: f32, center_y: f32) -> bool {
+    let w = keep_width(ui, lang);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(right - w, center_y - 10.0),
+        egui::vec2(w, 20.0),
+    );
+    ui.place(
+        rect,
+        egui::Button::new(t(lang, "keep"))
+            .small()
+            .wrap_mode(egui::TextWrapMode::Extend),
+    )
+    .clicked()
 }
 
 /// A 28 px square that stays lit while the thing it toggles is on (the right panel): the
@@ -14949,10 +15041,25 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             }
         };
         let meta = format!("{date} · {}", db::human_in(cs.lang, f.size));
-        let right = if cs.trash_mode {
-            40.0
-        } else if cs.show_keep {
-            96.0
+        // The right rail of a row: the digits and, when the screen has one, the "keep" target or the
+        // 24 px restore target. One width for the whole rail — before M26.20 the digits were drawn
+        // at 8 px from the edge and the buttons started at 78 px, so "1920×1080" printed under the
+        // button's word (the wider Russian caption made it obvious).
+        let keep_w = if cs.show_keep {
+            keep_width(ui, cs.lang)
+        } else {
+            0.0
+        };
+        let tail = if cs.show_keep {
+            keep_w + 12.0
+        } else if cs.trash_mode {
+            24.0 + 12.0
+        } else {
+            0.0
+        };
+        let kind_w = mono_width(ui, &kind, meta_px);
+        let right = if tail > 0.0 {
+            tail + kind_w + 12.0
         } else {
             132.0
         };
@@ -14980,23 +15087,14 @@ fn draw_list(ui: &mut egui::Ui, ctx: &egui::Context, cs: &mut Cells, files: &[&F
             th.text_dim,
         );
         ui.painter().text(
-            egui::pos2(rect.right() - 8.0, name_top),
+            egui::pos2(rect.right() - 8.0 - tail, name_top),
             egui::Align2::RIGHT_TOP,
             &kind,
             egui::FontId::monospace(meta_px),
             th.text_med,
         );
-        if cs.show_keep {
-            let btn = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - 78.0, rect.center().y - 10.0),
-                egui::vec2(70.0, 20.0),
-            );
-            if ui
-                .place(btn, egui::Button::new(t(cs.lang, "keep")).small())
-                .clicked()
-            {
-                cs.keep_clicked = Some(f.id);
-            }
+        if cs.show_keep && keep_button(ui, cs.lang, rect.right() - 8.0, rect.center().y) {
+            cs.keep_clicked = Some(f.id);
         }
         if cs.trash_mode {
             let btn = egui::Rect::from_center_size(
@@ -15263,17 +15361,8 @@ fn draw_cell(
             }
             _ => {}
         }
-        if cs.show_keep {
-            let btn = egui::Rect::from_min_size(
-                egui::pos2(img_rect.right() - 78.0, img_rect.top() + 4.0),
-                egui::vec2(74.0, 20.0),
-            );
-            if ui
-                .place(btn, egui::Button::new(t(cs.lang, "keep")).small())
-                .clicked()
-            {
-                cs.keep_clicked = Some(f.id);
-            }
+        if cs.show_keep && keep_button(ui, cs.lang, img_rect.right() - 4.0, img_rect.top() + 14.0) {
+            cs.keep_clicked = Some(f.id);
         }
         if cs.trash_mode {
             ui.painter().rect_filled(
@@ -18452,6 +18541,26 @@ mod tests {
             egui::Shape::Vec(v) => {
                 for s in v {
                     collect_text(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The drawn pictures: a textured rectangle and the tint it is multiplied by (M26.20).
+    fn collect_pictures(
+        shape: &egui::Shape,
+        out: &mut Vec<(egui::Rect, egui::TextureId, egui::Color32)>,
+    ) {
+        match shape {
+            egui::Shape::Rect(r) => {
+                if let Some(brush) = &r.brush {
+                    out.push((r.rect, brush.fill_texture_id, r.fill));
+                }
+            }
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    collect_pictures(s, out);
                 }
             }
             _ => {}
@@ -27334,8 +27443,9 @@ mod tests {
             // Per-tile actions are placed into a fixed 20 px rect (`ui.place`): a word and an
             // icon do not fit there, so the word stays alone (the per-tile targets — the two of
             // M22.26 and the trash's restore of M22.27 — are icon-only circles drawn by
-            // `tile_icon_target`, not buttons of egui).
-            "t(cs.lang, \"keep\")",
+            // `tile_icon_target`, not buttons of egui). Since M26.20 the "keep" target is placed
+            // by `keep_button`, which sizes the box to the word; it is still one 20 px row.
+            "t(lang, \"keep\")",
         ];
         let mut offenders = Vec::new();
         for marker in [
@@ -28619,8 +28729,161 @@ mod tests {
         }
     }
 
+    /// M26.20: the left of the top bar carries the logo itself — a 24 px picture, not the drawn
+    /// "photo library" glyph — and it is painted in the accent of the theme that is on: `#f59e0b`
+    /// on the dark palette, `#b45309` on the light one. One asset, two colours.
+    ///
+    /// A textured picture is a `Rect` with a brush in this egui, and its tint is the rect's fill,
+    /// so the theme's decision is read back from the shape itself.
+    #[test]
+    fn the_top_bar_carries_the_logo_in_the_accent_of_the_theme() {
+        for (mode, accent) in [
+            (db::ThemeMode::Dark, super::DARK.accent),
+            (db::ThemeMode::Light, super::LIGHT.accent),
+        ] {
+            let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-mark.db"));
+            app.settings.theme = mode;
+            let ctx = egui::Context::default();
+            super::style(&ctx);
+            assert!(
+                app.mark_texture(&ctx).is_some(),
+                "{mode:?}: the 24 px mark does not decode"
+            );
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1240.0, 840.0),
+                )),
+                ..Default::default()
+            };
+            let mut frame = eframe::Frame::_new_kittest();
+            // The palette is applied to the context while the frame is already built, so the theme
+            // of the first frame is the previous one: the second frame is the one that is drawn in
+            // the colour the settings asked for.
+            for _ in 0..2 {
+                let out = ctx.run_ui(raw.clone(), |ui| eframe::App::ui(&mut app, ui, &mut frame));
+                out.drop_without_applying_deltas();
+            }
+            let out = ctx.run_ui(raw, |ui| eframe::App::ui(&mut app, ui, &mut frame));
+            let mut pictures = Vec::new();
+            for c in &out.shapes {
+                collect_pictures(&c.shape, &mut pictures);
+            }
+            out.drop_without_applying_deltas();
+            let (mark, _texture, tint) = pictures
+                .iter()
+                .find(|(r, _, _)| {
+                    (r.width() - super::BRAND_MARK).abs() < 0.5
+                        && (r.height() - super::BRAND_MARK).abs() < 0.5
+                        && r.left() < 40.0
+                        && r.top() < super::TOP_H
+                })
+                .map(|(r, tex, tint)| (*r, *tex, *tint))
+                .unwrap_or_else(|| panic!("{mode:?}: no {0} px picture in the top bar", super::BRAND_MARK));
+            assert!(mark.left() < 12.0, "{mode:?}: the logo is not at the left: {mark:?}");
+            assert_eq!(
+                tint, accent,
+                "{mode:?}: the logo is not painted in the accent of the theme"
+            );
+        }
+    }
 
+    /// Every drawn word with its box: a word that does not fit its button is a defect the strings
+    /// alone cannot show (M26.20).
+    fn text_rects(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Text(t) => out.push((
+                t.galley.text().to_owned(),
+                egui::Rect::from_min_size(t.pos, t.galley.size()),
+            )),
+            egui::Shape::Vec(v) => {
+                for s in v {
+                    text_rects(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
 
+    /// One frame of the window with the box of every word and every rectangle.
+    fn window_frame_rects(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> (Vec<(String, egui::Rect)>, Vec<egui::Rect>) {
+        super::style(ctx);
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut texts = Vec::new();
+        let mut rects = Vec::new();
+        for c in &out.shapes {
+            text_rects(&c.shape, &mut texts);
+            collect_rect_bounds(&c.shape, &mut rects);
+        }
+        out.drop_without_applying_deltas();
+        (texts, rects)
+    }
 
+    /// M26.20: the "keep" target of a duplicate fits its word in both languages and in both cell
+    /// views, and the digits at the right of a list row never land under it. Before the fix the
+    /// Russian word wrapped onto two lines inside a 20 px button (45.6×30 px of text in a
+    /// 70×20 px box) and "320×240" was drawn at 8 px from the edge, on top of the button's word.
+    #[test]
+    fn the_keep_target_fits_its_word_and_keeps_the_digits_clear() {
+        for (lang, word) in [(i18n::Lang::En, "keep"), (i18n::Lang::Ru, "оставить")] {
+            for style in [db::CellStyle::List, db::CellStyle::Tiles] {
+                let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-keep.db"));
+                let mut a = file_row(1, "image", "a.jpg");
+                let mut b = file_row(2, "image", "b.jpg");
+                a.sha256 = "same".into();
+                b.sha256 = "same".into();
+                app.items = vec![a, b];
+                app.groups = crate::dupes::find_groups(&app.items, 6);
+                app.settings.lang = lang;
+                app.settings.cell_style = style;
+                app.view = View::Dupes;
+                let ctx = egui::Context::default();
+                let (texts, rects) = window_frame_rects(&mut app, &ctx, egui::vec2(1240.0, 1400.0));
+                let keep: Vec<_> = texts.iter().filter(|(t, _)| t == word).map(|(_, r)| *r).collect();
+                assert!(!keep.is_empty(), "{lang:?}/{style:?}: no “{word}” on the screen");
+                for r in &keep {
+                    // One line, and inside its own button: a box of 20 px cannot hold two.
+                    assert!(r.height() <= 16.0, "{lang:?}/{style:?}: the word wraps: {r:?}");
+                    let btn = rects
+                        .iter()
+                        .filter(|f| f.contains(r.center()) && (f.height() - 20.0).abs() < 1.0)
+                        .max_by(|a, b| a.width().total_cmp(&b.width()))
+                        .copied()
+                        .unwrap_or_else(|| panic!("{lang:?}/{style:?}: no button under {r:?}"));
+                    assert!(
+                        r.width() < btn.width() && r.height() < btn.height(),
+                        "{lang:?}/{style:?}: “{word}” {r:?} does not fit its button {btn:?}"
+                    );
+                }
+                if style == db::CellStyle::List {
+                    // The digits of the row keep to the left of the button's edge.
+                    let left = keep.iter().map(|r| r.left()).fold(f32::MAX, f32::min);
+                    for (t, r) in texts.iter().filter(|(t, _)| t == "320×240") {
+                        assert!(
+                            r.right() <= left,
+                            "{lang:?}: “{t}” {r:?} runs under the button that starts at {left}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
+    /// The window carries the logo (M26.19): the embedded PNG is a square RGBA image, and a missing
+    /// or broken asset would leave the window without an icon instead of failing the start.
+    #[test]
+    fn the_window_icon_is_the_embedded_logo() {
+        let icon = super::window_icon().expect("the logo in assets/ decodes");
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+    }
 }

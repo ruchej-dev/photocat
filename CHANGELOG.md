@@ -22,11 +22,23 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   what the matching sliders would propose before a pass runs [M26.16].
 - Automatic face matches wait in a quarantine until the owner confirms them: “Quarantine · N” in the
   group list, “Confirm all”, and `faces --quarantine` / `confirm` / `reject` [M26.17].
+- The mark: the cat-aperture logo and its lockup in `assets/`, and the window carries the icon — the
+  flat 256 px cut-out of the mark, embedded in the binary, with 32/64/128 px files for packaging
+  [M26.19].
 
 ### Changed
 
+- The top bar carries the logo itself, painted in the accent of the theme — `#b45309` on the
+  light palette — instead of the drawn photo-library glyph [M26.20].
 - An automatic match no longer joins a named group by itself: the step proposes a face, and a
   confirmation or a refusal is the owner's decision [M26.17].
+- The duplicate settings left the left panel for the page that owns the groups: the threshold,
+  “Find groups”, the summary and the plan stand above the cards [M26.18].
+
+### Fixed
+
+- The “keep” target of a duplicate follows its word in both languages, so “оставить” stays on
+  one line, and the digits at the right of a list row no longer run under it [M26.20].
 
 ### Removed
 

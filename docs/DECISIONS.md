@@ -1407,3 +1407,40 @@ the false merges are the near ties the sliders already try to avoid.
 member (the matching step must never read `face_matches` as a reference, or a run would cascade
 through its own guesses); deleting a face or a photo when a proposal is refused; a proposal without
 a name (a group that loses its label takes its proposals with it).
+
+## 0052. The mark lives in `assets/` and the window carries it; the UI icons stay drawn geometry
+
+**Decision (2026-11-27).** The logo is a cat head whose outline is a stack of photo frames with an
+aperture for an eye — the name read twice; the lockup adds the word `photocat`. Both are kept as PNG
+in `assets/` (`photocat-1024.png`, `photocat-lockup.png`), and so is the **flat cut-out** of the mark
+— its strokes alone on transparency, without the dark plate and the glow of the 1024 px file, because
+a light desktop must see the mark and not a dark tile around it. The 256 px cut-out
+(`photocat-icon-256.png`) is embedded in the binary with `include_bytes!` and handed to
+`egui::ViewportBuilder::with_icon`; 32/64/128 px live next to it for packaging, and 32 px is the
+smallest size the mark still reads in. No new dependency: `image` already decodes PNG for the
+previews, and the icon is decoded once at start.
+
+**Why.** The window had no icon and the repository had no mark; a family-archive program that the
+owner launches from a dock has to be findable there in a second, the same rule the interface follows.
+The asset is the owner's, made for this program, so it is distributed under the same Apache-2.0 as the
+code and adds nothing to `NOTICE` beyond a line naming the folder.
+
+**What it costs and what we would do without it.** 46 KiB in the binary and one PNG decode at start;
+a broken asset costs the icon, not the window (`window_icon` returns `Option`, the viewport keeps its
+default). Without it the program keeps the toolkit's empty icon, which is what it had until now.
+
+**The mark in the top bar (M26.20).** The window chrome carries the same asset, and the light theme is
+answered by the palette rather than by a second file: `assets/photocat-mark-24.png` (the flat geometry at
+the size the strip uses, its alpha boosted to `α^0.70`) is decoded once, its pixels are forced to white,
+and `egui::Image::tint` paints it with `theme.accent` — `#f59e0b` on the dark palette, `#b45309` on the
+light one. That is the rule `icon_mark_color` already followed for the drawn glyphs, so a third theme
+needs no asset. A 20 px mark is not enough: at that size the strokes of a 1024 px drawing are half a
+pixel wide, which is why the strip's mark is 24 px and why its file was tuned rather than downscaled.
+
+**The line that does not move:** ADR 0048 still holds for the interface — every in-window icon (the
+toolbar, the cards, the status bar) is drawn geometry, a font glyph or nothing; the logo is an image
+of the outside of the window only. A screenshot of the app must not depend on a bitmap.
+
+**Forbids:** pulling the logo into a widget, a background or a decal (that would be the first image in
+the interface, and the scaling tests of `docs/UI.md` would stop meaning anything); an SVG- or
+font-based mark that needs a new renderer; a network fetch for the icon.

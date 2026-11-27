@@ -2637,6 +2637,127 @@ run offers 22. `cargo test` 362 passed + `source_language` 3, `clippy --all-targ
 **Not doing.** Auto-confirmation of a proposal (a guessed group is the thing this task removes);
 deleting a refused face or its crop; showing a proposal as a member of the group (it is not one).
 
+**M26.18 — the settings of the duplicates screen live on its page.** ✅ (done 2026-11-27)
+**Goal.** The left panel is the map of the application, not a drawer of the current screen: the
+duplicate threshold, the pass and the plan move from the panel into the page that owns the groups —
+the second screen after the People page (M26.14).
+
+**Source.** The owner's message of 2026-11-27: "настройки для дублей перенести из левой колонки на
+страницу дублей".
+
+**What was there.** `App::dupes_controls` drew a block in the left panel — the caps heading, the
+threshold line with its slider, "Find groups", the summary, "Export the plan", "Copy the list", two
+hints and the sharpness note — while the page held only the cards of the groups. The panel scrolled
+to reach the action whose result is on the page, and the page itself said "Press “Find groups” on
+the left."
+
+**Acceptance criteria.**
+1. The block stands at the top of the duplicates page: the threshold sentence with its slider (saved
+   on release), one wrapping row of actions — the accent "Find groups", "Export the plan", "Copy the
+   list" (both live only with groups) — the summary and the hints. The left panel draws no settings
+   of this screen.
+2. The block is drawn inside the content panel, where the rows and the groups already left `App`, so
+   it borrows the threshold and a counted `dupes::Summary` (`DupesSettings`) and reports the press
+   (`DupesPress`); the frame saves the value, runs the pass or writes/copies the CSV after the
+   borrows are released. Nothing writes during a drag.
+3. The empty page says where the action is without naming a place that no longer holds it.
+4. The block folds instead of painting past a 700 px window, and the cards keep their room: measured
+   on a 1240×840 frame, with the numbers in `plan/STATUS.md`.
+5. Nothing about the archive, the DB schema or the plan file changes; the strings go through the
+   `PAIRS` table and `plan/I18N.md` follows.
+
+**Acceptance.** No duplicate setting in the left panel; the page carries the threshold, both
+actions, the summary and the hints above the cards; a headless frame of the screen in both languages
+at a wide and a narrow size; `cargo test`, `clippy --all-targets`, `source_language`, `check.sh`.
+
+**Files.** `src/app.rs`, `src/i18n.rs`, `docs/UI.md`, `plan/I18N.md`, `plan/STATUS.md`,
+`CHANGELOG.md`, `CHANGELOG.ru.md`.
+
+**Done (2026-11-27).** `DupesSettings::draw` opens the page: the threshold line (110 px) with its
+slider, one row of actions (172.5 px), the summary (199), the two hints (218 / 250) and the
+sharpness note (269); the first group's "#1" follows at 311.5 px. The press is applied after
+`drop(cells)`: the threshold into `settings.max_dist` + `save_settings`, "Find groups" into
+`self.groups` + the status line, the plan into `<cache>/plan.csv` or the clipboard. The left panel
+lost the `View::Dupes` arm and the `dupes_controls` method (no settings of this screen remain), and
+the empty state reads "No groups yet: press “Find groups” above." The test
+`the_duplicates_screen_owns_its_settings` holds the move and the two y numbers.
+`cargo test` 363 passed + `source_language` 3, `clippy --all-targets` clean, `check.sh` 55,
+`rust-analyzer diagnostics` no errors.
+
+**Not doing.** Moving the duplicate threshold out of "Settings → Indexing and duplicates" (the
+dialog keeps the default; the page owns the working value); a second copy of the groups on the
+panel; re-running the pass by itself when the slider moves.
+
+**M26.19 — the mark: the logo in `assets/` and the window icon.** ✅ (done 2026-11-27)
+**Goal.** The program gets a face: the owner's mark (a cat head built from a stack of photo frames,
+an aperture for the eye) and its lockup are in the repository, and the window carries the icon —
+findable in a dock in a second, the same rule the interface follows.
+
+**Source.** The owner's message of 2026-11-27 with two files: `~/Pictures/photocat.webp` (the mark)
+and `~/Pictures/photocat-lookup.webp` (the lockup).
+
+**What was there.** No `assets/` folder, no mark anywhere, and the window opened with the toolkit's
+empty icon; the READMEs started with a bare `# photocat`.
+
+**Acceptance criteria.**
+1. `assets/` holds the mark (1024 px), the lockup and the 256 px square the window uses; both READMEs
+   open with the lockup.
+2. The icon is part of the binary — `include_bytes!`, decoded once, handed to
+   `ViewportBuilder::with_icon` — and a missing or broken file costs the icon, not the window.
+3. No new dependency and no new build step: `image` already decodes PNG.
+4. The interface itself does not change: ADR 0048 (icons are drawn geometry) stays true inside the
+   window, and nothing in `docs/UI.md` moves.
+5. The provenance and the licence of the asset are written down: ADR 0052, a line in `NOTICE`.
+
+**Acceptance.** A test proves the embedded PNG decodes into a 256×256 RGBA icon; the release binary
+builds and the window lives through the smoke run; the documents name the folder and the terms.
+
+**Files.** `assets/`, `src/app.rs`, `docs/DECISIONS.md` + `.ru.md`, `README.md` + `.ru.md`, `NOTICE`,
+`plan/STATUS.md`, `CHANGELOG.md`, `CHANGELOG.ru.md`.
+
+**Done (2026-11-27).** `assets/photocat-1024.png` (the mark as it came, re-encoded from a JPEG that
+was named `webp`), `assets/photocat-lockup.png` (1184×296) and `assets/photocat-256.png` (45 927 B,
+embedded). `app::window_icon` returns `Option<egui::IconData>`; `run` applies it only when it decodes.
+`the_window_icon_is_the_embedded_logo` checks the size and the buffer. The window gets the **flat**
+cut-out (the strokes alone on transparency, no plate, no glow) and the tree holds the 32/64/128 px
+reductions for packaging: the derivation is written down in `assets/README.md`, and 32 px is the
+smallest size the mark still reads in — the ears, the frame and the aperture are all there on a
+`#0C0E12` and on a `#F8FAFC` background. Measured: 25.6 s release build, `+46 KiB` on a 90 MB binary, `timeout 6 ./target/release/photocat gui` exits 124 with no output.
+`cargo test` 364 passed + `source_language` 3, 18 ignored, `clippy --all-targets` clean, `check.sh` 55.
+
+**M26.20 — the logo in the top bar and the "keep" target that follows its word.** ✅ (done 2026-11-27)
+**Goal.** The window shows the logo where the owner looks for it, in both themes, and no button of the
+duplicates screen spills its word.
+**Source.** The owner's message of 2026-11-27: "я не увидел в приложении иконки. В левом верхнем углу
+старый логотип. Замени на новый, но надо решить, как в светлой теме будет. На странице дублей в режиме
+списка справа кнопки с поплывшими надписями. Исправь."
+**Acceptance criteria.**
+1. The left of the top bar carries the logo asset, not a drawn glyph, at a size the strokes survive
+   (24 px) — `assets/photocat-mark-24.png`, embedded.
+2. The light theme is answered by the palette, not by a second file: one texture, forced white, tinted
+   with `theme.accent` (`#f59e0b` / `#b45309`).
+3. The "keep" target of a duplicate sizes itself to the word and never wraps, in both languages, in
+   the tile and in the list view; the digits of a list row stop before it.
+4. The layout metrics of `docs/UI.md` stay true (the search field keeps its 646 px cap).
+5. Both are covered by tests that read the frame back: the tint off the picture shape, the word's box
+   against its button.
+**Files.** `assets/photocat-mark-24.png`, `src/app.rs`, `docs/UI.md` + `.ru.md`, `assets/README.md`,
+`docs/DECISIONS.md` ADR 0052, `plan/STATUS.md`, `CHANGELOG.md`, `CHANGELOG.ru.md`.
+**Done (2026-11-27).** `App::mark_texture` decodes the 24 px file once, whites it and lets
+`Image::tint` decide the colour; `BRAND_MARK` 24 / `BRAND_GAP` 6 replace the 20 px glyph and its 2 px
+gap. `keep_width`/`keep_button` measure the word and place a box of that width with
+`TextWrapMode::Extend`; the row's right rail is one `tail` width. Measured: "оставить" 45.6×30 (two
+lines) → 53×15 in a 73×20 box; English unchanged at 28×15 in 70×20. `cargo test` 366 passed + 3,
+`clippy`, `check.sh` 55, `rust-analyzer` clean.
+**Not doing.** A second light-theme asset; the logo inside the window anywhere but the top bar (ADR
+0048 stays); a filled 16 px silhouette; a wrap of the words of the "keep" target instead of a wider box.
+
+**Not doing.** A 16 px file (the strokes drown whatever the gamma: that size needs a filled
+silhouette, a drawing and not a reduction — `assets/README.md` says so); an SVG or a font-based mark
+(a renderer we do not have); the logo inside the window as a widget or a background (ADR 0048 stays);
+a `.desktop` file and an installer for Wayland, where the icon comes from the desktop entry rather
+than the client (a packaging task of its own, M28).
+
 **Not doing.** Deleting rows or files when a folder is switched off; a network geocoder; installing
 or downloading external programs from the app; a separate "diagnostics" screen (the warning dialog
 is enough); a responsive web-style reflow of every screen (the six breakpoints are the contract).

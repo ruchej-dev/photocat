@@ -1,3 +1,5 @@
+![photocat](assets/photocat-lockup.png)
+
 # photocat
 
 A media-archive cataloguer in Rust: indexing, exact duplicates and near-duplicates, semantic
@@ -6,7 +8,8 @@ modified.
 
 *Русская версия: [README.ru.md](README.ru.md).*
 
-What changed and when: [CHANGELOG.md](CHANGELOG.md).
+What changed and when: [CHANGELOG.md](CHANGELOG.md). The mark and the window icon live in
+[`assets/`](assets/) (ADR 0052).
 
 ## Build
 

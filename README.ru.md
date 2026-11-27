@@ -1,3 +1,5 @@
+![photocat](assets/photocat-lockup.png)
+
 # photocat
 
 Каталогизатор медиаархива на Rust: индексация, поиск дублей и похожих снимков, смысловые теги, OCR
@@ -5,7 +7,8 @@
 
 *English version: [README.md](README.md).*
 
-Что менялось и когда: [CHANGELOG.ru.md](CHANGELOG.ru.md).
+Что менялось и когда: [CHANGELOG.ru.md](CHANGELOG.ru.md). Знак и иконка окна лежат в
+[`assets/`](assets/) (ADR 0052).
 
 ## Сборка
 
