@@ -56,6 +56,7 @@ fn language(args: &[String]) -> Result<Lang> {
 }
 
 fn main() -> Result<()> {
+    quiet_broken_pipe();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("gui");
     match cmd {
@@ -1180,6 +1181,31 @@ fn main() -> Result<()> {
     }
 }
 
+/// A report piped into a reader that has already left (`photocat stats | head -3`) is not a crash:
+/// the reader asked for less, and the write fails with a closed pipe. The panic `println!` raises on
+/// that error becomes a quiet exit; every other panic keeps its message and its backtrace note.
+fn quiet_broken_pipe() {
+    let fallback = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if is_broken_pipe(info.payload()) {
+            std::process::exit(0);
+        }
+        fallback(info);
+    }));
+}
+
+/// The payload of the panic that a failing `print!`/`println!` raises: the standard library writes
+/// “failed printing to stdout: …” and the OS names the closed pipe (“Broken pipe”, “The pipe is
+/// being closed”). Anything else is not this case.
+fn is_broken_pipe(payload: &(dyn std::any::Any + Send)) -> bool {
+    let text = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    text.starts_with("failed printing to") && text.to_lowercase().contains("pipe")
+}
+
 /// `photocat albums …` — albums as data: the tree, the order and the rows in the DB.
 /// No command opens a file by path or writes to disk: PATH is a `files.path` key, not a
 /// file operation. Exit codes: 0 — done, 1 — a data error, 2 — wrong arguments or a refusal
@@ -1770,6 +1796,20 @@ pub fn has_flag(args: &[String], name: &str) -> bool {
 #[cfg(test)]
 mod cli_i18n_tests {
     use super::*;
+
+    /// M24.3: a report cut short by its reader (`photocat stats | head`) exits quietly instead of a
+    /// Rust backtrace; any other panic keeps its message.
+    #[test]
+    fn a_closed_pipe_is_not_a_crash() {
+        let closed: &(dyn std::any::Any + Send) =
+            &"failed printing to stdout: Broken pipe (os error 32)".to_string();
+        let closed_windows: &(dyn std::any::Any + Send) =
+            &"failed printing to stdout: The pipe is being closed. (os error 232)".to_string();
+        let other: &(dyn std::any::Any + Send) = &"assertion failed: a pipe dream";
+        assert!(is_broken_pipe(closed));
+        assert!(is_broken_pipe(closed_windows));
+        assert!(!is_broken_pipe(other));
+    }
 
     /// M21.6: the CLI reports speak the language of `settings.lang`. Every report is a pair
     /// of lines, English and Russian, from the same `lang` field, so it is visible that the

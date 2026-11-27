@@ -1188,7 +1188,7 @@ a third language; gettext/fluent; changing the language mechanism decided in ADR
 
 ---
 
-## M24 — a clean install and one binary 🔄 (M24.1–M24.2 done)
+## M24 — a clean install and one binary ✅ (M24.1–M24.3 done)
 
 **Goal.** A person who has never had photocat: no DB, no previews, no models, no settings. Everything
 the app needs appears on its own or is asked for with a button, and the weights come only from the
@@ -1202,29 +1202,33 @@ file.
 2. A clean cache (`XDG_CACHE_HOME=$(mktemp -d) ./target/release/photocat gui`): the window opens,
    `<cache>/photocat/photocat.db` and `thumbs/` are created, the language comes from the locale, the
    screen says that no folder is indexed yet, the model block says "not downloaded", the faces and
-   text blocks are disabled with an explanation, and no pass starts by itself.
+   text blocks are disabled with an explanation, and no pass starts by itself. ✅ (M24.3)
 3. The first folder: adding and indexing it from the window works with **no model at all** — stats,
    duplicates, the calendar, the grid and the full screen work without CLIP; the tags and the search
-   say "download the model" instead of failing.
+   say "download the model" instead of failing. ✅ (M24.3)
 4. The model: the consent tick plus "Download model" fetches 217.5 MiB with the sha256 matched, then
    "Compute tags" works; with the network down the message says what failed and the rest keeps
-   working.
+   working. ✅ (M24.3)
 5. Absent system programs: with no `ffmpeg` and `tesseract` (the fields cleared and the names out of
    `PATH`) the app still starts and indexes photos, downloads a model and runs OCR's disabled state,
-   and each block says what is lost — one honest line, no crash, no dialog loop.
+   and each block says what is lost — one honest line, no crash, no dialog loop. ✅ (M24.3)
 6. One binary: `cargo build --release` gives `target/release/photocat`, `doctor` lists the external
    programs as optional, and copying that file to another machine of the same OS is enough (the DB
    and the models travel in the cache). The weights are fetched by the binary itself, with no
    external program at all. ✅ (M24.2)
 7. The pass is recorded in `plan/STATUS.md` with numbers: what a clean start costs in bytes and
-   seconds, and what the first index of a 120-file folder takes.
+   seconds, and what the first index of a 120-file folder takes. ✅ (M24.3)
 
 **Steps.** M24.1 — the shell script is gone, the messages name the binary (done 2026-11-24; the
 smoke of a clean start also caught the GUI not storing the first-launch language — fixed in
 `app::first_lang`). M24.2 — the downloader is the binary's own HTTPS client, `ureq` + `rustls`, and
 `curl` is gone (done 2026-11-24: 148.6 MiB in 22.7 s with the sha256 matched; ADR 0047). M24.3 — the
 clean-install pass itself: an empty cache, no models, no external programs, then a model download
-with consent.
+with consent (done 2026-11-27: a cold start costs 176 KiB and 13 ms, 120 files index in 4.7 s, the
+217.5 MiB model comes in 35.5 s with the sha256 matched, and with no `ffmpeg`/`tesseract` in `PATH`
+photos index, a model still downloads and every block names what is lost; the pass found three
+defects — a `faces` message that pointed at `./target/release/photocat`, a clean GUI start that made
+no `thumbs/`, and a panic on a closed pipe — all fixed; the numbers are in `plan/STATUS.md`).
 
 ### M24.4 — the Windows release and the folder picker on a Windows disk (done 2026-11-26)
 

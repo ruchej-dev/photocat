@@ -2707,6 +2707,10 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
         }
     }
     let db_path = db::resolve_db(explicit.as_deref())?;
+    // The previews folder belongs to the cache from the first launch: the owner's clean install has
+    // `<cache>/photocat/photocat.db` and `thumbs/` before anything is indexed (M24.3), and the
+    // storage pane counts the folder instead of a missing path.
+    let _ = std::fs::create_dir_all(db::cache_dir().join("thumbs"));
     let lang = first_lang(&db_path);
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -21617,6 +21621,67 @@ mod tests {
                 "missing “{want}” in the forget confirmation: {texts:?}"
             );
         }
+    }
+
+    /// M24.3: the folder list's own indexing path works on a clean install with no model at all —
+    /// `App::index_roots` (the "Reindex" action of the catalog menu) walks the folder, writes the
+    /// row and the window reloads it. A broken JPEG gives a row without a preview, so the test
+    /// writes nothing into the owner's previews folder.
+    #[test]
+    fn the_folder_list_indexes_the_first_catalog_with_no_model() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "photocat-first-catalog-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("broken.jpg"), b"not a jpeg").unwrap();
+        let db_path = std::env::temp_dir().join(format!(
+            "photocat-first-catalog-{}-{stamp}.db",
+            std::process::id()
+        ));
+        {
+            let c = db::open(&db_path).unwrap();
+            let mut s = db::load_settings(&c);
+            s.roots = vec![dir.to_string_lossy().to_string()];
+            s.models_dir = std::env::temp_dir().join("photocat-test-models-never-downloaded");
+            db::save_settings(&c, &s).unwrap();
+        }
+        let mut app = App::new(db_path.clone());
+        app.settings.lang = i18n::Lang::En;
+        assert!(
+            !crate::embed::model_present(&app.settings),
+            "a clean install has no CLIP model"
+        );
+        app.index_roots(app.settings.roots.clone());
+        let ctx = egui::Context::default();
+        let start = std::time::Instant::now();
+        while app.rx.is_some() && start.elapsed().as_secs() < 30 {
+            window_frame_at(&mut app, &ctx, Vec::new(), egui::vec2(1240.0, 840.0));
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            app.rx.is_none(),
+            "the index started by the folder list must finish"
+        );
+        let conn = db::open(&db_path).unwrap();
+        let rows: i64 = conn
+            .query_row("select count(*) from files", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "the row is in the index with no model at all");
+        assert_eq!(app.items.len(), 1, "the window shows what it indexed");
+        assert!(
+            app.items[0].thumb.is_none(),
+            "the broken JPEG stays without a preview"
+        );
+        assert!(
+            app.status.contains("1 file"),
+            "the window reloaded and names what it has: {}",
+            app.status
+        );
     }
 
     #[test]

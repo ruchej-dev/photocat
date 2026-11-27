@@ -76,7 +76,7 @@ pub fn check_model(settings: &db::Settings) -> Result<()> {
         if !path.is_file() {
             bail!(
                 "the face model files are missing: {}\ndownload them in the settings (with consent) or: \
-                 ./target/release/photocat faces download --yes",
+                 `photocat faces download --yes`",
                 path.display()
             );
         }
