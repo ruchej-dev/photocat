@@ -1810,7 +1810,7 @@ the top strip visibly taller than 32 logical px) and the report "при узко
 
 **Tasks.** M26.1 (done 2026-11-26) folders can be switched off; M26.2 (done 2026-11-27) a warning
 mark for a limited feature and its info dialog; M26.3 (done 2026-11-27) "Find the programs" in the settings; M26.4 (done 2026-11-27) the
-Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the face settings move to the People screen; M26.6 the layout survives a narrow window;
+Windows top strip is as tall as the design says; M26.5 (done 2026-11-27) the face settings move to the People screen; M26.6 (done 2026-11-27) the layout survives a narrow window;
 M26.7 the catalog block after `photocat_1`: the pill and its dropdown; M26.8 the database gives the
 space back (VACUUM); M26.9 a catalog chooses which passes run over it (faces, tags, text);
 M26.10 splitting a face does not throw the owner out of the group, and the ticked faces can be split
@@ -2093,7 +2093,7 @@ p50 5.68–7.79 ms with the tag dictionary still the heaviest. `cargo test` 342 
 `cargo test --test source_language` 3, `cargo clippy --all-targets` clean, `check.sh` 55 checks,
 `rust-analyzer diagnostics` 0 errors. The owner's review on the real window is the last word.
 
-**M26.6 — the layout survives a narrow window.**
+**M26.6 — the layout survives a narrow window.** ✅ (done 2026-11-27)
 **Goal.** At any width from 700 to 2539 px no control overlaps another, nothing is cut off and the
 grid recomputes its columns — the owner's "при узком окне вся вёрстка плывёт" is gone.
 
@@ -2118,7 +2118,28 @@ grid recomputes its columns — the owner's "при узком окне вся �
 **Acceptance.** The six frames pass the overlap and bounds tests; a screenshot at 900×700 shows a
 readable central panel; the owner's review on the real window.
 
-**Files.** `src/app.rs`, `docs/UI.md`, `.pi/skills/ui-design/SKILL.md`, `plan/STATUS.md`.
+**Done (2026-11-27).** One row was measured instead of a fixed breakpoint: the constant 900 px broke
+on the longer Russian words, so `ribbon_title_width`/`ribbon_controls_width` lay the row out on an
+invisible ui before drawing it. The title and the controls keep one row with `RIBBON_ROW_GAP` (24 px)
+to spare — down to an 836 px window in English and 984 px in Russian; otherwise the controls take a
+second `HEAD_ROW_H` (24 px) row and wrap; when even the smaller group does not fit, the "Flat / By
+months" switch leaves the row for the "Sort" menu (below 675 / 793 px, and the menu carries it in
+every window). The ribbon reads and writes a `RibbonState` copy of the cell view, the order and the
+layout — the tiles' cache already borrows `App` — applied to the settings after the frame. Below
+`LEFT_PIN_H` (670 px) the left panel scrolls as a whole instead of clipping its pinned part
+(`left_panel_body`/`left_panel_scrolled`), and the calendar's month card cuts its name to the room
+the counter leaves (`caption_name`). Every dialog asks for `dialog_width`/`dialog_height` — never
+more than the window minus 48 px and the 34 px its card adds — so the settings dialog is 652×552 at
+700×600 instead of hanging 47 px off the left edge. The test `the_layout_survives_a_narrow_window`
+renders 700×600, 900×700, 1100×800, 1240×840, 1691×1021 and 2539×1000 in both languages over seven
+screens and asserts no word and no interactive target outside the window, no two of them overlapping
+(the widgets report their own rects through `tests::note_target`), the ribbon's row rule at 700/1240,
+the card's panel at `DETAILS_MIN_W`, the left panel's scroll at 700×600 and nine dialogs inside the
+window. `cargo test` 343 passed, `cargo test --test source_language` 3, `cargo clippy --all-targets`
+clean, `check.sh` 55 checks, `rust-analyzer diagnostics` 0 errors. The owner's review on the real
+window is the last word.
+
+**Files.** `src/app.rs`, `docs/UI.md`, `.pi/skills/ui-design/references/verstka.md`, `plan/STATUS.md`.
 
 **M26.8 — the database gives the space back (VACUUM).**
 **Goal.** Rows that left the database — a catalog removed from the index, the index reset, tags and

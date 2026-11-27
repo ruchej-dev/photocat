@@ -535,6 +535,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("tile order: date, name or size", "порядок плиток: дата, имя или размер"),
     ("Flat", "Подряд"),
     ("By months", "По месяцам"),
+    ("Layout", "Вид сетки"),
     ("No date", "Без даты"),
     ("No preview", "Без превью"),
     ("only the files without a date", "только файлы без даты"),

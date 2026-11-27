@@ -708,6 +708,21 @@ const REFRESH_HINT: &str = "Re-read the database into the window: reads no file,
 const YEARS_CHIP_H: f32 = 18.0;
 /// Below this window width the details move into the left panel: the grid needs 4 columns.
 const DETAILS_MIN_W: f32 = 1200.0;
+/// The least air between the title of the view and the controls of the ribbon (M26.6): while the
+/// two fit with it, the ribbon keeps one row; without it the controls take a second row. Measured:
+/// the title and the full group keep one row down to an 836 px window in English and 984 px in
+/// Russian; without the layout switch — down to 675 and 793 px.
+const RIBBON_ROW_GAP: f32 = 24.0;
+/// The first row of a wrapped ribbon: the name of the view and its facts (M26.6).
+const HEAD_ROW_H: f32 = 24.0;
+/// What a dialog must leave of the window: the margin of the modal on both sides (`DIALOG_MARGIN`)
+/// and the padding its card adds — the 16 px of `dialog_frame` and its 1 px line, both sides.
+const DIALOG_MARGIN: f32 = 48.0;
+const DIALOG_FRAME_PAD: f32 = 34.0;
+/// The part of the left panel that is pinned above its scroll (folder, navigation, the two filter
+/// rows and the threshold). Below it the whole panel scrolls, so a short window never clips it
+/// (M26.6): the threshold's block ends at 660 px on the corpus (M25.6).
+const LEFT_PIN_H: f32 = 670.0;
 /// The gap inside the calendar grids: between the month cards of the year layer and between the
 /// day cells of the month and week layers (the mock-up's `gap-1.5` / `gap-2`).
 const CAL_GAP: f32 = 6.0;
@@ -1237,6 +1252,8 @@ fn nav_item(
     let th = theme(ui);
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), NAV_H), egui::Sense::click());
+    #[cfg(test)]
+    tests::note_target(text, rect.intersect(ui.clip_rect()));
     if ui.is_rect_visible(rect) {
         // The active item: the card tone, the text in the accent and a 2 px accent edge on the
         // left, radius 6 px (M22.11). The field tone of the drawn screen reads 4.07:1 under the
@@ -1443,13 +1460,26 @@ fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
         .inner_margin(egui::Margin::same(16))
 }
 
+/// The width a dialog may ask for (M26.6): its design width, but never more than the window leaves
+/// once the 24 px margins of the modal and the padding of its card (16 px and a 1 px line on each
+/// side) are taken. A dialog is never wider than the window.
+fn dialog_width(ctx: &egui::Context, want: f32) -> f32 {
+    (ctx.content_rect().width() - DIALOG_MARGIN - DIALOG_FRAME_PAD).min(want)
+}
+
+/// The same for the height: a short window shrinks the dialog's body, which scrolls.
+fn dialog_height(ctx: &egui::Context, want: f32) -> f32 {
+    (ctx.content_rect().height() - DIALOG_MARGIN - DIALOG_FRAME_PAD).min(want)
+}
+
 /// The chip of an active filter: the word with "×"; a click removes only this filter (M16).
 fn filter_chip(ui: &mut egui::Ui, text: &str, lang: Lang) -> bool {
-    ui.add(
-        egui::Button::new(egui::RichText::new(format!("{text} ×")).size(12.0)).small(),
-    )
-    .on_hover_text(t(lang, "remove the filter"))
-    .clicked()
+    let resp = ui
+        .add(egui::Button::new(egui::RichText::new(format!("{text} ×")).size(12.0)).small())
+        .on_hover_text(t(lang, "remove the filter"));
+    #[cfg(test)]
+    tests::note_target(text, resp.rect.intersect(ui.clip_rect()));
+    resp.clicked()
 }
 
 /// A tag chip: 20 px high, mono 11, the word and its count after a middle dot, the picked chip in
@@ -1476,6 +1506,8 @@ fn cloud_chip(ui: &mut egui::Ui, text: &str, selected: bool, height: f32) -> egu
         .layout_no_wrap(text.to_owned(), font.clone(), th.text_med);
     let size = egui::vec2(galley.size().x + 14.0, height);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    #[cfg(test)]
+    tests::note_target(text, rect.intersect(ui.clip_rect()));
     if ui.is_rect_visible(rect) {
         let (fill, border, color) = if selected {
             (th.accent_soft, th.accent, th.accent)
@@ -1537,6 +1569,8 @@ fn toggle_chip(
         egui::Sense::hover()
     };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
+    #[cfg(test)]
+    tests::note_target(text, rect.intersect(ui.clip_rect()));
     if ui.is_rect_visible(rect) {
         let (fill, border, color) = if !enabled {
             (th.field, th.border, th.text_dim)
@@ -2504,6 +2538,9 @@ pub fn run(explicit: Option<PathBuf>) -> Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1240.0, 840.0])
+            // The smallest window the layout is checked in (M26.6): below it the left panel turns
+            // into one scroll and the ribbon into two rows, and nothing else can be said about it.
+            .with_min_inner_size([700.0, 600.0])
             .with_title(t(lang, "photocat — a media archive cataloguer")),
         ..Default::default()
     };
@@ -2762,6 +2799,212 @@ struct App {
     theme_key: Option<egui::Theme>,
     /// Scrolling with the wheel and the touchpad: the speed, the coast, the pause (M22.2b).
     scroll: Scroll,
+}
+
+/// The look of the grid as the content ribbon sees it (M26.6): the ribbon is drawn inside the
+/// content panel, where the tiles' cache has already borrowed `App`, so the controls read and write
+/// this copy and `App::ui` applies it to the settings once the frame is over.
+struct RibbonState {
+    cell_style: db::CellStyle,
+    sort: db::GridSort,
+    layout: db::GridLayout,
+    changed: bool,
+}
+
+/// A ui laid out away from the window and painted nowhere: the ribbon measures itself there before
+/// it draws (M26.6). An empty clip keeps the measurement out of every hit test and every painting.
+fn measuring_ui(ui: &mut egui::Ui, right_to_left: bool) -> egui::Ui {
+    let far = egui::Rect::from_min_size(egui::pos2(-10_000.0, -10_000.0), egui::vec2(10_000.0, RIBBON_H));
+    let layout = if right_to_left {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    let mut away = ui.new_child(egui::UiBuilder::new().max_rect(far).layout(layout));
+    // An invisible ui paints nothing and takes no clicks: the frame the measurement ran in is the
+    // frame the owner sees, and it must not gain a single word or target from a probe.
+    away.set_clip_rect(egui::Rect::NOTHING);
+    away.set_invisible();
+    away
+}
+
+/// How wide the title of the view and its facts are, measured by drawing them away from the window.
+fn ribbon_title_width(ui: &mut egui::Ui, title: &str, count: &str) -> f32 {
+    let mut away = measuring_ui(ui, false);
+    away.spacing_mut().item_spacing.x = 6.0;
+    away.label(egui::RichText::new(title).size(18.0).strong());
+    away.label(num(&away, count, 12.0));
+    away.min_rect().width()
+}
+
+/// How wide the controls of the ribbon are: the measurement is the drawing itself, so the two can
+/// never drift apart (M26.6).
+fn ribbon_controls_width(
+    ui: &mut egui::Ui,
+    view: View,
+    lang: Lang,
+    album_scope_now: bool,
+    searching: bool,
+    tight: bool,
+    right_to_left: bool,
+) -> f32 {
+    let mut away = measuring_ui(ui, right_to_left);
+    let mut st = RibbonState {
+        cell_style: db::CellStyle::Tiles,
+        sort: db::GridSort::DateDesc,
+        layout: db::GridLayout::Flat,
+        changed: false,
+    };
+    ribbon_controls(&mut away, view, lang, album_scope_now, searching, tight, &mut st);
+    away.min_rect().width()
+}
+
+/// The controls of the content ribbon (M22.19): the cell view, the order of the grid and its layout.
+/// One body, drawn in two places — right-aligned in a wide window, left-to-right with wrapping in
+/// the second row of a narrow one (M26.6). `tight` sends the layout switch into the "Sort" menu,
+/// where the order already lives: at 700 px the cell views and the order take the whole row.
+fn ribbon_controls(
+    ui: &mut egui::Ui,
+    view: View,
+    lang: Lang,
+    album_scope_now: bool,
+    searching: bool,
+    tight: bool,
+    st: &mut RibbonState,
+) {
+    ui.spacing_mut().item_spacing.x = 6.0;
+    // The cell view (M22): the mock-up tile is the main one, the rows and the list come
+    // second. The tile size is the pill of the top bar (M22.19). On the Albums screen the
+    // "Cards / List" switch of the album control row is the one look switch: it changes the
+    // album cards and the snapshots together, so no second, dead "List" sits in the ribbon
+    // (M22.22/M22.23). The face tiles have one look of their own, so the switch is not drawn
+    // there either (M22.26).
+    if !matches!(view, View::Albums | View::Faces) {
+        let mut style = st.cell_style;
+        for (value, icon, label, hint) in [
+            (
+                db::CellStyle::Tiles,
+                Icon::GridView,
+                t(lang, "Tile"),
+                t(
+                    lang,
+                    "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut",
+                ),
+            ),
+            (
+                db::CellStyle::Rows,
+                Icon::ViewAgenda,
+                t(lang, "Rows"),
+                t(lang, "proportion rows: the tile width follows the frame"),
+            ),
+            (
+                db::CellStyle::List,
+                Icon::ViewList,
+                t(lang, "List"),
+                t(lang, "a list: name, date and size in one row"),
+            ),
+        ] {
+            if ui
+                .add(WordButton::picked(icon, label, style == value).compact())
+                .on_hover_text(hint)
+                .clicked()
+            {
+                style = value;
+            }
+        }
+        if style != st.cell_style {
+            st.cell_style = style;
+            st.changed = true;
+        }
+        ui.add_space(6.0);
+        hairline_vertical(ui);
+        ui.add_space(6.0);
+    }
+    // The order is available in the grid and inside an album (M19), but not in the tree.
+    if view == View::Grid || album_scope_now {
+        // M17: how to look (months or a run) and in which order. While a semantic search runs
+        // the search sets the order — the switch is dimmed.
+        let mut sort = st.sort;
+        let mut layout = st.layout;
+        let sort_resp = ui.add_enabled_ui(!searching, |ui| {
+            let resp = ui.add(WordButton::new(Icon::Sort, t(lang, "Sort")));
+            egui::Popup::menu(&resp).show(|ui| {
+                if album_scope_now {
+                    ui.selectable_value(
+                        &mut sort,
+                        db::GridSort::Album,
+                        t(lang, "Album order"),
+                    );
+                }
+                for (value, label) in GRID_SORTS {
+                    ui.selectable_value(&mut sort, value, t(lang, label));
+                }
+                // The look of the grid sits under the order it belongs to (M26.6): in a tight
+                // window it is the only entrance to the layout, in a wide one a second one.
+                if view == View::Grid {
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(t(lang, "Layout"))
+                            .size(11.0)
+                            .color(dim(ui)),
+                    );
+                    for (value, label) in [
+                        (db::GridLayout::Flat, "Flat"),
+                        (db::GridLayout::Months, "By months"),
+                    ] {
+                        ui.selectable_value(&mut layout, value, t(lang, label));
+                    }
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} {}",
+                        t(lang, "now:"),
+                        sort_label(sort, lang)
+                    ))
+                    .size(11.0)
+                    .color(dim(ui)),
+                );
+            });
+            resp
+        });
+        sort_resp
+            .inner
+            .on_disabled_hover_text(t(lang, "the search sets the order"))
+            .on_hover_text(t(lang, "tile order: date, name or size"));
+        if sort != st.sort {
+            st.sort = sort;
+            st.changed = true;
+        }
+        if view == View::Grid && !tight {
+            ui.add_space(6.0);
+            hairline_vertical(ui);
+            ui.add_space(6.0);
+            for (value, icon, label) in [
+                (db::GridLayout::Flat, Icon::ViewAgenda, t(lang, "Flat")),
+                (
+                    db::GridLayout::Months,
+                    Icon::CalendarMonth,
+                    t(lang, "By months"),
+                ),
+            ] {
+                // `add_enabled`, not `add_enabled_ui`: a child ui reports its size only after
+                // it is drawn, so the row could not wrap it and the last button left the
+                // panel (M22.8).
+                let r = ui.add_enabled(
+                    !searching,
+                    WordButton::picked(icon, label, layout == value).compact(),
+                );
+                if r.clicked() {
+                    layout = value;
+                }
+                r.on_disabled_hover_text(t(lang, "the search sets the order"));
+            }
+        }
+        if layout != st.layout {
+            st.layout = layout;
+            st.changed = true;
+        }
+    }
 }
 
 impl App {
@@ -4198,7 +4441,7 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-album-pick"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(460.0);
+            ui.set_min_width(dialog_width(ctx, 460.0));
             ui.label(egui::RichText::new(t(lang, "Add to an album")).size(14.0).strong());
             ui.label(num(ui, things.clone(), 11.0).color(dim(ui)));
             ui.add_space(6.0);
@@ -4220,7 +4463,7 @@ impl App {
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut filter)
                         .hint_text(t(lang, "Filter the albums"))
-                        .desired_width(300.0),
+                        .desired_width(ui.available_width().min(300.0)),
                 );
                 field.on_hover_text(t(lang, "a part of the album name"));
                 ui.add_space(2.0);
@@ -4253,7 +4496,7 @@ impl App {
             ui.add(
                 egui::TextEdit::singleline(&mut new_name)
                     .hint_text(t(lang, "For printing, Summer 2024"))
-                    .desired_width(360.0),
+                    .desired_width(ui.available_width().min(360.0)),
             );
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -4361,10 +4604,13 @@ impl App {
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
             ui.allocate_ui_with_layout(
-                egui::vec2(760.0, 620.0),
+                egui::vec2(dialog_width(ctx, 760.0), dialog_height(ctx, 620.0)),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.set_min_size(egui::vec2(760.0, 620.0));
+                    ui.set_min_size(egui::vec2(
+                        dialog_width(ctx, 760.0),
+                        dialog_height(ctx, 620.0),
+                    ));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
@@ -4423,7 +4669,7 @@ impl App {
                             ui.horizontal(|ui| {
                                 ui.add_space(16.0);
                                 ui.vertical(|ui| {
-                                    ui.set_max_width(520.0);
+                                    ui.set_max_width(ui.available_width().min(520.0));
                                     self.settings_section(ui, tab);
                                 });
                             });
@@ -4674,7 +4920,7 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-picker"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(520.0);
+            ui.set_min_width(dialog_width(ctx, 520.0));
             ui.label(egui::RichText::new(t(lang, "Add a folder")).size(14.0));
             ui.label(
                 egui::RichText::new(current.display().to_string())
@@ -4825,7 +5071,7 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-storage"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(460.0);
+            ui.set_min_width(dialog_width(ctx, 460.0));
             ui.label(egui::RichText::new(title).size(14.0));
             ui.add_space(4.0);
             ui.label(text);
@@ -4908,7 +5154,7 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-album"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(480.0);
+            ui.set_min_width(dialog_width(ctx, 480.0));
             ui.label(egui::RichText::new(dialog.title(lang)).size(14.0));
             ui.add_space(6.0);
             match dialog {
@@ -4946,7 +5192,7 @@ impl App {
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut name)
                             .hint_text(t(lang, "Dacha 2024, May, For printing"))
-                            .desired_width(360.0),
+                            .desired_width(ui.available_width().min(360.0)),
                     );
                     field.request_focus();
                 }
@@ -5029,7 +5275,7 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-export"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(640.0);
+            ui.set_min_width(dialog_width(ctx, 640.0));
             ui.label(egui::RichText::new(t(lang, "Export the album to disk")).size(14.0));
             ui.label(i18n::fill(lang, "Album “{}”", std::slice::from_ref(&title)));
             ui.label(
@@ -5049,14 +5295,14 @@ impl App {
                     ui.add(
                         egui::TextEdit::singleline(&mut out)
                             .hint_text(t(lang, "/mnt/disk/export — the folder exists already"))
-                            .desired_width(440.0),
+                            .desired_width((ui.available_width() - 110.0).clamp(120.0, 440.0)),
                     );
                     ui.end_row();
                     ui.label(t(lang, "File name:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut name)
                             .hint_text(organize::EXPORT_TEMPLATE)
-                            .desired_width(440.0),
+                            .desired_width((ui.available_width() - 110.0).clamp(120.0, 440.0)),
                     );
                     ui.end_row();
                 });
@@ -5173,7 +5419,7 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("photocat-trash"))
             .frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(460.0);
+            ui.set_min_width(dialog_width(ctx, 460.0));
             ui.label(egui::RichText::new(t(lang, "Empty the trash?")).size(14.0));
             ui.add_space(4.0);
             ui.label(num(ui, &facts, 11.0).color(dim(ui)));
@@ -5233,8 +5479,10 @@ impl App {
         let mut copy = false;
         let modal = egui::Modal::new(egui::Id::unique("photocat-limited")).frame(dialog_frame(ctx));
         let resp = modal.show(ctx, |ui| {
-            ui.set_min_width(560.0);
-            ui.set_max_width(640.0);
+            ui.set_min_width(dialog_width(ctx, 560.0));
+            // The widest form, but never past the window (M26.6): the commands and the page
+            // addresses wrap inside it.
+            ui.set_max_width(dialog_width(ctx, 640.0));
             ui.horizontal(|ui| {
                 icon_mark_color(ui, Icon::Warning, 18.0, theme(ui).accent);
                 ui.label(
@@ -5373,7 +5621,7 @@ impl App {
                 .color(dim(ui)),
             );
             for page in pages {
-                ui.label(num(ui, *page, 11.0).color(dim(ui)));
+                ui.add(egui::Label::new(num(ui, *page, 11.0).color(dim(ui))).wrap());
             }
         }
     }
@@ -6946,8 +7194,32 @@ impl App {
         }
     }
 
+
     /// The left panel: the map of the application. The navigation and the filter are pinned, the view context scrolls.
     fn left_panel(&mut self, ui: &mut egui::Ui, show_card: bool, show_faces: bool) {
+        // M26.6: a window shorter than the pinned part scrolls the whole panel. The pin exists so
+        // that the threshold never leaves the chips it cuts, and it keeps its meaning only while
+        // the pinned part fits: at 600 px it would be clipped instead.
+        if ui.available_height() < LEFT_PIN_H {
+            egui::ScrollArea::vertical()
+                .id_salt("left-all")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.left_panel_body(ui, show_card, show_faces, true));
+        } else {
+            self.left_panel_body(ui, show_card, show_faces, false);
+        }
+        panel_edge(ui, false);
+    }
+
+    /// The body of the left panel. `short` says the panel already scrolls as a whole, so the
+    /// pinned part needs no scroll of its own (M26.6).
+    fn left_panel_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        show_card: bool,
+        show_faces: bool,
+        short: bool,
+    ) {
         let lang = self.settings.lang;
         // The folder and "Start indexing" are work with the archive, not a search: they live here, while
         // the top bar stays a single 32 px row (mock-up: working folder block).
@@ -7155,42 +7427,58 @@ impl App {
         let tag_counts = self.tag_counts();
         self.threshold_block(ui, &tag_counts);
 
-        egui::ScrollArea::vertical()
-            .id_salt("left-scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                // The tag cloud opens the scrolling part (M25.6): the threshold above it is pinned,
-                // and the chips it cuts stand right under it. It is the filter of the grid only,
-                // but the model block follows on every screen, so the cloud keeps its place.
-                if embed::model_present(&self.settings) {
-                    ui.add_space(2.0);
-                    self.tags_heading(ui);
-                    self.tag_chips(ui, &tag_counts);
-                    ui.add_space(4.0);
-                    hairline(ui);
-                }
-                // The years follow the cloud (M25.6 undoes the M22.3 order on purpose): a click
-                // narrows the date filter to one year. They are drawn on the grid and the calendar
-                // only — other screens have a context of their own (groups, faces, the trash).
-                let years = self.year_counts();
-                if matches!(self.view, View::Grid | View::Calendar) && !years.is_empty() {
-                    nav_section(ui, t(lang, "YEARS"));
-                    self.years_block(ui, &years);
-                    hairline(ui);
-                }
-                match self.view {
-                    View::Dupes => self.dupes_controls(ui),
-                    View::Faces => self.faces_controls(ui, show_faces),
-                    _ => {}
-                }
-                self.model_block(ui);
-                if show_card {
-                    ui.add_space(8.0);
-                    hairline(ui);
-                    self.file_card(ui, self.selected);
-                }
-            });
-        panel_edge(ui, false);
+        if short {
+            self.left_panel_scrolled(ui, show_card, show_faces, &tag_counts);
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("left-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    self.left_panel_scrolled(ui, show_card, show_faces, &tag_counts)
+                });
+        }
+    }
+
+    /// The scrolling part of the left panel: the tag cloud opens it, the years, the controls of the
+    /// screen, the model block and — in a narrow window — the file card (M25.6, M26.6).
+    fn left_panel_scrolled(
+        &mut self,
+        ui: &mut egui::Ui,
+        show_card: bool,
+        show_faces: bool,
+        tag_counts: &[usize],
+    ) {
+        let lang = self.settings.lang;
+        // The tag cloud opens the scrolling part (M25.6): the threshold above it is pinned,
+        // and the chips it cuts stand right under it. It is the filter of the grid only,
+        // but the model block follows on every screen, so the cloud keeps its place.
+        if embed::model_present(&self.settings) {
+            ui.add_space(2.0);
+            self.tags_heading(ui);
+            self.tag_chips(ui, tag_counts);
+            ui.add_space(4.0);
+            hairline(ui);
+        }
+        // The years follow the cloud (M25.6 undoes the M22.3 order on purpose): a click
+        // narrows the date filter to one year. They are drawn on the grid and the calendar
+        // only — other screens have a context of their own (groups, faces, the trash).
+        let years = self.year_counts();
+        if matches!(self.view, View::Grid | View::Calendar) && !years.is_empty() {
+            nav_section(ui, t(lang, "YEARS"));
+            self.years_block(ui, &years);
+            hairline(ui);
+        }
+        match self.view {
+            View::Dupes => self.dupes_controls(ui),
+            View::Faces => self.faces_controls(ui, show_faces),
+            _ => {}
+        }
+        self.model_block(ui);
+        if show_card {
+            ui.add_space(8.0);
+            hairline(ui);
+            self.file_card(ui, self.selected);
+        }
     }
 
     /// The years of the archive as a wrapped cloud (M25.2): the five newest as 18 px chips and,
@@ -11741,26 +12029,34 @@ fn paint_arch_card(
         );
         r.left() + pad + 18.0
     };
-    ui.painter().text(
-        egui::pos2(name_x, r.top() + 4.0),
-        egui::Align2::LEFT_TOP,
-        name,
-        egui::FontId::proportional(12.0),
-        if selected {
-            th.accent
-        } else if count > 0 {
-            th.text
-        } else {
-            th.text_dim
-        },
-    );
-    ui.painter().text(
-        egui::pos2(r.right() - pad, r.top() + 5.0),
-        egui::Align2::RIGHT_TOP,
+    // The counter keeps the right edge, so the name is cut to the room it leaves (M26.6): in a
+    // 700 px window a month card is ~100 px wide and "September" used to run into its number.
+    let count_color = if selected { th.accent } else { th.text_med };
+    let count_galley = ui.painter().layout_no_wrap(
         format!("{count}"),
         egui::FontId::monospace(10.0),
-        if selected { th.accent } else { th.text_med },
+        count_color,
     );
+    let name_color = if selected {
+        th.accent
+    } else if count > 0 {
+        th.text
+    } else {
+        th.text_dim
+    };
+    let name_room = (r.right() - pad - count_galley.size().x - 6.0 - name_x).max(12.0);
+    let name_galley = caption_name(
+        ui,
+        name,
+        egui::FontId::proportional(12.0),
+        name_color,
+        name_room,
+    );
+    ui.painter()
+        .galley(egui::pos2(name_x, r.top() + 4.0), name_galley, name_color);
+    let count_x = r.right() - pad - count_galley.size().x;
+    ui.painter()
+        .galley(egui::pos2(count_x, r.top() + 5.0), count_galley, count_color);
     // The cover: the first snapshot of the cell, fitted whole — a preview is never cropped.
     let cover = egui::Rect::from_min_max(
         egui::pos2(r.left() + pad, r.top() + 23.0),
@@ -12028,6 +12324,8 @@ fn icon_button_tone(
     hint: &str,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    #[cfg(test)]
+    tests::note_target(hint, rect.intersect(ui.clip_rect()));
     let resp = resp
         .on_hover_text(hint)
         .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -12089,6 +12387,8 @@ fn toggle_icon_button(
     hint: &str,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    #[cfg(test)]
+    tests::note_target(hint, rect.intersect(ui.clip_rect()));
     let resp = resp
         .on_hover_text(hint)
         .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -12204,6 +12504,8 @@ impl egui::Widget for WordButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let (w, h, icon_size, font) = self.size(ui);
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
+        #[cfg(test)]
+        tests::note_target(&self.text, rect.intersect(ui.clip_rect()));
         let th = theme(ui);
         let visuals = if self.selected {
             ui.style().interact_selectable(&resp, true)
@@ -14315,6 +14617,15 @@ impl eframe::App for App {
             ),
         };
 
+        // M26.6: the ribbon reads and writes a copy of the grid's look — the tiles' cache below has
+        // already borrowed `App`, and the copy is applied to the settings after the frame.
+        let mut ribbon = RibbonState {
+            cell_style: self.settings.cell_style,
+            sort: self.settings.grid_sort,
+            layout: self.settings.grid_layout,
+            changed: false,
+        };
+        let searching = self.semantic_hits.is_some();
         egui::CentralPanel::default().show(ui, |ui| {
             // The content panel: the canvas background, the view heading and the row of chips.
             egui::Frame::new()
@@ -14323,142 +14634,69 @@ impl eframe::App for App {
                 .show(ui, |ui| {
             // The content ribbon — one 44 px row, the mock-up's `h-11`: the view name and its
             // facts on the left, the controls of the view on the right (M22.19). Before this the
-            // heading, the controls and the chips took three rows of the panel.
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), RIBBON_H),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.label(egui::RichText::new(title).size(18.0).strong());
-                    ui.label(num(ui, count, 12.0).color(dim(ui)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        // The cell view (M22): the mock-up tile is the main one, the rows and the
-                        // list come second. The tile size is the pill of the top bar (M22.19).
-                        // On the Albums screen the "Cards / List" switch of the album control row
-                        // is the one look switch: it changes the album cards and the snapshots
-                        // together, so no second, dead "List" sits in the ribbon (M22.22/M22.23).
-                        // The face tiles have one look of their own, so the switch is not drawn
-                        // there either (M22.26).
-                        if !matches!(view, View::Albums | View::Faces) {
-                            let mut style = self.settings.cell_style;
-                            for (value, icon, label, hint) in [
-                                (
-                                    db::CellStyle::Tiles,
-                                    Icon::GridView,
-                                    t(lang, "Tile"),
-                                    t(lang, "as in the mock-up: a 4:3 frame, the snapshot fills it, the sides are cut"),
-                                ),
-                                (
-                                    db::CellStyle::Rows,
-                                    Icon::ViewAgenda,
-                                    t(lang, "Rows"),
-                                    t(lang, "proportion rows: the tile width follows the frame"),
-                                ),
-                                (
-                                    db::CellStyle::List,
-                                    Icon::ViewList,
-                                    t(lang, "List"),
-                                    t(lang, "a list: name, date and size in one row"),
-                                ),
-                            ] {
-                                if ui
-                                    .add(WordButton::picked(icon, label, style == value).compact())
-                                    .on_hover_text(hint)
-                                    .clicked()
-                                {
-                                    style = value;
-                                }
-                            }
-                            if style != self.settings.cell_style {
-                                self.settings.cell_style = style;
-                                view_save = true;
-                            }
-                            ui.add_space(6.0);
-                            hairline_vertical(ui);
-                            ui.add_space(6.0);
-                        }
-                        // The order is available in the grid and inside an album (M19), but not
-                        // in the tree.
-                        let album_scope_now =
-                            view == View::Albums && self.album_selected.is_some();
-                        if view == View::Grid || album_scope_now {
-                            // M17: how to look (months or a run) and in which order.
-                            // While a semantic search runs the search sets the order — the switch
-                            // is dimmed.
-                            let searching = self.semantic_hits.is_some();
-                            let mut sort = self.settings.grid_sort;
-                            let sort_resp = ui.add_enabled_ui(!searching, |ui| {
-                                let resp =
-                                    ui.add(WordButton::new(Icon::Sort, t(lang, "Sort")));
-                                egui::Popup::menu(&resp).show(|ui| {
-                                    if album_scope_now {
-                                        ui.selectable_value(
-                                            &mut sort,
-                                            db::GridSort::Album,
-                                            t(lang, "Album order"),
-                                        );
-                                    }
-                                    for (value, label) in GRID_SORTS {
-                                        ui.selectable_value(&mut sort, value, t(lang, label));
-                                    }
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} {}",
-                                            t(lang, "now:"),
-                                            sort_label(sort, lang)
-                                        ))
-                                        .size(11.0)
-                                        .color(dim(ui)),
-                                    );
-                                });
-                                resp
-                            });
-                            sort_resp
-                                .inner
-                                .on_disabled_hover_text(t(lang, "the search sets the order"))
-                                .on_hover_text(t(lang, "tile order: date, name or size"));
-                            if sort != self.settings.grid_sort {
-                                self.settings.grid_sort = sort;
-                                view_save = true;
-                            }
-                            if view == View::Grid {
-                                ui.add_space(6.0);
-                                hairline_vertical(ui);
-                                ui.add_space(6.0);
-                                let mut layout = self.settings.grid_layout;
-                                for (value, icon, label) in [
-                                    (db::GridLayout::Flat, Icon::ViewAgenda, t(lang, "Flat")),
-                                    (
-                                        db::GridLayout::Months,
-                                        Icon::CalendarMonth,
-                                        t(lang, "By months"),
-                                    ),
-                                ] {
-                                    // `add_enabled`, not `add_enabled_ui`: a child ui reports
-                                    // its size only after it is drawn, so the row could not wrap
-                                    // it and the last button left the panel (M22.8).
-                                    let r = ui.add_enabled(
-                                        !searching,
-                                        WordButton::picked(icon, label, layout == value)
-                                            .compact(),
-                                    );
-                                    if r.clicked() {
-                                        layout = value;
-                                    }
-                                    r.on_disabled_hover_text(t(
-                                        lang,
-                                        "the search sets the order",
-                                    ));
-                                }
-                                if layout != self.settings.grid_layout {
-                                    self.settings.grid_layout = layout;
-                                    view_save = true;
-                                }
-                            }
-                        }
-                    });
-                },
-            );
+            // heading, the controls and the chips took three rows of the panel. M26.6: the row is
+            // measured before it is drawn, and the title never runs under a control — the layout
+            // switch leaves for the "Sort" menu when the full group does not fit, and the controls
+            // take a second row when even the smaller group does not. The numbers are measured, not
+            // guessed: a fixed breakpoint broke on the longer Russian words.
+            let album_scope_now = view == View::Albums && album_selected.is_some();
+            let room = ui.available_width();
+            let title_room = ribbon_title_width(ui, &title, &count);
+            let tight = room
+                < title_room
+                    + ribbon_controls_width(ui, view, lang, album_scope_now, searching, false, true)
+                    + RIBBON_ROW_GAP;
+            let two_rows = room
+                < title_room
+                    + ribbon_controls_width(ui, view, lang, album_scope_now, searching, tight, false)
+                    + RIBBON_ROW_GAP;
+            if two_rows {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), HEAD_ROW_H),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(egui::RichText::new(title).size(18.0).strong());
+                        ui.label(num(ui, count, 12.0).color(dim(ui)));
+                    },
+                );
+                ui.add_space(2.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ribbon_controls(
+                        ui,
+                        view,
+                        lang,
+                        album_scope_now,
+                        searching,
+                        tight,
+                        &mut ribbon,
+                    );
+                });
+            } else {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), RIBBON_H),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(egui::RichText::new(title).size(18.0).strong());
+                        ui.label(num(ui, count, 12.0).color(dim(ui)));
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                ribbon_controls(
+                                    ui,
+                                    view,
+                                    lang,
+                                    album_scope_now,
+                                    searching,
+                                    tight,
+                                    &mut ribbon,
+                                );
+                            },
+                        );
+                    },
+                );
+            }
             if matches!(view, View::Grid | View::Calendar | View::Albums) && chips.any() {
                 ui.add_space(2.0);
                 clear_chips = draw_filter_chips(ui, &chips);
@@ -16098,6 +16336,13 @@ impl eframe::App for App {
         // Release the borrows of self.textures/missing before open_viewer/reload.
         #[allow(clippy::drop_non_drop)]
         drop(cells);
+        // The ribbon's copy of the look of the grid reaches the settings once the frame is over.
+        if ribbon.changed {
+            self.settings.cell_style = ribbon.cell_style;
+            self.settings.grid_sort = ribbon.sort;
+            self.settings.grid_layout = ribbon.layout;
+            view_save = true;
+        }
         if view_save {
             self.save_settings();
         }
@@ -16837,15 +17082,30 @@ mod tests {
         clock: &mut f64,
         notches: f32,
     ) -> Vec<(String, egui::Pos2)> {
-        super::style(ctx);
         // A tall window: the cloud and the years under it are both on screen before the scroll.
-        let size = egui::vec2(1240.0, 1100.0);
+        scrolled_panel_at(app, ctx, clock, notches, egui::vec2(1240.0, 1100.0))
+    }
+
+    /// The whole window with the wheel turned over the left panel, at any window size (M26.6).
+    fn scrolled_panel_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        clock: &mut f64,
+        notches: f32,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::Pos2)> {
+        super::style(ctx);
         let mut drawn = Vec::new();
         for pass in 0..24 {
             let mut events = Vec::new();
             if pass == 0 && notches != 0.0 {
                 // The wheel moves the area under the pointer: the scrolling part of the panel.
-                events.push(egui::Event::PointerMoved(egui::pos2(130.0, 800.0)));
+                // Over the scrolling part: the cloud starts under the pinned 660 px of the
+                // panel, and at a short window the whole panel scrolls.
+                events.push(egui::Event::PointerMoved(egui::pos2(
+                    130.0,
+                    (size.y * 0.75).clamp(200.0, 800.0),
+                )));
                 events.push(wheel_event(-notches));
             }
             let raw = egui::RawInput {
@@ -25140,5 +25400,449 @@ mod tests {
             );
         }
     }
+
+
+    thread_local! {
+        /// Every interactive target of the last frame a layout check asked for (M26.6).
+        static TARGETS: std::cell::RefCell<Option<Vec<(String, egui::Rect)>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Records one interactive target while a layout check runs (M26.6). A window without a GUI has
+    /// no other way to say where a button landed, so the widgets report their own rects.
+    pub(super) fn note_target(text: &str, rect: egui::Rect) {
+        // Only the visible part of a target counts: a row scrolled out of its area is not there.
+        if rect.width() < 0.5 || rect.height() < 0.5 {
+            return;
+        }
+        TARGETS.with_borrow_mut(|t| {
+            if let Some(v) = t {
+                v.push((text.to_owned(), rect));
+            }
+        });
+    }
+
+    /// The boxes of the drawn words, cut to what the frame actually shows: a word scrolled out of
+    /// its area is not painted, and a word cut by the edge of its panel is only as wide as shown.
+    fn clipped_words_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::Rect)> {
+        super::style(ctx);
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let first = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        let mut words = Vec::new();
+        for c in &out.shapes {
+            let mut inner = Vec::new();
+            collect_text_rects(&c.shape, &mut inner);
+            for (text, r) in inner {
+                let vis = r.intersect(c.clip_rect);
+                if vis.width() > 0.5 && vis.height() > 0.5 {
+                    words.push((text, vis));
+                }
+            }
+        }
+        out.drop_without_applying_deltas();
+        words
+    }
+
+    fn strict_overlap(a: &(String, egui::Rect), b: &(String, egui::Rect)) -> bool {
+        let i = a.1.intersect(b.1);
+        i.width() > 1.0 && i.height() > 1.0
+    }
+
+    fn modal_card(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+        draw: impl Fn(&mut App, &egui::Context),
+    ) -> (Option<egui::Rect>, Vec<(String, egui::Rect)>) {
+        super::style(ctx);
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let first = ctx.run_ui(raw(), |ui| {
+            let c = ui.ctx().clone();
+            draw(app, &c);
+        });
+        first.drop_without_applying_deltas();
+        let out = ctx.run_ui(raw(), |ui| {
+            let c = ui.ctx().clone();
+            draw(app, &c);
+        });
+        let mut words = Vec::new();
+        let mut rects = Vec::new();
+        for c in &out.shapes {
+            let mut inner = Vec::new();
+            collect_text_rects(&c.shape, &mut inner);
+            for (text, r) in inner {
+                let vis = r.intersect(c.clip_rect);
+                if vis.width() > 0.5 && vis.height() > 0.5 {
+                    words.push((text, vis));
+                }
+            }
+            collect_rect_styles(&c.shape, &mut rects);
+        }
+        out.drop_without_applying_deltas();
+        // The card: radius 8 and a 1 px line, the biggest of them.
+        let card = rects
+            .iter()
+            .filter(|(_, _, stroke, radius)| {
+                stroke.width > 0.0 && radius.nw == super::RADIUS_CARD as u8
+            })
+            .map(|(r, _, _, _)| *r)
+            .next_back();
+        (card, words)
+    }
+
+
+    /// Every interactive target of one frame at a given window size (M26.6): the widgets record
+    /// themselves while the check runs, because a layout without a GUI has no other way to say
+    /// where a button landed.
+    fn targets_at(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+    ) -> Vec<(String, egui::Rect)> {
+        super::style(ctx);
+        let raw = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let first = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        first.drop_without_applying_deltas();
+        TARGETS.with_borrow_mut(|t| *t = Some(Vec::new()));
+        let out = ctx.run_ui(raw(), |ui| eframe::App::ui(app, ui, &mut frame));
+        out.drop_without_applying_deltas();
+        TARGETS.with_borrow_mut(|t| t.take().unwrap_or_default())
+    }
+
+    /// M26.6: the layout survives a narrow window — the owner's complaint that the whole layout
+    /// drifts apart at a narrow window.
+    /// Six sizes from 700×600 to 2539×1000 and every screen: no word and no target leaves the
+    /// window, no two of them overlap, the ribbon is one row while it fits and two when it does not,
+    /// the left panel scrolls instead of clipping its pinned part, and every dialog fits.
+    #[test]
+    fn the_layout_survives_a_narrow_window() {
+        use super::{HEAD_ROW_H, LEFT_W};
+        let sizes = [
+            egui::vec2(700.0, 600.0),
+            egui::vec2(900.0, 700.0),
+            egui::vec2(1100.0, 800.0),
+            egui::vec2(1240.0, 840.0),
+            egui::vec2(1691.0, 1021.0),
+            egui::vec2(2539.0, 1000.0),
+        ];
+        let views = [
+            (View::Grid, "grid"),
+            (View::Albums, "albums"),
+            (View::Calendar, "calendar"),
+            (View::Faces, "faces"),
+            (View::Dupes, "dupes"),
+            (View::Trash, "trash"),
+            (View::Integrity, "integrity"),
+        ];
+        let ctx = egui::Context::default();
+        for lang in [i18n::Lang::En, i18n::Lang::Ru] {
+            let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-narrow.db"));
+            fake_model_dir(&mut app);
+            app.items = m17_rows();
+            app.tags.insert(1, vec![("beach".into(), 0.9)]);
+            app.tags.insert(3, vec![("cake".into(), 0.7)]);
+            app.tag_dists = embed::tag_distributions(&app.tags);
+            app.tag_filters = vec!["beach".into()];
+            app.settings.lang = lang;
+            app.details_open = true;
+            for size in sizes {
+                let win = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                for (view, name) in views {
+                    app.view = view;
+                    let words = clipped_words_at(&mut app, &ctx, size);
+                    for (text, r) in &words {
+                        assert!(
+                            win.contains_rect(*r),
+                            "{name} at {}×{} paints “{text}” outside the window: {r:?}",
+                            size.x,
+                            size.y
+                        );
+                    }
+                    for i in 0..words.len() {
+                        for j in (i + 1)..words.len() {
+                            assert!(
+                                !strict_overlap(&words[i], &words[j]),
+                                "{name} at {}×{}: “{}” {:?} overlaps “{}” {:?}",
+                                size.x,
+                                size.y,
+                                words[i].0,
+                                words[i].1,
+                                words[j].0,
+                                words[j].1
+                            );
+                        }
+                    }
+                    let targets = targets_at(&mut app, &ctx, size);
+                    for (text, r) in &targets {
+                        assert!(
+                            win.contains_rect(*r),
+                            "{name} at {}×{} has a target outside the window: “{text}” {r:?}",
+                            size.x,
+                            size.y
+                        );
+                    }
+                    for i in 0..targets.len() {
+                        for j in (i + 1)..targets.len() {
+                            assert!(
+                                !strict_overlap(&targets[i], &targets[j]),
+                                "{name} at {}×{}: the target “{}” {:?} overlaps “{}” {:?}",
+                                size.x,
+                                size.y,
+                                targets[i].0,
+                                targets[i].1,
+                                targets[j].0,
+                                targets[j].1
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // The ribbon: the title on its own row under 900 px, next to the controls above it.
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-narrow-ribbon.db"));
+        app.items = m17_rows();
+        app.settings.lang = i18n::Lang::En;
+        let ctx = egui::Context::default();
+        for size in sizes {
+            app.view = View::Grid;
+            let targets = targets_at(&mut app, &ctx, size);
+            let at = |needle: &str| {
+                targets
+                    .iter()
+                    .find(|(text, _)| text == needle)
+                    .map(|(_, r)| *r)
+                    .unwrap_or_else(|| panic!("no “{needle}” at {}×{}: {targets:?}", size.x, size.y))
+            };
+            let title = clipped_words_at(&mut app, &ctx, size)
+                .into_iter()
+                .find(|(text, r)| text == "All files" && r.min.x >= LEFT_W)
+                .map(|(_, r)| r)
+                .expect("the view title is drawn");
+            let tile = at("Tile");
+            let sort = at("Sort");
+            // The title and its facts never run under the controls of the ribbon.
+            assert!(
+                title.min.x >= LEFT_W && title.max.x <= size.x,
+                "the title leaves the content panel at {}×{}: {title:?}",
+                size.x,
+                size.y
+            );
+            // The controls stand in the content panel: not under the left panel, not past the edge.
+            for (what, r) in [("tile", tile), ("sort", sort)] {
+                assert!(
+                    r.min.x >= LEFT_W && r.max.x <= size.x,
+                    "the ribbon's {what} left the content panel at {}×{}: {r:?}",
+                    size.x,
+                    size.y
+                );
+            }
+            // One row while the title and the controls fit with `RIBBON_ROW_GAP` to spare: it
+            // holds at every wide window and never at the narrowest one.
+            let same_row = title.max.y > tile.min.y && title.min.y < tile.max.y;
+            if size.x >= 1240.0 {
+                assert!(
+                    same_row,
+                    "at {}×{} the ribbon must be one row: {title:?} {tile:?}",
+                    size.x, size.y
+                );
+                assert!(
+                    tile.min.x - title.max.x >= super::RIBBON_ROW_GAP - 40.0,
+                    "the title runs into the controls at {}×{}: {title:?} {tile:?}",
+                    size.x,
+                    size.y
+                );
+            }
+            // The layout switch ("Flat / By months") leaves the row for the "Sort" menu at the
+            // narrowest window: the smaller group still fits, the full one does not.
+            let flat = targets.iter().find(|(text, _)| text == "Flat");
+            if size.x <= 700.0 {
+                assert!(
+                    flat.is_none(),
+                    "at {}×{} the layout switch still takes the row",
+                    size.x,
+                    size.y
+                );
+            } else if size.x >= 1240.0 {
+                assert!(
+                    flat.is_some(),
+                    "at {}×{} the layout switch disappeared",
+                    size.x,
+                    size.y
+                );
+            }
+            // A longer title wraps the ribbon at the narrowest window: the controls take a second
+            // row and the row of the title is the `HEAD_ROW_H` band.
+            if size.x <= 700.0 {
+                app.view = View::Dupes;
+                let words = clipped_words_at(&mut app, &ctx, size);
+                let dupes_targets = targets_at(&mut app, &ctx, size);
+                let title = words
+                    .iter()
+                    .find(|(text, r)| text == "Duplicates & series" && r.min.x >= LEFT_W)
+                    .map(|(_, r)| *r)
+                    .expect("the title of the duplicates screen");
+                let tile = dupes_targets
+                    .iter()
+                    .find(|(text, _)| text == "Tile")
+                    .map(|(_, r)| *r)
+                    .expect("the cell views of the duplicates screen");
+                assert!(
+                    title.max.y <= tile.min.y,
+                    "at {}×{} the controls must take a second row: title {title:?}, tile {tile:?}",
+                    size.x,
+                    size.y
+                );
+                assert!(
+                    tile.max.y - title.min.y <= HEAD_ROW_H + 32.0,
+                    "the wrapped ribbon is taller than its two rows at {}×{}: {tile:?} {title:?}",
+                    size.x,
+                    size.y
+                );
+                app.view = View::Grid;
+            }
+            // The card keeps a panel of its own only above 1200 px: under it, the card moves into
+            // the left panel, where it lies in the scrolling part of the panel.
+            let card = clipped_words_at(&mut app, &ctx, size)
+                .into_iter()
+                .find(|(text, _)| text == "File details")
+                .map(|(_, r)| r);
+            match card {
+                Some(r) => assert!(
+                    size.x >= super::DETAILS_MIN_W && r.min.x > LEFT_W,
+                    "at {}×{} the card is drawn outside the right panel: {r:?}",
+                    size.x,
+                    size.y
+                ),
+                None => assert!(
+                    size.x < super::DETAILS_MIN_W,
+                    "at {}×{} the right panel with the card disappeared: {size:?}",
+                    size.x,
+                    size.y
+                ),
+            }
+        }
+
+        // A 600 px window scrolls the whole left panel: the pinned part is reachable, not clipped.
+        app.settings.lang = i18n::Lang::En;
+        let short = egui::vec2(700.0, 600.0);
+        let mut clock = 0.0;
+        let top = scrolled_panel_at(&mut app, &ctx, &mut clock, 0.0, short);
+        assert!(
+            top.iter().any(|(text, _)| text == "FOLDER"),
+            "the folder block is not drawn at 700×600: {top:?}"
+        );
+        let down = scrolled_panel_at(&mut app, &ctx, &mut clock, 1.0, short);
+        let words: Vec<&String> = down.iter().map(|(text, _)| text).collect();
+        assert!(
+            words.iter().any(|t| t.starts_with("No preview"))
+                || words.iter().any(|t| t.starts_with("No date")),
+            "the filter chips of the left panel are unreachable at 700×600: {down:?}"
+        );
+        assert!(
+            !words.iter().any(|t| *t == "FOLDER"),
+            "the panel did not scroll as a whole at 700×600: {down:?}"
+        );
+
+        // Every dialog fits the smallest window and keeps its words inside.
+        let mut app = App::new(std::path::PathBuf::from("/tmp/photocat-test-narrow-dialogs.db"));
+        app.items = m17_rows();
+        app.settings.lang = i18n::Lang::En;
+        let size = egui::vec2(700.0, 600.0);
+        app.settings_open = true;
+        assert_dialog_fits(&mut app, size, "settings", |app, c| app.settings_modal(c));
+        app.settings_open = false;
+        app.roots_open = true;
+        assert_dialog_fits(&mut app, size, "folders", |app, c| app.roots_modal(c));
+        app.roots_open = false;
+        app.picker_open = true;
+        assert_dialog_fits(&mut app, size, "picker", |app, c| app.picker_modal(c));
+        app.picker_open = false;
+        app.storage_confirm = Some(StorageAction::Thumbs);
+        assert_dialog_fits(&mut app, size, "storage", |app, c| app.storage_modal(c));
+        app.storage_confirm = None;
+        app.album_dialog = Some(AlbumDialog::New);
+        assert_dialog_fits(&mut app, size, "album", |app, c| app.album_modal(c));
+        app.album_dialog = None;
+        app.export_open = true;
+        assert_dialog_fits(&mut app, size, "export", |app, c| app.export_modal(c));
+        app.export_open = false;
+        app.trash_confirm = true;
+        assert_dialog_fits(&mut app, size, "trash", |app, c| app.trash_modal(c));
+        app.trash_confirm = false;
+        app.album_pick = Some(super::AlbumPick {
+            files: vec![1],
+            target: 0,
+            new_name: String::new(),
+            filter: String::new(),
+        });
+        assert_dialog_fits(&mut app, size, "album pick", |app, c| app.album_pick_modal(c));
+        app.album_pick = None;
+        app.limited_open = true;
+        app.tools_missing = vec![tools::Tool::Ffmpeg];
+        assert_dialog_fits(&mut app, size, "limited feature", |app, c| app.limited_modal(c));
+        app.limited_open = false;
+    }
+
+    /// A dialog is a card inside the window: at 700×600 it is at most the window minus the margins
+    /// and every word of it stays within (M26.6).
+    fn assert_dialog_fits(
+        app: &mut App,
+        size: egui::Vec2,
+        what: &str,
+        draw: impl Fn(&mut App, &egui::Context),
+    ) {
+        let ctx = egui::Context::default();
+        let (card, words) = modal_card(app, &ctx, size, draw);
+        let win = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        let card = card.unwrap_or_else(|| panic!("the {what} dialog is not a card"));
+        assert!(
+            win.contains_rect(card),
+            "the {what} dialog leaves the window: {card:?}"
+        );
+        assert!(
+            card.width() <= size.x - super::DIALOG_MARGIN,
+            "the {what} dialog is wider than the window minus the margins: {card:?}"
+        );
+        for (text, r) in &words {
+            assert!(
+                win.contains_rect(*r),
+                "the {what} dialog paints “{text}” outside the window: {r:?}"
+            );
+        }
+        for i in 0..words.len() {
+            for j in (i + 1)..words.len() {
+                assert!(
+                    !strict_overlap(&words[i], &words[j]),
+                    "the {what} dialog: “{}” {:?} overlaps “{}” {:?}",
+                    words[i].0,
+                    words[i].1,
+                    words[j].0,
+                    words[j].1
+                );
+            }
+        }
+    }
+
+
+
+
 
 }

@@ -125,7 +125,7 @@ the interface rules at the end of the file.
 - **The window is looked at in both themes** (M22.11): `app::tests::every_screen_paints_only_the_
   tokens_of_its_theme` renders the grid, the four calendar layers, the albums and the full screen in
   dark and in light and fails on a word, fill or line that is not a token of the palette in use; the
-  four screens without a mock-up and all seven dialogs do the same in their own tests.
+  four screens without a mock-up and all nine dialogs do the same in their own tests.
 - **The ground is neutral** (M22.11): the light `canvas` is the design system's cool `canvas-base`
   `#f8fafc`, never its warm Material `background` `#fff8f5`; every ground token keeps `r ≤ g ≤ b`,
   and a tile's frame is painted in `canvas`, so the letterbox around a photograph does not cast on
@@ -172,7 +172,26 @@ the interface rules at the end of the file.
   changes the album cards and the album's photos together (M22.23). The "People" screen hides them
   too: its face tiles have one look of their own (M22.26). The row of active filter
   chips with "×" and "Reset" is drawn **only while a filter is on**,
-  so the grid does not pay for an empty row; the counts are already in the title.
+  so the grid does not pay for an empty row; the counts are already in the title. The "Sort" menu
+  carries the grid's layout under a "Layout" line ("Flat", "By months") in every window, so the
+  switch never has a single entrance (M26.6).
+- **A narrow window keeps the layout** (M26.6; the window cannot be made smaller than 700×600 —
+  `with_min_inner_size`, the size the test uses). Nothing is
+  painted outside the window, no two words overlap and no two interactive targets overlap —
+  `app::tests::the_layout_survives_a_narrow_window` renders 700×600, 900×700, 1100×800, 1240×840,
+  1691×1021 and 2539×1000 in both languages, over the seven screens, and fails on a word or a button
+  outside the window, on two of them that overlap, and on a dialog wider than the window minus 48 px.
+  The breakpoints are **measured, not spelled as one number**, because the Russian column is longer:
+  the title and the controls of the ribbon share a row while they fit with 24 px to spare (down to
+  an 836 px window in English, 984 px in Russian); below that the controls take a second 24 px row
+  (`HEAD_ROW_H`) and wrap there; when even the smaller group does not fit, the "Flat / By months"
+  switch leaves the row for the "Sort" menu (below 675 / 793 px — at the 700 px minimum in Russian
+  always). A window shorter than the 670 px the pinned part of the left panel needs
+  (`LEFT_PIN_H`) makes **the whole panel scroll** — the pin is kept only while the pinned part fits,
+  and a short window scrolls instead of clipping the filter rows and the threshold. Every dialog
+  asks for `dialog_width`/`dialog_height`: its design size, never more than the window minus the
+  48 px of the modal and the 34 px its card adds, and it scrolls its body — the settings dialog is
+  794×654 at 1240×840 and 652×552 at 700×600.
 - **Three columns:** on the left the app map and the filters, in the centre the grid, on the right
   the details of the selected file. The right panel is 280 px and appears while the grid keeps 4
   columns (window ≥ 1200 px); below that the card moves into the left panel, so that the grid does
@@ -180,7 +199,9 @@ the interface rules at the end of the file.
   the card; below 1200 px that list falls back to the left panel (M22.26).
 - **The left panel:** navigation, the folder block and the filter block are pinned on top and do
   not scroll; everything else scrolls between them — the years, the view context, the model and
-  text blocks, and the file card (in a narrow window). The years open that scrolling part, so they
+  text blocks, and the file card (in a narrow window). The pinned part needs 670 px (`LEFT_PIN_H`,
+  the threshold's block ends at 660 on the corpus): a shorter window scrolls the whole panel, so
+  the pin never turns into clipping (M26.6). The years open that scrolling part, so they
   are the first thing under the pinned filter and need no scroll of their own; they are a filter of
   the grid and of the calendar only — the duplicates, faces, trash and integrity screens have a
   context of their own. The years are a wrapped cloud of 18 px chips (M25.2): the five newest and
@@ -408,6 +429,7 @@ a rare one.
 | Grid step | 10 px between tiles inside a row and between rows (the mock-up's `gap-2.5`); other screens live on the common `item_spacing` 8×6 | `app.rs::draw_tiles`, `draw_flow` |
 | Month heading | "May 2024" at 14 px on the left, "· 132 files · 5.4 GiB" at 11 px next to it, 4 px before the tiles and 16 px after the group; the heading of the group under the top edge of the grid area is pinned there on the canvas tone and pushed out by the next group's heading (M22.4) | `app.rs::month_header`, `draw_sticky_month` |
 | Content panel | one 44 px ribbon (M22.19): the view title 18 px with the facts 12 px mono on the left; on the right the controls as 20 px buttons — the three cell views, "By months / Flat" and the "Sort" menu (11 px label) — divided by 1 × 16 px lines; the chips row with "×" and "Reset" appears only while a filter is on | `ui()` → `draw_filter_chips` |
+| Content ribbon in a narrow window | the row is measured before it is drawn (`ribbon_title_width`, `ribbon_controls_width` on an invisible ui): one row while the title and the controls fit with `RIBBON_ROW_GAP` (24 px) to spare — 836 px of window in English, 984 px in Russian; otherwise a second `HEAD_ROW_H` (24 px) row of controls that wraps; the layout switch leaves the row for the "Sort" menu below 675 / 793 px (M26.6) | `ribbon_controls`, `ribbon_controls_width`, `App::ui` |
 | Navigation item | 28 px high, a 14 px icon 8 px from the left edge, the 13 px label 6 px after it, the 11 px number on the right; the selected one — the `field` tone and accent text (M22.3, the mock-up's row without a bar) | `app.rs::nav_item` |
 | Action button | 26 px high, 10 px padding, 4 px radius: a 14 px icon, 6 px, the word of 13 px; the one main action of a screen — the accent fill and the text on the accent; the OS-trash path — a 1 px `danger` border, no fill; a 20 px compact variant for a strip switch, for a dense row and for the two actions of the file card (M22.16, so they stay on one line in both languages); the icon takes the colour of the word, the disabled state takes `text_dim` | `app.rs::WordButton`, `word_button` |
 | Icon | 14 px (12 px in a compact/small button), a 1.5 px stroke, the box = the glyph: the set is the mock-up's Material Symbols by name, drawn by `paint_icon` — the player signs (⏮ ▶ ⏸ ⏭, sound) were the first of it | `app.rs::Icon`, `paint_icon` |
@@ -436,8 +458,8 @@ a rare one.
 | Right panel | 280 px, its frame with no margin of its own so the 1 px line stands on its left edge; a 44 px header band on the `card` tone with the info glyph, "File details" at 12 px strong and the 22 px "×" 12 px from the right edge, a 1 px line under it; closed by that "×" (hint) and by the details toggle of the top strip (M22.19; its hint is "Details" / "Hide details"); hidden while the window is narrower than 1200 px — then the card is in the left panel | `Panel::right`, `App::details_panel` |
 | Preview in the card | the panel width minus 24 px of air, 4:3, no higher than 210 px, the frame fitted entirely, the `canvas` well, an 8 px radius, a 1 px `border`, all four corners cut; a dark corner badge — "▶ M:SS" for a video, the format ("JPG", "HEIC") for a still; below the name mono 12 in the accent and the path mono 11 `text_dim`; "Open full screen" and "To trash" as 20 px buttons in one row in either language | `App::file_card` |
 | Own-tag row | one line in a framed `field` row (a 4 px radius, 8 px/2 px inside, M22.16, 28 px high with its 1 px line): the "`#`" in mono 12, the frame-less field takes `available − 16 − 22 − 8 px` (never below 40), the "Add tag" button is an icon-only 22 px square with the `add` glyph and the hint, and both are 22 px high with the text centred on the line (M22.18 — the theme's 26 px field with its text at the top made the input stick to the upper edge); the field is ~190 px of the 255 px card and the row never widens the panel (M22.12) | `App::file_card` |
-| "Settings" dialog | 760×620 px of content inside the dialog frame, a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 14 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
-| Dialog | one `dialog_frame` for all seven: the `card` tone, a 1 px `border`, the 8 px radius and 16 px of air inside; the title 14 px, the body 13 px, hints 11–12 px; at most one accent button — the dialog's main action — and no accent at all on the settings dialog, where every change is saved at once; the trash confirmation is the one dialog whose button moves files, so it carries the `danger` border and no fill; a number stands in a facts row of its own in mono 11, never inside a translated sentence; a report body is mono 11 in its own scroll area with a copy button (M22.10) | `app.rs::dialog_frame`, the `*_modal` functions |
+| "Settings" dialog | 760×620 px of content inside the dialog frame (clamped to the window: 652×552 at 700×600), a 200 px section list on the left, fields up to 520 px; above the list the caps 10 px line "SETTINGS SECTIONS"; a section row 28 px with a 14 px icon, the 13 px label and a mono 10 value at the right edge that is dropped when it would touch the word; the active row on the `accent_soft` fill with a 2 px accent edge on the left; the pane title 14 px, a 1 px rule under it | `App::settings_modal`, `app.rs::settings_nav_item`, `SettingsTab::icon` |
+| Dialog | one `dialog_frame` for all nine, never wider than the window minus 48 px of margin and the 34 px the card adds (`dialog_width`, `dialog_height`), its body scrolled: the `card` tone, a 1 px `border`, the 8 px radius and 16 px of air inside; the title 14 px, the body 13 px, hints 11–12 px; at most one accent button — the dialog's main action — and no accent at all on the settings dialog, where every change is saved at once; the trash confirmation is the one dialog whose button moves files, so it carries the `danger` border and no fill; a number stands in a facts row of its own in mono 11, never inside a translated sentence; a report body is mono 11 in its own scroll area with a copy button (M22.10) | `app.rs::dialog_frame`, the `*_modal` functions |
 | Caption under a cell | a 22 px band on the `panel` tone: the file name (mono 10, left) and the date `YYYY-MM-DD HH:MM` or "no date" (mono 10, `text_dim`, right); the name stays on one line and is cut with an ellipsis at the edge of the date — a long name never wraps over the preview and never runs over the date | `draw_cell`, `caption_name` |
 | Top strip | exactly `TOP_H` = 32 logical px at any `pixels_per_point`, plus its 1 px bottom line drawn on the last row, one row, `panel` tone (M22.19, after `photocat_1`; the height is a constant of the layout and no child may take it — M26.4); the search well is 28 px high (a 20 px row with 3 px of air and a 1 px line) and at most 646 px wide (the mock-up's 576 plus the ~70 px of the state pill that left in M25.8), centred between the mark and the tools; the "Tiles" pill is 26 px high — 14 px of glyph, a 6 px gap and an 84 px slider; the details toggle (28 px) and "Settings" (26 px) on the right; a pass row or the reminder adds height under the one row and leaves it at 32 px afterwards | `App::top_bar`, `App::search_field`, `App::tile_pill` |
 | Bottom strip | 28 px, `panel` tone, 1 px top line, mono counters: a dot and the last fact, then — while an external program does not start — a 16 px amber warning target 2 px after the state word (M26.2, the glyph `Warning`, the hint "some features are limited — click for the details"), then the count of files and their volume; on the right the selected file (name · frame · size) | `App::status_bar`, `icon_button_tone` |

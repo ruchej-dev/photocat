@@ -41,9 +41,13 @@ override the theme; do not introduce colours of our own except the accent.
 | Face in the cache | 112×112 | `faces` |
 | Calendar cell | `(width − 24)/7` × 96 px | `View::Calendar` |
 | Video bar | 16 px, 11 px text | `draw_cell` |
+| Content ribbon | one 44 px row; the controls take a second 24 px row when the title and they do not fit with 24 px to spare (measured: 836 px of window in English, 984 in Russian) | `ribbon_controls_width`, `App::ui` |
+| Dialog | its design size, never wider than the window minus 48 px of margin and the 34 px the card adds; the body scrolls | `dialog_width`, `dialog_height` |
 
-The minimum window is 1000×700: at that size the grid must keep **at least 4 columns**. If the tile
-metric grows so much that 4 columns no longer fit — that is a defect, not "it got roomier".
+The minimum window is **700×600** (M26.6, enforced by `with_min_inner_size`): at that size nothing
+leaves the window, no two words and no two targets overlap, and the ribbon wraps when it must. At 1000×700 the grid must keep **at least 4 columns**.
+If the tile metric grows so much that 4 columns no longer fit — that is a defect, not "it got
+roomier".
 
 ## 3. Typography
 
@@ -101,6 +105,15 @@ Rules:
   their width before the grid is drawn, otherwise the grid "cringes" on the first frame. The right
   panel is drawn only while the grid keeps 4 columns (a window of 1200 px or wider); otherwise the
   card lives in the left panel, not as a separate screen.
+- **A narrow window is a requirement, not an accident** (M26.6). The ribbon's row is *measured*
+  before it is drawn, never guessed from one breakpoint: the title and the controls keep one row
+  while they fit with 24 px to spare, otherwise the controls take a second row and wrap, and when
+  even the smaller group does not fit, the "Flat / By months" switch moves into the "Sort" menu.
+  A window shorter than the pinned part of the left panel (670 px) scrolls **the whole panel** —
+  the pin exists only while the pinned part fits. A dialog never asks for more than the window
+  minus the margins: it clamps its size and scrolls its body. The test is
+  `app::tests::the_layout_survives_a_narrow_window` — six sizes, both languages, seven screens,
+  nine dialogs.
 - The top bar has at most **two rows** of controls: (1) the folder + "Index" + "Refresh" + on the
   right "Folders", "Details", "Settings", (2) the search with the segmented mode. The third row is
   only the progress of a background pass.
