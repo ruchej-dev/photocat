@@ -5,7 +5,7 @@
 ## Layers
 
 ```
-L3  main.rs ── app.rs            CLI and GUI
+L3  main.rs, cli/ ── app.rs     CLI and GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
 L1  db.rs   storage.rs
@@ -117,6 +117,13 @@ item is measured from its first line to its closing brace.
 Twenty-five items are over the budget on this date and are written into `BUDGET_EXEMPT`: ten files,
 two `impl` blocks and thirteen functions. All but `src/derive.rs` (776 lines) belong to a move that
 M27.2–M27.6 already plans; `derive.rs` needs a split of its own. The list must be empty by M27.8.
+
+**After M27.2 (2026-11-28).** `src/main.rs` is **85 lines**: the flag parser's home, the dispatch
+`match` and nothing else. The subcommands live in `src/cli/` — one file per command, `report.rs` for
+the shared progress line, spinner and short version — and the biggest of them is `albums.rs` at 376
+lines with every function under 200. `check.sh` now walks `src/` recursively and treats the whole
+folder as the `cli` layer, so the files under it are held to the same rule. `BUDGET_EXEMPT` is down
+to 22 items: the nine files still to move, two `impl` blocks and eleven functions.
 
 ## Indexing flow
 

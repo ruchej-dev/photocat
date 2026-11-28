@@ -36,18 +36,24 @@ declare -A ALLOWED=(
   [player]=""
   [app]="i18n derive db index dupes organize verify embed eval ocr faces player tools recycle storage"
   [main]="i18n derive db index dupes organize verify embed eval ocr faces player app tools"
+  [cli]="i18n derive db index dupes organize verify embed eval ocr faces player tools app"
 )
 
 echo "1. dependencies between modules"
-for f in src/*.rs; do
+for f in $(find src -name '*.rs' | sort); do
   mod=$(basename "$f" .rs)
-  [[ -v ALLOWED[$mod] ]] || { err "module src/$mod.rs is not registered in the layer map of check.sh"; continue; }
-  refs=$(grep -oE 'crate::[a-z_][a-z0-9_]*' "$f" 2>/dev/null | cut -d: -f3 | sort -u | grep -vx "$mod" || true)
+  # A folder is one layer: every file under src/cli/ belongs to `cli` (ADR 0053).
+  case "$f" in
+    src/cli/*) mod=cli ;;
+  esac
+  [[ -v ALLOWED[$mod] ]] || { err "module $f is not registered in the layer map of check.sh"; continue; }
+  refs=$(grep -oE 'crate::[a-z_][a-z0-9_]*' "$f" 2>/dev/null | cut -d: -f3 | sort -u \
+    | grep -vx "$mod" | grep -vxE 'flag_str|flag_num|has_flag' || true)
   for r in $refs; do
     if [[ " ${ALLOWED[$mod]} " == *" $r "* ]]; then
       pass
     else
-      err "src/$mod.rs uses crate::$r, which the layers forbid"
+      err "$f uses crate::$r, which the layers forbid"
     fi
   done
 done
@@ -55,7 +61,7 @@ done
 
 # ---------------------------------------------------------------- 2. egui
 echo "2. egui only in app.rs"
-bad=$(grep -lE '\b(egui|eframe)::|use eframe|use egui' src/*.rs 2>/dev/null | grep -v '^src/app.rs$' || true)
+bad=$(grep -rlE '\b(egui|eframe)::|use eframe|use egui' src --include='*.rs' 2>/dev/null | grep -v '^src/app.rs$' || true)
 if [[ -n $bad ]]; then
   err "egui found outside src/app.rs: $(echo "$bad" | tr '\n' ' ')"
 else
@@ -66,7 +72,7 @@ fi
 # ---------------------------------------------------------------- 3. archive files
 echo "3. no deleting or renaming files"
 # The exception is src/storage.rs: it deletes only the contents of <cache>/photocat (the path is checked inside).
-bad=$(grep -nE '\b(fs::remove_file|fs::remove_dir|fs::remove_dir_all|fs::rename|remove_file|remove_dir_all)' src/*.rs 2>/dev/null | grep -v '^src/storage.rs:' || true)
+bad=$(grep -rnE '\b(fs::remove_file|fs::remove_dir|fs::remove_dir_all|fs::rename|remove_file|remove_dir_all)' src --include='*.rs' 2>/dev/null | grep -v '^src/storage.rs:' || true)
 if [[ -n $bad ]]; then
   err "src/ deletes or renames files (ADR 0005):"
   echo "$bad" | sed 's/^/      /'
@@ -91,7 +97,7 @@ if [[ $bad == "ureq is not in Cargo.toml" ]]; then
 else
   pass
 fi
-bad=$(grep -nE 'Command::new\("(curl|ffmpeg|ffprobe|tesseract)"\)' src/*.rs 2>/dev/null \
+bad=$(grep -rnE 'Command::new\("(curl|ffmpeg|ffprobe|tesseract)"\)' src --include='*.rs' 2>/dev/null \
   | grep -v '^src/tools.rs:' || true)
 if [[ -n $bad ]]; then
   err "an external program is started outside src/tools.rs (ADR 0019):"
@@ -100,7 +106,7 @@ else
   pass
 fi
 # The HTTP client lives in the downloader only.
-bad=$(grep -nE '\bureq::|\bureq\b' src/*.rs 2>/dev/null | grep -v '^src/embed.rs:' || true)
+bad=$(grep -rnE '\bureq::|\bureq\b' src --include='*.rs' 2>/dev/null | grep -v '^src/embed.rs:' || true)
 if [[ -n $bad ]]; then
   err "ureq is used outside src/embed.rs (ADR 0047):"
   echo "$bad" | sed 's/^/      /'
@@ -136,7 +142,7 @@ fi
 # scan lives in tests/source_language.rs; here it runs without a build, and a Cyrillic letter in a
 # declaration is caught even before the test is compiled.
 echo "6. the code speaks English"
-bad=$(grep -nP '\b(fn|let|struct|enum|trait|const|static|mod|type)\s+(mut\s+)?[A-Za-z0-9_]*[\x{0400}-\x{04FF}]' src/*.rs 2>/dev/null || true)
+bad=$(grep -rnP '\b(fn|let|struct|enum|trait|const|static|mod|type)\s+(mut\s+)?[A-Za-z0-9_]*[\x{0400}-\x{04FF}]' src --include='*.rs' 2>/dev/null || true)
 if [[ -n $bad ]]; then
   err "a Cyrillic identifier in src/ (AGENTS.md §6):"
   echo "$bad" | sed 's/^/      /'
@@ -176,9 +182,6 @@ BUDGET_EXEMPT=(
   "src/embed.rs|file|-|1928"
   "src/faces.rs|file|-|1249"
   "src/i18n.rs|file|-|2352"
-  "src/main.rs|file|-|1847"
-  "src/main.rs|fn|main|1177"
-  "src/main.rs|fn|albums_cli|294"
   "src/organize.rs|file|-|1484"
   "src/player.rs|file|-|1594"
   "src/verify.rs|file|-|1104"

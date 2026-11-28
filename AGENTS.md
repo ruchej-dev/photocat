@@ -79,7 +79,8 @@ source of truth (see `plan/I18N.md` for the order).
 | `src/recycle.rs` | L2 | moving to the OS trash after confirmation, clearing rows | previews, egui |
 | `src/player.rs` | L2 | built-in player: `rff` demux, H.264/HEVC/AAC decode, `cpal` sound, frame as RGBA | DB, egui |
 | `src/app.rs` | L3 | the whole egui GUI | direct SQL calls |
-| `src/main.rs` | L3 | CLI parsing, subcommands | — |
+| `src/main.rs` | L3 | CLI parsing, the dispatch `match` | — |
+| `src/cli/` | L3 | one subcommand per file, the shared report line | — |
 
 The one-dependency rule: **a module depends only on lower layers**. Checked by
 `bash .pi/skills/enforce-architecture/scripts/check.sh`.

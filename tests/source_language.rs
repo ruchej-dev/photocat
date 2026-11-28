@@ -461,20 +461,30 @@ fn test_part(src: &str) -> &str {
 fn sources() -> Vec<(String, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut out = Vec::new();
-    for entry in fs::read_dir(&dir).expect("src/ is readable") {
+    collect_sources(&dir, &dir, &mut out);
+    out.sort();
+    out
+}
+
+/// Every `.rs` under `src/`, the name relative to it (`cli/index.rs`), so a module in a folder is
+/// checked like a top-level one.
+fn collect_sources(dir: &Path, base: &Path, out: &mut Vec<(String, String)>) {
+    for entry in fs::read_dir(dir).expect("src/ is readable") {
         let path = entry.expect("a directory entry").path();
+        if path.is_dir() {
+            collect_sources(&path, base, out);
+            continue;
+        }
         if path.extension().and_then(|e| e.to_str()) != Some("rs") {
             continue;
         }
         let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .expect("a file name")
-            .to_string();
+            .strip_prefix(base)
+            .expect("a source file is under src/")
+            .to_string_lossy()
+            .replace('\\', "/");
         out.push((name, fs::read_to_string(&path).expect("a source file is readable")));
     }
-    out.sort();
-    out
 }
 
 #[test]

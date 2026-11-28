@@ -43,7 +43,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 Что проверяется:
 
 1. `use crate::<модуль>` не выходит за карту слоёв (`derive` ↓, `db` ↓,
-   `index`/`dupes`/`organize`/`verify`, `app`/`main` сверху).
+   `index`/`dupes`/`organize`/`verify`, `app`/`main`/`cli` сверху; каждый файл в `src/cli/` —
+   слой `cli`).
 2. `egui`/`eframe` встречается только в `src/app.rs`.
 3. В `src/` нет `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` — оригиналы
    архива неприкосновенны (ADR 0005).
@@ -108,7 +109,7 @@ awk -v file=src/app.rs -f .pi/skills/enforce-architecture/scripts/budget.awk src
 - Разрешено: `rff-format-*`, `rff-codec-*`, `cpal`, `rayon`, `std`.
 - Запрещено: `egui`/`eframe`, `rusqlite`, `crate::db`, запуск внешних программ (`tools`).
 - Проверить: плеер только читает файл, ничего не пишет в архив; UI-строки — в `app.rs`;
-  `play` в `main.rs` — единственный CLI-вход, и он без графики.
+  `play` диспетчеризуется из `main.rs` в `player::cli` — единственный CLI-вход, и он без графики.
 
 ### `app` (L3)
 - Разрешено: всё ниже + `eframe`/`egui`.

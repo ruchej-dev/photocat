@@ -44,6 +44,9 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   `BUDGET_EXEMPT` lists today's 25 offenders and only shrinks, and `docs/ARCHITECTURE.md`
   § “Modules and crates” holds the crate table, the module tree and the numbers the refactor starts
   from [M27.1].
+- `main.rs` keeps only the parsing and the dispatch: each subcommand lives in its own file under
+  `src/cli/`, and the shared progress line and spinner in `cli/report.rs`; the words and the exit
+  codes of every command are unchanged [M27.2].
 
 ### Fixed
 

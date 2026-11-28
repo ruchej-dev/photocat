@@ -14,14 +14,30 @@ Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 embedded in the binary and handed to the window as its icon, ADR 0052; no new dependency,
 +46 KiB to the 90 MB binary, the icon decodes in a test and the window lives to the smoke
 timeout).
-→ doing:M27.1 (the architecture: the inventory, the module budget in `check.sh` — 700 lines per file,
+→ done:M27.1 (the architecture: the inventory, the module budget in `check.sh` — 700 lines per file,
 800 per `impl`, 200 per function, `BUDGET_EXEMPT` only shrinks — and § "Modules and crates" of
-`docs/ARCHITECTURE.md`; ADR 0053 is accepted) → planned:M27.2–M27.8 (modules first, then seven
-crates) and M28 (product builds: a `.deb` assembled without `dpkg`, a `PKGBUILD`, a Windows zip with
-its runtime and `.ico`, a macOS bundle, one `scripts/build-product.sh` — ADR 0054). M27.2 moves the
-first code; M28 is a separate milestone.
+`docs/ARCHITECTURE.md`; ADR 0053 is accepted) → doing:M27.2 (`main.rs` is the parser and the dispatch
+only; thirteen subcommands live in `src/cli/`, the shared report line in `cli/report.rs`) →
+planned:M27.3–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
+without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
+`scripts/build-product.sh` — ADR 0054). M28 is a separate milestone.
 
 ## Where we are
+
+**M27.2 — `main.rs` becomes `cli/`.** The 1 847-line file is **85 lines**: the flag reader is
+`cli/flags.rs`, `usage`, `language` and the broken-pipe hook are `cli/mod.rs`, and the dispatch is one
+line per command. Thirteen subcommands moved to `src/cli/` — `index`, `stats`, `embed`, `faces`,
+`ocr`, `search`, `models`, `settings`, `albums`, `tags`, `eval`, `clusters`, `doctor` — with
+`report.rs` holding the shared progress line, the download spinner and `short_version`. `dupes`,
+`organize`, `verify`, `manifest`, `export` already had their entry in their L2 module and stay there;
+`play` moves with the player, not with the reports. `albums::run` was 294 lines and is now a
+dispatcher of seven functions, the biggest 54. `check.sh` walks `src/` recursively and treats the
+whole `src/cli/` folder as the `cli` layer (85 checks now, up from 56), and `tests/source_language.rs`
+walks it too. The saved dump of `--help` plus 24 empty-archive commands — stdout, stderr and exit
+codes, wall times masked — is byte-identical before and after. `BUDGET_EXEMPT` fell from 25 to 22:
+`main.rs`, its 1 177-line `main()` and `albums_cli` left the list. Measured: `cargo test` 366 passed
++ 3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 85 checks / 0 violations,
+`rust-analyzer diagnostics` 0 errors. The owner's review is the last word.
 
 M27.1 opens the architectural refactor the owner asked for on 2026-11-27: no god modules, no
 28 000-line file, and the layer map as something a machine checks instead of a `grep` nobody runs.

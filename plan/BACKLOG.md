@@ -2886,6 +2886,18 @@ caught. `AGENTS.md` §3 and the `enforce-architecture` skill carry the rule. `ca
    after: the check is a saved dump of `--help` and of each command's empty-archive output.
 **Files.** `src/main.rs` → `src/cli/**`, `src/i18n.rs` (nothing new), `plan/STATUS.md`.
 
+**Done (2026-11-28).** `src/main.rs` is 85 lines: the flag reader in `cli/flags.rs`, `usage`,
+`language` and the broken-pipe hook in `cli/mod.rs`, the dispatch one line per command. Thirteen
+subcommands moved to `src/cli/` with their own `run(args)`; `report.rs` holds what every long pass
+shares — the refreshed progress line, the download spinner, `short_version` — while a command's own
+sentences stay with the command that prints them. `dupes`, `organize`, `verify`, `manifest` and
+`export` already had their entry in their L2 module and keep it; `play` stays `player::cli`.
+`albums::run` was 294 lines and is now a dispatcher of seven functions, the biggest 54. `check.sh`
+walks `src/` recursively and treats the folder as the `cli` layer (85 checks), and
+`tests/source_language.rs` walks it too. The dump of `--help` and 24 empty-archive commands (stdout,
+stderr, exit codes; wall times masked) is byte-identical before and after. `BUDGET_EXEMPT`: 25 → 22.
+`cargo test` 366 + 3, clippy clean, `check.sh` 85 / 0, `rust-analyzer diagnostics` 0 errors.
+
 **M27.3 — `db.rs` becomes `db/` by subject, the schema in one place.**
 **Goal.** `open`/`init`/the schema are read in one file; a query is found by its subject.
 **Acceptance criteria.**

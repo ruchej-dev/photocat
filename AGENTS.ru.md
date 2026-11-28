@@ -73,7 +73,8 @@
 | `src/player.rs` | L2 | встроенный плеер: демукс `rff`, декод H.264/HEVC/AAC, звук `cpal`, кадр в RGBA | БД, egui |
 | `src/storage.rs` | L1 | занятое место, очистка кэша и индекса | архив, egui |
 | `src/app.rs` | L3 | весь GUI на egui | прямые вызовы SQL |
-| `src/main.rs` | L3 | разбор CLI, подкоманды | — |
+| `src/main.rs` | L3 | разбор CLI, `match` диспетчеризации | — |
+| `src/cli/` | L3 | файл на подкоманду, общая строка отчёта | — |
 
 Правило одной зависимости: **модуль зависит только от нижних слоёв**. Проверяется
 `bash .pi/skills/enforce-architecture/scripts/check.sh`.

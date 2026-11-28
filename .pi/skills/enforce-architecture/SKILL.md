@@ -44,7 +44,8 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 What is checked:
 
 1. `use crate::<module>` does not leave the layer map (`derive` ↓, `db` ↓,
-   `index`/`dupes`/`organize`/`verify`, `app`/`main` on top).
+   `index`/`dupes`/`organize`/`verify`, `app`/`main`/`cli` on top; every file under `src/cli/` is
+   the `cli` layer).
 2. `egui`/`eframe` appears only in `src/app.rs`.
 3. There is no `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` in `src/` —
    archive originals are untouchable (ADR 0005).
@@ -109,7 +110,7 @@ change: the list only shrinks.
 - Allowed: `rff-format-*`, `rff-codec-*`, `cpal`, `rayon`, `std`.
 - Forbidden: `egui`/`eframe`, `rusqlite`, `crate::db`, starting external programs (`tools`).
 - Check: the player only reads a file, writes nothing into the archive; UI strings live in `app.rs`;
-  `play` in `main.rs` is the only CLI entry and it has no graphics.
+  `play` is dispatched from `main.rs` to `player::cli`, the only CLI entry, and it has no graphics.
 
 ### `app` (L3)
 - Allowed: everything below + `eframe`/`egui`.
