@@ -95,7 +95,7 @@ echo "4. the network only for models"
 # request anywhere else means some code the owner never consented to talks to the internet.
 bad=$(grep -nE '^(reqwest|hyper|curl|isahc|attohttpc)\s*=' Cargo.toml 2>/dev/null || true)
 if [[ -n $bad ]]; then
-  err "a second HTTP client in Cargo.toml: the weights are fetched by ureq in src/embed.rs (ADR 0047): $bad"
+  err "a second HTTP client in Cargo.toml: the weights are fetched by ureq in src/embed/download.rs (ADR 0047): $bad"
 else
   pass
 fi
@@ -114,15 +114,15 @@ else
   pass
 fi
 # The HTTP client lives in the downloader only.
-bad=$(grep -rnE '\bureq::|\bureq\b' src --include='*.rs' 2>/dev/null | grep -v '^src/embed.rs:' || true)
+bad=$(grep -rnE '\bureq::|\bureq\b' src --include='*.rs' 2>/dev/null | grep -v '^src/embed/download.rs:' || true)
 if [[ -n $bad ]]; then
-  err "ureq is used outside src/embed.rs (ADR 0047):"
+  err "ureq is used outside src/embed/download.rs (ADR 0047):"
   echo "$bad" | sed 's/^/      /'
 else
   pass
 fi
 # Only GET: a weight file is read, nothing about the owner is sent.
-bad=$(grep -nE '\.(post|put|delete|patch)\s*\(' src/embed.rs 2>/dev/null || true)
+bad=$(grep -nE '\.(post|put|delete|patch)\s*\(' src/embed/download.rs 2>/dev/null || true)
 if [[ -n $bad ]]; then
   err "the downloader can send data (ADR 0015):"
   echo "$bad" | sed 's/^/      /'
@@ -185,7 +185,6 @@ BUDGET_EXEMPT=(
   "src/app.rs|fn|settings_model|236"
   "src/app.rs|fn|settings_tag_dictionary|202"
   "src/derive.rs|file|-|776"
-  "src/embed.rs|file|-|1928"
   "src/faces.rs|file|-|1249"
   "src/organize/export.rs|file|-|987"
 )

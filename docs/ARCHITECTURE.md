@@ -6,7 +6,7 @@
 
 ```
 L3  main.rs, cli/ ── app.rs     CLI and GUI
-L2  index.rs   dupes.rs   organize/   verify/   embed.rs   eval.rs   ocr.rs   faces.rs
+L2  index.rs   dupes.rs   organize/   verify/   embed/   eval.rs   ocr.rs   faces.rs
     recycle.rs   player/
 L1  db/   storage.rs
 L0  i18n/   derive.rs   tools.rs
@@ -148,14 +148,17 @@ blocks and ten functions.
 **After M27.5, partly (2026-11-28).** `src/organize.rs` is `organize/` — `plan.rs` (312 lines),
 `apply.rs` (53), `export.rs` (987), `mod.rs` (167) — `src/verify.rs` is `verify/` — `compare.rs`
 (451), `manifest.rs` (550), `mod.rs` (130) — and `src/player.rs` is `player/` — `demux.rs` (131),
-`decode.rs` (409), `audio.rs` (386), `present.rs` (293), `mod.rs` (418). The public surface did not
-change: `organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`,
-`player::Player` and `player::cli` are re-exports, and no call site was rewritten. The dry-run plan
-of the real 2 230-file DB, the reports of a three-file comparison and `play --decode-only` on
-`VID_20230107_203018.mp4` (369 frames, 47.3 fps before / 47.6 after, RGBA 2.1 / 2.0 ms per frame)
-stay the same. `check.sh` maps the folders to their layers; `BUDGET_EXEMPT` is down to 17 items:
-the four files still to move (`app.rs`, `embed.rs`, `faces.rs`, `derive.rs`), two `impl` blocks, ten
-functions and `organize/export.rs` (987). `embed/` and `faces/` remain in this task.
+`decode.rs` (409), `audio.rs` (386), `present.rs` (293), `mod.rs` (418) — and `src/embed.rs` is
+`embed/` — `model.rs` (697), `download.rs` (333), `tags.rs` (676), `search.rs` (72), `kmeans.rs`
+(187), `mod.rs` (23). The public surface did not change: `organize::cli`, `organize::export_cli`,
+`verify::cli`, `verify::manifest_cli`, `player::Player`, `player::cli` and every `embed::` name are
+re-exports, and no call site was rewritten. The dry-run plan of the real 2 230-file DB, the reports
+of a three-file comparison, `play --decode-only` on `VID_20230107_203018.mp4` (369 frames, 47.3 fps
+before / 47.6 after, RGBA 2.1 / 2.0 ms per frame), a `--retag` of the real 2 233-file DB (31 262 tag
+rows byte-identical) and the `search` and `clusters` reports stay the same. `check.sh` maps the
+folders to their layers; `BUDGET_EXEMPT` is down to 16 items: the three files still to move
+(`app.rs`, `faces.rs`, `derive.rs`), two `impl` blocks, ten functions and `organize/export.rs` (987).
+`faces/` remains in this task.
 
 ## Indexing flow
 

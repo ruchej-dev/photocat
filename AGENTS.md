@@ -70,7 +70,7 @@ source of truth (see `plan/I18N.md` for the order).
 | `src/storage.rs` | L1 | used space, cache and index cleanup | archive, egui |
 | `src/index.rs` | L2 | `walkdir` traversal, rayon parallelism, writer thread | egui |
 | `src/dupes.rs` | L2 | union-find, exact and similar duplicates, CSV | egui |
-| `src/embed.rs` | L2 | CLIP embeddings, tags, cosine search, k-means | egui, DB rows |
+| `src/embed/` | L2 | CLIP embeddings, tags, cosine search, k-means: `model.rs`, `download.rs`, `tags.rs`, `search.rs`, `kmeans.rs` | egui, DB rows |
 | `src/eval.rs` | L2 | the labelled check: a reproducible sample, `labels.csv`, contact sheets, top-1/top-3 and the confident-tag accuracy | egui, raw SQL strings |
 | `src/ocr.rs` | L2 | text candidates, the `tesseract` pass, writing text to the DB | egui, image decoding |
 | `src/faces.rs` | L2 | SCRFD detection, alignment, ArcFace embeddings, face clusters | egui, raw SQL strings |
@@ -204,7 +204,7 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   comments, doc comments, log and error text, and the source text of the interface are English.
   Cyrillic appears only as a translation: the Russian column of the tables in `src/i18n/terms/`
   (and the month, weekday and plural words in `src/i18n/lang.rs`),
-  the `*.ru.md` documents, and model prompt data (`embed.rs`). Nothing else in `src/` may hold a
+  the `*.ru.md` documents, and model prompt data (`embed/tags.rs`). Nothing else in `src/` may hold a
   Cyrillic letter.
 - **UI strings are translated, not duplicated.** An English source string goes through
   `i18n::t(lang, "…")`, which returns the Russian text when `Lang::Ru` is chosen. A CLI report

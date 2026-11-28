@@ -57,6 +57,8 @@
   слепок `sha256sum`; отчёты не изменились [M27.5].
 - Встроенный плеер — папка: `player/demux.rs`, `player/decode.rs`, `player/audio.rs` и
   `player/present.rs`; кадры и тайминги не изменились [M27.5].
+- CLIP — папка: `embed/model.rs`, `embed/download.rs`, `embed/tags.rs`, `embed/search.rs` и
+  `embed/kmeans.rs`; теги, поиск и кластеры не изменились [M27.5].
 
 ### Исправлено
 

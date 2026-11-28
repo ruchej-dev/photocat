@@ -37,7 +37,7 @@ const RUSSIAN_DATA: &[&str] = &[
     "i18n/terms/settings.rs",
     "i18n/terms/shell.rs",
     // The prompts of the multilingual CLIP model and its default tag labels.
-    "embed.rs",
+    "embed/tags.rs",
     // `labels.csv` is the owner's file: the parser keeps accepting the old Russian keywords
     // `пропуск` and `другое` next to `skip` and `other`.
     "eval.rs",

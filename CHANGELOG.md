@@ -57,6 +57,9 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   `verify/manifest.rs` the `sha256sum` snapshot; the reports are unchanged [M27.5].
 - The built-in player is a folder: `player/demux.rs`, `player/decode.rs`, `player/audio.rs` and
   `player/present.rs`; the frames and the timing are unchanged [M27.5].
+- The CLIP side is a folder: `embed/model.rs`, `embed/download.rs`, `embed/tags.rs`,
+  `embed/search.rs` and `embed/kmeans.rs`; the tags, the search and the clusters are unchanged
+  [M27.5].
 
 ### Fixed
 
