@@ -47,6 +47,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
 - `main.rs` keeps only the parsing and the dispatch: each subcommand lives in its own file under
   `src/cli/`, and the shared progress line and spinner in `cli/report.rs`; the words and the exit
   codes of every command are unchanged [M27.2].
+- The database module is a folder by subject: `db/schema.rs` is the only place the DDL and `init`
+  live, and a query is found by its table; no command, word or byte on disk changed [M27.3].
 
 ### Fixed
 

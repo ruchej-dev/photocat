@@ -451,7 +451,12 @@ fn words(code: &str) -> Vec<&str> {
     out
 }
 
-fn test_part(src: &str) -> &str {
+fn test_part<'a>(name: &str, src: &'a str) -> &'a str {
+    // A `tests.rs` module is test code from the first line: it has no `#[cfg(test)]` marker of
+    // its own, the parent module carries it.
+    if name.ends_with("tests.rs") {
+        return src;
+    }
     match src.split_once("#[cfg(test)]") {
         Some((_, tail)) => tail,
         None => "",
@@ -513,9 +518,13 @@ fn converted_modules_hold_no_russian() {
         // A test may quote the Russian translation or the owner's words: those literals are
         // expected values and fixtures, not interface text. Only the code before `#[cfg(test)]`
         // is held to the rule; comments are checked in the tests too.
-        let production = match src.split_once("#[cfg(test)]") {
-            Some((head, _)) => head,
-            None => src.as_str(),
+        let production = if name.ends_with("tests.rs") {
+            ""
+        } else {
+            match src.split_once("#[cfg(test)]") {
+                Some((head, _)) => head,
+                None => src.as_str(),
+            }
         };
         let (_, comments, _) = split(&src);
         let (_, _, strings) = split(production);
@@ -551,7 +560,7 @@ fn converted_modules_hold_no_russian() {
 fn test_messages_are_english() {
     let mut bad = Vec::new();
     for (name, src) in sources() {
-        for text in russian_messages(test_part(&src)) {
+        for text in russian_messages(test_part(&name, &src)) {
             bad.push(format!("{name}: {text}"));
         }
     }

@@ -8,7 +8,7 @@
 L3  main.rs, cli/ ── app.rs     CLI and GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
-L1  db.rs   storage.rs
+L1  db/   storage.rs
 L0  i18n.rs   derive.rs   tools.rs
 ```
 
@@ -124,6 +124,16 @@ the shared progress line, spinner and short version — and the biggest of them 
 lines with every function under 200. `check.sh` now walks `src/` recursively and treats the whole
 folder as the `cli` layer, so the files under it are held to the same rule. `BUDGET_EXEMPT` is down
 to 22 items: the nine files still to move, two `impl` blocks and eleven functions.
+
+**After M27.3 (2026-11-28).** `src/db.rs` is a folder of eight subject files. `schema.rs` is the only
+place the DDL, `SCHEMA_VERSION`, `open` and `init` live; `settings.rs`, `files.rs`, `albums.rs`,
+`tags.rs`, `faces.rs`, `progress.rs` and `human.rs` hold the queries of their table; `mod.rs` holds
+the module list and the re-exports only. `init` was 271 lines and is now `create_tables` (183) plus
+`migrate` (85), so the function left `BUDGET_EXEMPT`; the biggest file is `settings.rs` at 659 lines.
+The `sqlite3 .schema` dump of a fresh DB and of a copy of the real 2 230-file DB is identical before
+and after, and the real DB keeps its sha256, mtime, size and `user_version = 10` when `db::open`
+runs. `BUDGET_EXEMPT` is down to 20 items: the eight files still to move, two `impl` blocks and ten
+functions.
 
 ## Indexing flow
 

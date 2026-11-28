@@ -66,7 +66,7 @@ source of truth (see `plan/I18N.md` for the order).
 | `src/i18n.rs` | L0 | UI and CLI language: `Lang`, `t(lang, text)`, `fill(lang, template, values)`, `count(lang, n, noun)`, the en→ru table | DB, UI, decoding |
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (date/GPS/camera), previews, date from the name | DB, UI, indexer |
 | `src/tools.rs` | L0 | paths to `ffmpeg`/`ffprobe`/`tesseract`, `PATH` lookup, version probing | DB, UI, decoding |
-| `src/db.rs` | L1 | SQLite schema, inserts/queries, albums (tree and order), `Progress`, `human()` | egui, image decoding |
+| `src/db/` | L1 | SQLite by subject: `schema.rs` (the DDL, `SCHEMA_VERSION`, `open`, `init`), `settings.rs`, `files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs` | egui, image decoding |
 | `src/storage.rs` | L1 | used space, cache and index cleanup | archive, egui |
 | `src/index.rs` | L2 | `walkdir` traversal, rayon parallelism, writer thread | egui |
 | `src/dupes.rs` | L2 | union-find, exact and similar duplicates, CSV | egui |

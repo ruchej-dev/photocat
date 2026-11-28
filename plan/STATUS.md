@@ -16,13 +16,26 @@ embedded in the binary and handed to the window as its icon, ADR 0052; no new de
 timeout).
 → done:M27.1 (the architecture: the inventory, the module budget in `check.sh` — 700 lines per file,
 800 per `impl`, 200 per function, `BUDGET_EXEMPT` only shrinks — and § "Modules and crates" of
-`docs/ARCHITECTURE.md`; ADR 0053 is accepted) → doing:M27.2 (`main.rs` is the parser and the dispatch
+`docs/ARCHITECTURE.md`; ADR 0053 is accepted) → done:M27.2 (`main.rs` is the parser and the dispatch
 only; thirteen subcommands live in `src/cli/`, the shared report line in `cli/report.rs`) →
-planned:M27.3–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
+doing:M27.3 (`db.rs` is a folder by subject; the schema, `SCHEMA_VERSION`, `open` and `init` live in
+`db/schema.rs`) → planned:M27.4–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
 without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
 `scripts/build-product.sh` — ADR 0054). M28 is a separate milestone.
 
 ## Where we are
+
+**M27.3 — `db.rs` becomes `db/`.** The 3 243-line file is now eight subject files under `src/db/`:
+`schema.rs` (the only place the DDL, `SCHEMA_VERSION`, `open` and `init` live), `settings.rs`,
+`files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs`; `mod.rs` holds the module
+list and the re-exports only. `init` was 271 lines and is split into `create_tables` (183) and
+`migrate` (85), so it left `BUDGET_EXEMPT`; the biggest file is `settings.rs` at 659 lines.
+`check.sh` treats every file under `src/db/` as the `db` layer, and the budget script counts a
+`tests.rs` module as test code. The saved `sqlite3 .schema` dump of a fresh DB and of a copy of the
+real 2 230-file DB is identical before and after; the real DB keeps its sha256, mtime, size and
+`user_version = 10` when `db::open` runs. `BUDGET_EXEMPT`: 22 → 20. Measured: `cargo test` 366 + 3,
+`cargo clippy --all-targets` clean, `check.sh` 89 checks / 0 violations, `rust-analyzer diagnostics`
+0 errors. The owner's review is the last word.
 
 **M27.2 — `main.rs` becomes `cli/`.** The 1 847-line file is **85 lines**: the flag reader is
 `cli/flags.rs`, `usage`, `language` and the broken-pipe hook are `cli/mod.rs`, and the dispatch is one

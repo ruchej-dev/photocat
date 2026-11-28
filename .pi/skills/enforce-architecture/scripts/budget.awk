@@ -7,8 +7,9 @@
 #   impl  <name>  <lines>
 #   fn    <name>  <lines>
 #
-# Production code is everything before the top-level `#[cfg(test)] mod tests` block:
-# the budget is about what a reader has to hold in mind, not about the tests.
+# Production code is everything before the top-level `#[cfg(test)] mod tests` block, and a
+# `tests.rs` module counts as nothing at all: the budget is about what a reader has to hold in
+# mind, not about the tests.
 # Strings, char literals and comments are stripped before braces are counted, so a
 # `'{'` in a message cannot open a block.
 
@@ -78,6 +79,8 @@ END {
   for (i = 1; i < n; i++)
     if (L[i] ~ /^#\[cfg\(test\)\]$/ && L[i + 1] ~ /^mod [A-Za-z0-9_]*tests?[A-Za-z0-9_]* \{$/)
       prod = i - 1
+  # A `tests.rs` module is test code from the first line: the parent module carries the marker.
+  if (file ~ /(^|\/)tests\.rs$/) prod = 0
 
   printf "%s\tfile\t-\t%d\n", file, prod
 

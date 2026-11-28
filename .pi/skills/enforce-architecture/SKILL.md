@@ -45,7 +45,7 @@ What is checked:
 
 1. `use crate::<module>` does not leave the layer map (`derive` ↓, `db` ↓,
    `index`/`dupes`/`organize`/`verify`, `app`/`main`/`cli` on top; every file under `src/cli/` is
-   the `cli` layer).
+   the `cli` layer and every file under `src/db/` the `db` layer).
 2. `egui`/`eframe` appears only in `src/app.rs`.
 3. There is no `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` in `src/` —
    archive originals are untouchable (ADR 0005).
@@ -123,7 +123,7 @@ change: the list only shrinks.
 - `conn.execute(` or a `SELECT …` string appeared in `app.rs`.
 - `image::open` appeared in `dupes.rs`.
 - A new file passed 700 lines, or a function passed 200.
-- `use crate::derive` appeared in `db.rs`.
+- `use crate::derive` appeared in `db/`.
 - `organize` learned to delete "the excess" instead of reporting.
 - `verify` or `manifest` write into the archive folder without an explicit `--out` or delete files.
 - A new dependency without a row in `docs/DECISIONS.md`.

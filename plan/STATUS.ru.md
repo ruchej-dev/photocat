@@ -16,13 +16,35 @@ Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 `STATUS.md`)
 → done:M27.1 (архитектура: инвентарь, бюджет модуля в `check.sh` — 700 строк на файл, 800 на
 `impl`, 200 на функцию, `BUDGET_EXEMPT` только сокращается — и раздел «Модули и крейты» в
-`docs/ARCHITECTURE.ru.md`; ADR 0053 принят) → doing:M27.2 (`main.rs` — только разбор и
+`docs/ARCHITECTURE.ru.md`; ADR 0053 принят) → done:M27.2 (`main.rs` — только разбор и
 диспетчеризация; тринадцать подкоманд живут в `src/cli/`, общая строка отчёта — в
-`cli/report.rs`) → planned:M27.3–M27.8 (сначала модули, затем семь крейтов) и M28 (сборка
+`cli/report.rs`) → doing:M27.3 (`db.rs` — папка по темам; схема, `SCHEMA_VERSION`, `open` и `init`
+живут в `db/schema.rs`) → planned:M27.4–M27.8 (сначала модули, затем семь крейтов) и M28 (сборка
 продукта: `.deb`, собранный без `dpkg`, `PKGBUILD`, zip для Windows с рантаймом и `.ico`, бандл
 macOS, один `scripts/build-product.sh` — ADR 0054). M28 — отдельный этап.
 
 ## Где мы
+
+**M27.2 — `main.rs` становится `cli/`.** Файл на 1 847 строк — **85**: дом разбора флагов —
+`cli/flags.rs`, `usage`, `language` и перехват закрытого канала — `cli/mod.rs`, диспетчеризация —
+одна строка на команду. Тринадцать подкоманд переехали в `src/cli/` со своим `run(args)`;
+`report.rs` держит общую строку прогресса, спиннер загрузки и `short_version`. `dupes`, `organize`,
+`verify`, `manifest` и `export` остались в своих модулях L2, `play` — с плеером. `albums::run` был
+294 строки и стал диспетчером семи функций, самая большая — 54. `check.sh` обходит `src/`
+рекурсивно, `tests/source_language.rs` тоже. `BUDGET_EXEMPT`: 25 → 22. Дамп `--help` и 24 команд на
+пустом архиве побайтово одинаков до и после.
+
+**M27.3 — `db.rs` становится `db/`.** Файл на 3 243 строки — теперь восемь файлов по темам в
+`src/db/`: `schema.rs` (единственное место, где живут DDL, `SCHEMA_VERSION`, `open` и `init`),
+`settings.rs`, `files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs`; `mod.rs` —
+только список модулей и реэкспорты. `init` был 271 строку и разбит на `create_tables` (183) и
+`migrate` (85), поэтому ушёл из `BUDGET_EXEMPT`; самый большой файл — `settings.rs`, 659 строк.
+`check.sh` считает каждый файл в `src/db/` слоем `db`, а бюджетный скрипт считает модуль `tests.rs`
+тестовым кодом. Дамп `sqlite3 .schema` свежей БД и копии реальной БД на 2 230 файлов одинаков до и
+после; реальная БД сохраняет sha256, mtime, размер и `user_version = 10`, когда запускается
+`db::open`. `BUDGET_EXEMPT`: 22 → 20. Измерено: `cargo test` 366 + 3, `cargo clippy --all-targets`
+чисто, `check.sh` 89 проверок / 0 нарушений, `rust-analyzer diagnostics` 0 ошибок. Последнее слово —
+за просмотром владельца.
 
 M24.3 закрывает M24: сам проход по чистой установке — пустой кэш, ни одной модели, а затем и ни
 одной внешней программы. Числа — в `docs/ARCHITECTURE.md`; здесь то, что проход увидел, и три

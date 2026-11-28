@@ -44,7 +44,7 @@ bash .pi/skills/enforce-architecture/scripts/check.sh --build  # + cargo check
 
 1. `use crate::<модуль>` не выходит за карту слоёв (`derive` ↓, `db` ↓,
    `index`/`dupes`/`organize`/`verify`, `app`/`main`/`cli` сверху; каждый файл в `src/cli/` —
-   слой `cli`).
+   слой `cli`, а каждый файл в `src/db/` — слой `db`).
 2. `egui`/`eframe` встречается только в `src/app.rs`.
 3. В `src/` нет `fs::remove_file`, `fs::remove_dir`, `fs::remove_dir_all`, `fs::rename` — оригиналы
    архива неприкосновенны (ADR 0005).
@@ -122,7 +122,7 @@ awk -v file=src/app.rs -f .pi/skills/enforce-architecture/scripts/budget.awk src
 - В `app.rs` появился `conn.execute(` или `SELECT …` строкой.
 - В `dupes.rs` появился `image::open`.
 - Новый файл перевалил за 700 строк, или функция — за 200.
-- В `db.rs` появился `use crate::derive`.
+- В `db/` появился `use crate::derive`.
 - `organize` научился удалять «лишнее» вместо отчёта.
 - `verify` или `manifest` пишут в каталог архива без явного `--out` или удаляют файлы.
 - Новая зависимость без строки в `docs/DECISIONS.ru.md`.

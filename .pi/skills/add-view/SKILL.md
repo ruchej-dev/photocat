@@ -21,7 +21,7 @@ views (tags, faces, documents), so adding a view is a repeatable operation, not 
 1. **Decision.** Write a row in `docs/UI.md` §Screens: the view name, what is on it, the main
    action. If the view changes the structure on disk or introduces a new filter in the DB — a row in
    `docs/DECISIONS.md`.
-2. **Data.** Answer: does the view need new fields/a table? If yes — `db.rs` first (`ALTER TABLE` in
+2. **Data.** Answer: does the view need new fields/a table? If yes — `db/` first (`ALTER TABLE` in `schema.rs`,
    `open`, a fetch function), then the UI. A view does not run SQL itself.
 3. **Enum.** `enum View` in `app.rs` + `selectable_value` in the left panel. The label is in
    English, an infinitive or a noun: "All files", "Duplicates and series", "By dates".
@@ -78,7 +78,7 @@ timeout 6 ./target/release/photocat gui        # only with a warning to the owne
 ```
 
 View logic that can be checked without a screen (counts, grouping, filter) goes into
-`dupes.rs`/`db.rs` and is checked through the CLI or a separate function — then the view stays thin.
+`dupes.rs`/`db/` and is checked through the CLI or a separate function — then the view stays thin.
 
 ## Done when
 

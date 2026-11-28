@@ -8,7 +8,7 @@
 L3  main.rs, cli/ ── app.rs     CLI и GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
-L1  db.rs   storage.rs
+L1  db/   storage.rs
 L0  i18n.rs   derive.rs   tools.rs
 ```
 
@@ -119,6 +119,16 @@ src/
 строк, где каждая функция меньше 200. `check.sh` теперь обходит `src/` рекурсивно и считает всю
 папку слоем `cli`, поэтому файлы в ней подчиняются тому же правилу. В `BUDGET_EXEMPT` осталось 22
 элемента: девять ещё не переехавших файлов, два блока `impl` и одиннадцать функций.
+
+**После M27.3 (2026-11-28).** `src/db.rs` — папка из восьми файлов по темам. `schema.rs` —
+единственное место, где живут DDL, `SCHEMA_VERSION`, `open` и `init`; `settings.rs`, `files.rs`,
+`albums.rs`, `tags.rs`, `faces.rs`, `progress.rs` и `human.rs` держат запросы своей таблицы;
+`mod.rs` — только список модулей и реэкспорты. `init` был 271 строку и стал `create_tables` (183)
+плюс `migrate` (85), поэтому функция ушла из `BUDGET_EXEMPT`; самый большой файл — `settings.rs`,
+659 строк. Дамп `sqlite3 .schema` свежей БД и копии реальной БД на 2 230 файлов одинаков до и
+после, а реальная БД сохраняет свой sha256, mtime, размер и `user_version = 10`, когда запускается
+`db::open`. В `BUDGET_EXEMPT` осталось 20 элементов: восемь ещё не переехавших файлов, два блока
+`impl` и десять функций.
 
 ## Поток индексации
 

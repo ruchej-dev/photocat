@@ -60,7 +60,7 @@
 | `src/i18n.rs` | L0 | язык интерфейса и отчётов CLI: `Lang`, `t(lang, текст)`, `fill(lang, шаблон, значения)`, `count(lang, n, noun)`, таблица англ→рус | БД, UI, декодирование |
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (дата/GPS/камера), превью, дата из имени | БД, UI, индексатор |
 | `src/tools.rs` | L0 | пути к `ffmpeg`/`ffprobe`/`tesseract`, поиск в `PATH`, проверка версии | БД, UI, декодирование |
-| `src/db.rs` | L1 | схема SQLite, вставка/выборка, альбомы (дерево и порядок), `Progress`, `human()` | egui, декодирование картинок |
+| `src/db/` | L1 | SQLite по темам: `schema.rs` (DDL, `SCHEMA_VERSION`, `open`, `init`), `settings.rs`, `files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs` | egui, декодирование картинок |
 | `src/index.rs` | L2 | обход `walkdir`, rayon-параллелизм, поток-писатель | egui |
 | `src/dupes.rs` | L2 | union-find, точные и похожие дубли, CSV | egui |
 | `src/embed.rs` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means | egui, БД-строки |

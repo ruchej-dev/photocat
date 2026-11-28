@@ -42,9 +42,11 @@ declare -A ALLOWED=(
 echo "1. dependencies between modules"
 for f in $(find src -name '*.rs' | sort); do
   mod=$(basename "$f" .rs)
-  # A folder is one layer: every file under src/cli/ belongs to `cli` (ADR 0053).
+  # A folder is one layer: every file under src/cli/ belongs to `cli` and every file under src/db/
+  # to `db` (ADR 0053).
   case "$f" in
     src/cli/*) mod=cli ;;
+    src/db/*) mod=db ;;
   esac
   [[ -v ALLOWED[$mod] ]] || { err "module $f is not registered in the layer map of check.sh"; continue; }
   refs=$(grep -oE 'crate::[a-z_][a-z0-9_]*' "$f" 2>/dev/null | cut -d: -f3 | sort -u \
@@ -176,8 +178,6 @@ BUDGET_EXEMPT=(
   "src/app.rs|fn|reload|282"
   "src/app.rs|fn|settings_model|236"
   "src/app.rs|fn|settings_tag_dictionary|202"
-  "src/db.rs|file|-|3243"
-  "src/db.rs|fn|init|271"
   "src/derive.rs|file|-|776"
   "src/embed.rs|file|-|1928"
   "src/faces.rs|file|-|1249"

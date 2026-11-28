@@ -2911,6 +2911,15 @@ stderr, exit codes; wall times masked) is byte-identical before and after. `BUDG
    a saved `sqlite3 .schema` dump that is identical before and after.
 **Files.** `src/db.rs` → `src/db/**`, `docs/ARCHITECTURE.md` § DB schema (paths only).
 
+**Done (2026-11-28).** `src/db/` holds `schema.rs`, `settings.rs`, `files.rs`, `albums.rs`,
+`tags.rs`, `faces.rs`, `progress.rs`, `human.rs`; `mod.rs` is the module list and the re-exports
+only. The DDL, `SCHEMA_VERSION`, `open` and `init` live in `schema.rs` alone; `init` is split into
+`create_tables` and `migrate`, so it left `BUDGET_EXEMPT`. `check.sh` maps every file under `src/db/`
+to the `db` layer, and the budget script counts `tests.rs` as test code. The saved `sqlite3 .schema`
+dump of a fresh DB and of a copy of the real 2 230-file DB is identical; the real DB's sha256, mtime,
+size and `user_version = 10` are unchanged by `db::open`. `BUDGET_EXEMPT`: 22 → 20. `cargo test`
+366 + 3, clippy clean, `check.sh` 89 / 0, `rust-analyzer diagnostics` 0 errors.
+
 **M27.4 — `i18n.rs` becomes `i18n/`: the table split by area, one test for the whole table.**
 **Goal.** 2 594 lines of pairs stop being one wall: the words of a screen are next to the screen's
 name in the index, and a missing translation is found by a test, not by a user.

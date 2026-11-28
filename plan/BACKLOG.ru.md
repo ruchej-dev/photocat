@@ -2451,6 +2451,15 @@ stderr, коды возврата; время замаскировано) поб
    записи, `db::open` по-прежнему ничего не пишет, пока версия совпадает — доказано существующими
    тестами и сохранённым дампом `sqlite3 .schema`, одинаковым до и после.
 
+**Сделано (2026-11-28).** В `src/db/` — `schema.rs`, `settings.rs`, `files.rs`, `albums.rs`,
+`tags.rs`, `faces.rs`, `progress.rs`, `human.rs`; `mod.rs` — только список модулей и реэкспорты.
+DDL, `SCHEMA_VERSION`, `open` и `init` живут только в `schema.rs`; `init` разбит на `create_tables`
+и `migrate`, поэтому ушёл из `BUDGET_EXEMPT`. `check.sh` считает каждый файл в `src/db/` слоем
+`db`, а бюджетный скрипт — модуль `tests.rs` тестовым кодом. Сохранённый дамп `sqlite3 .schema`
+свежей БД и копии реальной БД на 2 230 файлов одинаков; sha256, mtime, размер и `user_version = 10`
+реальной БД не меняются от `db::open`. `BUDGET_EXEMPT`: 22 → 20. `cargo test` 366 + 3, clippy
+чисто, `check.sh` 89 / 0, `rust-analyzer diagnostics` 0 ошибок.
+
 **M27.4 — `i18n.rs` становится `i18n/`: таблица по областям, один тест на всю таблицу.**
 1. `src/i18n/` с `lang.rs` (`Lang`, `t`, `fill`, `count`, `ensure_lang`), `table.rs` (упорядоченный
    список таблиц областей), `terms/` — файл на область (`shell`, `grid`, `inspector`, `dupes`,
