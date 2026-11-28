@@ -66,7 +66,7 @@
 | `src/embed/` | L2 | CLIP-эмбеддинги, теги, косинусный поиск, k-means: `model.rs`, `download.rs`, `tags.rs`, `search.rs`, `kmeans.rs` | egui, БД-строки |
 | `src/eval.rs` | L2 | размеченная проверка: воспроизводимая выборка, `labels.csv`, контактные листы, top-1/top-3 и точность уверенного тега | egui, строки SQL |
 | `src/ocr.rs` | L2 | кандидаты на текст, проход `tesseract`, запись текста в БД | egui, декодирование картинок |
-| `src/faces.rs` | L2 | SCRFD-детекция, выравнивание, ArcFace-эмбеддинги, кластеры лиц | egui, прямые SQL-строки |
+| `src/faces/` | L2 | SCRFD-детекция, выравнивание, ArcFace-эмбеддинги, кластеры лиц: `detect.rs`, `align.rs`, `embed.rs`, `clusters.rs`, `matches.rs` | egui, прямые SQL-строки |
 | `src/organize/` | L2 | план по датам, hardlink/copy/symlink, выгрузка альбома копиями: `plan.rs`, `apply.rs`, `export.rs` | egui |
 | `src/verify/` | L2 | сверка двух копий, слепок sha256sum: `compare.rs`, `manifest.rs` | БД-схема, egui |
 | `src/recycle.rs` | L2 | перенос в системную корзину по подтверждению, очистка строк | превью, egui |

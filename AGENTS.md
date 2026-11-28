@@ -73,7 +73,7 @@ source of truth (see `plan/I18N.md` for the order).
 | `src/embed/` | L2 | CLIP embeddings, tags, cosine search, k-means: `model.rs`, `download.rs`, `tags.rs`, `search.rs`, `kmeans.rs` | egui, DB rows |
 | `src/eval.rs` | L2 | the labelled check: a reproducible sample, `labels.csv`, contact sheets, top-1/top-3 and the confident-tag accuracy | egui, raw SQL strings |
 | `src/ocr.rs` | L2 | text candidates, the `tesseract` pass, writing text to the DB | egui, image decoding |
-| `src/faces.rs` | L2 | SCRFD detection, alignment, ArcFace embeddings, face clusters | egui, raw SQL strings |
+| `src/faces/` | L2 | SCRFD detection, alignment, ArcFace embeddings, face clusters: `detect.rs`, `align.rs`, `embed.rs`, `clusters.rs`, `matches.rs` | egui, raw SQL strings |
 | `src/organize/` | L2 | date plan, hardlink/copy/symlink, album export: `plan.rs`, `apply.rs`, `export.rs` | egui |
 | `src/verify/` | L2 | comparing two copies, `sha256sum` manifest: `compare.rs`, `manifest.rs` | DB schema, egui |
 | `src/recycle.rs` | L2 | moving to the OS trash after confirmation, clearing rows | previews, egui |

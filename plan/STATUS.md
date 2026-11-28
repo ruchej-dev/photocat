@@ -20,14 +20,15 @@ timeout).
 only; thirteen subcommands live in `src/cli/`, the shared report line in `cli/report.rs`) →
 done:M27.3 (`db.rs` is a folder by subject; the schema, `SCHEMA_VERSION`, `open` and `init` live in
 `db/schema.rs`) → done:M27.4 (`i18n.rs` is a folder: `lang.rs`, `table.rs` and `terms/` by screen
-area) → doing:M27.5 (`organize/`, `verify/`, `player/` and `embed/` are done; `faces/` remains) →
+area) → done:M27.5 (`organize/`, `verify/`, `player/`, `embed/` and `faces/` are folders; no call
+site changed) →
 planned:M27.6–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
 without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
 `scripts/build-product.sh` — ADR 0054). M28 is a separate milestone.
 
 ## Where we are
 
-**M27.5 — the L2 modules become folders (in progress).** `src/organize.rs` (1 484 production
+**M27.5 — the L2 modules become folders (done).** `src/organize.rs` (1 484 production
 lines) is `organize/`: `plan.rs` (312) builds the dry-run plan, `apply.rs` (53) creates the
 hardlink, copy or symlink, `export.rs` (987) copies an album and `mod.rs` (167) holds the `organize`
 command; the helpers the three files share stay `pub(super)`. `src/verify.rs` (1 104) is `verify/`:
@@ -38,16 +39,21 @@ RGBA, `audio.rs` (386) feeds the sound card and `present.rs` (293) holds the clo
 rule; `mod.rs` (418) is the `Player` facade and the `play` command. `src/embed.rs` (1 928) is
 `embed/`: `model.rs` (697) holds the catalogue and the ONNX session, `download.rs` (333) the
 consented fetch with sha256, `tags.rs` (676) the dictionary and the two passes, `search.rs` (72) the
-cosine search and the tag filters, `kmeans.rs` (187) the clusters. The public surface is unchanged —
-`organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`, `player::Player`,
-`player::cli` and every `embed::` name are re-exports, and no call site was rewritten. Measured: the
-dry-run plan of the real 2 230-file DB, the reports of a three-file comparison, `play --decode-only`
-on `VID_20230107_203018.mp4` (369 frames, 47.3 fps before / 47.6 after), a `--retag` of the real
-2 233-file DB (31 262 tag rows byte-identical) and the `search` and `clusters` reports are the same;
-`check.sh` maps the folders to their layers and `BUDGET_EXEMPT` falls 19 → 16 (the `organize` file
-became `organize/export.rs` at 987; the `verify`, `player` and `embed` entries are gone). `cargo
-test` 367 + 3, clippy clean, `check.sh` 111 / 0, `rust-analyzer diagnostics` 0 errors. Remaining in
-M27.5: `faces/`.
+cosine search and the tag filters, `kmeans.rs` (187) the clusters. `src/faces.rs` (1 249) is
+`faces/`: `detect.rs` (134) the SCRFD pass, `align.rs` (87) the five-point crop, `embed.rs` (168)
+the ArcFace session, `clusters.rs` (479) the scan and the grouping, `matches.rs` (296) the
+quarantine proposals, `mod.rs` (145) the model files and the download. The public surface is
+unchanged — `organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`,
+`player::Player`, `player::cli` and every `embed::` and `faces::` name are re-exports, and no call
+site was rewritten. Measured: the dry-run plan of the real 2 230-file DB, the reports of a
+three-file comparison, `play --decode-only` on `VID_20230107_203018.mp4` (369 frames, 47.3 fps
+before / 47.6 after), a `--retag` of the real 2 233-file DB (31 262 tag rows byte-identical), the
+`search` and `clusters` reports and `faces --recluster` on the same DB (2 498 faces, 637 groups, the
+same partition and match scores; only the numeric cluster IDs are assigned afresh) are the same;
+`check.sh` maps the folders to their layers and `BUDGET_EXEMPT` falls 19 → 15 (the `organize` file
+became `organize/export.rs` at 987; the `verify`, `player`, `embed` and `faces` entries are gone).
+`cargo test` 367 + 3, clippy clean, `check.sh` 120 / 0, `rust-analyzer diagnostics` 0 errors.
+M27.5 is closed; M27.6 takes `app.rs` next.
 
 **M27.4 — `i18n.rs` becomes `i18n/`.** The 2 352-line file is a folder: `lang.rs` keeps the mechanism
 (`Lang`, `t`, `fill`, `count`, the month, weekday and plural words), `table.rs` the ordered list of

@@ -250,7 +250,12 @@ fn every_report_string_is_in_the_table() {
         ("embed/kmeans.rs", include_str!("../embed/kmeans.rs")),
         ("embed/download.rs", include_str!("../embed/download.rs")),
         ("ocr.rs", include_str!("../ocr.rs")),
-        ("faces.rs", include_str!("../faces.rs")),
+        ("faces/mod.rs", include_str!("../faces/mod.rs")),
+        ("faces/detect.rs", include_str!("../faces/detect.rs")),
+        ("faces/align.rs", include_str!("../faces/align.rs")),
+        ("faces/embed.rs", include_str!("../faces/embed.rs")),
+        ("faces/clusters.rs", include_str!("../faces/clusters.rs")),
+        ("faces/matches.rs", include_str!("../faces/matches.rs")),
         ("tools.rs", include_str!("../tools.rs")),
     ];
     let mut missing = Vec::new();

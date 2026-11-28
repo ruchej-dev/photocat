@@ -60,6 +60,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
 - The CLIP side is a folder: `embed/model.rs`, `embed/download.rs`, `embed/tags.rs`,
   `embed/search.rs` and `embed/kmeans.rs`; the tags, the search and the clusters are unchanged
   [M27.5].
+- Faces are a folder: `faces/detect.rs`, `faces/align.rs`, `faces/embed.rs`, `faces/clusters.rs`
+  and `faces/matches.rs`; the groups and the matches are unchanged [M27.5].
 
 ### Fixed
 

@@ -185,7 +185,6 @@ BUDGET_EXEMPT=(
   "src/app.rs|fn|settings_model|236"
   "src/app.rs|fn|settings_tag_dictionary|202"
   "src/derive.rs|file|-|776"
-  "src/faces.rs|file|-|1249"
   "src/organize/export.rs|file|-|987"
 )
 echo "7. the module budget: ≤ 700 lines per file, ≤ 800 per impl, ≤ 200 per fn"

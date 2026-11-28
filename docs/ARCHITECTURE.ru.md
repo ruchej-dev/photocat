@@ -6,7 +6,7 @@
 
 ```
 L3  main.rs, cli/ ── app.rs     CLI и GUI
-L2  index.rs   dupes.rs   organize/   verify/   embed/   eval.rs   ocr.rs   faces.rs
+L2  index.rs   dupes.rs   organize/   verify/   embed/   eval.rs   ocr.rs   faces/
     recycle.rs   player/
 L1  db/   storage.rs
 L0  i18n/   derive.rs   tools.rs
@@ -145,15 +145,18 @@ src/
 `compare.rs` (451), `manifest.rs` (550), `mod.rs` (130); `src/player.rs` — `player/`: `demux.rs`
 (131), `decode.rs` (409), `audio.rs` (386), `present.rs` (293), `mod.rs` (418); `src/embed.rs` —
 `embed/`: `model.rs` (697), `download.rs` (333), `tags.rs` (676), `search.rs` (72), `kmeans.rs`
-(187), `mod.rs` (23). Публичная поверхность не изменилась: `organize::cli`, `organize::export_cli`,
-`verify::cli`, `verify::manifest_cli`, `player::Player`, `player::cli` и все имена `embed::` —
-реэкспорты, ни одно место вызова не переписано. План раскладки реальной БД на 2 230 файлов,
-отчёты сверки трёх файлов, `play --decode-only` на `VID_20230107_203018.mp4` (369 кадров, 47.3 fps
-до / 47.6 после, RGBA 2.1 / 2.0 мс на кадр), `--retag` реальной БД на 2 233 файла (31 262 строки
-тегов побайтово одинаковы) и отчёты `search` и `clusters` остаются прежними. `check.sh` относит
-папки к их слоям; в `BUDGET_EXEMPT` осталось 16 элементов: три ещё не переехавших файла
-(`app.rs`, `faces.rs`, `derive.rs`), два блока `impl`, десять функций и `organize/export.rs`
-(987). `faces/` ещё в этом задании.
+(187), `mod.rs` (23); `src/faces.rs` — `faces/`: `detect.rs` (134), `align.rs` (87), `embed.rs`
+(168), `clusters.rs` (479), `matches.rs` (296), `mod.rs` (145). Публичная поверхность не
+изменилась: `organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`,
+`player::Player`, `player::cli` и все имена `embed::` и `faces::` — реэкспорты, ни одно место
+вызова не переписано. План раскладки реальной БД на 2 230 файлов, отчёты сверки трёх файлов,
+`play --decode-only` на `VID_20230107_203018.mp4` (369 кадров, 47.3 fps до / 47.6 после, RGBA
+2.1 / 2.0 мс на кадр), `--retag` реальной БД на 2 233 файла (31 262 строки тегов побайтово
+одинаковы), отчёты `search` и `clusters` и `faces --recluster` на той же БД (2 498 лиц, 637
+групп, то же разбиение и те же веса совпадений; заново выданы только числовые id кластеров)
+остаются прежними. `check.sh` относит папки к их слоям; в `BUDGET_EXEMPT` осталось 15 элементов:
+два ещё не переехавших файла (`app.rs`, `derive.rs`), два блока `impl`, десять функций и
+`organize/export.rs` (987). M27.5 закрыт; следующий — `app.rs` (M27.6).
 
 ## Поток индексации
 
