@@ -18,12 +18,25 @@ timeout).
 800 per `impl`, 200 per function, `BUDGET_EXEMPT` only shrinks — and § "Modules and crates" of
 `docs/ARCHITECTURE.md`; ADR 0053 is accepted) → done:M27.2 (`main.rs` is the parser and the dispatch
 only; thirteen subcommands live in `src/cli/`, the shared report line in `cli/report.rs`) →
-doing:M27.3 (`db.rs` is a folder by subject; the schema, `SCHEMA_VERSION`, `open` and `init` live in
-`db/schema.rs`) → planned:M27.4–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
+done:M27.3 (`db.rs` is a folder by subject; the schema, `SCHEMA_VERSION`, `open` and `init` live in
+`db/schema.rs`) → doing:M27.4 (`i18n.rs` is a folder: `lang.rs`, `table.rs` and `terms/` by screen
+area) → planned:M27.5–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
 without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
 `scripts/build-product.sh` — ADR 0054). M28 is a separate milestone.
 
 ## Where we are
+
+**M27.4 — `i18n.rs` becomes `i18n/`.** The 2 352-line file is a folder: `lang.rs` keeps the mechanism
+(`Lang`, `t`, `fill`, `count`, the month, weekday and plural words), `table.rs` the ordered list of
+the ten area tables, and `terms/` one file per screen area — `shell`, `grid`, `inspector`, `dupes`,
+`faces`, `albums`, `calendar`, `settings`, `reports`, `dialogs`. `pairs()` flattens the areas once,
+so `t()` keeps one signature and one lookup; the 1 966 lines of the table are byte-identical after
+the move (1 201 pairs), and the headless frame tests of the viewer, the card and the settings dialog
+pass unchanged. A new test fails on a key repeated across areas and on an empty translation. The
+biggest file is `terms/reports.rs` at 603 lines. `check.sh` treats every file under `src/i18n/` as
+the `i18n` layer; `BUDGET_EXEMPT`: 20 → 19. Measured: `cargo test` 367 + 3, `cargo clippy
+--all-targets` clean, `check.sh` 89 checks / 0 violations, `rust-analyzer diagnostics` 0 errors. The
+owner's review is the last word.
 
 **M27.3 — `db.rs` becomes `db/`.** The 3 243-line file is now eight subject files under `src/db/`:
 `schema.rs` (the only place the DDL, `SCHEMA_VERSION`, `open` and `init` live), `settings.rs`,

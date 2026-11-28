@@ -23,7 +23,19 @@ const PENDING: &[&str] = &[
 /// Files whose string literals are legitimate Russian *data*: the translation table itself and the
 /// prompts for the multilingual model. Their comments are still English like everywhere else.
 const RUSSIAN_DATA: &[&str] = &[
-    "i18n.rs",
+    // The language itself: month and weekday names, the plural forms of the counted nouns.
+    "i18n/lang.rs",
+    // The translation table: the Russian column of every area (M27.4).
+    "i18n/terms/albums.rs",
+    "i18n/terms/calendar.rs",
+    "i18n/terms/dialogs.rs",
+    "i18n/terms/dupes.rs",
+    "i18n/terms/faces.rs",
+    "i18n/terms/grid.rs",
+    "i18n/terms/inspector.rs",
+    "i18n/terms/reports.rs",
+    "i18n/terms/settings.rs",
+    "i18n/terms/shell.rs",
     // The prompts of the multilingual CLIP model and its default tag labels.
     "embed.rs",
     // `labels.csv` is the owner's file: the parser keeps accepting the old Russian keywords
@@ -545,7 +557,7 @@ fn converted_modules_hold_no_russian() {
     }
     assert!(
         bad.is_empty(),
-        "Russian belongs in src/i18n.rs (AGENTS.md §6): {bad:?}"
+        "Russian belongs in src/i18n/ (AGENTS.md §6): {bad:?}"
     );
     assert!(
         pending_honest.is_empty(),

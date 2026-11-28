@@ -9,12 +9,12 @@ L3  main.rs, cli/ ── app.rs     CLI and GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
 L1  db/   storage.rs
-L0  i18n.rs   derive.rs   tools.rs
+L0  i18n/   derive.rs   tools.rs
 ```
 
 | Layer | Knows about | Must not know about |
 |---|---|---|
-| L0 `i18n` | `std` only; `Lang`, the "English source → Russian" table, `t(lang, …)`, `fill(lang, template, values)`, `count(lang, n, noun)` | DB, UI, decoding |
+| L0 `i18n` | `std` only; `Lang`, the "English source → Russian" tables (one per screen area), `t(lang, …)`, `fill(lang, template, values)`, `count(lang, n, noun)` | DB, UI, decoding |
 | L0 `derive` | files, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | DB, UI, parallelism |
 | L0 `tools` | `std::process`, `PATH`, `anyhow` | DB, UI, decoding |
 | L1 `db` | `rusqlite`, `anyhow`, `tools` (the settings type), `i18n` (the language type) | decoding, egui |
@@ -73,7 +73,7 @@ src/
   cli/           one file per subcommand, and report.rs for the sentences built with i18n::fill
   db/            schema.rs (CREATE/ALTER, SCHEMA_VERSION, init, open), settings.rs, files.rs,
                  albums.rs, tags.rs, faces.rs, progress.rs, human.rs
-  i18n/          lang.rs (Lang, t, fill, count, ensure_lang), table.rs, terms/ with one file per
+  i18n/          lang.rs (Lang, t, fill, count), table.rs, terms/ with one file per
                  area: shell, grid, inspector, dupes, faces, albums, calendar, settings, reports,
                  dialogs
   organize/      plan.rs, apply.rs, export.rs
@@ -134,6 +134,16 @@ The `sqlite3 .schema` dump of a fresh DB and of a copy of the real 2 230-file DB
 and after, and the real DB keeps its sha256, mtime, size and `user_version = 10` when `db::open`
 runs. `BUDGET_EXEMPT` is down to 20 items: the eight files still to move, two `impl` blocks and ten
 functions.
+
+**After M27.4 (2026-11-28).** The 2 352-line `src/i18n.rs` is now a folder: `lang.rs` keeps the mechanism (`Lang`,
+`t`, `fill`, `count`, the month, weekday and plural words), `table.rs` the ordered list of the ten
+area tables, and `terms/` one file per screen area — `shell`, `grid`, `inspector`, `dupes`, `faces`,
+`albums`, `calendar`, `settings`, `reports`, `dialogs`. `pairs()` flattens the areas once, so `t()`
+still does one lookup; the 1 966 lines of the table are byte-identical after the move (1 201
+pairs), and the headless frame tests of the viewer, the card and the settings dialog pass unchanged.
+The biggest file is `terms/reports.rs` at 603 lines. `check.sh` treats every file under `src/i18n/`
+as the `i18n` layer; `BUDGET_EXEMPT` is down to 19 items: the seven files still to move, two `impl`
+blocks and ten functions.
 
 ## Indexing flow
 

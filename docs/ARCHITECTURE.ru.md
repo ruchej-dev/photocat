@@ -9,12 +9,12 @@ L3  main.rs, cli/ ── app.rs     CLI и GUI
 L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
 L1  db/   storage.rs
-L0  i18n.rs   derive.rs   tools.rs
+L0  i18n/   derive.rs   tools.rs
 ```
 
 | Слой | Знает про | Не знает про |
 |---|---|---|
-| L0 `i18n` | только `std`; `Lang`, таблица «английский исходник → русский перевод», `t(lang, …)`, `fill(lang, шаблон, значения)`, `count(lang, n, noun)` | БД, UI, декодирование |
+| L0 `i18n` | только `std`; `Lang`, таблицы «английский исходник → русский перевод» (по одной на область экрана), `t(lang, …)`, `fill(lang, шаблон, значения)`, `count(lang, n, noun)` | БД, UI, декодирование |
 | L0 `derive` | файлы, `image`, `image_hasher`, `kamadak-exif`, `sha2`, `tools` | БД, UI, параллелизм |
 | L0 `tools` | `std::process`, `PATH`, `anyhow` | БД, UI, декодирование |
 | L1 `db` | `rusqlite`, `anyhow`, `tools` (тип настроек), `i18n` (тип языка) | декодирование, egui |
@@ -67,7 +67,7 @@ src/
   cli/           по файлу на подкоманду и report.rs для фраз, собранных через i18n::fill
   db/            schema.rs (CREATE/ALTER, SCHEMA_VERSION, init, open), settings.rs, files.rs,
                  albums.rs, tags.rs, faces.rs, progress.rs, human.rs
-  i18n/          lang.rs (Lang, t, fill, count, ensure_lang), table.rs, terms/ — по файлу на
+  i18n/          lang.rs (Lang, t, fill, count), table.rs, terms/ — по файлу на
                  область: shell, grid, inspector, dupes, faces, albums, calendar, settings, reports,
                  dialogs
   organize/      plan.rs, apply.rs, export.rs
@@ -129,6 +129,16 @@ src/
 после, а реальная БД сохраняет свой sha256, mtime, размер и `user_version = 10`, когда запускается
 `db::open`. В `BUDGET_EXEMPT` осталось 20 элементов: восемь ещё не переехавших файлов, два блока
 `impl` и десять функций.
+
+**После M27.4 (2026-11-28).** Файл `src/i18n.rs` на 2 352 строки — теперь папка: `lang.rs` держит механизм (`Lang`, `t`,
+`fill`, `count`, названия месяцев, дней недели и формы числительных), `table.rs` —
+упорядоченный список десяти таблиц областей, `terms/` — файл на область экрана: `shell`, `grid`,
+`inspector`, `dupes`, `faces`, `albums`, `calendar`, `settings`, `reports`, `dialogs`. `pairs()`
+разворачивает области один раз, поэтому `t()` по-прежнему делает один поиск; 1 966 строк таблицы
+побайтово одинаковы после переезда (1 201 пара), а headless-тесты кадра просмотрщика, карточки и
+диалога настроек проходят без правок. Самый большой файл — `terms/reports.rs`, 603 строки.
+`check.sh` считает каждый файл в `src/i18n/` слоем `i18n`; в `BUDGET_EXEMPT` осталось 19
+элементов: семь ещё не переехавших файлов, два блока `impl` и десять функций.
 
 ## Поток индексации
 

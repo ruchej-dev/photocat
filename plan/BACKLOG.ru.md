@@ -1974,7 +1974,8 @@ M26.3: окно теперь отправляет владельца к этой
 через `tests::note_target`), правило строки ленты при 700/1240, панель карточки на `DETAILS_MIN_W`,
 прокрутку левой панели при 700×600 и девять диалогов внутри окна. `cargo test` 343 прошло,
 `cargo test --test source_language` 3, `cargo clippy --all-targets` чисто, `check.sh` 55 проверок,
-`rust-analyzer diagnostics` 0 ошибок. Последнее слово — взгляд владельца на реальном окне.
+`rust-analyzer diagnostics` 0 ошибок. `ensure_lang` остаётся в `db/settings.rs`: он открывает
+соединение, а `i18n` — только `std`. Последнее слово — взгляд владельца на реальном окне.
 
 **Файлы.** `src/app.rs`, `docs/UI.ru.md`, `.pi/skills/ui-design/references/verstka.ru.md`,
 `plan/STATUS.ru.md`.
@@ -2469,6 +2470,16 @@ DDL, `SCHEMA_VERSION`, `open` и `init` живут только в `schema.rs`; 
 3. Новый тест падает на повторе исходной строки между областями и на пустом переводе.
 4. Всё в окне по-прежнему переведено: безголовый кадр трёх экранов на двух языках печатает те же
    слова, что до переезда.
+
+**Сделано (2026-11-28).** В `src/i18n/` — `lang.rs` (механизм: `Lang`, `t`, `fill`, `count`,
+названия месяцев, дней недели и формы числительных), `table.rs` (упорядоченный список десяти
+таблиц областей) и `terms/` с `shell`, `grid`, `inspector`, `dupes`, `faces`, `albums`, `calendar`,
+`settings`, `reports` и `dialogs`; `pairs()` разворачивает их один раз, поэтому `t()` сохраняет
+один поиск и ту же подпись. 1 966 строк таблицы побайтово одинаковы после переезда (1 201 пара);
+новый тест падает на повторе ключа между областями и на пустом переводе; headless-тесты кадра
+просмотрщика, карточки и диалога настроек проходят без правок. `check.sh` считает `src/i18n/`
+слоем `i18n`; `BUDGET_EXEMPT`: 20 → 19. `cargo test` 367 + 3, clippy чисто, `check.sh` 89 / 0,
+`rust-analyzer diagnostics` 0 ошибок.
 
 **M27.5 — модули L2 становятся папками: `organize/`, `player/`, `embed/`, `faces/`, `verify/`.**
 1. `organize/` → `plan`, `apply`, `export`; `player/` → `demux`, `decode`, `audio`, `present`;

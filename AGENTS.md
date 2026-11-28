@@ -63,7 +63,7 @@ source of truth (see `plan/I18N.md` for the order).
 
 | File | Layer | Responsible for | Must not know about |
 |---|---|---|---|
-| `src/i18n.rs` | L0 | UI and CLI language: `Lang`, `t(lang, text)`, `fill(lang, template, values)`, `count(lang, n, noun)`, the en→ru table | DB, UI, decoding |
+| `src/i18n/` | L0 | UI and CLI language: `lang.rs` (`Lang`, `t`, `fill`, `count`), `table.rs` (the ordered area list), `terms/` (one en→ru table per screen area) | DB, UI, decoding |
 | `src/derive.rs` | L0 | sha256, dHash, EXIF (date/GPS/camera), previews, date from the name | DB, UI, indexer |
 | `src/tools.rs` | L0 | paths to `ffmpeg`/`ffprobe`/`tesseract`, `PATH` lookup, version probing | DB, UI, decoding |
 | `src/db/` | L1 | SQLite by subject: `schema.rs` (the DDL, `SCHEMA_VERSION`, `open`, `init`), `settings.rs`, `files.rs`, `albums.rs`, `tags.rs`, `faces.rs`, `progress.rs`, `human.rs` | egui, image decoding |
@@ -202,7 +202,8 @@ bash .pi/skills/corpus-bench/scripts/bench.sh            # measure on the real c
   English.
 - **The code speaks English.** Identifiers (functions, variables, fields, types, test names),
   comments, doc comments, log and error text, and the source text of the interface are English.
-  Cyrillic appears only as a translation: the Russian column of the `PAIRS` table in `src/i18n.rs`,
+  Cyrillic appears only as a translation: the Russian column of the tables in `src/i18n/terms/`
+  (and the month, weekday and plural words in `src/i18n/lang.rs`),
   the `*.ru.md` documents, and model prompt data (`embed.rs`). Nothing else in `src/` may hold a
   Cyrillic letter.
 - **UI strings are translated, not duplicated.** An English source string goes through

@@ -18,12 +18,25 @@ Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 `impl`, 200 на функцию, `BUDGET_EXEMPT` только сокращается — и раздел «Модули и крейты» в
 `docs/ARCHITECTURE.ru.md`; ADR 0053 принят) → done:M27.2 (`main.rs` — только разбор и
 диспетчеризация; тринадцать подкоманд живут в `src/cli/`, общая строка отчёта — в
-`cli/report.rs`) → doing:M27.3 (`db.rs` — папка по темам; схема, `SCHEMA_VERSION`, `open` и `init`
-живут в `db/schema.rs`) → planned:M27.4–M27.8 (сначала модули, затем семь крейтов) и M28 (сборка
+`cli/report.rs`) → done:M27.3 (`db.rs` — папка по темам; схема, `SCHEMA_VERSION`, `open` и `init`
+живут в `db/schema.rs`) → doing:M27.4 (`i18n.rs` — папка: `lang.rs`, `table.rs` и `terms/` по
+областям экрана) → planned:M27.5–M27.8 (сначала модули, затем семь крейтов) и M28 (сборка
 продукта: `.deb`, собранный без `dpkg`, `PKGBUILD`, zip для Windows с рантаймом и `.ico`, бандл
 macOS, один `scripts/build-product.sh` — ADR 0054). M28 — отдельный этап.
 
 ## Где мы
+
+**M27.4 — `i18n.rs` становится `i18n/`.** Файл на 2 352 строки — папка: `lang.rs` держит механизм
+(`Lang`, `t`, `fill`, `count`, названия месяцев, дней недели и формы числительных), `table.rs` —
+упорядоченный список десяти таблиц областей, `terms/` — файл на область экрана: `shell`, `grid`,
+`inspector`, `dupes`, `faces`, `albums`, `calendar`, `settings`, `reports`, `dialogs`. `pairs()`
+разворачивает области один раз, поэтому `t()` сохраняет одну подпись и один поиск; 1 966 строк
+таблицы побайтово одинаковы после переезда (1 201 пара), а headless-тесты кадра просмотрщика,
+карточки и диалога настроек проходят без правок. Новый тест падает на ключе, повторённом между
+областями, и на пустом переводе. Самый большой файл — `terms/reports.rs`, 603 строки. `check.sh`
+считает каждый файл в `src/i18n/` слоем `i18n`; `BUDGET_EXEMPT`: 20 → 19. Измерено: `cargo test`
+367 + 3, `cargo clippy --all-targets` чисто, `check.sh` 89 проверок / 0 нарушений, `rust-analyzer
+diagnostics` 0 ошибок. Последнее слово — за просмотром владельца.
 
 **M27.2 — `main.rs` становится `cli/`.** Файл на 1 847 строк — **85**: дом разбора флагов —
 `cli/flags.rs`, `usage`, `language` и перехват закрытого канала — `cli/mod.rs`, диспетчеризация —

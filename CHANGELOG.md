@@ -49,6 +49,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   codes of every command are unchanged [M27.2].
 - The database module is a folder by subject: `db/schema.rs` is the only place the DDL and `init`
   live, and a query is found by its table; no command, word or byte on disk changed [M27.3].
+- The language table is a folder by screen area: `i18n/lang.rs` keeps the mechanism, `i18n/table.rs`
+  the ordered areas and `i18n/terms/` the words; every translation is unchanged [M27.4].
 
 ### Fixed
 

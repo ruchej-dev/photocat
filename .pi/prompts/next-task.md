@@ -25,7 +25,7 @@ Order, do not reorder:
 
 Constraints that must not be broken on the way: originals are never deleted or renamed; `egui` only
 in `src/app.rs`; no network; heavy work in a background thread with progress; UI labels go through
-`i18n::t(lang, "…")` and the English text lands in `src/i18n.rs`.
+`i18n::t(lang, "…")` and the English text lands in `src/i18n/terms/`.
 
 At the end of the answer: what was done, which numbers were obtained, what is left and what the next
 step of the plan is.

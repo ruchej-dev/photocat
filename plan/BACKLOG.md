@@ -2934,6 +2934,17 @@ name in the index, and a missing translation is found by a test, not by a user.
    languages prints the same words as before the move.
 **Files.** `src/i18n.rs` → `src/i18n/**`, `plan/I18N.md` (the paths of the table), `AGENTS.md` §6.
 
+**Done (2026-11-28).** `src/i18n/` holds `lang.rs` (the mechanism: `Lang`, `t`, `fill`, `count`, the
+month, weekday and plural words), `table.rs` (the ordered list of the ten area tables) and `terms/`
+with `shell`, `grid`, `inspector`, `dupes`, `faces`, `albums`, `calendar`, `settings`, `reports` and
+`dialogs`; `pairs()` flattens them once, so `t()` keeps one lookup and the same signature. The 1 966
+lines of the table are byte-identical after the move (1 201 pairs); a new test fails on a repeated
+key across areas and on an empty translation; the headless frame tests of the viewer, the card and
+the settings dialog pass unchanged. `check.sh` maps `src/i18n/` to the `i18n` layer;
+`BUDGET_EXEMPT`: 20 → 19. `cargo test` 367 + 3, clippy clean, `check.sh` 89 / 0, `rust-analyzer
+diagnostics` 0 errors. `ensure_lang` stays in `db/settings.rs`: it opens a connection, and `i18n`
+is `std` only.
+
 **M27.5 — the L2 modules become folders: `organize/`, `player/`, `embed/`, `faces/`, `verify/`.**
 **Goal.** Each pass is read in pieces: a plan, an apply, a decode, a download — not one 2 000-line
 file.
