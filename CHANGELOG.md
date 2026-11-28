@@ -55,6 +55,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   creates the links or copies and `organize/export.rs` copies an album; the plan is unchanged [M27.5].
 - The comparison and the manifest are a folder: `verify/compare.rs` holds the two-copy check and
   `verify/manifest.rs` the `sha256sum` snapshot; the reports are unchanged [M27.5].
+- The built-in player is a folder: `player/demux.rs`, `player/decode.rs`, `player/audio.rs` and
+  `player/present.rs`; the frames and the timing are unchanged [M27.5].
 
 ### Fixed
 

@@ -7,7 +7,7 @@
 ```
 L3  main.rs, cli/ ── app.rs     CLI и GUI
 L2  index.rs   dupes.rs   organize/   verify/   embed.rs   eval.rs   ocr.rs   faces.rs
-    recycle.rs   player.rs
+    recycle.rs   player/
 L1  db/   storage.rs
 L0  i18n/   derive.rs   tools.rs
 ```
@@ -142,13 +142,16 @@ src/
 
 **После M27.5, частично (2026-11-28).** `src/organize.rs` — теперь `organize/`: `plan.rs`
 (312 строк), `apply.rs` (53), `export.rs` (987), `mod.rs` (167); `src/verify.rs` — `verify/`:
-`compare.rs` (451), `manifest.rs` (550), `mod.rs` (130). Публичная поверхность не изменилась:
-`organize::cli`, `organize::export_cli`, `verify::cli` и `verify::manifest_cli` — реэкспорты, ни
-одно место вызова не переписано. План раскладки реальной БД на 2 230 файлов и отчёты сверки трёх
-файлов побайтово одинаковы до и после переезда. `check.sh` относит обе папки к их слоям; в
-`BUDGET_EXEMPT` осталось 18 элементов: пять ещё не переехавших файлов (`app.rs`, `player.rs`,
-`embed.rs`, `faces.rs`, `derive.rs`), два блока `impl`, десять функций и `organize/export.rs`
-(987). `player/`, `embed/` и `faces/` ещё в этом задании.
+`compare.rs` (451), `manifest.rs` (550), `mod.rs` (130); `src/player.rs` — `player/`: `demux.rs`
+(131), `decode.rs` (409), `audio.rs` (386), `present.rs` (293), `mod.rs` (418). Публичная
+поверхность не изменилась: `organize::cli`, `organize::export_cli`, `verify::cli`,
+`verify::manifest_cli`, `player::Player` и `player::cli` — реэкспорты, ни одно место вызова не
+переписано. План раскладки реальной БД на 2 230 файлов, отчёты сверки трёх файлов и
+`play --decode-only` на `VID_20230107_203018.mp4` (369 кадров, 47.3 fps до / 47.6 после, RGBA
+2.1 / 2.0 мс на кадр) остаются прежними. `check.sh` относит папки к их слоям; в `BUDGET_EXEMPT`
+осталось 17 элементов: четыре ещё не переехавших файла (`app.rs`, `embed.rs`, `faces.rs`,
+`derive.rs`), два блока `impl`, десять функций и `organize/export.rs` (987). `embed/` и `faces/`
+ещё в этом задании.
 
 ## Поток индексации
 
@@ -352,7 +355,7 @@ album_files(album_id, file_id, position, added_at, PRIMARY KEY(album_id, file_id
 Ошибка `ffmpeg`/`ffprobe` — мягкая: строка попадает в БД без превью, счётчик `errors` растёт.
 Консольное окно на Windows подавляется (`CREATE_NO_WINDOW`), на Unix — обычный `Command`.
 
-**Воспроизведение видео.** С M14 видео играет встроенный плеер (`src/player.rs`, ADR 0030):
+**Воспроизведение видео.** С M14 видео играет встроенный плеер (`src/player/`, ADR 0030):
 кадр рисуется в окне приложения, звук идёт через `cpal`. Внешних программ для просмотра больше не
 нужно. Файл, который плееру не по зубам (кодек вне области, битый контейнер), честно отвергается:
 ничего не запускается, просмотрщик показывает причину и предлагает `ffplay` / системный плеер явными

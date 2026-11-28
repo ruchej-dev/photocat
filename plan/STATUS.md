@@ -20,7 +20,7 @@ timeout).
 only; thirteen subcommands live in `src/cli/`, the shared report line in `cli/report.rs`) →
 done:M27.3 (`db.rs` is a folder by subject; the schema, `SCHEMA_VERSION`, `open` and `init` live in
 `db/schema.rs`) → done:M27.4 (`i18n.rs` is a folder: `lang.rs`, `table.rs` and `terms/` by screen
-area) → doing:M27.5 (`organize/` and `verify/` are done; `player/`, `embed/` and `faces/` remain) →
+area) → doing:M27.5 (`organize/`, `verify/` and `player/` are done; `embed/` and `faces/` remain) →
 planned:M27.6–M27.8 (modules first, then seven crates) and M28 (product builds: a `.deb` assembled
 without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
 `scripts/build-product.sh` — ADR 0054). M28 is a separate milestone.
@@ -32,13 +32,18 @@ lines) is `organize/`: `plan.rs` (312) builds the dry-run plan, `apply.rs` (53) 
 hardlink, copy or symlink, `export.rs` (987) copies an album and `mod.rs` (167) holds the `organize`
 command; the helpers the three files share stay `pub(super)`. `src/verify.rs` (1 104) is `verify/`:
 `compare.rs` (451) holds the two-copy check and `manifest.rs` (550) the `sha256sum` snapshot, with
-the report helpers both share in `mod.rs` (130). The public surface is unchanged — `organize::cli`,
-`organize::export_cli`, `verify::cli` and `verify::manifest_cli` are re-exports, and no call site was
-rewritten. Measured: the dry-run plan of the real 2 230-file DB and the reports of a three-file
-comparison are byte-identical before and after; `check.sh` maps both folders to their layers and
-`BUDGET_EXEMPT` falls 19 → 18 (the `organize` file became `organize/export.rs` at 987, the
-`verify` entry is gone). `cargo test` 367 + 3, clippy clean, `check.sh` 101 / 0, `rust-analyzer
-diagnostics` 0 errors. Remaining in M27.5: `player/`, `embed/`, `faces/`.
+the report helpers both share in `mod.rs` (130). `src/player.rs` (1 594) is `player/`: `demux.rs`
+(131) opens the container and hands out packets, `decode.rs` (409) turns packets into frames and
+RGBA, `audio.rs` (386) feeds the sound card and `present.rs` (293) holds the clock and the drop
+rule; `mod.rs` (418) is the `Player` facade and the `play` command. The public surface is unchanged
+— `organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`, `player::Player`
+and `player::cli` are re-exports, and no call site was rewritten. Measured: the dry-run plan of the
+real 2 230-file DB, the reports of a three-file comparison and `play --decode-only` on
+`VID_20230107_203018.mp4` (369 frames, 47.3 fps before / 47.6 after) are the same; `check.sh` maps
+the folders to their layers and `BUDGET_EXEMPT` falls 19 → 17 (the `organize` file became
+`organize/export.rs` at 987; the `verify` and `player` entries are gone). `cargo test` 367 + 3,
+clippy clean, `check.sh` 101 / 0, `rust-analyzer diagnostics` 0 errors. Remaining in M27.5:
+`embed/`, `faces/`.
 
 **M27.4 — `i18n.rs` becomes `i18n/`.** The 2 352-line file is a folder: `lang.rs` keeps the mechanism
 (`Lang`, `t`, `fill`, `count`, the month, weekday and plural words), `table.rs` the ordered list of

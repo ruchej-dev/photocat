@@ -55,6 +55,8 @@
   ссылки или копии, `organize/export.rs` выгружает альбом; план не изменился [M27.5].
 - Сверка и слепок — папка: `verify/compare.rs` держит сверку двух копий, `verify/manifest.rs` —
   слепок `sha256sum`; отчёты не изменились [M27.5].
+- Встроенный плеер — папка: `player/demux.rs`, `player/decode.rs`, `player/audio.rs` и
+  `player/present.rs`; кадры и тайминги не изменились [M27.5].
 
 ### Исправлено
 

@@ -77,7 +77,7 @@ source of truth (see `plan/I18N.md` for the order).
 | `src/organize/` | L2 | date plan, hardlink/copy/symlink, album export: `plan.rs`, `apply.rs`, `export.rs` | egui |
 | `src/verify/` | L2 | comparing two copies, `sha256sum` manifest: `compare.rs`, `manifest.rs` | DB schema, egui |
 | `src/recycle.rs` | L2 | moving to the OS trash after confirmation, clearing rows | previews, egui |
-| `src/player.rs` | L2 | built-in player: `rff` demux, H.264/HEVC/AAC decode, `cpal` sound, frame as RGBA | DB, egui |
+| `src/player/` | L2 | built-in player: `rff` demux, H.264/HEVC/AAC decode, `cpal` sound, frame as RGBA: `demux.rs`, `decode.rs`, `audio.rs`, `present.rs` | DB, egui |
 | `src/app.rs` | L3 | the whole egui GUI | direct SQL calls |
 | `src/main.rs` | L3 | CLI parsing, the dispatch `match` | — |
 | `src/cli/` | L3 | one subcommand per file, the shared report line | — |

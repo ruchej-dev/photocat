@@ -20,7 +20,7 @@ Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 диспетчеризация; тринадцать подкоманд живут в `src/cli/`, общая строка отчёта — в
 `cli/report.rs`) → done:M27.3 (`db.rs` — папка по темам; схема, `SCHEMA_VERSION`, `open` и `init`
 живут в `db/schema.rs`) → done:M27.4 (`i18n.rs` — папка: `lang.rs`, `table.rs` и `terms/` по
-областям экрана) → doing:M27.5 (`organize/` и `verify/` готовы; остались `player/`, `embed/` и
+областям экрана) → doing:M27.5 (`organize/`, `verify/` и `player/` готовы; остались `embed/` и
 `faces/`) → planned:M27.6–M27.8 (сначала модули, затем семь крейтов) и M28 (сборка
 продукта: `.deb`, собранный без `dpkg`, `PKGBUILD`, zip для Windows с рантаймом и `.ico`, бандл
 macOS, один `scripts/build-product.sh` — ADR 0054). M28 — отдельный этап.
@@ -32,13 +32,17 @@ macOS, один `scripts/build-product.sh` — ADR 0054). M28 — отдельн
 копию или ссылку, `export.rs` (987) выгружает альбом, `mod.rs` (167) держит команду `organize`;
 общие помощники трёх файлов остаются `pub(super)`. `src/verify.rs` (1 104) — `verify/`:
 `compare.rs` (451) держит сверку двух копий, `manifest.rs` (550) — слепок `sha256sum`, общие
-помощники отчётов — в `mod.rs` (130). Публичная поверхность не изменилась: `organize::cli`,
-`organize::export_cli`, `verify::cli` и `verify::manifest_cli` — реэкспорты, ни одно место вызова
-не переписано. Измерено: план раскладки реальной БД на 2 230 файлов и отчёты сверки трёх файлов
-побайтово одинаковы до и после; `check.sh` относит обе папки к их слоям, `BUDGET_EXEMPT`:
-19 → 18 (файл `organize` стал `organize/export.rs` на 987, запись `verify` удалена). `cargo test`
-367 + 3, clippy чисто, `check.sh` 101 / 0, `rust-analyzer diagnostics` 0 ошибок. В M27.5 остались
-`player/`, `embed/`, `faces/`.
+помощники отчётов — в `mod.rs` (130). `src/player.rs` (1 594) — `player/`: `demux.rs` (131)
+открывает контейнер и выдаёт пакеты, `decode.rs` (409) превращает пакеты в кадры и RGBA,
+`audio.rs` (386) кормит звуковую карту, `present.rs` (293) держит часы и правило пропуска;
+`mod.rs` (418) — фасад `Player` и команда `play`. Публичная поверхность не изменилась:
+`organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`, `player::Player` и
+`player::cli` — реэкспорты, ни одно место вызова не переписано. Измерено: план раскладки реальной
+БД на 2 230 файлов, отчёты сверки трёх файлов и `play --decode-only` на
+`VID_20230107_203018.mp4` (369 кадров, 47.3 fps до / 47.6 после) прежние; `check.sh` относит папки
+к их слоям, `BUDGET_EXEMPT`: 19 → 17 (файл `organize` стал `organize/export.rs` на 987; записи
+`verify` и `player` удалены). `cargo test` 367 + 3, clippy чисто, `check.sh` 101 / 0,
+`rust-analyzer diagnostics` 0 ошибок. В M27.5 остались `embed/`, `faces/`.
 
 **M27.4 — `i18n.rs` становится `i18n/`.** Файл на 2 352 строки — папка: `lang.rs` держит механизм
 (`Lang`, `t`, `fill`, `count`, названия месяцев, дней недели и формы числительных), `table.rs` —

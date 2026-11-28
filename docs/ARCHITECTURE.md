@@ -7,7 +7,7 @@
 ```
 L3  main.rs, cli/ ── app.rs     CLI and GUI
 L2  index.rs   dupes.rs   organize/   verify/   embed.rs   eval.rs   ocr.rs   faces.rs
-    recycle.rs   player.rs
+    recycle.rs   player/
 L1  db/   storage.rs
 L0  i18n/   derive.rs   tools.rs
 ```
@@ -146,14 +146,16 @@ as the `i18n` layer; `BUDGET_EXEMPT` is down to 19 items: the seven files still 
 blocks and ten functions.
 
 **After M27.5, partly (2026-11-28).** `src/organize.rs` is `organize/` — `plan.rs` (312 lines),
-`apply.rs` (53), `export.rs` (987), `mod.rs` (167) — and `src/verify.rs` is `verify/` — `compare.rs`
-(451), `manifest.rs` (550), `mod.rs` (130). The public surface did not change: `organize::cli`,
-`organize::export_cli`, `verify::cli` and `verify::manifest_cli` are re-exports, and no call site was
-rewritten. The dry-run plan of the real 2 230-file DB and the reports of a three-file comparison are
-byte-identical before and after the move. `check.sh` maps both folders to their layers;
-`BUDGET_EXEMPT` is down to 18 items: the five files still to move (`app.rs`, `player.rs`,
-`embed.rs`, `faces.rs`, `derive.rs`), two `impl` blocks, ten functions and `organize/export.rs`
-(987). `player/`, `embed/` and `faces/` remain in this task.
+`apply.rs` (53), `export.rs` (987), `mod.rs` (167) — `src/verify.rs` is `verify/` — `compare.rs`
+(451), `manifest.rs` (550), `mod.rs` (130) — and `src/player.rs` is `player/` — `demux.rs` (131),
+`decode.rs` (409), `audio.rs` (386), `present.rs` (293), `mod.rs` (418). The public surface did not
+change: `organize::cli`, `organize::export_cli`, `verify::cli`, `verify::manifest_cli`,
+`player::Player` and `player::cli` are re-exports, and no call site was rewritten. The dry-run plan
+of the real 2 230-file DB, the reports of a three-file comparison and `play --decode-only` on
+`VID_20230107_203018.mp4` (369 frames, 47.3 fps before / 47.6 after, RGBA 2.1 / 2.0 ms per frame)
+stay the same. `check.sh` maps the folders to their layers; `BUDGET_EXEMPT` is down to 17 items:
+the four files still to move (`app.rs`, `embed.rs`, `faces.rs`, `derive.rs`), two `impl` blocks, ten
+functions and `organize/export.rs` (987). `embed/` and `faces/` remain in this task.
 
 ## Indexing flow
 
@@ -381,7 +383,7 @@ under `sha256[..24]` as the photos. An `ffmpeg`/`ffprobe` error is soft: the row
 without a preview and the `errors` counter grows. The console window is suppressed on Windows
 (`CREATE_NO_WINDOW`), on Unix it is a plain `Command`.
 
-**Video playback.** Since M14 a video plays in the built-in player (`src/player.rs`, ADR 0030): the
+**Video playback.** Since M14 a video plays in the built-in player (`src/player/`, ADR 0030): the
 frame is drawn in the app window, the sound goes through `cpal`. External programs are no longer
 needed for viewing. A file the player cannot handle (a codec out of scope, a broken container) is
 refused honestly: nothing is started, the viewer shows the reason and offers `ffplay` / the system
