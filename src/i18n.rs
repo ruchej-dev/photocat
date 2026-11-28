@@ -2061,7 +2061,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("the check was interrupted without a report", "проверка прервана без отчёта"),
     ("{} of {} files", "файлов {} из {}"),
     ("Album “{}”", "Альбом «{}»"),
-    ("{} groups, {} spare", "групп {}, зря {}"),
+    ("{}, {} spare", "{}, зря {}"),
     ("{} faces in {} photos", "лиц {} на {} снимках"),
     ("{} files, {}", "файлов {}, {}"),
     ("no photos with the tag “{tag}” above the threshold {}% ({:.2}) — lower the threshold slider in the left panel", "нет снимков с тегом «{tag}» выше порога {}% ({tag_filter_raw:.2}) — опустите ползунок порога в левой панели"),
@@ -2141,7 +2141,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("the text is not recognized: {}", "текст не распознан: {}"),
     ("the text search failed: {}", "поиск по тексту не удался: {}"),
     ("word search “{}”: {} files in {} ms", "смысловой поиск «{}»: {} файлов за {} мс"),
-    ("{} groups, {} duplicates, in {} s", "групп: {}, дублей на {}, за {} с"),
+    ("{}, {} duplicates, in {} s", "{}, дублей на {}, за {} с"),
     ("{}, {} s", "{}, {} с"),
     ("{}: keep {} — {}", "{}: оставить {} — {}"),
 

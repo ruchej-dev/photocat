@@ -29,6 +29,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   and the README picks the lockup that matches the reader's theme [M26.21].
 - The lockup is the owner's new layout: the app's own mark beside the word, 800×220 — the size the
   README shows it at — with the ink framed by equal air and no cropping [M26.22].
+- Screenshots of every screen, in English and Russian, and the gallery in `docs/SCREENSHOTS.md`
+  and `docs/SCREENSHOTS.ru.md`.
 
 ### Changed
 
@@ -43,6 +45,9 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
 
 - The “keep” target of a duplicate follows its word in both languages, so “оставить” stays on
   one line, and the digits at the right of a list row no longer run under it [M26.20].
+- The Trash screen's header counts the files in the trash instead of showing “0 files, 0 B”.
+- The duplicates header and the status bar count groups with the right plural: “1 group”
+  instead of “1 groups”.
 
 ### Removed
 
