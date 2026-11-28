@@ -38,6 +38,81 @@ crate::`), он же запрещает вызовы `fs::remove_*` и `fs::rena
 `src/storage.rs`: он удаляет только внутри `<кэш>/photocat/` после проверки канонического пути;
 архив и модели не трогает.
 
+## Модули и крейты
+
+Сегодня программа — один крейт: в `src/` **52 104 строки в 17 файлах**, и только `app.rs` — 28 895:
+18 381 рабочего кода и 10 514 тестов. Читатель, которому нужен экран дублей, прокручивает весь файл,
+а карта слоёв выше — это `grep` в `check.sh`, а не то, что знает компилятор. M27 идёт к цели
+ADR 0053 двумя шагами — сначала модули, потом крейты, — и каждый шаг сохраняет поведение и тесты
+неизменными.
+
+**Крейты (M27.7).**
+
+| Крейт | Что держит | От чего может зависеть |
+|---|---|---|
+| `photocat-core` | `derive`, `tools`, `i18n` | ни от чего нашего |
+| `photocat-data` | `db`, `storage` | core |
+| `photocat-engine` | `index`, `dupes`, `organize`, `verify`, `eval` | core, data |
+| `photocat-ml` | `embed`, `faces`, `ocr` | core, data (только здесь живут `ort`, `tokenizers`) |
+| `photocat-player` | `player` | core (только здесь живут декодеры `rff-*` и `cpal`) |
+| `photocat-ui` | `ui/**` | все крейты ниже, `egui`/`eframe` |
+| `photocat-cli` | `cli/**` | все крейты ниже, без `egui` |
+| `photocat` | `main.rs`: бинарник, соединяющий CLI и GUI | все |
+
+**Дерево модулей (M27.2–M27.6).**
+
+```
+src/
+  main.rs        только разбор аргументов и диспетчеризация
+  cli/           по файлу на подкоманду и report.rs для фраз, собранных через i18n::fill
+  db/            schema.rs (CREATE/ALTER, SCHEMA_VERSION, init, open), settings.rs, files.rs,
+                 albums.rs, tags.rs, faces.rs, progress.rs, human.rs
+  i18n/          lang.rs (Lang, t, fill, count, ensure_lang), table.rs, terms/ — по файлу на
+                 область: shell, grid, inspector, dupes, faces, albums, calendar, settings, reports,
+                 dialogs
+  organize/      plan.rs, apply.rs, export.rs
+  player/        demux.rs, decode.rs, audio.rs, present.rs
+  embed/         model.rs, download.rs, tags.rs, search.rs, kmeans.rs
+  faces/         detect.rs, align.rs, embed.rs, clusters.rs, matches.rs
+  verify/        compare.rs, manifest.rs
+  ui/            theme.rs, icon.rs, widgets.rs, text.rs, frame.rs, app.rs,
+                 shell/    top_strip, left_panel, ribbon, status_bar, selection_bar
+                 screens/  grid, cards, inspector, dupes, faces, albums, calendar, trash,
+                           integrity, viewer
+                 dialogs/  settings/*, roots, export, album, limited
+                 actions/  reload, index_roots, save_settings, насос проходов
+```
+
+**Бюджет модуля.** В файле не больше **700 строк рабочего кода**, в блоке **`impl` — 800**, в
+**функции — 200**; модуль отвечает за один экран или один проход, никогда за два несвязанных.
+`check.sh` меряет каждый файл скриптом `scripts/budget.awk` (комментарии и строковые литералы
+вырезаются до подсчёта скобок, блок `#[cfg(test)] mod tests` не считается) и держит сегодняшних
+нарушителей в `BUDGET_EXEMPT` с числом строк на момент записи. Список только сокращается: элемент,
+переросший своё число, валит проверку, и запись, которая теперь уложилась в бюджет, — тоже: это
+тот же механизм `PENDING`, что у `tests/source_language.rs`. Правило записано в `AGENTS.md` §3.
+
+**Откуда M27.1 стартует (измерено 2026-11-28).** Рабочие строки — те, что до модуля тестов;
+элемент меряется от первой строки до закрывающей скобки.
+
+| Файл | Рабочих | Тестов | Крупнейший элемент |
+|---|---|---|---|
+| `src/app.rs` | 18 381 | 10 514 | `impl App` 9 061; `impl eframe::App for App` 2 935 с `ui()` 2 933; `viewer_modal` 855; `file_card_content` 656 |
+| `src/db.rs` | 3 243 | 1 510 | `init` 271 |
+| `src/i18n.rs` | 2 352 | 242 | сама таблица |
+| `src/embed.rs` | 1 928 | 458 | `impl Model` 257 |
+| `src/main.rs` | 1 847 | 332 | `main()` 1 177; `albums_cli` 294 |
+| `src/player.rs` | 1 594 | 214 | `present_loop` 173 |
+| `src/organize.rs` | 1 484 | 521 | `cli` 141 |
+| `src/faces.rs` | 1 249 | 364 | `run` 175 |
+| `src/verify.rs` | 1 104 | 324 | `verify_report` 109 |
+| `src/derive.rs` | 776 | 167 | `exif_meta` 49 |
+| остальные семь | ≤ 572 каждый | | `src/eval.rs` 572, `src/tools.rs` 563, `src/dupes.rs` 539, `src/ocr.rs` 336, `src/index.rs` 321, `src/storage.rs` 143, `src/recycle.rs` 115 |
+
+Двадцать пять элементов на эту дату сверх бюджета, и все они вписаны в `BUDGET_EXEMPT`: десять
+файлов, два блока `impl` и тринадцать функций. Все, кроме `src/derive.rs` (776 строк), принадлежат
+шагу, который M27.2–M27.6 и так планирует; `derive.rs` нужен свой разрез. К M27.8 список должен
+опустеть.
+
 ## Поток индексации
 
 ```

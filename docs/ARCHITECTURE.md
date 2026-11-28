@@ -44,6 +44,80 @@ the Russian labels the window must show. There is one
 exception — `src/storage.rs`: it removes only inside `<cache>/photocat/` after checking the
 canonical path; it does not touch the archive or the models.
 
+## Modules and crates
+
+The program is one crate today: `src/` is **52 104 lines in 17 files**, and `app.rs` alone is 28 895 —
+18 381 of production and 10 514 of tests. A reader looking for the duplicates screen scrolls the
+whole file, and the layer map above is a `grep` in `check.sh` rather than something the compiler
+knows. M27 walks to the target of ADR 0053 in two moves — modules first, crates second — and every
+step keeps the behaviour and the tests identical.
+
+**The crates (M27.7).**
+
+| Crate | Holds | May depend on |
+|---|---|---|
+| `photocat-core` | `derive`, `tools`, `i18n` | nothing of ours |
+| `photocat-data` | `db`, `storage` | core |
+| `photocat-engine` | `index`, `dupes`, `organize`, `verify`, `eval` | core, data |
+| `photocat-ml` | `embed`, `faces`, `ocr` | core, data (`ort`, `tokenizers` live here alone) |
+| `photocat-player` | `player` | core (the `rff-*` decoders and `cpal` live here alone) |
+| `photocat-ui` | `ui/**` | every crate below, `egui`/`eframe` |
+| `photocat-cli` | `cli/**` | every crate below, no `egui` |
+| `photocat` | `main.rs`: the binary that wires the CLI and the GUI | all |
+
+**The module tree (M27.2–M27.6).**
+
+```
+src/
+  main.rs        the parser and the dispatch only
+  cli/           one file per subcommand, and report.rs for the sentences built with i18n::fill
+  db/            schema.rs (CREATE/ALTER, SCHEMA_VERSION, init, open), settings.rs, files.rs,
+                 albums.rs, tags.rs, faces.rs, progress.rs, human.rs
+  i18n/          lang.rs (Lang, t, fill, count, ensure_lang), table.rs, terms/ with one file per
+                 area: shell, grid, inspector, dupes, faces, albums, calendar, settings, reports,
+                 dialogs
+  organize/      plan.rs, apply.rs, export.rs
+  player/        demux.rs, decode.rs, audio.rs, present.rs
+  embed/         model.rs, download.rs, tags.rs, search.rs, kmeans.rs
+  faces/         detect.rs, align.rs, embed.rs, clusters.rs, matches.rs
+  verify/        compare.rs, manifest.rs
+  ui/            theme.rs, icon.rs, widgets.rs, text.rs, frame.rs, app.rs,
+                 shell/    top_strip, left_panel, ribbon, status_bar, selection_bar
+                 screens/  grid, cards, inspector, dupes, faces, albums, calendar, trash,
+                           integrity, viewer
+                 dialogs/  settings/*, roots, export, album, limited
+                 actions/  reload, index_roots, save_settings, the pass pump
+```
+
+**The module budget.** Production code holds at most **700 lines per file**, an **`impl` block 800**,
+a **function 200**; a module owns one screen or one pass, never two unrelated things. `check.sh`
+measures every file with `scripts/budget.awk` (comments and string literals are stripped before the
+braces are counted, the `#[cfg(test)] mod tests` block is excluded) and keeps today's offenders in
+`BUDGET_EXEMPT` with the line count they had when they were written down. The list only shrinks: an
+item that grows past its number fails the check, and so does an entry that is now under the budget —
+the `PENDING` mechanism `tests/source_language.rs` uses. The rule is part of `AGENTS.md` §3.
+
+**Where M27.1 starts (measured 2026-11-28).** Production lines are those before the test module; an
+item is measured from its first line to its closing brace.
+
+| File | Production | Tests | Biggest item |
+|---|---|---|---|
+| `src/app.rs` | 18 381 | 10 514 | `impl App` 9 061; `impl eframe::App for App` 2 935 with `ui()` 2 933; `viewer_modal` 855; `file_card_content` 656 |
+| `src/db.rs` | 3 243 | 1 510 | `init` 271 |
+| `src/i18n.rs` | 2 352 | 242 | the table itself |
+| `src/embed.rs` | 1 928 | 458 | `impl Model` 257 |
+| `src/main.rs` | 1 847 | 332 | `main()` 1 177; `albums_cli` 294 |
+| `src/player.rs` | 1 594 | 214 | `present_loop` 173 |
+| `src/organize.rs` | 1 484 | 521 | `cli` 141 |
+| `src/faces.rs` | 1 249 | 364 | `run` 175 |
+| `src/verify.rs` | 1 104 | 324 | `verify_report` 109 |
+| `src/derive.rs` | 776 | 167 | `exif_meta` 49 |
+| the other seven | ≤ 572 each | | `src/eval.rs` 572, `src/tools.rs` 563, `src/dupes.rs` 539, `src/ocr.rs` 336, `src/index.rs` 321, `src/storage.rs` 143, `src/recycle.rs` 115 |
+
+Twenty-five items are over the budget on this date and are written into `BUDGET_EXEMPT`: ten files,
+two `impl` blocks and thirteen functions. All but `src/derive.rs` (776 lines) belong to a move that
+M27.2–M27.6 already plans; `derive.rs` needs a split of its own. The list must be empty by M27.8.
+
 ## Indexing flow
 
 ```

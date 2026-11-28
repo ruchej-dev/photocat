@@ -54,6 +54,36 @@ What is checked:
 6. The code speaks English (AGENTS.md §6): no Cyrillic identifier in `src/`, and
    `cargo test --test source_language` passes — the converted modules hold no Russian comment or
    string, and the `PENDING` list has no stale entry.
+7. The module budget (ADR 0053): production code ≤ 700 lines per file, an `impl` block ≤ 800, a
+   function ≤ 200; `scripts/budget.awk` counts and `BUDGET_EXEMPT` holds today's offenders.
+
+## The module budget
+
+A module owns one screen or one pass. The budget is what stops the next 28 000-line file from
+appearing one screen at a time:
+
+| What | Limit |
+|---|---|
+| production lines in a file | 700 |
+| lines in an `impl` block | 800 |
+| lines in a function | 200 |
+
+`budget.awk` strips comments and string literals, counts braces, and ignores the
+`#[cfg(test)] mod tests` block: the budget is about what a reader has to hold in mind, not about the
+tests. It can be run on one file:
+
+```bash
+awk -v file=src/app.rs -f .pi/skills/enforce-architecture/scripts/budget.awk src/app.rs
+# src/app.rs	file	-	18381
+# src/app.rs	impl	App	9061
+# src/app.rs	fn	ui	2933
+```
+
+`check.sh` compares the result with `BUDGET_EXEMPT` (section 7) and fails on four things: an item over
+the budget that is not in the list; an item that grew past its recorded count; an entry whose item is
+now under the budget (remove the entry, do not keep it); an entry whose item no longer exists (a
+rename or a move — update the entry). When a move shrinks a file, lower its number in the same
+change: the list only shrinks.
 
 ## A manual checklist by module
 
@@ -91,6 +121,7 @@ What is checked:
 
 - `conn.execute(` or a `SELECT …` string appeared in `app.rs`.
 - `image::open` appeared in `dupes.rs`.
+- A new file passed 700 lines, or a function passed 200.
 - `use crate::derive` appeared in `db.rs`.
 - `organize` learned to delete "the excess" instead of reporting.
 - `verify` or `manifest` write into the archive folder without an explicit `--out` or delete files.

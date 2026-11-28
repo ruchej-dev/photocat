@@ -1446,17 +1446,24 @@ of the outside of the window only. A screenshot of the app must not depend on a 
 **Forbids:** pulling the logo into a widget, a background or a decal (that would be the first image in
 the interface, and the scaling tests of `docs/UI.md` would stop meaning anything); an SVG- or
 font-based mark that needs a new renderer; a network fetch for the icon.
-## 0053. The workspace: six crates and a module budget, so that no file is the program (proposed)
+## 0053. The workspace: six crates and a module budget, so that no file is the program (accepted)
 
-**Status: proposed for the owner (M27, 2026-11-27).** No code is moved yet. This is the target the
-tasks of M27 walk to, and the reason each of them exists.
+**Status: accepted by the owner (M27, 2026-11-27); the work started on 2026-11-28 with M27.1.** No
+code is moved yet. This is the target the tasks of M27 walk to, and the reason each of them exists.
 
 **The facts (measured 2026-11-27).** `src/` is 51 859 lines in 17 files. `app.rs` alone is 28 650 —
 18 309 of production and 10 344 of tests; the `impl eframe::App for App` block is 13 279 lines with a
 single `ui()` of 2 955 lines inside it, `impl App` another 9 025 with `index_roots` at 860 and
 `viewer_modal` at 859. `db.rs` 4 753, `i18n.rs` 2 594, `embed.rs` 2 386, `main.rs` 2 179 (17
 subcommands in one `match`), `organize.rs` 2 005, `player.rs` 1 808, `faces.rs` 1 613, `verify.rs`
-1 428. A reader looking for the duplicates screen scrolls through the whole file to find it, and the
+1 428.
+
+**The facts re-measured (2026-11-28, the start of M27.1).** `src/` is 52 104 lines; `app.rs` 28 895 —
+18 381 of production and 10 514 of tests. The `impl eframe::App for App` block is 2 935 lines from its
+first line to its closing brace, and its `ui()` is 2 933; the 13 279 in the first measurement does not
+reproduce. `impl App` is 9 061, `viewer_modal` 855, `file_card_content` 656, `paint_icon` 475;
+`db::init` 271, `main()` 1 177. The exact table and the method are in `docs/ARCHITECTURE.md`
+§ "Modules and crates". A reader looking for the duplicates screen scrolls through the whole file to find it, and the
 compiler cannot say a word about the layer map: today it is a `grep` in `check.sh`.
 
 **Decision.** Two moves, in that order.

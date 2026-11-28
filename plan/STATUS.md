@@ -14,12 +14,35 @@ Renaming originals was rejected by the owner — §1 AGENTS.md stays unchanged.
 embedded in the binary and handed to the window as its icon, ADR 0052; no new dependency,
 +46 KiB to the 90 MB binary, the icon decodes in a test and the window lives to the smoke
 timeout).
-→ planned:M27 (the architecture: modules first, then seven crates — `ui/`, `cli/`, `db/` and the L2
-folders, a module budget in `check.sh` that only shrinks, ADR 0053) and M28 (product builds: a `.deb`
-assembled without `dpkg`, a `PKGBUILD`, a Windows zip with its runtime and `.ico`, a macOS bundle, one
-`scripts/build-product.sh` — ADR 0054). Both milestones are tasks, not code: nothing is moved yet.
+→ doing:M27.1 (the architecture: the inventory, the module budget in `check.sh` — 700 lines per file,
+800 per `impl`, 200 per function, `BUDGET_EXEMPT` only shrinks — and § "Modules and crates" of
+`docs/ARCHITECTURE.md`; ADR 0053 is accepted) → planned:M27.2–M27.8 (modules first, then seven
+crates) and M28 (product builds: a `.deb` assembled without `dpkg`, a `PKGBUILD`, a Windows zip with
+its runtime and `.ico`, a macOS bundle, one `scripts/build-product.sh` — ADR 0054). M27.2 moves the
+first code; M28 is a separate milestone.
 
 ## Where we are
+
+M27.1 opens the architectural refactor the owner asked for on 2026-11-27: no god modules, no
+28 000-line file, and the layer map as something a machine checks instead of a `grep` nobody runs.
+The task moves no code — it agrees on the target and makes the budget countable.
+`docs/ARCHITECTURE.md` § "Modules and crates" now holds the crate table of ADR 0053, the module tree
+of `ui/`, `cli/`, `db/` and the L2 folders, and the numbers M27 starts from (measured 2026-11-28,
+production lines before `mod tests`): `src/` **52 104 lines in 17 files**, `app.rs` **28 895**
+(18 381 production + 10 514 tests) with `impl App` **9 061**, `impl eframe::App for App` **2 935**
+and its `ui()` **2 933**, `viewer_modal` 855, `file_card_content` 656; `db.rs` 4 753 with `init` 271;
+`i18n.rs` 2 594; `main.rs` 2 179 with `main()` 1 177. The first measurement in ADR 0053 claimed
+13 279 lines for the `impl eframe::App` block; that number does not reproduce, the ADR now carries
+the re-measured one. `scripts/budget.awk` measures one file (comments and string literals are
+stripped before the braces are counted, the test module is excluded) and `check.sh` §7 compares it
+with `BUDGET_EXEMPT`: **25 items today** — 10 files, 2 `impl` blocks, 13 functions. The list only
+shrinks: an item that grows past its recorded number fails the check, an entry that is now under the
+budget fails too (remove it), and so does an entry whose item no longer exists. The four failure
+modes were injected and caught. `AGENTS.md` §3 and the `enforce-architecture` skill carry the rule
+and the way to check one file by hand. Measured: `cargo test` 366 passed + 3 guard tests,
+`cargo clippy --all-targets` clean, `check.sh` 56 checks / 0 violations (one more than the 55 of
+M26.13 — the budget), `rust-analyzer diagnostics` 0 errors; no code moved, so the window is the same
+one. The owner's review is the last word.
 
 M24.3 closes M24: the clean-install pass itself, on an empty cache with no models and then with no
 external programs either. The numbers are in `docs/ARCHITECTURE.md`; here is what the pass saw and

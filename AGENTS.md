@@ -84,6 +84,12 @@ source of truth (see `plan/I18N.md` for the order).
 The one-dependency rule: **a module depends only on lower layers**. Checked by
 `bash .pi/skills/enforce-architecture/scripts/check.sh`.
 
+The module budget (ADR 0053): a production file holds at most **700 lines**, an `impl` block
+**800**, a function **200**; a module owns one screen or one pass, never two unrelated ones.
+`check.sh` counts the lines (`scripts/budget.awk`) and keeps today's offenders in `BUDGET_EXEMPT`
+with their numbers; the list only shrinks — an item that grows past its number fails, and so does an
+entry that is now under the budget. M27 moves the code to the target and empties the list.
+
 ## 4. Data
 
 - `tags`: rows `(file_id, tag, score, source)` where `source='clip:<model_id>'`; labels and prompts

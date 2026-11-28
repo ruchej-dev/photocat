@@ -2862,6 +2862,18 @@ check that counts.
 **Files.** `docs/ARCHITECTURE.md` + `.ru.md`, `AGENTS.md` + `.ru.md`,
 `.pi/skills/enforce-architecture/**`, `plan/STATUS.md`.
 
+**Done (2026-11-28).** `docs/ARCHITECTURE.md` § "Modules and crates" holds the crate table, the
+module tree and the measured start: `src/` 52 104 lines in 17 files, `app.rs` 28 895 (18 381
+production + 10 514 tests) with `impl App` 9 061 and `ui()` 2 933. The 13 279 lines ADR 0053 claimed
+for the `impl eframe::App for App` block do not reproduce — the block is 2 935 — and the ADR carries
+the re-measured numbers. `scripts/budget.awk` measures one file (comments and strings stripped, the
+test module excluded); `check.sh` §7 compares it with `BUDGET_EXEMPT` — 25 items today: 10 files,
+2 `impl` blocks, 13 functions — and fails on a new offender, on growth past the recorded number, on
+an entry that is now under the budget and on an entry whose item is gone; all four were injected and
+caught. `AGENTS.md` §3 and the `enforce-architecture` skill carry the rule. `cargo test` 366 passed +
+3 guard tests, `cargo clippy --all-targets` clean, `check.sh` 56 checks / 0 violations,
+`rust-analyzer diagnostics` 0 errors.
+
 **M27.2 — `main.rs` becomes `cli/`: one file per subcommand.**
 **Goal.** A subcommand is found by its name, in its own file.
 **Acceptance criteria.**

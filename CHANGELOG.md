@@ -40,6 +40,10 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   confirmation or a refusal is the owner's decision [M26.17].
 - The duplicate settings left the left panel for the page that owns the groups: the threshold,
   “Find groups”, the summary and the plan stand above the cards [M26.18].
+- The module budget: `check.sh` counts production lines per file, per `impl` block and per function,
+  `BUDGET_EXEMPT` lists today's 25 offenders and only shrinks, and `docs/ARCHITECTURE.md`
+  § “Modules and crates” holds the crate table, the module tree and the numbers the refactor starts
+  from [M27.1].
 
 ### Fixed
 

@@ -5,7 +5,8 @@
 set -uo pipefail
 
 # scripts/ → enforce-architecture/ → skills/ → .pi/ → project root
-ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd -- "$HERE/../../../.." && pwd)
 cd -- "$ROOT" || exit 2
 
 fail=0
@@ -150,9 +151,87 @@ else
   tail -12 /tmp/photocat-source-language.txt | sed 's/^/      /'
 fi
 
-# ---------------------------------------------------------------- 7. build
+# ---------------------------------------------------------------- 7. module budget
+# ADR 0053: production code ≤ 700 lines per file, an `impl` block ≤ 800, a function ≤ 200; a module
+# owns one screen or one pass. The list below holds today's offenders with the line count they had
+# when they were written down. It only shrinks: an item that grew past its number fails the check,
+# and so does an entry whose item is now under the budget (remove the entry instead of keeping it).
+BUDGET_EXEMPT=(
+  "src/app.rs|file|-|18381"
+  "src/app.rs|impl|App|9061"
+  "src/app.rs|impl|eframe::App for App|2935"
+  "src/app.rs|fn|ui|2933"
+  "src/app.rs|fn|viewer_modal|855"
+  "src/app.rs|fn|file_card_content|656"
+  "src/app.rs|fn|paint_icon|475"
+  "src/app.rs|fn|roots_modal|374"
+  "src/app.rs|fn|draw|305"
+  "src/app.rs|fn|integrity_panel|305"
+  "src/app.rs|fn|reload|282"
+  "src/app.rs|fn|settings_model|236"
+  "src/app.rs|fn|settings_tag_dictionary|202"
+  "src/db.rs|file|-|3243"
+  "src/db.rs|fn|init|271"
+  "src/derive.rs|file|-|776"
+  "src/embed.rs|file|-|1928"
+  "src/faces.rs|file|-|1249"
+  "src/i18n.rs|file|-|2352"
+  "src/main.rs|file|-|1847"
+  "src/main.rs|fn|main|1177"
+  "src/main.rs|fn|albums_cli|294"
+  "src/organize.rs|file|-|1484"
+  "src/player.rs|file|-|1594"
+  "src/verify.rs|file|-|1104"
+)
+echo "7. the module budget: ≤ 700 lines per file, ≤ 800 per impl, ≤ 200 per fn"
+declare -A budget_lines=() budget_ceiling=() budget_seen=()
+while IFS=$'\t' read -r path kind name lines; do
+  key="$path|$kind|$name"
+  (( ${budget_lines[$key]:-0} > lines )) || budget_lines[$key]=$lines
+done < <(find src -name '*.rs' | sort | while IFS= read -r f; do awk -v file="$f" -f "$HERE/budget.awk" "$f"; done)
+for entry in "${BUDGET_EXEMPT[@]}"; do
+  budget_ceiling["${entry%|*}"]=${entry##*|}
+done
+over=0
+budget_fail=0
+for key in "${!budget_lines[@]}"; do
+  lines=${budget_lines[$key]}
+  kind=${key#*|}; kind=${kind%%|*}
+  case $kind in
+    file) budget=700 ;;
+    impl) budget=800 ;;
+    fn) budget=200 ;;
+  esac
+  (( lines > budget )) || continue
+  over=$((over + 1))
+  budget_seen[$key]=1
+  if [[ ! -v budget_ceiling[$key] ]]; then
+    budget_fail=$((budget_fail + 1))
+    err "over the budget and not exempt: ${key//|/ } — $lines lines (limit $budget)"
+  elif (( lines > budget_ceiling[$key] )); then
+    budget_fail=$((budget_fail + 1))
+    err "${key//|/ } grew: $lines lines, the exempt count is ${budget_ceiling[$key]}"
+  fi
+done
+for key in "${!budget_ceiling[@]}"; do
+  if [[ ! -v budget_seen[$key] ]]; then
+    if [[ -v budget_lines[$key] ]]; then
+      budget_fail=$((budget_fail + 1))
+      err "${key//|/ } is under the budget now (${budget_lines[$key]} lines): remove the BUDGET_EXEMPT entry"
+    else
+      budget_fail=$((budget_fail + 1))
+      err "BUDGET_EXEMPT names ${key//|/ }, which no longer exists: update or remove the entry"
+    fi
+  fi
+done
+if (( budget_fail == 0 )); then
+  pass
+  note "ok" "$over items over the budget, all written down in BUDGET_EXEMPT (the list only shrinks)"
+fi
+
+# ---------------------------------------------------------------- 8. build
 if [[ ${1:-} == --build ]]; then
-  echo "7. cargo check"
+  echo "8. cargo check"
   if cargo check --all-targets --quiet 2>&1 | tail -5; then
     pass
     note "ok" "the build passes"
