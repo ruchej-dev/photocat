@@ -6,7 +6,7 @@
 
 ```
 L3  main.rs, cli/ ── app.rs     CLI и GUI
-L2  index.rs   dupes.rs   organize/   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
+L2  index.rs   dupes.rs   organize/   verify/   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
 L1  db/   storage.rs
 L0  i18n/   derive.rs   tools.rs
@@ -139,6 +139,16 @@ src/
 диалога настроек проходят без правок. Самый большой файл — `terms/reports.rs`, 603 строки.
 `check.sh` считает каждый файл в `src/i18n/` слоем `i18n`; в `BUDGET_EXEMPT` осталось 19
 элементов: семь ещё не переехавших файлов, два блока `impl` и десять функций.
+
+**После M27.5, частично (2026-11-28).** `src/organize.rs` — теперь `organize/`: `plan.rs`
+(312 строк), `apply.rs` (53), `export.rs` (987), `mod.rs` (167); `src/verify.rs` — `verify/`:
+`compare.rs` (451), `manifest.rs` (550), `mod.rs` (130). Публичная поверхность не изменилась:
+`organize::cli`, `organize::export_cli`, `verify::cli` и `verify::manifest_cli` — реэкспорты, ни
+одно место вызова не переписано. План раскладки реальной БД на 2 230 файлов и отчёты сверки трёх
+файлов побайтово одинаковы до и после переезда. `check.sh` относит обе папки к их слоям; в
+`BUDGET_EXEMPT` осталось 18 элементов: пять ещё не переехавших файлов (`app.rs`, `player.rs`,
+`embed.rs`, `faces.rs`, `derive.rs`), два блока `impl`, десять функций и `organize/export.rs`
+(987). `player/`, `embed/` и `faces/` ещё в этом задании.
 
 ## Поток индексации
 

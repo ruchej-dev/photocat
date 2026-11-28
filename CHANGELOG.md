@@ -53,6 +53,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   the ordered areas and `i18n/terms/` the words; every translation is unchanged [M27.4].
 - The date arrange pass is a folder: `organize/plan.rs` builds the dry-run plan, `organize/apply.rs`
   creates the links or copies and `organize/export.rs` copies an album; the plan is unchanged [M27.5].
+- The comparison and the manifest are a folder: `verify/compare.rs` holds the two-copy check and
+  `verify/manifest.rs` the `sha256sum` snapshot; the reports are unchanged [M27.5].
 
 ### Fixed
 

@@ -68,7 +68,7 @@
 | `src/ocr.rs` | L2 | кандидаты на текст, проход `tesseract`, запись текста в БД | egui, декодирование картинок |
 | `src/faces.rs` | L2 | SCRFD-детекция, выравнивание, ArcFace-эмбеддинги, кластеры лиц | egui, прямые SQL-строки |
 | `src/organize/` | L2 | план по датам, hardlink/copy/symlink, выгрузка альбома копиями: `plan.rs`, `apply.rs`, `export.rs` | egui |
-| `src/verify.rs` | L2 | сверка двух копий, слепок sha256sum | БД-схема, egui |
+| `src/verify/` | L2 | сверка двух копий, слепок sha256sum: `compare.rs`, `manifest.rs` | БД-схема, egui |
 | `src/recycle.rs` | L2 | перенос в системную корзину по подтверждению, очистка строк | превью, egui |
 | `src/player.rs` | L2 | встроенный плеер: демукс `rff`, декод H.264/HEVC/AAC, звук `cpal`, кадр в RGBA | БД, egui |
 | `src/storage.rs` | L1 | занятое место, очистка кэша и индекса | архив, egui |

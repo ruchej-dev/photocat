@@ -189,7 +189,6 @@ BUDGET_EXEMPT=(
   "src/faces.rs|file|-|1249"
   "src/organize/export.rs|file|-|987"
   "src/player.rs|file|-|1594"
-  "src/verify.rs|file|-|1104"
 )
 echo "7. the module budget: ≤ 700 lines per file, ≤ 800 per impl, ≤ 200 per fn"
 declare -A budget_lines=() budget_ceiling=() budget_seen=()
