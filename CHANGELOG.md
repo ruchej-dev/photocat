@@ -51,6 +51,8 @@ maintainer needs. A release takes the `[Unreleased]` section, gives it a version
   live, and a query is found by its table; no command, word or byte on disk changed [M27.3].
 - The language table is a folder by screen area: `i18n/lang.rs` keeps the mechanism, `i18n/table.rs`
   the ordered areas and `i18n/terms/` the words; every translation is unchanged [M27.4].
+- The date arrange pass is a folder: `organize/plan.rs` builds the dry-run plan, `organize/apply.rs`
+  creates the links or copies and `organize/export.rs` copies an album; the plan is unchanged [M27.5].
 
 ### Fixed
 

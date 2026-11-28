@@ -48,6 +48,11 @@ for f in $(find src -name '*.rs' | sort); do
     src/cli/*) mod=cli ;;
     src/db/*) mod=db ;;
     src/i18n/*) mod=i18n ;;
+    src/organize/*) mod=organize ;;
+    src/player/*) mod=player ;;
+    src/embed/*) mod=embed ;;
+    src/faces/*) mod=faces ;;
+    src/verify/*) mod=verify ;;
   esac
   [[ -v ALLOWED[$mod] ]] || { err "module $f is not registered in the layer map of check.sh"; continue; }
   refs=$(grep -oE 'crate::[a-z_][a-z0-9_]*' "$f" 2>/dev/null | cut -d: -f3 | sort -u \
@@ -182,7 +187,7 @@ BUDGET_EXEMPT=(
   "src/derive.rs|file|-|776"
   "src/embed.rs|file|-|1928"
   "src/faces.rs|file|-|1249"
-  "src/organize.rs|file|-|1484"
+  "src/organize/export.rs|file|-|987"
   "src/player.rs|file|-|1594"
   "src/verify.rs|file|-|1104"
 )

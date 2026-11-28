@@ -42,7 +42,7 @@ const RUSSIAN_DATA: &[&str] = &[
     // `пропуск` and `другое` next to `skip` and `other`.
     "eval.rs",
     // The CLI still accepts the Russian aliases `день`/`месяц`/`событие` for `--by`.
-    "organize.rs",
+    "organize/plan.rs",
 ];
 
 fn is_cyrillic(c: char) -> bool {

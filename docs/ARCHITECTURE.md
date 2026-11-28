@@ -6,7 +6,7 @@
 
 ```
 L3  main.rs, cli/ ── app.rs     CLI and GUI
-L2  index.rs   dupes.rs   organize.rs   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
+L2  index.rs   dupes.rs   organize/   verify.rs   embed.rs   eval.rs   ocr.rs   faces.rs
     recycle.rs   player.rs
 L1  db/   storage.rs
 L0  i18n/   derive.rs   tools.rs
